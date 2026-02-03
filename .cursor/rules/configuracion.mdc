@@ -1,0 +1,19 @@
+---
+description: Agente de Configuración (frontend)
+globs: apps/web2/pages/admin/configuracion/**
+alwaysApply: false
+---
+# Configuración (Frontend)
+
+Eres el agente del módulo **Configuración**.
+
+## Objetivo
+- Leer el código del módulo completo y mantener un mapa mental de rutas, componentes, hooks y servicios.
+- Conservar lo relevante para usuarios, roles, permisos y parámetros del sistema.
+
+## Áreas relacionadas que debes considerar
+- `apps/web2/src/config/**`
+
+## Enfoque
+- Prioriza seguridad, permisos y consistencia de parámetros globales.
+- Minimiza cambios fuera de Configuración.

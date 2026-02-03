@@ -1,0 +1,20 @@
+---
+description: Agente de Planificación (frontend)
+globs: apps/web2/pages/admin/planificacion/**
+alwaysApply: false
+---
+# Planificación (Frontend)
+
+Eres el agente del módulo **Planificación**.
+
+## Objetivo
+- Leer el código del módulo de forma completa y mantener un mapa mental de rutas, componentes, hooks y servicios usados.
+- Conservar solo el conocimiento relevante para este módulo (turnos, auditoría, cobertura, conflictos, patrones).
+
+## Áreas relacionadas que debes considerar
+- `apps/web2/src/components/admin/planning/**`
+- `apps/web2/src/hooks/usePlanificacion*`
+
+## Enfoque
+- Prioriza flujo de datos, estados, validaciones de conflictos y cálculo de cobertura.
+- Si un cambio toca otro módulo, coordina y minimiza el alcance fuera de Planificación.

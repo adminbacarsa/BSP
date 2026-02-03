@@ -1,153 +1,168 @@
-
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
+import React, { useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Building2, AlertTriangle, Clock, Siren, CheckCircle } from 'lucide-react';
+import { Shield, Clock, AlertTriangle, Siren, Navigation, UserCheck, PlayCircle, LogOut, Building2 } from 'lucide-react';
 
-// --- GENERADOR DE ICONOS DINÁMICOS ---
-const createCustomIcon = (status: 'OK' | 'WARNING' | 'CRITICAL' | 'RETENTION' | 'ACTIVE', countPresent: number, countTotal: number) => {
-    let color = '#64748b'; // Slate (Default / Vacío / Gris)
-    let shadowColor = 'rgba(0,0,0,0.2)';
-    let iconHtml = '';
-    let pulseClass = '';
-    let showRing = false;
+// --- ICONOS DINÁMICOS ---
+const createCustomIcon = (color: string, type: 'SHIELD' | 'ALERT' | 'SIREN' | 'CHECK' | 'OFF') => {
+    let svgPath = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"; 
+    let innerElement = '';
+    
+    if (type === 'ALERT') innerElement = '<circle cx="12" cy="12" r="3" fill="white"/>';
+    if (type === 'SIREN') innerElement = '<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="white" stroke-width="2"/>';
 
-    if (status === 'ACTIVE') { 
-        color = '#10b981'; // Verde
-        shadowColor = 'rgba(16, 185, 129, 0.4)'; 
-        showRing = true; 
-    } 
-    if (status === 'WARNING') { 
-        color = '#f59e0b'; // Amarillo
-        shadowColor = 'rgba(245, 158, 11, 0.4)'; 
-        showRing = true;
-    } 
-    if (status === 'CRITICAL') { 
-        color = '#ef4444'; // Rojo
-        shadowColor = 'rgba(239, 68, 68, 0.4)'; 
-        pulseClass = 'animate-pulse'; 
-        showRing = true;
-        iconHtml = `<div style="position: absolute; top: -5px; right: -5px; background: ${color}; color: white; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; border: 2px solid white;">!</div>`; 
-    } 
-    if (status === 'RETENTION') { 
-        color = '#f97316'; // Naranja
-        shadowColor = 'rgba(249, 115, 22, 0.5)'; 
-        pulseClass = 'animate-pulse'; 
-        showRing = true;
-        iconHtml = `<div style="position: absolute; top: -5px; right: -5px; background: ${color}; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; border: 2px solid white;">R</div>`; 
-    }
-
-    const badgeHtml = countTotal > 0 
-        ? `<div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); background: white; color: #1e293b; border-radius: 10px; padding: 2px 6px; font-size: 10px; font-weight: 800; border: 1px solid #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.1); white-space: nowrap;">${countPresent}/${countTotal}</div>` 
-        : '';
-
-    const ringHtml = showRing 
-        ? `<div style="position: absolute; width: 100%; height: 100%; background-color: ${color}; opacity: 0.2; border-radius: 50%; animation: pulse-ring 2s infinite;"></div>`
-        : '';
-
-    const html = `
-        <div style="position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-            ${ringHtml}
-            <div class="${pulseClass}" style="width: 32px; height: 32px; background-color: ${color}; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px ${shadowColor}; display: flex; align-items: center; justify-content: center; color: white;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    ${status === 'ACTIVE' ? '<path d="M20 6L9 17l-5-5"/>' : '<path d="M3 21h18M5 21V7l8-4 8 4v14"/>'}
-                </svg>
-            </div>
-            ${iconHtml}
-            ${badgeHtml}
-        </div>
-    `;
-
-    return L.divIcon({ html, className: 'custom-map-icon', iconSize: [44, 44], iconAnchor: [22, 44], popupAnchor: [0, -40] });
+    const svgString = `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="${svgPath}" />
+            ${innerElement}
+            ${type === 'CHECK' ? '<path d="M9 12l2 2 4-4" stroke="white" stroke-width="3"/>' : ''}
+        </svg>`;
+    
+    return L.divIcon({
+        className: 'custom-icon',
+        html: `<div style="width: 36px; height: 36px; filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4)); transform: translateY(-50%);">${svgString}</div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 36],
+        popupAnchor: [0, -36]
+    });
 };
 
-const RecenterMap = ({ center }: { center: [number, number] }) => { const map = useMap(); useEffect(() => { map.setView(center, map.getZoom()); }, [center]); return null; };
+const Icons = {
+    GREEN: createCustomIcon('#10b981', 'CHECK'),   // Activo / A Tiempo
+    YELLOW: createCustomIcon('#f59e0b', 'ALERT'),  // Tarde (5-60 min)
+    RED: createCustomIcon('#e11d48', 'SIREN'),     // Ausencia (>60 min) / Crítico
+    ORANGE: createCustomIcon('#f97316', 'SHIELD'), // Retención
+    BLUE: createCustomIcon('#3b82f6', 'SHIELD'),   // Franco
+    GRAY: createCustomIcon('#64748b', 'OFF'),      // Sin Actividad / Plan Futuro
+};
 
-interface Props { 
-    center: [number, number]; 
-    objectives: any[]; 
-    processedData: any[]; 
-    onAction: (action: string, id: string) => void; 
-    setMapInstance: (map: any) => void; 
-    onOpenResolution?: (shift: any) => void;
-    currentFilter?: string;
-}
+const MapUpdater = ({ markers }: any) => {
+    const map = useMap();
+    useEffect(() => {
+        if (markers.length > 0) {
+            const group = new L.FeatureGroup(markers.map((m: any) => L.marker([m.lat, m.lng])));
+            map.fitBounds(group.getBounds().pad(0.2));
+        }
+    }, [markers, map]);
+    return null;
+};
 
-export default function OperacionesMap({ center, objectives, processedData, onAction, setMapInstance, onOpenResolution, currentFilter }: Props) {
+const OperacionesMap = ({ 
+    center, 
+    allObjectives = [], // LISTA MAESTRA DE OBJETIVOS (Para que se vean todos los del filtro)
+    filteredShifts = [], // LISTA DE TURNOS ACTUALES (Para colorearlos)
+    onOpenCoverage,
+    onOpenCheckout,
+    onOpenAttendance,
+    onOpenHandover,
+    onOpenInterrupt,
+    onReportPlanning
+}: any) => {
 
-    const getObjectiveStatus = (objId: string) => {
-        const shifts = processedData.filter(s => s.objectiveId === objId);
-        const visibleList = shifts.filter(s => s.status !== 'CANCELED');
+    const markers = useMemo(() => {
+        // 1. Usamos allObjectives que YA VIENE FILTRADO desde el padre
+        return allObjectives.filter((obj: any) => obj.lat && obj.lng).map((obj: any) => {
+            
+            // 2. Buscar turnos para este objetivo
+            const shiftsInObjective = filteredShifts.filter((s: any) => s.objectiveId === obj.id);
+            
+            let icon = Icons.GRAY; // Default: Gris
+            let statusText = 'S/A'; // Sin Actividad
+            let priority = 0; 
 
-        const totalReq = visibleList.length;
-        const totalPres = visibleList.filter(s => s.isPresent).length;
-        
-        const hasRetention = visibleList.some(s => s.isRetention);
-        const hasCritical = visibleList.some(s => s.isUnassigned || s.isSlaGap);
-        const hasActive = visibleList.some(s => s.isPresent);
+            // 3. Determinar color por gravedad
+            if (shiftsInObjective.length > 0) {
+                shiftsInObjective.forEach((s: any) => {
+                    const now = new Date();
+                    const start = s.shiftDateObj ? (s.shiftDateObj.seconds ? new Date(s.shiftDateObj.seconds * 1000) : s.shiftDateObj) : new Date();
+                    const diffMin = (now.getTime() - start.getTime()) / 60000;
 
-        let status: 'OK' | 'WARNING' | 'CRITICAL' | 'RETENTION' | 'ACTIVE' = 'OK';
-        if (hasCritical) status = 'CRITICAL';
-        else if (hasRetention) status = 'RETENTION';
-        else if (hasActive) status = 'ACTIVE';
-        else if (totalReq > 0 && totalPres === 0) status = 'WARNING';
+                    if ((s.isUnassigned || (!s.isPresent && !s.isCompleted && diffMin > 60)) && priority < 5) {
+                        icon = Icons.RED; statusText = s.isUnassigned ? 'VACANTE' : 'AUSENCIA'; priority = 5;
+                    } else if (s.isRetention && priority < 4) {
+                        icon = Icons.ORANGE; statusText = 'RETENCIÓN'; priority = 4;
+                    } else if (!s.isPresent && !s.isCompleted && diffMin > 5 && diffMin <= 60 && priority < 3) {
+                        icon = Icons.YELLOW; statusText = 'TARDE'; priority = 3;
+                    } else if ((s.isPresent || (diffMin >= -15 && diffMin <= 5 && !s.isPresent)) && priority < 2) {
+                        icon = Icons.GREEN; statusText = s.isPresent ? 'ACTIVO' : 'A TIEMPO'; priority = 2;
+                    } else if (s.isFranco && priority < 1) {
+                        icon = Icons.BLUE; statusText = 'FRANCO'; priority = 1;
+                    }
+                });
+            }
 
-        return { status, req: totalReq, present: totalPres, guards: visibleList };
-    };
+            return {
+                id: obj.id,
+                lat: obj.lat,
+                lng: obj.lng,
+                name: obj.name,
+                client: obj.clientName || 'Cliente',
+                shifts: shiftsInObjective,
+                icon,
+                statusText,
+                hasShift: shiftsInObjective.length > 0
+            };
+        });
+    }, [allObjectives, filteredShifts]); 
 
     return (
-        <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%', background: '#f8fafc' }} ref={setMapInstance}>
-            <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-            <RecenterMap center={center} />
-            
-            {objectives.map(obj => {
-                if (!obj.lat || !obj.lng) return null;
-                const audit = getObjectiveStatus(obj.id);
-                const hasActivity = audit.guards.length > 0;
+        <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} className="z-0">
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution='&copy; CARTO' />
+            <MapUpdater markers={markers} />
 
-                if (!hasActivity && currentFilter !== 'TODOS') return null;
-
-                // 🛑 FIX V29: LÓGICA DE CAPAS (Z-INDEX)
-                // Los números más altos se renderizan ENCIMA
-                let zIndex = 0;
-                if (audit.status === 'CRITICAL') zIndex = 1000;
-                else if (audit.status === 'RETENTION') zIndex = 900;
-                else if (audit.status === 'ACTIVE') zIndex = 800;
-                else if (audit.status === 'WARNING') zIndex = 700;
-                else zIndex = 0; // Grises al fondo
-
-                return (
-                    <Marker 
-                        key={obj.id} 
-                        position={[obj.lat, obj.lng]} 
-                        icon={createCustomIcon(audit.status, audit.present, audit.req)}
-                        zIndexOffset={zIndex} // <-- APLICACIÓN DEL FIX
-                    >
-                        <Tooltip direction="top" offset={[0, -42]} opacity={1} className="font-bold text-xs uppercase bg-slate-800 text-white border-0 shadow-lg px-2 py-1 rounded">
-                            {obj.name}
-                        </Tooltip>
-
-                        <Popup className="custom-popup">
-                            <div className="flex flex-col min-w-[280px]">
-                                <div className={`p-3 rounded-t-lg flex justify-between items-start ${audit.status === 'CRITICAL' ? 'bg-red-600 text-white' : audit.status === 'RETENTION' ? 'bg-orange-500 text-white' : audit.status === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-white'}`}>
-                                    <div><h3 className="font-black text-sm uppercase flex items-center gap-2"><Building2 size={14}/> {obj.name}</h3><p className="text-[10px] opacity-90">{obj.address}</p></div>
-                                    <div className="text-right"><span className="text-xl font-black">{audit.present}/{audit.req}</span><p className="text-[9px] uppercase font-bold opacity-80">Presentes</p></div>
+            {markers.map((marker: any) => (
+                <Marker key={marker.id} position={[marker.lat, marker.lng]} icon={marker.icon}>
+                    <Popup className="custom-popup">
+                        <div className="min-w-[240px]">
+                            <div className="border-b pb-2 mb-2 flex justify-between items-start">
+                                <div>
+                                    <h3 className="font-black text-sm text-slate-800 leading-tight">{marker.name}</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase">{marker.client}</p>
                                 </div>
-                                <div className="max-h-[250px] overflow-y-auto bg-white p-1">
-                                    {audit.guards.length === 0 ? <div className="text-center py-4 text-xs text-slate-400 italic">Sin actividad registrada en este filtro</div> : 
-                                    audit.guards.map((s: any) => (
-                                        <div key={s.id} className={`p-2 mb-1 rounded border-l-4 flex justify-between items-center group hover:bg-slate-50 transition-colors ${s.isUnassigned || s.isSlaGap ? 'border-red-500 bg-red-50/50' : s.isRetention ? 'border-orange-500 bg-orange-50/50' : s.isPresent ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-300'}`}>
-                                            <div className="flex-1"><p className="text-xs font-bold text-slate-800 flex items-center gap-1">{s.isUnassigned ? '🔴 VACANTE' : s.employeeName}{s.isRetention && <Clock size={10} className="text-orange-600 animate-pulse"/>}</p><p className="text-[10px] text-slate-500 font-mono">{s.shiftDateObj?.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} - {s.endDateObj?.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</p></div>
-                                            <div className="flex gap-1">{(s.isUnassigned || s.isSlaGap || s.isRetention) && onOpenResolution ? (<button onClick={() => onOpenResolution(s)} className="p-1.5 bg-rose-100 text-rose-600 rounded hover:bg-rose-600 hover:text-white" title="Resolver"><Siren size={12}/></button>) : s.isPresent ? (<div className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-[9px] font-bold flex items-center gap-1"><CheckCircle size={10}/> ON</div>) : (<span className="text-[9px] text-slate-400 font-bold uppercase">{s.statusText}</span>)}</div>
-                                        </div>
-                                    ))}
-                                </div>
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded text-white ${marker.statusText === 'AUSENCIA' || marker.statusText === 'VACANTE' ? 'bg-rose-600' : (marker.statusText === 'TARDE' ? 'bg-amber-500' : (marker.statusText === 'ACTIVO' ? 'bg-emerald-600' : 'bg-slate-400'))}`}>{marker.statusText}</span>
                             </div>
-                        </Popup>
-                    </Marker>
-                );
-            })}
+
+                            <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                                {marker.hasShift ? marker.shifts.map((shift: any) => {
+                                    const now = new Date();
+                                    const start = shift.shiftDateObj ? (shift.shiftDateObj.seconds ? new Date(shift.shiftDateObj.seconds * 1000) : shift.shiftDateObj) : new Date();
+                                    const diffMin = (now.getTime() - start.getTime()) / 60000;
+                                    const canCheckIn = diffMin >= -15 && diffMin <= 60 && !shift.isPresent; 
+
+                                    return (
+                                        <div key={shift.id} className="bg-slate-50 p-2 rounded border border-slate-100">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-[10px] font-bold text-slate-700 truncate max-w-[120px]">{shift.employeeName || 'VACANTE'}</span>
+                                                <span className="text-[9px] font-mono text-slate-400">{start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {shift.isUnassigned && !shift.isReportedToPlanning && (
+                                                    <button onClick={() => onOpenCoverage(shift)} className="flex-1 bg-rose-600 text-white text-[9px] py-1 rounded font-bold hover:bg-rose-700">CUBRIR</button>
+                                                )}
+                                                {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && (
+                                                    diffMin > 60 ? (
+                                                        <button onClick={() => onOpenAttendance(shift)} className="flex-1 bg-rose-100 text-rose-700 border border-rose-200 text-[9px] py-1 rounded font-bold hover:bg-rose-200">AUSENCIA</button>
+                                                    ) : (
+                                                        <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex-1 text-white text-[9px] py-1 rounded font-bold ${canCheckIn ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-300'}`}>{diffMin > 5 ? 'LLEGÓ?' : 'PRESENTE'}</button>
+                                                    )
+                                                )}
+                                                {(shift.isPresent || shift.status === 'PRESENT') && (
+                                                    <button onClick={() => onOpenInterrupt(shift)} className="flex-1 bg-rose-50 text-rose-600 border border-rose-200 text-[9px] py-1 rounded font-bold hover:bg-rose-100">BAJA</button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                }) : (
+                                    <div className="text-center p-2 text-[10px] text-slate-400 italic">No hay actividad.</div>
+                                )}
+                            </div>
+                        </div>
+                    </Popup>
+                </Marker>
+            ))}
         </MapContainer>
     );
-}
+};
+
+export default OperacionesMap;

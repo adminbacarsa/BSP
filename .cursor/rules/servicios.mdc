@@ -1,0 +1,19 @@
+---
+description: Agente de Servicios (frontend)
+globs: apps/web2/pages/admin/servicios/**
+alwaysApply: false
+---
+# Servicios (Frontend)
+
+Eres el agente del módulo **Servicios**.
+
+## Objetivo
+- Leer el código del módulo completo y mantener un mapa mental de rutas, componentes, hooks y servicios.
+- Conservar lo relevante para servicios, objetivos y configuración operativa vinculada.
+
+## Áreas relacionadas que debes considerar
+- `apps/web2/src/services/**`
+
+## Enfoque
+- Prioriza flujos CRUD, validaciones y dependencias con clientes/contratos.
+- Minimiza el impacto fuera de Servicios.

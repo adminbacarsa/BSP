@@ -3,108 +3,129 @@ const path = require('path');
 const readline = require('readline');
 
 // ==========================================
-// ⚙️ CONFIGURACIÓN MAESTRA (CRONOAPP V6.0 - FINAL)
+// ⚙️ CRONOAPP SNAPSHOT MANAGER V8.0 (SMART)
 // ==========================================
 const ROOT_DIR = process.cwd();
 const BACKUP_ROOT = path.join(ROOT_DIR, '_SNAPSHOTS_ROOT');
 
-/**
- * 🗺️ MAPA DE MÓDULOS (Rutas Corregidas: apps/functions y apps/web2)
- */
-const MODULES = {
-    // --- 1. NIVEL MACRO ---
-    'FULL': { path: '', desc: '🌎 PROYECTO COMPLETO' },
-
-    // --- 2. INFRAESTRUCTURA (Rutas confirmadas) ---
-    'FULL_BACKEND': { 
-        path: path.join('apps', 'functions'), 
-        desc: '⚙️  Backend (apps/functions)' 
-    },
-    'FULL_WEB': { 
-        path: path.join('apps', 'web2'), 
-        desc: '🖥️  Frontend (apps/web2)' 
-    },
-
-    // --- 3. MÓDULOS DE NEGOCIO (Frontend) ---
-    // ⚠️ Asumimos estructura standard: apps/web2/pages/admin/...
-    // Si tu proyecto usa 'src/pages' o 'app/admin', el script te avisará si no encuentra la carpeta.
-    'FE_OPERATIONS': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'operations'), 
-        desc: '🛡️  OPERACIONES (Torre de Control)' 
-    },
-    'FE_CRM': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'crm'), 
-        desc: '🤝 CRM (Gestión Comercial)' 
-    },
-    'FE_SERVICES': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'services'), 
-        desc: '💼 SERVICIOS (Contratos)' 
-    },
-    'FE_REPORTS': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'reports'), 
-        desc: '📈 REPORTES (Métricas)' 
-    },
-    'FE_SCHEDULER': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'schedule'), 
-        desc: '📅 PLANIFICADOR (Turnos)' 
-    },
-    'FE_EMPLOYEES': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'employees'), 
-        desc: '👥 RRHH (Legajos)' 
-    },
-    'FE_DASHBOARD': { 
-        path: path.join('apps', 'web2', 'pages', 'admin', 'dashboard'), 
-        desc: '📊 DASHBOARD' 
-    },
-    'FE_COMPONENTS': { 
-        path: path.join('apps', 'web2', 'src', 'components'), 
-        desc: '🧩 COMPONENTES UI' 
-    },
-
-    // --- 4. BACKEND CORE (NestJS) ---
-    'BE_SCHEDULING': { 
-        path: path.join('apps', 'functions', 'src', 'scheduling'), 
-        desc: '🧠 API: Motor de Turnos' 
-    },
-    'BE_DATA': { 
-        path: path.join('apps', 'functions', 'src', 'data-management'), 
-        desc: '🗄️  API: Gestión de Datos' 
-    }
+// 1. DETECCIÓN DE RUTAS RAÍZ (NO SE INVENTA NADA)
+const PATHS = {
+    ROOT: ROOT_DIR,
+    BACKEND: fs.existsSync(path.join(ROOT_DIR, 'apps', 'functions')) ? path.join(ROOT_DIR, 'apps', 'functions') : null,
+    FRONTEND: fs.existsSync(path.join(ROOT_DIR, 'apps', 'web2')) ? path.join(ROOT_DIR, 'apps', 'web2') : null
 };
 
-// 🛑 LISTA NEGRA (Ignorar basura)
+// 2. DETECCIÓN DINÁMICA DE 'SRC'
+// El script busca si existe 'src' para construir las rutas correctamente
+let FE_SRC = '';
+if (PATHS.FRONTEND) {
+    if (fs.existsSync(path.join(PATHS.FRONTEND, 'src'))) {
+        FE_SRC = path.join(PATHS.FRONTEND, 'src');
+    } else {
+        FE_SRC = PATHS.FRONTEND; // Fallback por si acaso
+    }
+}
+
+// 🛑 LISTA NEGRA (Archivos Ignorados)
 const IGNORE_LIST = [
     'node_modules', '.next', 'out', '.git', '.firebase', 
     '_SNAPSHOTS_ROOT', '.DS_Store', 'dist', 'build', 'lib', 
     'coverage', '.turbo', '.vscode', 'package-lock.json', 'yarn.lock',
-    'firebase-debug.log', 'ui-debug.log'
+    'firebase-debug.log', 'ui-debug.log', 'Thumbs.db'
 ];
 
-// Inicialización
 if (!fs.existsSync(BACKUP_ROOT)) fs.mkdirSync(BACKUP_ROOT);
 
 // ==========================================
-// 🛠️ FUNCIONES CORE
+// 🧠 MOTOR DE DEPENDENCIAS INTELIGENTE
+// ==========================================
+
+/**
+ * Escanea el proyecto para encontrar todas las piezas dispersas de un módulo.
+ * Estrategia: "Safe Context" -> Página + Componentes + Lógica Global
+ */
+function resolveModuleDependencies(moduleName) {
+    if (!PATHS.FRONTEND || !FE_SRC) return [];
+
+    const pathsToBackup = [];
+    const searchName = moduleName.toLowerCase();
+
+    // A. LA VISTA PRINCIPAL (Page)
+    // Ruta calculada: apps/web2/src/pages/admin/[nombre_real]
+    // Buscamos la carpeta exacta en pages/admin
+    const pagesAdmin = path.join(FE_SRC, 'pages', 'admin');
+    if (fs.existsSync(pagesAdmin)) {
+        // Buscamos el nombre exacto de la carpeta (case sensitive en algunos OS)
+        const found = fs.readdirSync(pagesAdmin).find(f => f.toLowerCase() === searchName);
+        if (found) {
+            pathsToBackup.push({ 
+                path: path.join(pagesAdmin, found), 
+                desc: `📄 VISTA: pages/admin/${found}` 
+            });
+        }
+    }
+
+    // B. COMPONENTES RELACIONADOS (UI)
+    // Buscamos en components/ cualquier carpeta que contenga el nombre del módulo
+    const compRoot = path.join(FE_SRC, 'components');
+    if (fs.existsSync(compRoot)) {
+        const comps = fs.readdirSync(compRoot, { withFileTypes: true });
+        comps.forEach(c => {
+            if (c.isDirectory()) {
+                const cName = c.name.toLowerCase();
+                // Heurística: Si el nombre del componente contiene el nombre del módulo (ej: "operaciones" contiene "oper")
+                // O viceversa, o coincidencia parcial de 4 letras para cruzar inglés/español
+                if (cName.includes(searchName) || searchName.includes(cName) || 
+                   (searchName.length > 4 && cName.includes(searchName.substring(0,4)))) {
+                    pathsToBackup.push({ 
+                        path: path.join(compRoot, c.name), 
+                        desc: `🧩 UI: components/${c.name}` 
+                    });
+                }
+            }
+        });
+    }
+
+    // C. CONTEXTO GLOBAL (DEPENDENCIAS CRÍTICAS)
+    // Para asegurar que el módulo funcione, respaldamos SIEMPRE los hooks y servicios.
+    // Son livianos y evitan errores de "Module not found".
+    ['hooks', 'services', 'utils', 'context', 'types', 'interfaces', 'lib'].forEach(shared => {
+        const sharedPath = path.join(FE_SRC, shared);
+        if (fs.existsSync(sharedPath)) {
+            pathsToBackup.push({ 
+                path: sharedPath, 
+                desc: `🔗 GLOBAL: src/${shared}` 
+            });
+        }
+    });
+
+    return pathsToBackup;
+}
+
+// ==========================================
+// 🛠️ FUNCIONES DE SISTEMA
 // ==========================================
 
 function copyRecursive(src, dest) {
-    if (!fs.existsSync(src)) return; 
+    if (!fs.existsSync(src)) return 0;
     if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
     
+    let count = 0;
     const entries = fs.readdirSync(src, { withFileTypes: true });
-
     for (const entry of entries) {
         if (IGNORE_LIST.includes(entry.name)) continue;
         const srcPath = path.join(src, entry.name);
         const destPath = path.join(dest, entry.name);
         try {
             if (entry.isDirectory()) {
-                copyRecursive(srcPath, destPath);
+                count += copyRecursive(srcPath, destPath);
             } else {
                 fs.copyFileSync(srcPath, destPath);
+                count++;
             }
-        } catch (err) { /* Ignorar bloqueos */ }
+        } catch (err) {}
     }
+    return count;
 }
 
 function clearDirectory(targetDir) {
@@ -113,8 +134,6 @@ function clearDirectory(targetDir) {
     for (const entry of entries) {
         if (IGNORE_LIST.includes(entry.name) || 
             entry.name === 'snapshot.js' || 
-            entry.name === 'map_structure.js' || 
-            entry.name === 'verify_structure.js' || 
             entry.name === 'CONTEXTO_CRONOAPP.txt') continue;
         
         const fullPath = path.join(targetDir, entry.name);
@@ -129,51 +148,65 @@ function clearDirectory(targetDir) {
 }
 
 // ==========================================
-// 🚀 MOTOR DE BACKUP
+// 🚀 EJECUCIÓN
 // ==========================================
 
-const createBackup = (description = 'auto', moduleKey = 'FULL') => {
+const createBackup = (description, type, moduleName = null) => {
     const timestamp = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').split('.')[0];
     const safeDesc = description.replace(/[^a-z0-9]/gi, '_');
-    const folderName = `[${moduleKey}]_${timestamp}__${safeDesc}`;
-    const targetDir = path.join(BACKUP_ROOT, folderName);
+    
+    let folderName = '';
+    let backupTargets = []; // { path, desc, relativeDest }
 
-    console.log(`\n📦 Snapshot: ${folderName}`);
+    // --- CONFIGURACIÓN ---
+    if (type === 'FULL') {
+        folderName = `[FULL]_${timestamp}__${safeDesc}`;
+        backupTargets.push({ path: ROOT_DIR, desc: '🌎 Todo el Proyecto', relativeDest: '' });
+    } 
+    else if (type === 'BACKEND') {
+        if (!PATHS.BACKEND) return console.error('❌ Backend no encontrado.');
+        folderName = `[BACKEND]_${timestamp}__${safeDesc}`;
+        backupTargets.push({ path: PATHS.BACKEND, desc: '⚙️ Backend', relativeDest: 'apps/functions' });
+    } 
+    else if (type === 'FRONTEND') {
+        if (!PATHS.FRONTEND) return console.error('❌ Frontend no encontrado.');
+        folderName = `[FRONTEND]_${timestamp}__${safeDesc}`;
+        backupTargets.push({ path: PATHS.FRONTEND, desc: '🖥️ Frontend', relativeDest: 'apps/web2' });
+    }
+    else if (type === 'MODULE') {
+        folderName = `[MOD_${moduleName.toUpperCase()}]_${timestamp}__${safeDesc}`;
+        const targets = resolveModuleDependencies(moduleName);
+        
+        if (targets.length === 0) return console.error(`❌ No se encontró nada para: ${moduleName}`);
+
+        console.log(`\n🔍 Mapeo Inteligente para ${moduleName}:`);
+        targets.forEach(t => {
+            const relPath = path.relative(ROOT_DIR, t.path);
+            backupTargets.push({ path: t.path, desc: t.desc, relativeDest: relPath });
+            console.log(`   + ${t.desc}`);
+        });
+    }
+
+    // --- PROCESO ---
+    const finalBackupPath = path.join(BACKUP_ROOT, folderName);
+    console.log(`\n📦 Guardando en: ${folderName}...`);
 
     try {
-        if (moduleKey === 'FULL') {
-            copyRecursive(ROOT_DIR, targetDir);
-        } else {
-            const mod = MODULES[moduleKey];
-            if (!mod) {
-                console.error(`❌ Módulo no definido: ${moduleKey}`);
-                return null;
-            }
-            
-            const srcPath = path.join(ROOT_DIR, mod.path);
-            const destPath = path.join(targetDir, mod.path);
-            
-            if (!fs.existsSync(srcPath)) {
-                console.error(`❌ Ruta no encontrada: ${srcPath}`);
-                console.error(`   👉 Revisa si la carpeta existe. El backup de este módulo se omitirá.`);
-                return null;
-            }
+        let filesCount = 0;
+        backupTargets.forEach(target => {
+            const dest = path.join(finalBackupPath, target.relativeDest);
+            filesCount += copyRecursive(target.path, dest);
+        });
 
-            console.log(`   👉 Respaldando: ${mod.desc}`);
-            copyRecursive(srcPath, destPath);
+        // Siempre copiar el contexto
+        ['package.json', 'CONTEXTO_CRONOAPP.txt'].forEach(f => {
+            const fSrc = path.join(ROOT_DIR, f);
+            if (fs.existsSync(fSrc)) fs.copyFileSync(fSrc, path.join(finalBackupPath, f));
+        });
 
-             // Copiar contexto vital
-             ['package.json', 'CONTEXTO_CRONOAPP.txt'].forEach(f => {
-                const fSrc = path.join(ROOT_DIR, f);
-                const fDest = path.join(targetDir, f);
-                if (fs.existsSync(fSrc)) fs.copyFileSync(fSrc, fDest);
-            });
-        }
-        console.log(`✅ OK: _SNAPSHOTS_ROOT/${folderName}`);
-        return targetDir;
+        console.log(`✅ ¡Backup Exitoso! (~${filesCount} archivos)`);
     } catch (e) {
         console.error(`❌ Error crítico: ${e.message}`);
-        return null;
     }
 };
 
@@ -184,7 +217,7 @@ const restoreBackupInteract = (rl) => {
 
     if (backups.length === 0) { console.log('❌ Sin snapshots.'); rl.close(); return; }
 
-    console.log('\n📂 RESTAURAR SNAPSHOT:');
+    console.log('\n📂 SNAPSHOTS DISPONIBLES:');
     backups.forEach((b, i) => console.log(`   [${i + 1}] ${b}`));
     console.log('   [0] Cancelar');
 
@@ -195,78 +228,65 @@ const restoreBackupInteract = (rl) => {
         const selectedBackup = backups[idx];
         const sourcePath = path.join(BACKUP_ROOT, selectedBackup);
         
-        let moduleKey = 'FULL';
-        const match = selectedBackup.match(/^\[(.*?)\]/);
-        if (match) moduleKey = match[1];
-        
-        const modInfo = MODULES[moduleKey];
-
-        console.log(`\n⚠️  ALERTA: Vas a restaurar [${moduleKey}]`);
-        if (moduleKey !== 'FULL' && modInfo) console.log(`   🎯 Destino: ${modInfo.path}`);
-        else console.log(`   🌎 Destino: PROYECTO COMPLETO`);
-
-        rl.question('Escribe "SI" para confirmar: ', (confirm) => {
-            if (confirm.toUpperCase() === 'SI') {
-                if (moduleKey === 'FULL') {
-                    clearDirectory(ROOT_DIR);
-                    copyRecursive(sourcePath, ROOT_DIR);
-                } else if (modInfo) {
-                    const targetPath = path.join(ROOT_DIR, modInfo.path);
-                    const sourceModulePath = path.join(sourcePath, modInfo.path);
-                    clearDirectory(targetPath);
-                    copyRecursive(sourceModulePath, targetPath);
-                }
-                console.log('\n✅ Restauración completada.');
-            }
-            rl.close();
-        });
+        console.log(`\n⚠️  RESTAURANDO...`);
+        // Copia manteniendo la estructura relativa
+        copyRecursive(sourcePath, ROOT_DIR);
+        console.log(`✅ Restauración completada.`);
+        rl.close();
     });
 };
 
 // ==========================================
-// 🎮 MENÚ INTERACTIVO
+// 🎮 MENÚ DINÁMICO
 // ==========================================
 
-const args = process.argv.slice(2);
-const command = args[0];
+// Escaneo de Módulos Reales
+let availableModules = [];
+if (FE_SRC) {
+    const adminPath = path.join(FE_SRC, 'pages', 'admin');
+    if (fs.existsSync(adminPath)) {
+        availableModules = fs.readdirSync(adminPath, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => d.name);
+    }
+}
 
-if (command === 'auto') {
-    createBackup('auto_save', 'FULL');
+const args = process.argv.slice(2);
+if (args[0] === 'auto') {
+    createBackup('auto', 'FULL');
 } else {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     
     console.log(`
     =========================================
-    🛡️  CRONOAPP SNAPSHOT V6.0 (APPS)
+    🛡️  CRONOAPP SNAPSHOT V8.0 (SMART)
     =========================================
-    1. 🌎 FULL PROYECTO
+    1. 🌎 PROYECTO COMPLETO
+    2. ⚙️  SOLO BACKEND
+    3. 🖥️  SOLO FRONTEND
     
-    --- NEGOCIO (apps/web2) ---
-    2. 🛡️  Operaciones     6. 📅 Planificador
-    3. 🤝 CRM             7. 👥 RRHH
-    4. 💼 Servicios       8. 📊 Dashboard
-    5. 📈 Reportes
+    --- MÓDULOS DETECTADOS ---`);
     
-    --- TÉCNICO ---
-    9. ⚙️  BACKEND (apps/functions)
-    10. 🖥️  FRONTEND (apps/web2)
-    11. 🧠 Motor Scheduling
-    
-    12. ♻️  RESTAURAR
-    0. Salir
-    =========================================
-    `);
+    if (availableModules.length > 0) {
+        availableModules.forEach((mod, i) => console.log(`    ${i + 4}. 📦 ${mod.toUpperCase()}`));
+    } else {
+        console.log(`    (No se detectaron módulos en ${FE_SRC})`);
+    }
+
+    console.log(`\n    99. ♻️  RESTAURAR`);
+    console.log(`    0. Salir`);
+    console.log(`    =========================================`);
 
     rl.question('Opción: ', (opt) => {
-        const map = {
-            '1': 'FULL', '2': 'FE_OPERATIONS', '3': 'FE_CRM', '4': 'FE_SERVICES', 
-            '5': 'FE_REPORTS', '6': 'FE_SCHEDULER', '7': 'FE_EMPLOYEES', '8': 'FE_DASHBOARD', 
-            '9': 'FULL_BACKEND', '10': 'FULL_WEB', '11': 'BE_SCHEDULING'
-        };
-        if (opt === '12') restoreBackupInteract(rl);
-        else if (map[opt]) {
-            rl.question('Etiqueta: ', (desc) => {
-                createBackup(desc || 'manual', map[opt]);
+        const n = parseInt(opt);
+        if (opt === '1') createBackup('manual', 'FULL');
+        else if (opt === '2') createBackup('manual', 'BACKEND');
+        else if (opt === '3') createBackup('manual', 'FRONTEND');
+        else if (opt === '99') restoreBackupInteract(rl);
+        else if (n >= 4 && n < 4 + availableModules.length) {
+            const modName = availableModules[n - 4];
+            rl.question(`Etiqueta para ${modName}: `, (d) => {
+                createBackup(d || 'mod', 'MODULE', modName);
                 rl.close();
             });
         } else rl.close();

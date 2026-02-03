@@ -2,8 +2,8 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
+  "/admin/planificacion/auditplan": "pages/admin/planificacion/auditplan.js",
   "/admin/crm": "pages/admin/crm.js",
-  "/admin/operaciones": "pages/admin/operaciones.js",
-  "/admin/servicios": "pages/admin/servicios.js",
-  "/admin/planificacion": "pages/admin/planificacion.js"
+  "/admin/planificacion": "pages/admin/planificacion.js",
+  "/admin/cotizador": "pages/admin/cotizador.js"
 }

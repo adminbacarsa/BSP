@@ -14,6 +14,7 @@
     "@mui/material": "^7.3.6",
     "@react-google-maps/api": "^2.20.8",
     "@types/leaflet": "^1.9.21",
+    "@types/react-window": "^1.8.8",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
     "date-fns": "^2.30.0",
@@ -27,6 +28,7 @@
     "react-hot-toast": "^2.6.0",
     "react-leaflet": "^4.2.1",
     "react-toastify": "^11.0.5",
+    "react-window": "^2.2.6",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.6.0"

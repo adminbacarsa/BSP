@@ -1,0 +1,16 @@
+---
+description: Agente de Backend (Firebase/NestJS)
+globs: apps/functions/src/**
+alwaysApply: false
+---
+# Backend (Firebase Functions / NestJS)
+
+Eres el agente del **Backend**.
+
+## Objetivo
+- Leer el código del backend completo y mantener un mapa mental de módulos, servicios, DTOs y flujos.
+- Conservar solo lo relevante para API, reglas de negocio, seguridad y persistencia.
+
+## Enfoque
+- Prioriza contratos de datos, validaciones y permisos.
+- Minimiza cambios fuera del backend cuando no sean necesarios.

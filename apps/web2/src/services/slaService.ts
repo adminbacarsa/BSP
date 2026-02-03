@@ -2,19 +2,28 @@
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
 
-// Definición de Turno
-export interface Shift {
-  id: string;
+// Definición de Turno (variante)
+export interface ShiftVariant {
+  code: string;
   name: string;
-  position: string;
   startTime: string;
   endTime: string;
   hours: number;
-  quantity: number;
-  days: string[];
+  isCustom?: boolean;
+  days?: string[];
 }
 
-// Definición de Contrato de Servicio
+// Definición de Puesto
+export interface ServicePosition {
+  id: string;
+  name: string;
+  coverageType: '24hs' | '12hs_diurno' | '12hs_nocturno' | 'custom';
+  quantity: number;
+  allowedShiftTypes: ShiftVariant[];
+  activeDays: string[];
+}
+
+// Definición de Contrato de Servicio (SLA)
 export interface ServiceSLA {
   id?: string;
   clientId: string;
@@ -23,7 +32,7 @@ export interface ServiceSLA {
   objectiveName: string;
   startDate: string;
   endDate: string;
-  shifts: Shift[];
+  positions: ServicePosition[];
   totalMonthlyHours: number;
   status: 'active' | 'inactive' | 'expired';
 }
