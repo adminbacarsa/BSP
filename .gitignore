@@ -6,6 +6,13 @@ dist-ssr/
 build/
 .cache/
 .parcel-cache/
+.next/
+out/
+**/.next/
+**/out/
+_pdfgen/
+apps/web2/out_local_backup/
+apps/web2/out_prod/
 
 # --- Archivos de Datos y Media (Causantes de >100MB) ---
 *.zip
