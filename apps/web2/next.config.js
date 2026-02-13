@@ -2,7 +2,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',               // <--- ESTO OBLIGA A CREAR LA CARPETA 'out'
-  reactStrictMode: true,
+  reactStrictMode: false,         // Evitar doble ejecución de effects que puede causar loops
   images: {
     unoptimized: true,            // <--- OBLIGATORIO para Firebase Hosting (sin servidor de imágenes)
   },

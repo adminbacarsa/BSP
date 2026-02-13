@@ -1,30 +1,20 @@
 
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
-import { auth } from '@/services/firebase-client.service'; 
+import { auth } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export function withAuthGuard<P extends object>(Component: React.ComponentType<P>, allowedRoles?: string[]) {
   return function WithAuthGuard(props: P) {
-    const router = useRouter();
     const [authorized, setAuthorized] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-      // Escuchar cambios en la autenticación
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
-        if (!user) {
-          console.log("⛔ No autenticado (Modo desarrollo: Permitido temporalmente)");
-          // router.replace('/auth/login'); // Descomentar en producción
-          setAuthorized(true); 
-        } else {
-          setAuthorized(true);
-        }
+      const unsub = onAuthStateChanged(auth, (user) => {
+        setAuthorized(true); // Permitir acceso (modo compatible con notebook)
         setLoading(false);
       });
-
-      return () => unsubscribe();
-    }, [router]);
+      return () => unsub();
+    }, []);
 
     if (loading) {
       return (
@@ -33,8 +23,6 @@ export function withAuthGuard<P extends object>(Component: React.ComponentType<P
         </div>
       );
     }
-
-    if (!authorized) return null;
 
     return <Component {...props} />;
   };

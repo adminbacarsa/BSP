@@ -64,40 +64,40 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           
           {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">Operativa</div>}
           
-          <Link href="/admin/dashboard" className={getLinkClass('/admin/dashboard')} title="Dashboard">
+          <Link href="/admin/dashboard" prefetch={false} className={getLinkClass('/admin/dashboard')} title="Dashboard">
             <LayoutDashboard size={20}/> {isSidebarOpen && <span>Dashboard</span>}
           </Link>
           
-          <Link href="/admin/operaciones" className={getLinkClass('/admin/operaciones', true)} title="Centro Control">
+          <Link href="/admin/operaciones" prefetch={false} className={getLinkClass('/admin/operaciones', true)} title="Centro Control">
             <Radio size={20}/> {isSidebarOpen && <span>Centro Control</span>}
           </Link>
           
-          <Link href="/admin/planificacion" className={getLinkClass('/admin/planificacion')} title="Planificador">
+          <Link href="/admin/planificacion" prefetch={false} className={getLinkClass('/admin/planificacion')} title="Planificador">
             <Calendar size={20}/> {isSidebarOpen && <span>Planificador</span>}
           </Link>
 
           {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4">Gestión</div>}
           
-          <Link href="/admin/crm" className={getLinkClass('/admin/crm')} title="CRM Clientes">
+          <Link href="/admin/crm" prefetch={false} className={getLinkClass('/admin/crm')} title="CRM Clientes">
             <Briefcase size={20}/> {isSidebarOpen && <span>CRM Clientes</span>}
           </Link>
           
-          <Link href="/admin/servicios" className={getLinkClass('/admin/servicios')} title="Servicios">
+          <Link href="/admin/servicios" prefetch={false} className={getLinkClass('/admin/servicios')} title="Servicios">
             <ShieldCheck size={20}/> {isSidebarOpen && <span>Servicios</span>}
           </Link>
 
           {/* ✅ AQUÍ ESTÁ EL ENLACE RESTAURADO */}
-          <Link href="/admin/reportes" className={getLinkClass('/admin/reportes')} title="Reportes">
+          <Link href="/admin/reportes" prefetch={false} className={getLinkClass('/admin/reportes')} title="Reportes">
             <BarChart3 size={20}/> {isSidebarOpen && <span>Reportes</span>}
           </Link>
           
-          <Link href="/admin/rrhh" className={getLinkClass('/admin/rrhh')} title="RRHH">
+          <Link href="/admin/rrhh" prefetch={false} className={getLinkClass('/admin/rrhh')} title="RRHH">
             <Users size={20}/> {isSidebarOpen && <span>RRHH</span>}
           </Link>
 
            {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4">Sistema</div>}
           
-          <Link href="/admin/configuracion" className={getLinkClass('/admin/configuracion')} title="Configuración">
+          <Link href="/admin/configuracion" prefetch={false} className={getLinkClass('/admin/configuracion')} title="Configuración">
             <Settings size={20}/> {isSidebarOpen && <span>Configuración</span>}
           </Link>
         </nav>
