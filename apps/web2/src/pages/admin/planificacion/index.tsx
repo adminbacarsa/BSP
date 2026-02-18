@@ -604,17 +604,31 @@ export default function PlanificacionPage() {
             const map: any = {}; 
             snap.docs.forEach(d => { 
                 const data = d.data(); 
-                if (data.startDate && data.endDate && data.employeeId) { 
-                    const [sY, sM, sD] = data.startDate.split('-').map(Number); 
-                    const [eY, eM, eD] = data.endDate.split('-').map(Number); 
-                    let current = new Date(sY, sM - 1, sD); 
-                    const end = new Date(eY, eM - 1, eD); 
-                    while (current <= end) { 
+                if (!data.employeeId) return;
+                const toDay = (val: any) => {
+                    if (!val) return null;
+                    if (val.toDate) return val.toDate();
+                    if (val.seconds) return new Date(val.seconds * 1000);
+                    if (typeof val === 'string') {
+                        const parts = val.split('-').map(Number);
+                        if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]);
+                    }
+                    const dt = new Date(val);
+                    return isNaN(dt.getTime()) ? null : dt;
+                };
+                const start = toDay(data.startDate);
+                const end = toDay(data.endDate);
+                if (start && end) {
+                    let current = new Date(start);
+                    const endDay = new Date(end);
+                    current.setHours(0, 0, 0, 0);
+                    endDay.setHours(0, 0, 0, 0);
+                    while (current <= endDay) { 
                         const key = `${data.employeeId}_${getDateKey(current)}`; 
                         map[key] = { id: d.id, ...data, isAbsence: true }; 
                         current.setDate(current.getDate() + 1); 
                     } 
-                } 
+                }
             }); 
             setAbsencesMap(map); 
         });
