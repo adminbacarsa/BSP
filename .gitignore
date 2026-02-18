@@ -59,3 +59,7 @@ lerna-debug.log*
 *.sw?
 _SNAPSHOTS_ROOT/
 Thumbs.db
+
+# --- Excepción: snapshot final compartido en repo ---
+!apps/web2/out/
+!apps/web2/out/**
