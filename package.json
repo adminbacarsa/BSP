@@ -4,6 +4,7 @@
   "description": "Monorepositorio para la aplicación de cronogramas. Contiene Frontend (web) y Backend (functions).",
   "main": "index.js",
   "scripts": {
+    "start": "npm run serve:final",
     "test": "echo \"Error: Los tests se ejecutan en las subcarpetas: npm run test --workspace=functions\" && exit 1",
     "install:all": "npm install --workspaces",
     "dev:backend": "npm run serve --workspace=functions",

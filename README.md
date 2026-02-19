@@ -31,30 +31,26 @@ El proyecto es un **Monorepo** que integra Frontend y Backend:
     npm install
     ```
 
-## 💻 Desarrollo Local
+## Cómo ejecutar la plataforma (una sola versión)
 
-### Frontend oficial (versión final)
-
-La versión de referencia para el equipo se ejecuta en el puerto `5005`.
+Hay **una única versión** para usar. Mismo comando en cualquier equipo:
 
 ```bash
-# servidor estático de la versión final publicada
-npm run serve:final
+npm install
+npm start
 ```
 
-URL:
+Abrir en el navegador: **http://localhost:5005**
 
-```text
-http://localhost:5005
-```
+No hay otro puerto ni otra URL. Si algo corre en 3000 u otro puerto, no es la versión oficial.
 
-### Frontend editable (web2)
+---
 
-Si necesitás modo desarrollo sobre `apps/web2`, también corre en `5005`:
+### Para desarrolladores (opcional)
 
-```bash
-npm run dev:web2
-```
+Si editás código en `apps/web2` y querés ver cambios en caliente: `npm run dev:web2` (puerto 3000). No reemplaza la versión oficial; la versión oficial es solo la de `npm start` en 5005.
+
+**Importante:** No ejecutar `npm run build` dentro de `apps/web2` salvo que vayas a publicar una nueva versión y a hacer commit de `apps/web2/out`. Ese build sobrescribe la versión oficial.
 
 ### Backend (Functions)
 Para compilar y observar cambios en el backend TypeScript:
