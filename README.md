@@ -33,6 +33,29 @@ El proyecto es un **Monorepo** que integra Frontend y Backend:
 
 ## 💻 Desarrollo Local
 
+### Frontend oficial (versión final)
+
+La versión de referencia para el equipo se ejecuta en el puerto `5005`.
+
+```bash
+# servidor estático de la versión final publicada
+npm run serve:final
+```
+
+URL:
+
+```text
+http://localhost:5005
+```
+
+### Frontend editable (web2)
+
+Si necesitás modo desarrollo sobre `apps/web2`, también corre en `5005`:
+
+```bash
+npm run dev:web2
+```
+
 ### Backend (Functions)
 Para compilar y observar cambios en el backend TypeScript:
 ```bash
