@@ -1,0 +1,30 @@
+============================================
+  CONTROLDATA - UNA SOLA VERSION (5005)
+============================================
+
+En la NOTEBOOK (o cualquier PC) hacer EXACTAMENTE esto:
+
+1. Abrir terminal en ESTA carpeta (donde está este archivo).
+
+2. Traer la versión correcta de GitHub (solo si ya clonaste antes):
+   git fetch bsp
+   git reset --hard bsp/main
+
+   Si es la primera vez:
+   git clone https://github.com/adminbacarsa/BSP.git
+   cd BSP
+
+3. Instalar:
+   npm install
+
+4. Levantar la plataforma (UNICO comando que importa):
+   npm start
+
+5. Abrir en el navegador:
+   http://localhost:5005
+
+NO uses "npm run dev:web2" ni "npm run dev".
+Eso abre la versión de desarrollo (la vieja de 3002).
+La versión oficial es SOLO: npm start → localhost:5005
+
+============================================

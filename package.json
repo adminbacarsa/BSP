@@ -10,7 +10,7 @@
     "dev:backend": "npm run serve --workspace=functions",
     "dev:frontend": "npm run dev --workspace=web",
     "dev:web2": "npm --prefix apps/web2 run dev",
-    "serve:final": "npx --yes http-server \"apps/web2/out\" -p 5005 -c-1",
+    "serve:final": "node iniciar.js",
     "sync": "node sync_cronoapp.js",
     "watch": "npx nodemon -L --watch apps --ext ts,tsx,js,json --ignore \"**/node_modules/**\" --ignore \"**/.next/**\" --ignore \"**/out/**\" --delay 2 --exec \"node sync_cronoapp.js\""
   },
