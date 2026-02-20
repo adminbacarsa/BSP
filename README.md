@@ -31,26 +31,37 @@ El proyecto es un **Monorepo** que integra Frontend y Backend:
     npm install
     ```
 
-## Cómo ejecutar la plataforma (una sola versión)
+## Forma de trabajar (flujo estándar)
 
-Hay **una única versión** para usar. Mismo comando en cualquier equipo:
+1. **Desarrollar en local**  
+   Editar código en `apps/web2/src`, ver cambios en vivo:
+   ```bash
+   npm run dev
+   ```
+   Abrir **http://localhost:3000** (o el puerto que indique la terminal).
 
-```bash
-npm install
-npm start
-```
+2. **Probar y compilar**  
+   Cuando esté listo, generar la versión estática:
+   ```bash
+   npm run build
+   ```
+   Eso genera la carpeta `apps/web2/out/`.
 
-Abrir en el navegador: **http://localhost:5005**
+3. **Probar el build en local (opcional)**  
+   Ver la misma versión que se va a desplegar:
+   ```bash
+   npm start
+   ```
+   Abrir **http://localhost:5005**.
 
-No hay otro puerto ni otra URL. Si algo corre en 3000 u otro puerto, no es la versión oficial.
+4. **Desplegar**  
+   Subir a Firebase (o tu hosting):
+   ```bash
+   firebase deploy --only hosting
+   ```
 
----
-
-### Para desarrolladores (opcional)
-
-Si editás código en `apps/web2` y querés ver cambios en caliente: `npm run dev:web2` (puerto 3000). No reemplaza la versión oficial; la versión oficial es solo la de `npm start` en 5005.
-
-**Importante:** No ejecutar `npm run build` dentro de `apps/web2` salvo que vayas a publicar una nueva versión y a hacer commit de `apps/web2/out`. Ese build sobrescribe la versión oficial.
+Resumen: **dev** (trabajar) → **build** (compilar) → **deploy** (publicar).  
+`npm start` sirve para revisar el build localmente antes o después del deploy.
 
 ### Backend (Functions)
 Para compilar y observar cambios en el backend TypeScript:

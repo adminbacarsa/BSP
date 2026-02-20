@@ -1,30 +1,28 @@
 ============================================
-  CONTROLDATA - UNA SOLA VERSION (5005)
+  CONTROLDATA - Flujo de trabajo
 ============================================
 
-En la NOTEBOOK (o cualquier PC) hacer EXACTAMENTE esto:
+ 1. DESARROLLAR (trabajar en local)
+    npm run dev
+    -> Abrir http://localhost:3000
+    Editás código en apps/web2/src, los cambios se ven al instante.
 
-1. Abrir terminal en ESTA carpeta (donde está este archivo).
+ 2. COMPILAR (cuando terminás de probar)
+    npm run build
+    -> Genera apps/web2/out/ (la versión estática).
 
-2. Traer la versión correcta de GitHub (solo si ya clonaste antes):
-   git fetch bsp
-   git reset --hard bsp/main
+ 3. PROBAR EL BUILD EN LOCAL (opcional)
+    npm start
+    -> Abrir http://localhost:5005
+    Es la misma versión que se sube a producción.
 
-   Si es la primera vez:
-   git clone https://github.com/adminbacarsa/BSP.git
-   cd BSP
+ 4. DESPLEGAR
+    firebase deploy --only hosting
 
-3. Instalar:
-   npm install
-
-4. Levantar la plataforma (UNICO comando que importa):
-   npm start
-
-5. Abrir en el navegador:
-   http://localhost:5005
-
-NO uses "npm run dev:web2" ni "npm run dev".
-Eso abre la versión de desarrollo (la vieja de 3002).
-La versión oficial es SOLO: npm start → localhost:5005
-
-============================================
+--------------------------------------------
+Primera vez en esta PC / notebook:
+  git clone https://github.com/adminbacarsa/BSP.git
+  cd BSP
+  npm install
+  npm run dev
+--------------------------------------------
