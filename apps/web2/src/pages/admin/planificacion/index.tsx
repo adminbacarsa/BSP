@@ -10,7 +10,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Map, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost
+    PowerOff, LockKeyhole, Ghost, Maximize2
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth'; 
@@ -36,7 +36,8 @@ const SHIFT_STYLES: any = {
     'C': 'bg-slate-100 text-slate-600 border-slate-300 font-bold opacity-90',
     'FT': 'bg-violet-600 text-white border-violet-700 font-black shadow-sm',
     'FF': 'bg-cyan-600 text-white border-cyan-700 font-black shadow-sm',
-    'SWAP': 'bg-cyan-50 text-cyan-700 border-cyan-300 border-dashed font-bold'
+    'SWAP': 'bg-cyan-50 text-cyan-700 border-cyan-300 border-dashed font-bold',
+    'SWAP_PENDING': 'bg-amber-100 text-amber-700 border-amber-300 border-dashed font-bold'
 };
 
 const LEGEND_DESCRIPTIONS: Record<string, string> = {
@@ -57,7 +58,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'C': 'Turno Consolidado (Fichado)',
     'FT': 'Franco Trabajado (Pago Doble)',
     'FF': 'Franco x Franco (Devolución)',
-    'SWAP': 'Intercambio de Turno'
+    'SWAP': 'Intercambio de Turno',
+    'SWAP_PENDING': 'Intercambio pendiente de autorización'
 };
 
 const SHIFT_RANGES: Record<string, string> = {
@@ -141,6 +143,7 @@ export default function PlanificacionPage() {
     const [clients, setClients] = useState<any[]>([]);
     const [agreements, setAgreements] = useState<any[]>([]);
     const [unifiedLogs, setUnifiedLogs] = useState<any[]>([]);
+    const [showActivityModal, setShowActivityModal] = useState(false);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [hasUnread, setHasUnread] = useState(false);
@@ -279,21 +282,50 @@ export default function PlanificacionPage() {
                         .sort((a, b) => a.name.localeCompare(b.name)); 
     }, [employees, showSwapModal, swapSearchTerm, swapConfig]);
 
-    // 🛑 RESTAURADO: targetFrancos
+    // 🛑 RESTAURADO + FIX: targetFrancos (solo fechas válidas para enroque)
     useEffect(() => {
-        if (selectedSwapTarget) {
-            const dates: any[] = [];
-            Object.values(shiftsMap).forEach((s: any) => {
-                if (s.employeeId === selectedSwapTarget && (s.code === 'F' || s.isFranco)) {
-                    const [y, m, d] = getDateKey(s.startTime).split('-');
-                    dates.push({ dateStr: getDateKey(s.startTime), label: `${d}/${m}` });
-                }
-            });
-            setTargetFrancos(dates);
-        } else {
+        if (!selectedSwapTarget || !selectedCell?.empId || !selectedCell?.dateStr) {
             setTargetFrancos([]);
+            return;
         }
-    }, [selectedSwapTarget, shiftsMap]);
+
+        const getShiftInfo = (empId: string, dateStr: string) => {
+            const k = `${empId}_${dateStr}`;
+            const pending = pendingChanges[k];
+            if (pending) return pending.isDeleted ? null : pending;
+            return shiftsMap[k] || null;
+        };
+
+        const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes(String(code || '').toUpperCase());
+
+        const dates: any[] = [];
+        const seen = new Set<string>();
+
+        // Regla: solo ofrecer francos del target (emp2) donde emp1 NO tenga turno asignado
+        Object.values(shiftsMap).forEach((s: any) => {
+            if (s.employeeId !== selectedSwapTarget) return;
+            const isTargetFranco = (s.code === 'F' || s.isFranco) && !s.isFrancoTrabajado;
+            if (!isTargetFranco) return;
+
+            const dateStr = getDateKey(s.startTime);
+            if (seen.has(dateStr)) return;
+            if (isDateLocked(dateStr)) return;
+
+            // Si emp1 ya trabaja en dateStr, no es válida (evita doble turno / transferencias)
+            const emp1Shift = getShiftInfo(selectedCell.empId, dateStr);
+            if (emp1Shift && isWorkingCode(emp1Shift.code)) return;
+
+            // Si emp2 ya trabaja en date1 en OTRO objetivo, evitamos ofrecer (enroque no debe mover turnos cross-objetivo)
+            const emp2ShiftAtDate1 = getShiftInfo(selectedSwapTarget, selectedCell.dateStr);
+            if (emp2ShiftAtDate1 && isWorkingCode(emp2ShiftAtDate1.code) && emp2ShiftAtDate1.objectiveId && emp2ShiftAtDate1.objectiveId !== selectedObjective) return;
+
+            const [, m, d] = dateStr.split('-');
+            seen.add(dateStr);
+            dates.push({ dateStr, label: `${d}/${m}` });
+        });
+
+        setTargetFrancos(dates.sort((a, b) => a.dateStr.localeCompare(b.dateStr)));
+    }, [selectedSwapTarget, shiftsMap, pendingChanges, selectedCell?.empId, selectedCell?.dateStr, selectedObjective]);
 
     const activeServiceStatus = useMemo(() => {
         if (!selectedClient || !selectedObjective) return { status: 'IDLE', msg: '', icon: null };
@@ -600,6 +632,36 @@ export default function PlanificacionPage() {
             setShiftsMap(map); 
         });
 
+        // Actividad Reciente (audit_logs) - sin índices compuestos: traemos últimos N y filtramos en memoria.
+        const unsubLogs = onSnapshot(
+            query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(80)),
+            (snap) => {
+                const rows = snap.docs
+                    .map((d) => {
+                        const data: any = d.data();
+                        const ts =
+                            data.timestamp?.toDate ? data.timestamp.toDate()
+                            : (data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000)
+                            : new Date());
+                        return {
+                            id: d.id,
+                            timestamp: ts.getTime(),
+                            label: ACTION_LABELS[data.action] || data.action || 'CAMBIO',
+                            detail: data.details || '',
+                            actorUid: data.actorUid || '',
+                            actorEmail: data.actorEmail || '',
+                            actorName: data.actorName || data.actor || '',
+                            actor: data.actorName || data.actorEmail || data.actor || data.actorUid || '',
+                            module: data.module || '',
+                        };
+                    })
+                    .filter((x) => (x.module || '').toString().toUpperCase() === 'PLANIFICADOR')
+                    .slice(0, 20);
+                setUnifiedLogs(rows);
+            },
+            () => setUnifiedLogs([])
+        );
+
         const unsubA = onSnapshot(collection(db, 'ausencias'), snap => { 
             const map: any = {}; 
             snap.docs.forEach(d => { 
@@ -640,7 +702,7 @@ export default function PlanificacionPage() {
             if (alerts.length > 0) setHasUnread(true);
         });
         
-        return () => { unsubC(); unsubE(); unsubS(); unsubA(); unsubAg(); unsubN(); };
+        return () => { unsubC(); unsubE(); unsubS(); unsubLogs(); unsubA(); unsubAg(); unsubN(); };
     }, []);
 
     // ============================================================================
@@ -876,6 +938,7 @@ export default function PlanificacionPage() {
         setPendingChanges(newChanges); 
         setSelectedCell(null); 
         setActivePosition(null);
+        setFrancoMode('NONE');
         setPendingAssignment(null); 
         setSwapConfig(null); 
         setShowSwapModal(false); 
@@ -897,8 +960,124 @@ export default function PlanificacionPage() {
     };
 
     const confirmPendingAssignment = () => { if (!pendingAssignment) return; applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: modifiers.extend, isEarlyStart: modifiers.early, plannedNovedad: modifiers.plannedNovedad }); setPendingAssignment(null); setAuthWarningMessage(''); };
-    const executeSwap = () => { if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } const emp1 = selectedCell.empId; const date1 = selectedCell.dateStr; const emp2 = selectedSwapTarget; const date2 = selectedSwapDate; const newChanges = { ...pendingChanges }; const name1 = employees.find(e => e.id === emp1)?.name || 'Emp1'; const name2 = employees.find(e => e.id === emp2)?.name || 'Emp2'; newChanges[`${emp1}_${date1}`] = { code: coverShift1, isTemp: true, isFranco: false, isSwap: true, swapWith: name2 }; newChanges[`${emp2}_${date1}`] = { code: 'FF', isTemp: true, isFranco: true, isFrancoCompensatorio: true, swapWith: name1, swapDate: date2 }; newChanges[`${emp1}_${date1}`] = { code: 'FF', isTemp: true, isFranco: true, isFrancoCompensatorio: true, swapWith: name2, swapDate: date1 }; newChanges[`${emp2}_${date2}`] = { code: coverShift2, isTemp: true, isFranco: false, isSwap: true, swapWith: name1 }; setPendingChanges(newChanges); setShowSwapModal(false); setSwapConfig(null); setSelectedCell(null); setCoverageStep(false); toast.success("Enroque completado"); };
-    const handleSelectDate = (dateStr: string) => { setSelectedSwapDate(dateStr); setCoverageStep(true); const getShiftInfo = (eId: string, dStr: string) => { const k = `${eId}_${dStr}`; return pendingChanges[k] || shiftsMap[k]; }; const s1 = getShiftInfo(selectedSwapTarget, selectedCell.dateStr); if (s1 && s1.code !== 'F' && s1.code !== 'FF') { setCoverShift1(s1.code); setIsShift1Fixed(true); } else { setCoverShift1('M'); setIsShift1Fixed(false); } const s2 = getShiftInfo(selectedCell.empId, dateStr); if (s2 && s2.code !== 'F' && s2.code !== 'FF') { setCoverShift2(s2.code); setIsShift2Fixed(true); } else { setCoverShift2('M'); setIsShift2Fixed(false); } };
+
+    const getShiftFor = (empId: string, dateStr: string) => {
+        const k = `${empId}_${dateStr}`;
+        const pending = pendingChanges[k];
+        if (pending) return pending.isDeleted ? null : pending;
+        return shiftsMap[k] || null;
+    };
+
+    const toChangeConfig = (shift: any) => {
+        const code = (shift?.code || shift?.type || '').toString().toUpperCase();
+        const hours = Number(shift?.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
+        const startTime = typeof shift?.startTime === 'string' ? shift.startTime : (SHIFT_RANGES[code]?.split?.('-')?.[0]?.trim?.() || '07:00');
+        return {
+            code: shift?.code || code,
+            name: shift?.name || shift?.type || shift?.code || code,
+            hours,
+            startTime,
+            positionName: shift?.positionName || activePosition || dominantPosition?.positionName || 'General',
+            isFranco: shift?.code === 'F' || shift?.isFranco || false,
+            isFrancoTrabajado: !!shift?.isFrancoTrabajado,
+            isFrancoCompensatorio: !!shift?.isFrancoCompensatorio,
+            plannedNovedad: shift?.plannedNovedad || null,
+            isExtended: !!shift?.isExtended,
+            isEarlyStart: !!shift?.isEarlyStart
+        };
+    };
+
+    const executeSwap = () => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (!selectedCell?.empId || !selectedCell?.dateStr || !selectedSwapTarget) return;
+
+        const emp1 = selectedCell.empId;
+        const date1 = selectedCell.dateStr;
+        const emp2 = selectedSwapTarget;
+        const date2 = selectedSwapDate || date1;
+
+        const inCurrentMonth = (dateStr: string) => {
+            const [y, m] = dateStr.split('-').map(Number);
+            return y === currentDate.getFullYear() && m === (currentDate.getMonth() + 1);
+        };
+        // Regla pedida: ambas situaciones (turno↔turno y franco↔franco) solo dentro del mes visible
+        if (!inCurrentMonth(date1) || !inCurrentMonth(date2)) {
+            toast.error("El intercambio debe realizarse dentro del mes en curso.");
+            return;
+        }
+
+        const shift1 = getShiftFor(emp1, date1);
+        const shift2 = getShiftFor(emp2, date2);
+        if (!shift1 || !shift2) {
+            toast.error('Ambos empleados deben tener turno en ese día');
+            return;
+        }
+        if ([shift1, shift2].some((s: any) => isShiftConsolidated(s))) {
+            toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
+            return;
+        }
+
+        const name1 = employees.find(e => e.id === emp1)?.name || 'Emp1';
+        const name2 = employees.find(e => e.id === emp2)?.name || 'Emp2';
+
+        const newChanges = { ...pendingChanges };
+
+        const isFrancoLike = (s: any) => {
+            const code = String(s?.code || s?.type || '').toUpperCase();
+            return code === 'F' || code === 'FF' || !!s?.isFranco;
+        };
+        const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes(String(code || '').toUpperCase());
+
+        // Caso especial pedido: Franco ↔ Franco (intercambio de días de franco dentro del mes)
+        // Para que tenga efecto real, necesitamos los “turnos laborables” cruzados:
+        // - emp2 en date1 (para que emp1 pueda trabajar ese día)
+        // - emp1 en date2 (para que emp2 pueda trabajar ese día)
+        if (isFrancoLike(shift1) && isFrancoLike(shift2)) {
+            if (date2 === date1) {
+                toast.error("Para Franco ↔ Franco seleccioná un día distinto del compañero.");
+                return;
+            }
+            const emp2AtDate1 = getShiftFor(emp2, date1);
+            const emp1AtDate2 = getShiftFor(emp1, date2);
+            if (!emp2AtDate1 || !emp1AtDate2) {
+                toast.error("Para Franco ↔ Franco ambos deben tener turnos asignados en las dos fechas.");
+                return;
+            }
+            if (!isWorkingCode(emp2AtDate1.code) || !isWorkingCode(emp1AtDate2.code)) {
+                toast.error("Para Franco ↔ Franco se requiere que en las fechas cruzadas haya turnos laborables (no licencias/francos).");
+                return;
+            }
+            if ([emp2AtDate1, emp1AtDate2].some((s: any) => isShiftConsolidated(s))) {
+                toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
+                return;
+            }
+
+            // Emp1: deja de estar franco en date1 y toma el turno de Emp2 en date1
+            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(emp2AtDate1), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
+            // Emp2: pasa a estar franco en date1 (recibe el franco de Emp1)
+            newChanges[`${emp2}_${date1}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
+
+            // Emp2: deja de estar franco en date2 y toma el turno de Emp1 en date2
+            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(emp1AtDate2), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
+            // Emp1: pasa a estar franco en date2 (recibe el franco de Emp2)
+            newChanges[`${emp1}_${date2}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
+        } else {
+            // Swap estándar (como build 5005): intercambia 2 celdas (emp1/date1 ↔ emp2/date2)
+            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
+            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
+        }
+        setPendingChanges(newChanges);
+
+        setShowSwapModal(false);
+        setSwapConfig(null);
+        setCoverageStep(false);
+        setSelectedSwapTarget('');
+        setSelectedSwapDate('');
+        setSwapSearchTerm('');
+        toast.success("Enroque completado");
+    };
+
+    const handleSelectDate = (dateStr: string) => { setSelectedSwapDate(dateStr); };
     
     const handleMouseUp = () => { 
         setIsDragging(false); 
@@ -926,9 +1105,79 @@ export default function PlanificacionPage() {
     const isCellSelected = (r: number, c: number) => selection.start && r >= Math.min(selection.start.r, selection.end!.r) && r <= Math.max(selection.start.r, selection.end!.r) && c >= Math.min(selection.start.c, selection.end!.c) && c <= Math.max(selection.start.c, selection.end!.c);
 
     // 🛑 V8.20: RENDERIZADO DUAL (SPLIT SCREEN) - RESTAURADO
+    const calculatePlannedHoursForDate = (dateStr: string) => {
+        let total = 0;
+        const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes(String(code || '').toUpperCase());
+        displayedEmployees.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const pending = pendingChanges[key];
+            const existing = shiftsMap[key];
+            const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+            if (!activeShift) return;
+            const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
+            if (!shiftObjective || shiftObjective !== selectedObjective) return;
+            if (!isWorkingCode(activeShift.code)) return;
+            const code = (activeShift.code || activeShift.type || '').toString().toUpperCase();
+            const hours = Number(activeShift.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
+            total += hours;
+        });
+        return total;
+    };
+
+    const monthPlannedHours = useMemo(
+        () => daysInMonth.reduce((acc, day) => acc + calculatePlannedHoursForDate(getDateKey(day)), 0),
+        [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective]
+    );
+
+    const monthPlannedHoursByPosition = useMemo(() => {
+        const map: Record<string, number> = {};
+        const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes(String(code || '').toUpperCase());
+        daysInMonth.forEach((day) => {
+            const dateStr = getDateKey(day);
+            displayedEmployees.forEach((emp: any) => {
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                if (!activeShift) return;
+                const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
+                if (!shiftObjective || shiftObjective !== selectedObjective) return;
+                if (!isWorkingCode(activeShift.code)) return;
+                const code = (activeShift.code || activeShift.type || '').toString().toUpperCase();
+                const hours = Number(activeShift.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
+                const pos = (activeShift.positionName || activePosition || dominantPosition?.positionName || 'General').toString();
+                map[pos] = (map[pos] || 0) + hours;
+            });
+        });
+        return map;
+    }, [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective, activePosition, dominantPosition]);
+
     const renderGrid = (isSnapshotView: boolean, snapshotData?: any) => (
         <table className="border-collapse w-full text-xs">
-            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md h-10"><tr><th className="sticky left-0 z-40 bg-slate-100 p-2 text-left min-w-[150px] border-b border-r"><span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span></th>{daysInMonth.map(d => <th key={d.toISOString()} className={`min-w-[25px] border-b border-r p-1 text-center ${[0,6].includes(d.getDay())?'bg-slate-200':''}`}><span className="text-[10px] font-bold">{d.getDate()}</span></th>)}</tr></thead>
+            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
+                <tr className="h-6">
+                    <th rowSpan={2} className="sticky left-0 z-40 bg-slate-100 p-2 text-left min-w-[150px] border-b border-r">
+                        <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
+                    </th>
+                    {daysInMonth.map((d) => {
+                        const dateStr = getDateKey(d);
+                        const letter = getDayLetter(dateStr);
+                        const isWeekend = [0, 6].includes(d.getDay());
+                        return (
+                            <th key={`dw_${d.toISOString()}`} className={`min-w-[25px] border-b border-r p-1 text-center ${isWeekend ? 'bg-slate-200' : ''}`}>
+                                <span className="text-[9px] font-black text-slate-500">{letter}</span>
+                            </th>
+                        );
+                    })}
+                </tr>
+                <tr className="h-10">
+                    {daysInMonth.map((d) => (
+                        <th key={d.toISOString()} className={`min-w-[25px] border-b border-r p-1 text-center ${[0,6].includes(d.getDay())?'bg-slate-200':''}`}>
+                            <span className="text-[10px] font-bold">{d.getDate()}</span>
+                        </th>
+                    ))}
+                </tr>
+            </thead>
             <tbody>
                 {displayedEmployees.map((emp, idx) => {
                     const isGuest = selectedObjective && emp.preferredObjectiveId !== selectedObjective;
@@ -956,9 +1205,17 @@ export default function PlanificacionPage() {
                                         let statusIndicator = null;
                                         if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED') statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT') statusIndicator = 'bg-rose-500'; }
                                         let isSwap = s?.swapWith || p?.swapWith;
+                                        const swapPending = !!(
+                                            isSwap &&
+                                            (
+                                                (s?.origin && s.origin !== 'PLANIFICADOR' && !s.swapAuthorized) ||
+                                                (p?.origin && p.origin !== 'PLANIFICADOR' && !p.swapAuthorized)
+                                            )
+                                        );
+                                        const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
                                         if (isLockedDate) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; } 
-                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; style=`bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? SHIFT_STYLES['SWAP'] : ''}`; } } } 
-                                        else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? SHIFT_STYLES['SWAP'] : ''}`; content=s.code; } } }
+                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; style=`bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; } } } 
+                                        else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content=s.code; } } }
                                         if (isExtended) { style += ' ring-2 ring-violet-600 z-10'; }
                                         if (isEarly) { style += ' ring-2 ring-cyan-500 z-10'; }
                                         if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; } 
@@ -966,7 +1223,7 @@ export default function PlanificacionPage() {
                                         if (content === 'Ausencia con Aviso') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
                                         if (absence) { style = SHIFT_STYLES['V'] || 'bg-teal-600 text-white font-black'; content = "V"; if (absence.type === 'Vacaciones') { content = "V"; } else if (absence.type === 'Enfermedad') { content = "E"; style = SHIFT_STYLES['E']; } else { content = "AUS"; style = 'bg-rose-50 text-rose-700 font-bold border-rose-200'; } }
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={() => !isSnapshotView && isDragging && setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}}))} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected?'bg-indigo-200':''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={() => !isSnapshotView && isDragging && setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}}))} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected?'bg-indigo-200':''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -994,7 +1251,71 @@ export default function PlanificacionPage() {
                     );
                 })}
             </tbody>
-            <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300"><tr><td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] text-right uppercase text-slate-500 shadow-sm flex items-center justify-end gap-2 h-8"><ShieldCheck size={12}/> Cobertura:</td>{daysInMonth.map(day => { const dateStr = getDateKey(day); let totalActive = 0; const relevantEmployees = displayedEmployees; relevantEmployees.forEach(emp => { const key = `${emp.id}_${dateStr}`; const pending = pendingChanges[key]; const existing = shiftsMap[key]; let activeShift = pending ? (pending.isDeleted ? null : pending) : existing; if (activeShift) { const isWorking = activeShift.code !== 'F' && activeShift.code !== 'FF' && activeShift.code !== 'V' && activeShift.code !== 'L' && activeShift.code !== 'A' && activeShift.code !== 'E'; const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : ''); if (isWorking && shiftObjective === selectedObjective) { totalActive++; } } }); return (<td key={dateStr} className={`text-center border-r border-b text-[10px] font-black ${totalActive > 0 ? 'bg-white text-slate-700' : 'bg-rose-50 text-rose-300'}`} colSpan={1}>{totalActive}</td>); })}</tr></tfoot>
+            <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
+                <tr>
+                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] text-right uppercase text-slate-500 shadow-sm flex items-center justify-end gap-2 h-8">
+                        <ShieldCheck size={12}/> Cobertura:
+                    </td>
+                    {daysInMonth.map(day => {
+                        const dateStr = getDateKey(day);
+                        const dayLetter = getDayLetter(dateStr);
+                        let current = 0;
+                        const required = (positionStructure || []).reduce((acc: number, pos: any) => {
+                            const activeDays = Array.isArray(pos?.activeDays) ? pos.activeDays : [];
+                            if (activeDays.length > 0 && !activeDays.includes(dayLetter)) return acc;
+                            return acc + (Number(pos?.qty) || 1);
+                        }, 0);
+
+                        displayedEmployees.forEach((emp: any) => {
+                            const key = `${emp.id}_${dateStr}`;
+                            const pending = pendingChanges[key];
+                            const existing = shiftsMap[key];
+                            const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                            if (!activeShift) return;
+                            const isWorking = !['F','FF','V','L','A','E','AA'].includes(String(activeShift.code || '').toUpperCase());
+                            const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
+                            if (isWorking && shiftObjective === selectedObjective) current++;
+                        });
+
+                        const isCovered = required > 0 && current >= required;
+                        const cls = required === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600');
+                        return (
+                            <td key={dateStr} className={`text-center border-r border-b text-[10px] font-black ${cls}`} colSpan={1}>
+                                {required > 0 ? `${current}/${required}` : '-'}
+                            </td>
+                        );
+                    })}
+                </tr>
+                <tr>
+                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] text-right uppercase text-slate-500 shadow-sm flex items-center justify-end gap-2 h-8">
+                        <div className="flex flex-col items-end leading-tight">
+                            <div className="flex items-center gap-2">
+                                <Clock size={12}/> Horas (Mes: {monthPlannedHours}h)
+                            </div>
+                            <div className="text-[9px] font-bold text-slate-400 normal-case">
+                                {Object.entries(monthPlannedHoursByPosition).length === 0 ? (
+                                    <span>Sin horas por puesto</span>
+                                ) : (
+                                    Object.entries(monthPlannedHoursByPosition).map(([pos, h], i) => (
+                                        <span key={pos}>
+                                            {pos}: {h}h{i < Object.entries(monthPlannedHoursByPosition).length - 1 ? ' | ' : ''}
+                                        </span>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </td>
+                    {daysInMonth.map(day => {
+                        const dateStr = getDateKey(day);
+                        const planned = calculatePlannedHoursForDate(dateStr);
+                        return (
+                            <td key={dateStr} className="text-center border-r border-b text-[10px] font-black text-slate-600 bg-white" colSpan={1}>
+                                {planned > 0 ? planned : 0}
+                            </td>
+                        );
+                    })}
+                </tr>
+            </tfoot>
         </table>
     );
 
@@ -1164,14 +1485,67 @@ export default function PlanificacionPage() {
                 )}
 
                 <div className="bg-white p-2 rounded-xl border shadow-sm shrink-0 h-32 overflow-hidden flex flex-col no-print">
-                    <h4 className="text-[10px] font-black uppercase text-slate-400 mb-2 px-2 border-b pb-1 flex items-center gap-2"><Clock size={12}/> Actividad Reciente</h4>
+                    <div className="flex items-center justify-between mb-2 px-2 border-b pb-1">
+                        <h4 className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2">
+                            <Clock size={12}/> Actividad Reciente
+                        </h4>
+                        <button
+                            onClick={() => setShowActivityModal(true)}
+                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500"
+                            title="Expandir actividad"
+                        >
+                            <Maximize2 size={12}/>
+                        </button>
+                    </div>
                     <div className="overflow-y-auto custom-scrollbar space-y-1 px-2 pb-2">
+                        {unifiedLogs.length === 0 && (
+                            <div className="text-[10px] text-slate-400 italic px-1 py-2">Sin actividad reciente.</div>
+                        )}
                         {unifiedLogs.map(log => {
-                            const realName = usersMap[log.actor] || usersMap[log.actorUid] || log.actor || 'Sistema';
-                            return (<div key={log.id} className="flex items-center gap-2 text-[10px] p-1 border-b last:border-0 hover:bg-slate-50"><span className="font-mono text-slate-400">{new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span><span className="font-bold px-1.5 rounded uppercase bg-slate-100 text-slate-600">{log.label}</span><span className="text-slate-600 truncate flex-1">{log.detail}</span><span className="text-[9px] text-slate-400 font-bold">{realName}</span></div>);
+                            const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
+                            return (
+                                <div key={log.id} className="flex items-center gap-2 text-[10px] p-1 border-b last:border-0 hover:bg-slate-50">
+                                    <span className="font-mono text-slate-400">{new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                    <span className="font-bold px-1.5 rounded uppercase bg-slate-100 text-slate-600">{log.label}</span>
+                                    <span className="text-slate-600 truncate flex-1">{log.detail}</span>
+                                    <span className="text-[9px] text-slate-400 font-bold">{realName}</span>
+                                </div>
+                            );
                         })}
                     </div>
                 </div>
+
+                {showActivityModal && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowActivityModal(false)}>
+                        <div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
+                                <h3 className="font-black text-lg flex items-center gap-2"><Clock className="text-indigo-600" size={18}/> Actividad Reciente</h3>
+                                <button onClick={() => setShowActivityModal(false)} className="p-2 hover:bg-slate-200 rounded-lg"><X size={18}/></button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                                {unifiedLogs.length === 0 ? (
+                                    <div className="text-sm text-slate-400 italic">Sin actividad reciente.</div>
+                                ) : (
+                                    unifiedLogs.map((log) => {
+                                        const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
+                                        return (
+                                            <div key={log.id} className="p-3 border rounded-xl hover:bg-slate-50 transition-colors">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="text-xs font-mono text-slate-400">{new Date(log.timestamp).toLocaleString()}</span>
+                                                        <span className="text-[10px] font-black uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border">{log.label}</span>
+                                                        <span className="text-xs text-slate-700 truncate">{log.detail}</span>
+                                                    </div>
+                                                    <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">{realName}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* MODALES Y MENÚS DE CONTEXTO (V9.10 - EXPANDIDOS Y ORDENADOS) */}
 
@@ -1219,7 +1593,22 @@ export default function PlanificacionPage() {
                                             {uniqueSLAShifts.map((s: any) => (
                                                 <button key={s.code} onClick={() => handleAssignShift(s, activePosition || 'General')} disabled={isServiceLocked} className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform relative ${SHIFT_STYLES[s.code]}`}><span className="font-black text-sm">{s.code}</span><span className="text-[9px] opacity-70">{s.hours}hs</span>{!selectedCell.currentShift && gap < 0 && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}</button>
                                             ))}
-                                            <button onClick={() => { setFrancoMode('FT_SELECTION'); handleAssignShift({code: 'F', hours: 0}, 'General'); }} disabled={isServiceLocked} className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"><span>F</span><span className="text-[8px]">Franco</span></button>
+                                            <button
+                                                onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
+                                                disabled={isServiceLocked}
+                                                className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"
+                                                title="Asignar Franco (F)"
+                                            >
+                                                <span>F</span><span className="text-[8px]">Franco</span>
+                                            </button>
+                                            <button
+                                                onClick={() => setFrancoMode((m) => (m === 'FT_SELECTION' ? 'NONE' : 'FT_SELECTION'))}
+                                                disabled={isServiceLocked}
+                                                className={`p-2 rounded-lg border flex flex-col items-center justify-center font-black ${francoMode === 'FT_SELECTION' ? 'bg-violet-600 text-white border-violet-700 shadow-lg shadow-violet-200' : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'}`}
+                                                title="Modo FT: el próximo turno se marca como Franco Trabajado"
+                                            >
+                                                <span>FT</span><span className="text-[8px]">{francoMode === 'FT_SELECTION' ? 'Activo' : 'Modo'}</span>
+                                            </button>
                                         </div>
                                     </>
                                 );
@@ -1237,7 +1626,81 @@ export default function PlanificacionPage() {
 
                 {pendingAssignment && (<div className="fixed inset-0 z-[150] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Confirmar</button></div></div></div></div>)}
                 {showConflictModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-rose-900/20 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px] border-2 border-rose-100"><div className="text-center mb-6"><div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3"><Siren size={24}/></div><h3 className="text-lg font-black text-slate-800">Conflicto Detectado</h3><p className="text-xs text-slate-500 mt-1">Hay una superposición entre Novedad y Turno.</p></div><div className="space-y-3"><button onClick={() => resolveConflict('SPLIT')} className="w-full p-3 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-200 hover:bg-indigo-700 flex items-center justify-center gap-2"><Split size={16}/> Dividir Turno (Extensión + Adelanto)</button><button onClick={() => resolveConflict('FULL_COVERAGE')} className="w-full p-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-50 flex items-center justify-center gap-2"><Shield size={16}/> Cobertura Total (Franco Trabajado)</button><button onClick={() => setShowConflictModal(false)} className="w-full p-3 text-slate-400 font-bold text-xs hover:text-slate-600">Cancelar</button></div></div></div>)}
-                {showSwapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px]"><h3 className="font-black text-lg mb-4 flex items-center gap-2"><ArrowLeftRight size={20} className="text-indigo-500"/> Asistente de Enroque</h3>{!coverageStep ? (<><input type="text" placeholder="Buscar compañero..." className="w-full bg-slate-50 border p-3 rounded-xl mb-3 text-sm font-bold" value={swapSearchTerm} onChange={e => setSwapSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar border rounded-xl mb-4">{swapCandidates.map(c => (<button key={c.id} onClick={() => setSelectedSwapTarget(c.id)} className={`w-full p-3 text-left hover:bg-slate-50 border-b flex justify-between items-center ${selectedSwapTarget === c.id ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600'}`}><span>{c.name}</span>{selectedSwapTarget === c.id && <CheckCircle size={16}/>}</button>))}</div><div className="flex gap-2">{targetFrancos.map(f => (<button key={f.dateStr} onClick={() => handleSelectDate(f.dateStr)} className="bg-slate-100 px-3 py-1 rounded-lg text-xs font-bold border hover:bg-indigo-50 hover:border-indigo-200 transition-all">{f.label}</button>))}</div></>) : (<div className="space-y-4"><div className="bg-slate-50 p-4 rounded-xl border"><p className="text-xs font-black text-slate-400 uppercase mb-2">Configuración de Cobertura</p><div className="grid grid-cols-2 gap-4"><div><label className="text-[10px] font-bold text-slate-500">Turno para {employees.find(e=>e.id===selectedCell.empId)?.name}</label><input value={coverShift2} onChange={e=>setCoverShift2(e.target.value)} disabled={isShift2Fixed} className="w-full p-2 border rounded font-bold text-center mt-1"/></div><div><label className="text-[10px] font-bold text-slate-500">Turno para {employees.find(e=>e.id===selectedSwapTarget)?.name}</label><input value={coverShift1} onChange={e=>setCoverShift1(e.target.value)} disabled={isShift1Fixed} className="w-full p-2 border rounded font-bold text-center mt-1"/></div></div></div><button onClick={executeSwap} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200">Confirmar Enroque</button></div>)}</div></div>)}
+                {showSwapModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px]">
+                            <h3 className="font-black text-lg mb-4 flex items-center gap-2">
+                                <ArrowLeftRight size={20} className="text-indigo-500" /> Intercambio de Turno
+                            </h3>
+                            <>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar compañero..."
+                                    className="w-full bg-slate-50 border p-3 rounded-xl mb-3 text-sm font-bold"
+                                    value={swapSearchTerm}
+                                    onChange={e => setSwapSearchTerm(e.target.value)}
+                                />
+                                <div className="max-h-60 overflow-y-auto custom-scrollbar border rounded-xl mb-4">
+                                    {swapCandidates.map(c => (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => { setSelectedSwapTarget(c.id); setSelectedSwapDate(''); }}
+                                            className={`w-full p-3 text-left hover:bg-slate-50 border-b flex justify-between items-center ${selectedSwapTarget === c.id ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600'}`}
+                                        >
+                                            <span>{c.name}</span>
+                                            {selectedSwapTarget === c.id && <CheckCircle size={16} />}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {selectedSwapTarget && (
+                                    <div className="bg-white border rounded-xl p-3 mb-4">
+                                        <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Elegir día del compañero</div>
+                                        <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar">
+                                            {daysInMonth.map((d) => {
+                                                const dateStr = getDateKey(d);
+                                                if (isDateLocked(dateStr)) return null;
+                                                const shift = getShiftFor(selectedSwapTarget, dateStr);
+                                                if (!shift) return null;
+                                                const selectedDay = selectedSwapDate === dateStr;
+                                                return (
+                                                    <button
+                                                        key={dateStr}
+                                                        onClick={() => handleSelectDate(dateStr)}
+                                                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${selectedDay ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50'}`}
+                                                    >
+                                                        {d.getDate()}/{d.getMonth() + 1} {(shift.code || shift.type) || '-'}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="bg-slate-50 p-3 rounded-xl border text-xs text-slate-600 mb-3">
+                                    <div className="font-black text-slate-700 mb-1">Día: {selectedCell?.dateStr}</div>
+                                    <div className="flex justify-between">
+                                        <span>{employees.find(e => e.id === selectedCell?.empId)?.name || 'Empleado'}</span>
+                                        <span className="font-mono">{(getShiftFor(selectedCell?.empId, selectedCell?.dateStr)?.code) || '-'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>{employees.find(e => e.id === selectedSwapTarget)?.name || 'Compañero'}</span>
+                                        <span className="font-mono">{(getShiftFor(selectedSwapTarget, selectedSwapDate || selectedCell?.dateStr)?.code) || '-'}</span>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button onClick={() => { setShowSwapModal(false); setSelectedSwapTarget(''); setSelectedSwapDate(''); setSwapSearchTerm(''); }} className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200">
+                                        Cancelar
+                                    </button>
+                                    <button onClick={executeSwap} disabled={!selectedSwapTarget} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 disabled:opacity-50">
+                                        Confirmar Intercambio
+                                    </button>
+                                </div>
+                            </>
+                        </div>
+                    </div>
+                )}
                 {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-4">Agregar / Buscar Empleado</h3><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{employees.filter(e => e.name.toLowerCase().includes(addSearchTerm.toLowerCase())).map(emp => (<button key={emp.id} onClick={() => { setSearchTerm(emp.name); setForceShowAll(true); setShowAddModal(false); toast.info(`Mostrando a ${emp.name}`); }} className="w-full p-3 text-left hover:bg-slate-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500">{emp.name.substring(0,2)}</div>{emp.name}</button>))}</div></div></div>)}
                 {showVacancyModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px] border-l-4 border-l-teal-500"><h3 className="font-black text-lg text-slate-800 mb-1">Gestión de Ausencia Prolongada</h3><p className="text-sm text-slate-500 mb-6">Cubriendo a <span className="font-bold text-slate-800">{vacancyData?.employeeName}</span> por <span className="font-bold text-teal-600">{vacancyData?.type}</span></p><div className="bg-slate-50 p-4 rounded-xl border mb-4"><label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Seleccionar Suplente</label><select className="w-full p-3 rounded-lg border text-sm font-bold bg-white" value={selectedReplacement} onChange={e => setSelectedReplacement(e.target.value)}><option value="">Sin cobertura (Dejar descubierto)</option>{employees.filter(e => e.id !== vacancyData?.employeeId).map(e => (<option key={e.id} value={e.id}>{e.name}</option>))}</select></div><div className="flex gap-3"><button onClick={() => setShowVacancyModal(false)} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl">Cancelar</button><button onClick={handleProcessVacancy} className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold shadow-lg shadow-teal-200">Aplicar Cobertura</button></div></div></div>)}
                 {showRRHHModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px]"><h3 className="font-black text-lg mb-4">Registrar Novedad RRHH</h3><div className="space-y-4"><div><label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Novedad</label><select className="w-full border p-2 rounded-lg" value={rrhhData.type} onChange={e => setRrhhData({...rrhhData, type: e.target.value})}><option>Ausencia con Aviso</option><option>Ausencia sin Aviso</option><option>Enfermedad</option><option>Licencia Gremial</option><option>Vacaciones</option></select></div><div><label className="text-xs font-bold text-slate-500 block mb-1">Detalle / Motivo</label><textarea className="w-full border p-2 rounded-lg h-24 text-sm" value={rrhhData.reason} onChange={e => setRrhhData({...rrhhData, reason: e.target.value})} placeholder="Especifique el motivo..."></textarea></div><button onClick={handleRRHHSubmit} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Guardar Novedad</button><button onClick={() => setShowRRHHModal(false)} className="w-full text-slate-400 text-xs font-bold py-2">Cancelar</button></div></div></div>)}
