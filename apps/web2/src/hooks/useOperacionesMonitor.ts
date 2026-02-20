@@ -67,7 +67,7 @@ export const useOperacionesMonitor = () => {
     const [objectives, setObjectives] = useState<any[]>([]); 
     const [servicesSLA, setServicesSLA] = useState<any[]>([]); 
     const [recentLogs, setRecentLogs] = useState<any[]>([]);
-    const [viewTab, setViewTab] = useState<'PRIORIDAD' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS'>('PRIORIDAD');
+    const [viewTab, setViewTab] = useState<'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS'>('PRIORIDAD');
     const [selectedClientId, setSelectedClientId] = useState<string>('');
     const [filterText, setFilterText] = useState('');
     const [isCompact, setIsCompact] = useState(false);
@@ -106,8 +106,13 @@ export const useOperacionesMonitor = () => {
 
         const realShifts = rawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
+            const rawCode = String(shift.code || shift.shiftCode || '').toUpperCase();
+            const rawType = String(shift.type || shift.shiftType || '').toUpperCase();
+            const isFrancoCandidate = !!shift.isFranco || !!shift.isFrancoTrabajado || rawCode === 'F' || rawCode === 'FT' || rawType === 'FRANCO' || String(shift.objectiveName || '').toUpperCase() === 'FRANCO';
+
             const rawPos = (shift.positionName || '').trim();
-            if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') return null;
+            // En general filtramos "General/Sin Puesto", pero los FRANCOS pueden venir así y deben verse.
+            if (!isFrancoCandidate && (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General')) return null;
 
             let info = objMap.get(shift.objectiveId);
             let finalClient = info ? info.clientName : shift.clientName;
@@ -131,9 +136,11 @@ export const useOperacionesMonitor = () => {
             const countsForCoverage = isValidEmployee || isReportedToPlanning; 
 
             const isUnassigned = !isValidEmployee;
-            const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
+            // Franco puede venir como flag, como FT (franco trabajado) o como código.
+            const isFranco = isFrancoCandidate;
             
-            if (isUnassigned && !isReportedToPlanning) return null; 
+            // Mostrar vacantes aunque no estén "reportadas a planificación"
+            // (necesario para que PRIORIDAD pueda incluir vacantes críticas)
 
             const minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
             let retentionMinutes = 0;
@@ -142,10 +149,14 @@ export const useOperacionesMonitor = () => {
             
             const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart <= 15 && minutesUntilStart > -5; 
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart > 15;
+            const isPotentialAbsence = !isPresent && !isCompleted && isValidEmployee && !isFranco && minutesUntilStart <= -5;
+            const isLateArrival = isPotentialAbsence && minutesUntilStart > -60;
+            const isAbsenceLike = !!isAbsent || (isPotentialAbsence && minutesUntilStart <= -60);
 
             return {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: rawPos,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isReportedToPlanning, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
+                isPotentialAbsence, isLateArrival, isAbsenceLike,
                 minutesUntilStart, retentionMinutes, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
             };
         }).filter(Boolean);
@@ -253,8 +264,75 @@ export const useOperacionesMonitor = () => {
     }, [rawShifts, now, employees, objectives, servicesSLA]);
 
     // ... Resto del hook igual ...
-    const listData = useMemo(() => { let list = processedData; if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId); if (filterText) { const lower = filterText.toLowerCase(); list = list.filter((s: any) => (s.employeeName||'').toLowerCase().includes(lower) || (s.clientName||'').toLowerCase().includes(lower)); } switch (viewTab) { case 'TODOS': return list.filter((s:any) => !s.isFranco && isSameDay(s.shiftDateObj, now)); case 'PRIORIDAD': return list.filter((s:any) => (s.isImminent || s.isRetention) && !s.isFranco); case 'PLAN': return list.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now)); case 'ACTIVOS': return list.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention); case 'RETENIDOS': return list.filter((s:any) => s.isRetention); case 'VACANTES': return list.filter((s:any) => s.isUnassigned && isSameDay(s.shiftDateObj, now)); case 'AUSENTES': return list.filter((s:any) => (s.isAbsent || s.isPotentialAbsence) && isSameDay(s.shiftDateObj, now)); case 'FRANCOS': return list.filter((s:any) => s.isFranco && isSameDay(s.shiftDateObj, now)); default: return list; } }, [processedData, viewTab, filterText, selectedClientId, now]);
-    const stats = useMemo(() => { return { prioridad: processedData.filter(s => (s.isImminent || s.isRetention) && !s.isFranco).length, plan: processedData.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now)).length, activos: processedData.filter(s => s.isPresent && !s.isCompleted).length, retenidos: processedData.filter(s => s.isRetention).length, vacantes: processedData.filter(s => s.isUnassigned && isSameDay(s.shiftDateObj, now)).length, francos: processedData.filter(s => s.isFranco && isSameDay(s.shiftDateObj, now)).length, total: processedData.length }; }, [processedData, now]);
+    const listData = useMemo(() => {
+        let list = processedData;
+        if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
+        if (filterText) {
+            const lower = filterText.toLowerCase();
+            list = list.filter((s: any) =>
+                (s.employeeName||'').toLowerCase().includes(lower) ||
+                (s.clientName||'').toLowerCase().includes(lower) ||
+                (s.objectiveName||'').toLowerCase().includes(lower)
+            );
+        }
+
+        const isPriority = (s: any) => {
+            if (s.isFranco) return false;
+            if (s.isResolvedByOps) return false;
+            // Vacantes del día (incluye virtuales SLA gaps)
+            if (s.isUnassigned && isSameDay(s.shiftDateObj, now)) return true;
+            // Ausencias / no llegó del día (alertas críticas)
+            if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
+            // Presentes por confirmar / retenciones
+            if (s.isImminent || s.isRetention) return true;
+            return false;
+        };
+
+        switch (viewTab) {
+            case 'TODOS':
+                return list.filter((s:any) => !s.isFranco && isSameDay(s.shiftDateObj, now));
+            case 'PRIORIDAD':
+                return list.filter(isPriority);
+            case 'NO_LLEGO':
+                return list.filter((s:any) => s.isLateArrival && isSameDay(s.shiftDateObj, now));
+            case 'PLAN':
+                return list.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now));
+            case 'ACTIVOS':
+                return list.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
+            case 'RETENIDOS':
+                return list.filter((s:any) => s.isRetention);
+            case 'VACANTES':
+                return list.filter((s:any) => s.isUnassigned && isSameDay(s.shiftDateObj, now));
+            case 'AUSENTES':
+                return list.filter((s:any) => s.isAbsenceLike && isSameDay(s.shiftDateObj, now));
+            case 'FRANCOS':
+                return list.filter((s:any) => s.isFranco && isSameDay(s.shiftDateObj, now));
+            default:
+                return list;
+        }
+    }, [processedData, viewTab, filterText, selectedClientId, now]);
+    const stats = useMemo(() => {
+        const prioridad = processedData.filter((s:any) => {
+            if (s.isFranco) return false;
+            if (s.isResolvedByOps) return false;
+            if (s.isUnassigned && isSameDay(s.shiftDateObj, now)) return true;
+            if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
+            if (s.isImminent || s.isRetention) return true;
+            return false;
+        }).length;
+
+        return {
+            prioridad,
+            no_llego: processedData.filter(s => s.isLateArrival && isSameDay(s.shiftDateObj, now)).length,
+            plan: processedData.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now)).length,
+            activos: processedData.filter(s => s.isPresent && !s.isCompleted).length,
+            retenidos: processedData.filter(s => s.isRetention).length,
+            vacantes: processedData.filter(s => s.isUnassigned && isSameDay(s.shiftDateObj, now)).length,
+            ausentes: processedData.filter(s => s.isAbsenceLike && isSameDay(s.shiftDateObj, now)).length,
+            francos: processedData.filter(s => s.isFranco && isSameDay(s.shiftDateObj, now)).length,
+            total: processedData.length
+        };
+    }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => { try { const docRef = doc(db, 'turnos', shiftId); if (action === 'CHECKOUT') await updateDoc(docRef, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: serverTimestamp(), checkoutNote: payload || null }); } catch (e:any) { toast.error("Error: " + e.message); } };
     return { employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA, viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo, selectedClientId, setSelectedClientId, uniqueClients, filteredObjectives, handleAction };
 };
