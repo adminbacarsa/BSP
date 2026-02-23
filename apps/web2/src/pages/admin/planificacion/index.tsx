@@ -784,7 +784,27 @@ export default function PlanificacionPage() {
     const handleUnassignEmployee = async (emp: any) => { if (!selectedObjective) return; if (emp.preferredObjectiveId !== selectedObjective) { toast.error("Error asignación."); return; } if (!confirm(`¿CONFIRMAR DESVINCULACIÓN?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: null }); await addDoc(collection(db, 'audit_logs'), { action: 'DESVINCULACION_OBJETIVO', module: 'PLANIFICADOR', details: `Desvinculó a ${emp.name}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid }); toast.success("Desvinculado"); } catch (e) { toast.error("Error"); } };
     const handleMarkAllRead = async () => { if (!confirm("¿Marcar todas como leídas?")) return; const batch = writeBatch(db); notifications.forEach(n => { if (n.id) { const ref = doc(db, n.source === 'NOVEDAD' ? 'novedades' : 'ausencias', n.id); batch.update(ref, { viewed: true }); } }); await batch.commit(); setNotifications([]); setHasUnread(false); toast.success("Bandeja limpia"); };
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), { action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${selectedObjective}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid }); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
-    const handleDelete = async () => { if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; } if (!selectedCell) return; if (isDateLocked(selectedCell.dateStr)) { toast.warning("Bloqueado."); return; } const key = `${selectedCell.empId}_${selectedCell.dateStr}`; const newChanges = { ...pendingChanges }; newChanges[key] = { isDeleted: true }; setPendingChanges(newChanges); setSelectedCell(null); toast.info("Marcado para borrar."); };
+    const handleDelete = async () => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (!selectedCell) return;
+        if (isDateLocked(selectedCell.dateStr)) { toast.warning("Bloqueado."); return; }
+        if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: no se puede borrar desde el planificador."); return; }
+
+        // Si es una ausencia registrada (colección 'ausencias'), no se borra con pendingChanges.
+        // Permitimos borrar solo si era un cambio pendiente (ej: una marca en borrador).
+        if (selectedCell.absence) {
+            const keyAbs = `${selectedCell.empId}_${selectedCell.dateStr}`;
+            const pending = pendingChanges[keyAbs];
+            if (!pending) { toast.warning("Ausencia/vacaciones registrada: se gestiona desde RRHH."); return; }
+        }
+
+        const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
+        const newChanges = { ...pendingChanges };
+        newChanges[key] = { isDeleted: true };
+        setPendingChanges(newChanges);
+        setSelectedCell(null);
+        toast.info("Marcado para borrar.");
+    };
     const getSafeTime = (input: any) => { if (!input) return [6, 0]; if (typeof input === 'string') return input.split(':').map(Number); if (input.toDate) { const d = input.toDate(); return [d.getHours(), d.getMinutes()]; } if (input.seconds) { const d = new Date(input.seconds * 1000); return [d.getHours(), d.getMinutes()]; } if (input instanceof Date) return [input.getHours(), input.getMinutes()]; return [6, 0]; };
     
     const handleSaveAll = async () => { 
@@ -949,6 +969,10 @@ export default function PlanificacionPage() {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selectedCell) return; 
         if (isDateLocked(selectedCell.dateStr)) { toast.error("Periodo cerrado."); return; } 
+        if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: solo lectura."); return; }
+        if (selectedCell.absence) { toast.warning("El empleado tiene una ausencia/vacaciones registrada: no se puede planificar encima."); return; }
+        const existingCode = String(selectedCell.currentShift?.code || selectedCell.currentShift?.type || '').toUpperCase();
+        if (['V', 'L', 'A', 'E', 'AA'].includes(existingCode)) { toast.warning("Novedad RRHH (ausencia/vacaciones/licencia): no se puede planificar encima."); return; }
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`; 
         const existing = selectedCell.currentShift; 
         const isFT = francoMode === 'FT_SELECTION'; 
@@ -1553,73 +1577,220 @@ export default function PlanificacionPage() {
                 {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
                         <div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                            <div className="flex justify-between items-center mb-4">
-                                <div><h3 className="font-black text-lg text-slate-800">{employees.find(e => e.id === selectedCell.empId)?.name}</h3><p className="text-xs text-slate-500 font-bold uppercase">{selectedCell.dateStr}</p></div>
-                                <button onClick={handleDelete} className="p-2 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100" disabled={isServiceLocked}><Trash2 size={18}/></button>
-                            </div>
-                            <div className="mb-2">
-                                <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Puesto / Función</label>
-                                <select 
-                                    className="w-full bg-slate-50 border p-2 rounded-lg text-xs font-bold"
-                                    // 🛑 V9.00 - COMPONENTE CONTROLADO
-                                    value={activePosition || ''} 
-                                    id="positionSelector"
-                                    disabled={isServiceLocked}
-                                    onChange={(e) => setActivePosition(e.target.value)}
-                                >
-                                    {positionStructure.map(p => (
-                                        <option key={p.positionName} value={p.positionName}>
-                                            {p.positionName} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                             {(() => {
-                                const coverageData = modalCoverageStats || { current: 0, target: 24, pax: 1, isActiveDay: true };
-                                const currentPosName = activePosition || 'General';
-                                const isCovered = coverageData.current >= coverageData.target;
-                                const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
-                                const gap = coverageData.current - coverageData.target;
-                                const displayTarget = coverageData.isActiveDay ? `${coverageData.target}h` : `CERRADO (0h)`;
-                                const bgClass = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600') : 'bg-slate-100 text-slate-500';
-                                const barColor = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-300';
+                            {(() => {
+                                const employeeName = employees.find(e => e.id === selectedCell.empId)?.name || 'Empleado';
+                                const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                const pending = pendingChanges[key];
+                                const shift = selectedCell.currentShift;
+                                const absence = selectedCell.absence;
+                                const code = String(shift?.code || shift?.type || '').toUpperCase();
+                                const isConsolidated = isShiftConsolidated(shift);
+                                const isRRHHCode = ['V', 'L', 'A', 'E', 'AA'].includes(code);
+                                const isPastClosed = isDateLocked(selectedCell.dateStr);
+                                const hasSwap = !!(shift?.swapWith || shift?.swapDate);
+                                const isSwapPersisted = hasSwap && !pending && !!shift?.id;
+                                const isReadOnly = isConsolidated || !!absence || isRRHHCode || isPastClosed || isSwapPersisted;
+
+                                const plannedStart =
+                                    (typeof shift?.startTime === 'string') ? shift.startTime
+                                    : (shift?.startTime ? formatTime(shift.startTime) : '--:--');
+                                const plannedEnd =
+                                    (typeof shift?.endTime === 'string') ? shift.endTime
+                                    : (shift?.endTime ? formatTime(shift.endTime) : '--:--');
+                                const realStart = shift?.realStartTime ? formatTime(shift.realStartTime) : '--:--';
+                                const realEnd = shift?.realEndTime ? formatTime(shift.realEndTime) : '--:--';
+                                const status = (shift?.status || '').toString().toUpperCase();
+                                const objectiveId = (shift?.objectiveId || selectedObjective || '').toString();
+                                const serviceName = objectiveId ? getObjectiveName(objectiveId) : '-';
+                                const hours = Number(shift?.hours) || (code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0);
+                                const coveredPosition = (shift?.positionName || activePosition || 'General').toString();
+                                const showRealTimes = isConsolidated;
+
+                                if (isReadOnly) {
+                                    return (
+                                        <>
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div className="min-w-0">
+                                                    <h3 className="font-black text-lg text-slate-800 truncate">{employeeName}</h3>
+                                                    <p className="text-xs text-slate-500 font-bold uppercase">{selectedCell.dateStr}</p>
+                                                    <div className="mt-2 flex items-center gap-2">
+                                                        {isConsolidated && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                                                Consolidado
+                                                            </span>
+                                                        )}
+                                                        {isPastClosed && !isConsolidated && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-200">
+                                                                Cerrado
+                                                            </span>
+                                                        )}
+                                                        {isSwapPersisted && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-cyan-50 text-cyan-800 border-cyan-200">
+                                                                Intercambio
+                                                            </span>
+                                                        )}
+                                                        {(absence || isRRHHCode) && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200">
+                                                                RRHH
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => setSelectedCell(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <div className="p-3 rounded-xl border bg-slate-50">
+                                                    <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Planificado (Planificador)</div>
+                                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                                        <div className="font-bold text-slate-600">Cubrió</div>
+                                                        <div className="text-slate-800 font-bold">
+                                                            <span className="font-mono">{code || '-'}</span>
+                                                            <span className="mx-2 text-slate-300">|</span>
+                                                            <span>{coveredPosition}</span>
+                                                        </div>
+                                                        <div className="font-bold text-slate-600">Servicio</div>
+                                                        <div className="text-slate-800">{serviceName || '-'}</div>
+                                                        <div className="font-bold text-slate-600">Horario</div>
+                                                        <div className="font-mono text-slate-800">{plannedStart} - {plannedEnd}</div>
+                                                        <div className="font-bold text-slate-600">Horas</div>
+                                                        <div className="font-mono text-slate-800">{hours ? `${hours}h` : '-'}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="p-3 rounded-xl border bg-white">
+                                                    <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Real / Estado</div>
+                                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                                        <div className="font-bold text-slate-600">Estado</div>
+                                                        <div className="font-mono text-slate-800">{status || '-'}</div>
+                                                        <div className="font-bold text-slate-600">Ingreso</div>
+                                                        <div className="font-mono text-slate-800">{showRealTimes ? realStart : '--:--'}</div>
+                                                        <div className="font-bold text-slate-600">Egreso</div>
+                                                        <div className="font-mono text-slate-800">{showRealTimes ? realEnd : '--:--'}</div>
+                                                    </div>
+                                                </div>
+
+                                                {hasSwap && (
+                                                    <div className="p-3 rounded-xl border bg-cyan-50 border-cyan-200">
+                                                        <div className="text-[10px] font-black uppercase text-cyan-800 mb-2">Intercambio / Enroque</div>
+                                                        <div className="text-xs text-cyan-900 font-bold">
+                                                            {shift?.swapWith ? <>Con: <span className="font-black">{shift.swapWith}</span></> : '—'}
+                                                            {shift?.swapDate ? <span className="ml-2 font-mono">({shift.swapDate})</span> : null}
+                                                        </div>
+                                                        <div className="text-[10px] text-cyan-800 mt-1">
+                                                            {shift?.isFrancoCompensatorio ? 'FxF (Franco Compensatorio / FF)' : (shift?.isSwap ? 'Swap' : '')}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {(absence || isRRHHCode) && (
+                                                    <div className="p-3 rounded-xl border bg-amber-50 border-amber-200">
+                                                        <div className="text-[10px] font-black uppercase text-amber-800 mb-2">RRHH</div>
+                                                        <div className="text-xs text-amber-900">
+                                                            <div><span className="font-bold">Tipo</span>: {absence?.type || shift?.name || code || '—'}</div>
+                                                            {(absence?.reason || shift?.comments) && <div className="mt-1"><span className="font-bold">Detalle</span>: {absence?.reason || shift?.comments}</div>}
+                                                            {absence?.status && <div className="mt-1"><span className="font-bold">Estado</span>: {absence.status}</div>}
+                                                        </div>
+                                                        {pending ? (
+                                                            <button onClick={handleDelete} className="mt-3 w-full py-2 rounded-xl bg-white border border-amber-200 text-amber-900 font-black text-xs hover:bg-amber-100">
+                                                                Quitar marca (borrador)
+                                                            </button>
+                                                        ) : (
+                                                            <div className="mt-3 text-[10px] font-bold text-amber-800">
+                                                                Esta novedad viene de RRHH (ausencias). No se edita desde Planificación.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                <button onClick={() => setSelectedCell(null)} className="w-full py-3 bg-slate-900 text-white rounded-xl font-black text-xs hover:bg-slate-800">
+                                                    Cerrar
+                                                </button>
+                                            </div>
+                                        </>
+                                    );
+                                }
+
                                 return (
                                     <>
-                                        <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                                            <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><Layers size={14} className="text-slate-400"/><span className="text-[10px] font-bold text-slate-500 uppercase">Cobertura {currentPosName} ({coverageData.pax} pax)</span></div><div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>{coverageData.current}h / {displayTarget}</div></div>
-                                            <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }}></div></div>
+                                        <div className="flex justify-between items-center mb-4">
+                                            <div>
+                                                <h3 className="font-black text-lg text-slate-800">{employeeName}</h3>
+                                                <p className="text-xs text-slate-500 font-bold uppercase">{selectedCell.dateStr}</p>
+                                                {hasSwap && (
+                                                    <div className="mt-2 text-[10px] font-black uppercase text-cyan-700 flex items-center gap-1">
+                                                        <ArrowLeftRight size={12}/> Swap {shift?.swapWith ? `con ${shift.swapWith}` : ''} {shift?.swapDate ? `(${shift.swapDate})` : ''}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <button onClick={handleDelete} className="p-2 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100" disabled={isServiceLocked}><Trash2 size={18}/></button>
                                         </div>
-                                        <div className={`grid grid-cols-5 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-                                            {uniqueSLAShifts.map((s: any) => (
-                                                <button key={s.code} onClick={() => handleAssignShift(s, activePosition || 'General')} disabled={isServiceLocked} className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform relative ${SHIFT_STYLES[s.code]}`}><span className="font-black text-sm">{s.code}</span><span className="text-[9px] opacity-70">{s.hours}hs</span>{!selectedCell.currentShift && gap < 0 && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}</button>
-                                            ))}
-                                            <button
-                                                onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
+                                        <div className="mb-2">
+                                            <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Puesto / Función</label>
+                                            <select 
+                                                className="w-full bg-slate-50 border p-2 rounded-lg text-xs font-bold"
+                                                // 🛑 V9.00 - COMPONENTE CONTROLADO
+                                                value={activePosition || ''} 
+                                                id="positionSelector"
                                                 disabled={isServiceLocked}
-                                                className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"
-                                                title="Asignar Franco (F)"
+                                                onChange={(e) => setActivePosition(e.target.value)}
                                             >
-                                                <span>F</span><span className="text-[8px]">Franco</span>
-                                            </button>
-                                            <button
-                                                onClick={() => setFrancoMode((m) => (m === 'FT_SELECTION' ? 'NONE' : 'FT_SELECTION'))}
-                                                disabled={isServiceLocked}
-                                                className={`p-2 rounded-lg border flex flex-col items-center justify-center font-black ${francoMode === 'FT_SELECTION' ? 'bg-violet-600 text-white border-violet-700 shadow-lg shadow-violet-200' : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'}`}
-                                                title="Modo FT: el próximo turno se marca como Franco Trabajado"
-                                            >
-                                                <span>FT</span><span className="text-[8px]">{francoMode === 'FT_SELECTION' ? 'Activo' : 'Modo'}</span>
-                                            </button>
+                                                {positionStructure.map(p => (
+                                                    <option key={p.positionName} value={p.positionName}>
+                                                        {p.positionName} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </div>
+                                        {(() => {
+                                            const coverageData = modalCoverageStats || { current: 0, target: 24, pax: 1, isActiveDay: true };
+                                            const currentPosName = activePosition || 'General';
+                                            const isCovered = coverageData.current >= coverageData.target;
+                                            const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
+                                            const gap = coverageData.current - coverageData.target;
+                                            const displayTarget = coverageData.isActiveDay ? `${coverageData.target}h` : `CERRADO (0h)`;
+                                            const bgClass = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600') : 'bg-slate-100 text-slate-500';
+                                            const barColor = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-300';
+                                            return (
+                                                <>
+                                                    <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                                        <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><Layers size={14} className="text-slate-400"/><span className="text-[10px] font-bold text-slate-500 uppercase">Cobertura {currentPosName} ({coverageData.pax} pax)</span></div><div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>{coverageData.current}h / {displayTarget}</div></div>
+                                                        <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }}></div></div>
+                                                    </div>
+                                                    <div className={`grid grid-cols-5 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                                                        {uniqueSLAShifts.map((s: any) => (
+                                                            <button key={s.code} onClick={() => handleAssignShift(s, activePosition || 'General')} disabled={isServiceLocked} className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform relative ${SHIFT_STYLES[s.code]}`}><span className="font-black text-sm">{s.code}</span><span className="text-[9px] opacity-70">{s.hours}hs</span>{!selectedCell.currentShift && gap < 0 && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}</button>
+                                                        ))}
+                                                        <button
+                                                            onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
+                                                            disabled={isServiceLocked}
+                                                            className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"
+                                                            title="Asignar Franco (F)"
+                                                        >
+                                                            <span>F</span><span className="text-[8px]">Franco</span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setFrancoMode((m) => (m === 'FT_SELECTION' ? 'NONE' : 'FT_SELECTION'))}
+                                                            disabled={isServiceLocked}
+                                                            className={`p-2 rounded-lg border flex flex-col items-center justify-center font-black ${francoMode === 'FT_SELECTION' ? 'bg-violet-600 text-white border-violet-700 shadow-lg shadow-violet-200' : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'}`}
+                                                            title="Modo FT: el próximo turno se marca como Franco Trabajado"
+                                                        >
+                                                            <span>FT</span><span className="text-[8px]">{francoMode === 'FT_SELECTION' ? 'Activo' : 'Modo'}</span>
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
+                                        <div className={`flex gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                                            <button onClick={() => setModifiers(p => ({...p, extend: !p.extend}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.extend ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Extensión (+)</button>
+                                            <button onClick={() => setModifiers(p => ({...p, early: !p.early}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.early ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Adelanto (+)</button>
+                                            <button onClick={() => setShowRRHHModal(true)} className="flex-1 py-2 bg-slate-100 border-slate-200 text-slate-600 rounded-lg text-xs font-bold border hover:bg-slate-200">Ausencia/RRHH</button>
+                                        </div>
+                                        <button onClick={() => { setSwapConfig({ empId: selectedCell.empId }); setShowSwapModal(true); }} disabled={isServiceLocked} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"><ArrowLeftRight size={16}/> Iniciar Enroque / Cambio de Turno</button>
+                                        <div className="mt-2 px-2"><button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="w-full py-2 text-[10px] font-bold text-slate-400 hover:text-rose-500 flex items-center justify-center gap-1 disabled:opacity-50">Aplicar a Selección (Borrar)</button></div>
                                     </>
                                 );
                             })()}
-                            <div className={`flex gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-                                <button onClick={() => setModifiers(p => ({...p, extend: !p.extend}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.extend ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Extensión (+)</button>
-                                <button onClick={() => setModifiers(p => ({...p, early: !p.early}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.early ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Adelanto (+)</button>
-                                <button onClick={() => setShowRRHHModal(true)} className="flex-1 py-2 bg-slate-100 border-slate-200 text-slate-600 rounded-lg text-xs font-bold border hover:bg-slate-200">Ausencia/RRHH</button>
-                            </div>
-                            <button onClick={() => { setSwapConfig({ empId: selectedCell.empId }); setShowSwapModal(true); }} disabled={isServiceLocked} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"><ArrowLeftRight size={16}/> Iniciar Enroque / Cambio de Turno</button>
-                            <div className="mt-2 px-2"><button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="w-full py-2 text-[10px] font-bold text-slate-400 hover:text-rose-500 flex items-center justify-center gap-1 disabled:opacity-50">Aplicar a Selección (Borrar)</button></div>
                         </div>
                     </div>
                 )}
