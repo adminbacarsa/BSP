@@ -1,0 +1,91 @@
+<!DOCTYPE html><html><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>COSP TACTICAL V184.0</title><meta name="next-head-count" content="3"/><link rel="preload" href="/_next/static/css/a41ad98627e3c874.css" as="style" crossorigin=""/><link rel="stylesheet" href="/_next/static/css/a41ad98627e3c874.css" crossorigin="" data-n-g=""/><noscript data-n-css=""></noscript><script defer="" crossorigin="" nomodule="" src="/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js"></script><script src="/_next/static/chunks/webpack-db73abdafd0630fb.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/framework-a0c181e5e1f92031.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/main-d022f1aa6be447eb.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/pages/_app-c5b883cf96183e8c.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/403-9b4878d9e14e11f2.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/431-b77587aff286af5f.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/192-50f06bfa807085f6.js" defer="" crossorigin=""></script><script src="/_next/static/chunks/pages/admin/operaciones/map-view-e644a5b946863f9a.js" defer="" crossorigin=""></script><script src="/_next/static/qnbXVUPZY7WOmmSCv7z2_/_buildManifest.js" defer="" crossorigin=""></script><script src="/_next/static/qnbXVUPZY7WOmmSCv7z2_/_ssgManifest.js" defer="" crossorigin=""></script></head><body><div id="__next"><div class="h-screen w-screen overflow-hidden bg-slate-900 relative"><style>
+    /* ANIMACIONES */
+    @keyframes pulse-ring { 0% { transform: scale(0.33); opacity: 1; } 80%, 100% { transform: scale(2.5); opacity: 0; } }
+    @keyframes pulse-dot { 0% { transform: scale(0.8); } 50% { transform: scale(1); } 100% { transform: scale(0.8); } }
+    
+    .marker-alert-container { position: relative; width: 30px; height: 30px; }
+    .marker-alert-ring { position: absolute; height: 30px; width: 30px; border-radius: 50%; background-color: rgba(225, 29, 72, 0.6); animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+    .marker-alert-dot { position: absolute; left: 0; top: 0; height: 30px; width: 30px; background-color: #e11d48; border: 2px solid white; border-radius: 50%; color: white; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); animation: pulse-dot 1.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) -0.4s infinite; }
+
+    /* TOOLTIPS DARK GLASS */
+    .leaflet-tooltip { background: transparent !important; border: none !important; box-shadow: none !important; }
+    .leaflet-tooltip.custom-tooltip {
+        background-color: #0f172a !important;
+        border: 1px solid rgba(255,255,255,0.2) !important;
+        color: #f8fafc !important;
+        font-family: ui-sans-serif, system-ui, sans-serif !important;
+        font-weight: 800 !important;
+        font-size: 11px !important;
+        text-transform: uppercase !important;
+        border-radius: 6px !important;
+        padding: 5px 10px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5) !important;
+        white-space: nowrap !important;
+    }
+    .leaflet-tooltip-top:before { border-top-color: #0f172a !important; }
+
+    /* TARJETAS POPUP PRO */
+    .leaflet-popup-content-wrapper { padding: 0 !important; border-radius: 12px !important; overflow: hidden !important; background: white !important; }
+    .leaflet-popup-content { margin: 0 !important; width: 300px !important; font-family: ui-sans-serif, system-ui, sans-serif !important; }
+    
+    .pop-header { padding: 16px; color: white; position: relative; display: flex; justify-content: space-between; align-items: flex-start; }
+    .pop-header.normal { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
+    .pop-header.alert { background: linear-gradient(135deg, #be123c 0%, #881337 100%); }
+    
+    .pop-info { display: flex; align-items: center; gap: 10px; }
+    .pop-badges { display: flex; gap: 5px; position: absolute; bottom: 12px; right: 12px; }
+    
+    .pop-badge { 
+        background: rgba(255,255,255,0.9); color: #334155; 
+        font-size: 9px; font-weight: 800; padding: 3px 8px; 
+        border-radius: 12px; display: flex; align-items: center; gap: 3px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .pop-badge.alert { color: #e11d48; background: #fff; }
+
+    .pop-body { padding: 16px; max-height: 250px; overflow-y: auto; background: #fff; }
+    
+    .pop-address { 
+        font-size: 10px; color: #64748b; margin-bottom: 12px; 
+        display: flex; align-items: center; gap: 4px; background: #f8fafc;
+        padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;
+    }
+
+    .pop-row { 
+        background: #fff; border: 1px solid #e2e8f0; border-left-width: 4px; 
+        border-radius: 8px; padding: 10px; margin-bottom: 8px; 
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02); transition: all 0.2s;
+    }
+    .pop-row:hover { transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .pop-row.present { border-left-color: #10b981; }
+    .pop-row.absent { border-left-color: #94a3b8; opacity: 0.6; background: #f8fafc; }
+    .pop-row.late { border-left-color: #e11d48; background: #fff1f2; }
+    .pop-row.expired { border-left-color: #64748b; background: #f1f5f9; opacity: 0.8; }
+    .pop-row.overdue { border-left-color: #ef4444; background: #fef2f2; animation: pulse-soft 2s infinite; }
+
+    .pop-row-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .pop-name { font-weight: 700; font-size: 12px; color: #334155; display: flex; align-items: center; gap: 5px; }
+    
+    .pop-tag { font-size: 8px; padding: 2px 5px; border-radius: 4px; font-weight: bold; color: white; text-transform: uppercase; }
+    .pop-tag.late { background: #e11d48; }
+    .pop-tag.on { background: #10b981; }
+    .pop-tag.exp { background: #64748b; }
+    .pop-tag.over { background: #ef4444; }
+
+    .pop-time { font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 4px; background: #f1f5f9; padding: 3px 6px; border-radius: 4px; width: fit-content; margin-bottom: 10px; }
+
+    .pop-actions { display: flex; gap: 6px; }
+    .pop-btn { 
+        border: none; border-radius: 6px; padding: 8px 10px; 
+        font-size: 10px; font-weight: 700; cursor: pointer; 
+        text-transform: uppercase; color: white; flex: 1; transition: opacity 0.2s;
+    }
+    .pop-btn:hover { opacity: 0.9; }
+    .btn-checkin { background: #4f46e5; }
+    .btn-checkout { background: #7e22ce; }
+    .btn-alert { background: #e11d48; }
+    .btn-nov { background: #fff; color: #475569; border: 1px solid #cbd5e1; flex: 0 0 auto; }
+    .btn-nov:hover { background: #f1f5f9; }
+
+    @keyframes pulse-soft { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+</style><section aria-label="Notifications alt+T" tabindex="-1" aria-live="polite" aria-relevant="additions text" aria-atomic="false"></section><div class="absolute top-4 left-4 right-4 z-[1000] flex gap-2 justify-between pointer-events-none"><div class="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-2 flex items-center gap-3 border border-slate-200 pointer-events-auto"><div class="flex items-center gap-2 px-3 border-r border-slate-200 pr-4"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-rose-600 animate-pulse"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg><div><h1 class="font-black text-slate-800 text-sm leading-none">COSP TACTICAL</h1><span class="text-[10px] text-slate-500 font-bold">V184.0 LIVE</span></div></div><div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400 ml-1"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg><select class="bg-transparent text-xs font-bold text-slate-700 outline-none w-40 cursor-pointer"><option value="" selected="">TODOS LOS CLIENTES</option></select></div><div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-400 ml-1"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><input class="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value=""/></div></div><div class="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 pointer-events-auto border border-slate-200"><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-500">MAPA GENERAL</button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-white shadow-md ring-1 ring-slate-200 text-rose-600">PRIO<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">NO LLEGO<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">PLAN<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">ACT<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">RET<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">VAC<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">AUS<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all hover:bg-slate-100 text-slate-400">FRAN<!-- --> <span class="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">0</span></button><button class="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button></div></div><div class="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div></div><div class="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none"></div></div><script id="__NEXT_DATA__" type="application/json" crossorigin="">{"props":{"pageProps":{}},"page":"/admin/operaciones/map-view","query":{},"buildId":"qnbXVUPZY7WOmmSCv7z2_","nextExport":true,"autoExport":true,"isFallback":false,"scriptLoader":[]}</script></body></html>
