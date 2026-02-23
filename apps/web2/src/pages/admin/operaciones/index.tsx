@@ -699,19 +699,54 @@ export default function OperacionesPage() {
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
     const handleReportPlanning = async (shift: any) => { 
         try { 
-            let targetId = shift.id; 
-            if (shift.id.startsWith('SLA_GAP')) { 
+            const isVirtualVacancy = !!shift.isVirtual || (typeof shift.id === 'string' && (shift.id.startsWith('SLA_GAP') || shift.id.startsWith('V124_') || shift.id.startsWith('V124_GAP')));
+            let targetId = shift.id;
+
+            if (isVirtualVacancy) { 
                 const newRef = doc(collection(db, 'turnos')); 
-                targetId = newRef.id; 
-                const newShiftData = { ...shift, id: targetId, status: 'UNCOVERED_REPORTED', isReported: true, comments: 'Vacante de Contrato Reportada', createdAt: serverTimestamp(), isSlaGap: false, origin: 'SLA_GAP' }; 
+                targetId = newRef.id;
+                const startDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : (shift.startTime?.toDate ? shift.startTime.toDate() : new Date());
+                const endDate = shift.endDateObj instanceof Date ? shift.endDateObj : (shift.endTime?.toDate ? shift.endTime.toDate() : new Date(startDate.getTime() + 8 * 3600000));
+                const newShiftData = {
+                    startTime: Timestamp.fromDate(startDate),
+                    endTime: Timestamp.fromDate(endDate),
+                    employeeId: 'VACANTE',
+                    employeeName: shift.employeeName || 'VACANTE',
+                    objectiveId: shift.objectiveId || null,
+                    clientId: shift.clientId || null,
+                    code: shift.code || null,
+                    positionName: shift.positionName || null,
+                    objectiveName: shift.objectiveName || null,
+                    clientName: shift.clientName || null,
+                    status: 'UNCOVERED_REPORTED',
+                    isReported: true,
+                    isUnassigned: true,
+                    comments: 'Vacante de Contrato Reportada',
+                    createdAt: serverTimestamp(),
+                    origin: shift.id?.startsWith('V124_') ? 'VIRTUAL_VACANCY' : 'SLA_GAP'
+                };
                 await setDoc(newRef, newShiftData); 
-            } else { 
+            } else if (targetId && typeof targetId === 'string' && targetId.length > 0) { 
                 await updateDoc(doc(db, 'turnos', targetId), { status: 'UNCOVERED_REPORTED', isReported: true }); 
-            } 
-            await addDoc(collection(db, 'novedades'), { type: 'VACANTE_NO_CUBIERTA', title: 'Vacante Reportada', clientId: shift.clientId, objectiveId: shift.objectiveId, shiftId: targetId, description: `Vacante no cubierta en ${shift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }); 
+            } else {
+                toast.error('Turno sin ID válido para reportar.');
+                return;
+            }
+            await addDoc(collection(db, 'novedades'), { type: 'VACANTE_NO_CUBIERTA', title: 'Vacante Reportada', clientId: shift.clientId, objectiveId: shift.objectiveId, shiftId: targetId, description: `Vacante no cubierta en ${shift.objectiveName || 'objetivo'} (${shift.positionName || 'puesto'})`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', status: 'pending', priority: 'high' }); 
+            const auth = getAuth();
+            const operatorName = auth.currentUser?.email?.split('@')[0] || auth.currentUser?.displayName || 'Operador';
+            await addDoc(collection(db, 'audit_logs'), {
+                action: 'Devolución a Planificación',
+                module: 'OPERACIONES',
+                details: `Devolvió vacante a Planificación: ${shift.objectiveName || 'objetivo'} (${shift.positionName || 'puesto'})${shift.employeeName ? ` - ${String(shift.employeeName).replace('VACANTE: ', '')}` : ''}`,
+                timestamp: serverTimestamp(),
+                actorName: operatorName,
+                actorUid: auth.currentUser?.uid || null
+            });
             toast.success('Reporte enviado correctamente'); 
         } catch (e: any) { 
-            toast.error('Error al reportar'); 
+            console.error('handleReportPlanning', e);
+            toast.error(e?.message || 'Error al reportar'); 
         } 
     };
 

@@ -108,6 +108,7 @@ const formatTime = (dateInput: any) => {
 const ACTION_LABELS: Record<string, string> = {
     'ASIGNACION': 'Asignación', 'ELIMINACION': 'Eliminación', 'EDICION_MASIVA': 'Edición Masiva',
     'ASIGNACION_MASIVA': 'Asignación Múltiple', 'CAMBIO_FRANCO_TURNO': 'Franco x Turno (FT)', 'CAMBIO_TURNO_FRANCO': 'Turno x Franco (FF)',
+    'Devolución a Planificación': 'Devolución desde Operaciones',
 };
 
 // Helper para día de la semana (0=Domingo -> 'D')
@@ -653,9 +654,15 @@ export default function PlanificacionPage() {
                             actorName: data.actorName || data.actor || '',
                             actor: data.actorName || data.actorEmail || data.actor || data.actorUid || '',
                             module: data.module || '',
+                            action: data.action || '',
                         };
                     })
-                    .filter((x) => (x.module || '').toString().toUpperCase() === 'PLANIFICADOR')
+                    .filter((x) => {
+                        const mod = (x.module || '').toString().toUpperCase();
+                        if (mod === 'PLANIFICADOR') return true;
+                        if (mod === 'OPERACIONES' && (x.action === 'Devolución a Planificación' || (x.label || '').includes('Devolución'))) return true;
+                        return false;
+                    })
                     .slice(0, 20);
                 setUnifiedLogs(rows);
             },

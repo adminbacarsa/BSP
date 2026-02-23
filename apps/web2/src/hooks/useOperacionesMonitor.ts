@@ -279,8 +279,8 @@ export const useOperacionesMonitor = () => {
         const isPriority = (s: any) => {
             if (s.isFranco) return false;
             if (s.isResolvedByOps) return false;
-            // Vacantes del día (incluye virtuales SLA gaps)
-            if (s.isUnassigned && isSameDay(s.shiftDateObj, now)) return true;
+            // Vacantes del día (excluir las ya devueltas a planificación)
+            if (s.isUnassigned && !s.isReportedToPlanning && isSameDay(s.shiftDateObj, now)) return true;
             // Ausencias / no llegó del día (alertas críticas)
             if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
             // Presentes por confirmar / retenciones
@@ -315,7 +315,7 @@ export const useOperacionesMonitor = () => {
         const prioridad = processedData.filter((s:any) => {
             if (s.isFranco) return false;
             if (s.isResolvedByOps) return false;
-            if (s.isUnassigned && isSameDay(s.shiftDateObj, now)) return true;
+            if (s.isUnassigned && !s.isReportedToPlanning && isSameDay(s.shiftDateObj, now)) return true;
             if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
             if (s.isImminent || s.isRetention) return true;
             return false;
