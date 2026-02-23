@@ -1,6 +1,7 @@
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  pageExtensions: ['tsx'],         // Evita tratar archivos .ts como páginas (auditplan/* helpers)
   output: 'export',               // <--- ESTO OBLIGA A CREAR LA CARPETA 'out'
   reactStrictMode: false,         // Evitar doble ejecución de effects que puede causar loops
   images: {

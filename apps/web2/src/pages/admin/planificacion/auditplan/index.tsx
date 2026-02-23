@@ -7,7 +7,7 @@ import { Toaster, toast } from 'sonner';
 import { SHIFT_STYLES, SHIFT_HOURS_LOOKUP } from './constants';
 import { getDateKey, isDateLocked } from './utils';
 import { usePlanificacionLogic } from './usePlanificacionLogic';
-import { ShiftSelectorModal, RRHHModal } from './Modals';
+import { ShiftSelectorModal, RRHHModal } from '@/components/planificacion/AuditPlanModals';
 
 // 🛑 FIX: ASIGNACIÓN SEGURA DEL COMPONENTE LIST
 const List: any = dynamic(() => import('react-window').then((mod: any) => {
