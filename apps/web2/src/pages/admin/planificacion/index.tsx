@@ -728,6 +728,16 @@ export default function PlanificacionPage() {
             } catch (e) { console.error("Error update view", e); }
         }
 
+        // Navegar al cliente y objetivo del cronograma (ej. alertas de devolución VACANTE_NO_CUBIERTA)
+        if (notif.clientId && notif.objectiveId) {
+            setSelectedClient(notif.clientId);
+            setSelectedObjective(notif.objectiveId);
+            setSearchTerm('');
+            setForceShowAll(false);
+            const objLabel = notif.title || notif.description || getObjectiveName(notif.objectiveId) || 'objetivo';
+            toast.info(`Cronograma: ${objLabel}`);
+        }
+
         if (notif.source === 'AUSENCIA' && notif.type && (notif.type.includes('Vacaciones') || notif.type.includes('Licencia'))) {
             setVacancyData(notif);
             setSelectedReplacement('');
