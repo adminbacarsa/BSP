@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, serverTimestamp, addDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, serverTimestamp, addDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
@@ -84,8 +84,25 @@ export const useOperacionesMonitor = () => {
         unsubs.push(onSnapshot(collection(db, 'clients'), snap => { const objs: any[] = []; snap.docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); setObjectives(objs); }));
         unsubs.push(onSnapshot(query(collection(db, 'servicios_sla'), where('status', '==', 'active')), snap => setServicesSLA(snap.docs.map(d => ({ id: d.id, ...d.data() })))));
         const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
-        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => { setRecentLogs(snap.docs.map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details }))); }));
-        return () => { unsubs.forEach(u => u()); };
+        let unsubAudit: (() => void) | null = null;
+        getDocs(collection(db, 'system_users')).then((userSnap) => {
+            const nameByEmail: Record<string, string> = {};
+            userSnap.docs.forEach(d => {
+                const u = d.data();
+                const displayName = (u.firstName && u.lastName) ? `${u.lastName} ${u.firstName}`.trim() : (u.name || u.email || '');
+                if (u.email) nameByEmail[u.email] = displayName || u.email;
+                if (d.id) nameByEmail[d.id] = displayName || u.email || d.id;
+            });
+            unsubAudit = onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+                setRecentLogs(snap.docs.map(d => {
+                    const data = d.data();
+                    const actorName = data.actorName || data.actor || '';
+                    const resolvedName = nameByEmail[data.actorEmail] || nameByEmail[data.actorUid] || nameByEmail[actorName] || actorName;
+                    return { id: d.id, ...data, formattedActor: resolvedName || 'Sistema', time: getSafeDate(data.timestamp), fullDetail: data.details };
+                }));
+            });
+        });
+        return () => { unsubs.forEach(u => u()); unsubAudit?.(); };
     }, []);
 
     useEffect(() => {

@@ -603,7 +603,12 @@ export default function PlanificacionPage() {
             try { 
                 const snap = await getDocs(collection(db, 'system_users')); 
                 const map: Record<string, string> = {}; 
-                snap.docs.forEach(d => { const u = d.data(); if (u.email) map[u.email] = u.name || u.email; }); 
+                snap.docs.forEach(d => { 
+                    const u = d.data(); 
+                    const displayName = (u.firstName && u.lastName) ? `${u.lastName} ${u.firstName}`.trim() : (u.name || u.email || ''); 
+                    if (u.email) map[u.email] = displayName || u.email; 
+                    if (d.id) map[d.id] = displayName || u.email || d.id; 
+                }); 
                 setUsersMap(map); 
             } catch (e) { console.error("Error loading users", e); } 
         };
@@ -1595,7 +1600,7 @@ export default function PlanificacionPage() {
                             <div className="text-[10px] text-slate-400 italic px-1 py-2">Sin actividad reciente.</div>
                         )}
                         {unifiedLogs.map(log => {
-                            const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
+                            const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actorName] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
                             return (
                                 <div key={log.id} className="flex items-center gap-2 text-[10px] p-1 border-b last:border-0 hover:bg-slate-50">
                                     <span className="font-mono text-slate-400">{new Date(log.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
@@ -1620,7 +1625,7 @@ export default function PlanificacionPage() {
                                     <div className="text-sm text-slate-400 italic">Sin actividad reciente.</div>
                                 ) : (
                                     unifiedLogs.map((log) => {
-                                        const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
+                                        const realName = usersMap[log.actorUid] || usersMap[log.actorEmail] || usersMap[log.actorName] || usersMap[log.actor] || log.actorName || log.actor || 'Sistema';
                                         return (
                                             <div key={log.id} className="p-3 border rounded-xl hover:bg-slate-50 transition-colors">
                                                 <div className="flex items-center justify-between gap-3">
