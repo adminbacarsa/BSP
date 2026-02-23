@@ -1815,6 +1815,7 @@ export default function PlanificacionPage() {
                                             const coverageData = modalCoverageStats || { current: 0, target: 24, pax: 1, isActiveDay: true };
                                             const currentPosName = activePosition || 'General';
                                             const isCovered = coverageData.current >= coverageData.target;
+                                            const coverageFull = coverageData.isActiveDay && coverageData.target > 0 && isCovered;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
                                             const gap = coverageData.current - coverageData.target;
                                             const displayTarget = coverageData.isActiveDay ? `${coverageData.target}h` : `CERRADO (0h)`;
@@ -1829,17 +1830,19 @@ export default function PlanificacionPage() {
                                                     <div className={`grid grid-cols-5 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
+                                                            const disabledByCoverage = coverageFull;
+                                                            const disabled = isServiceLocked || isBlocked || disabledByCoverage;
                                                             return (
                                                                 <button
                                                                     key={s.code}
-                                                                    onClick={() => !isBlocked && handleAssignShift(s, activePosition || 'General')}
-                                                                    disabled={isServiceLocked || isBlocked}
-                                                                    title={isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
-                                                                    className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-transform relative ${isBlocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:scale-105'} ${SHIFT_STYLES[s.code]}`}
+                                                                    onClick={() => !disabled && handleAssignShift(s, activePosition || 'General')}
+                                                                    disabled={disabled}
+                                                                    title={disabledByCoverage ? 'Cobertura completa. Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
+                                                                    className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-transform relative ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:scale-105'} ${SHIFT_STYLES[s.code]}`}
                                                                 >
                                                                     <span className="font-black text-sm">{s.code}</span>
                                                                     <span className="text-[9px] opacity-70">{s.hours}hs</span>
-                                                                    {!selectedCell.currentShift && gap < 0 && !isBlocked && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}
+                                                                    {!selectedCell.currentShift && gap < 0 && !disabled && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}
                                                                 </button>
                                                             );
                                                         })}
@@ -1847,17 +1850,9 @@ export default function PlanificacionPage() {
                                                             onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
                                                             disabled={isServiceLocked}
                                                             className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"
-                                                            title="Asignar Franco (F)"
+                                                            title={coverageFull ? 'Cobertura llena: solo se permite Franco' : 'Asignar Franco (F)'}
                                                         >
                                                             <span>F</span><span className="text-[8px]">Franco</span>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setFrancoMode((m) => (m === 'FT_SELECTION' ? 'NONE' : 'FT_SELECTION'))}
-                                                            disabled={isServiceLocked}
-                                                            className={`p-2 rounded-lg border flex flex-col items-center justify-center font-black ${francoMode === 'FT_SELECTION' ? 'bg-violet-600 text-white border-violet-700 shadow-lg shadow-violet-200' : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'}`}
-                                                            title="Modo FT: el próximo turno se marca como Franco Trabajado"
-                                                        >
-                                                            <span>FT</span><span className="text-[8px]">{francoMode === 'FT_SELECTION' ? 'Activo' : 'Modo'}</span>
                                                         </button>
                                                     </div>
                                                 </>
