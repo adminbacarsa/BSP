@@ -275,6 +275,58 @@ export default function PlanificacionPage() {
         return pos ? pos.shifts : [];
     }, [positionStructure, activePosition]);
 
+    // Bloqueo por puesto/día: no mezclar 8h con 12h; solo permitir turnos del mismo grupo y no repetir códigos ya asignados.
+    const shiftButtonDisabledMap = useMemo(() => {
+        const disabled = new Set<string>();
+        if (!selectedCell?.dateStr || !selectedObjective || !uniqueSLAShifts.length) return disabled;
+        const dateStr = selectedCell.dateStr;
+        const posName = activePosition || (positionStructure[0]?.positionName) || 'General';
+        const isWorking = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes(String(code || '').toUpperCase());
+
+        const assigned: { code: string; hours: number }[] = [];
+        displayedEmployees.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
+            if (!shift || shift.positionName !== posName) return;
+            if (!isWorking(shift.code)) return;
+            const objectiveMatch = shift.objectiveId === selectedObjective || !!pendingChanges[key];
+            if (!objectiveMatch) return;
+            const hours = Number(shift.hours) || SHIFT_HOURS_LOOKUP[shift.code] || 8;
+            assigned.push({ code: String(shift.code || shift.type || '').toUpperCase(), hours });
+        });
+
+        const assigned8h = assigned.filter(a => a.hours <= 10).map(a => a.code);
+        const assigned12h = assigned.filter(a => a.hours > 10).map(a => a.code);
+        const shifts8h = uniqueSLAShifts.filter((s: any) => (Number(s.hours) || 8) <= 10);
+        const shifts12h = uniqueSLAShifts.filter((s: any) => (Number(s.hours) || 8) > 10);
+        const max8h = shifts8h.length;
+        const max12h = shifts12h.length;
+
+        uniqueSLAShifts.forEach((s: any) => {
+            const code = String(s.code || '').toUpperCase();
+            const hours = Number(s.hours) || 8;
+            const is8h = hours <= 10;
+
+            if (assigned8h.length > 0 && assigned12h.length > 0) {
+                disabled.add(code);
+                return;
+            }
+            if (assigned8h.length > 0) {
+                if (!is8h) { disabled.add(code); return; }
+                if (assigned8h.includes(code)) { disabled.add(code); return; }
+                if (assigned8h.length >= max8h) { disabled.add(code); return; }
+                return;
+            }
+            if (assigned12h.length > 0) {
+                if (is8h) { disabled.add(code); return; }
+                if (assigned12h.includes(code)) { disabled.add(code); return; }
+                if (assigned12h.length >= max12h) { disabled.add(code); return; }
+                return;
+            }
+        });
+        return disabled;
+    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts]);
+
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
         if (!showSwapModal) return []; 
@@ -1775,9 +1827,22 @@ export default function PlanificacionPage() {
                                                         <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }}></div></div>
                                                     </div>
                                                     <div className={`grid grid-cols-5 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-                                                        {uniqueSLAShifts.map((s: any) => (
-                                                            <button key={s.code} onClick={() => handleAssignShift(s, activePosition || 'General')} disabled={isServiceLocked} className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 hover:scale-105 transition-transform relative ${SHIFT_STYLES[s.code]}`}><span className="font-black text-sm">{s.code}</span><span className="text-[9px] opacity-70">{s.hours}hs</span>{!selectedCell.currentShift && gap < 0 && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}</button>
-                                                        ))}
+                                                        {uniqueSLAShifts.map((s: any) => {
+                                                            const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
+                                                            return (
+                                                                <button
+                                                                    key={s.code}
+                                                                    onClick={() => !isBlocked && handleAssignShift(s, activePosition || 'General')}
+                                                                    disabled={isServiceLocked || isBlocked}
+                                                                    title={isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
+                                                                    className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition-transform relative ${isBlocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:scale-105'} ${SHIFT_STYLES[s.code]}`}
+                                                                >
+                                                                    <span className="font-black text-sm">{s.code}</span>
+                                                                    <span className="text-[9px] opacity-70">{s.hours}hs</span>
+                                                                    {!selectedCell.currentShift && gap < 0 && !isBlocked && <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm z-10">{gap}h</div>}
+                                                                </button>
+                                                            );
+                                                        })}
                                                         <button
                                                             onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
                                                             disabled={isServiceLocked}
