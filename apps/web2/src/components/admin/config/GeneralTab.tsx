@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { 
     Save, Building, FileText, Mail, Phone, AlertTriangle, Trash2, 
-    ShieldAlert, RefreshCw, Moon, Sun, Monitor, Zap, Hexagon 
+    ShieldAlert, RefreshCw, Moon, Sun, Monitor, Zap, Hexagon, Camera, ArrowRight 
 } from 'lucide-react';
 import { functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -125,6 +126,22 @@ export default function GeneralTab() {
                 <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-end">
                     <button onClick={handleSaveCompany} className="bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 text-white px-8 py-4 rounded-xl font-black text-xs uppercase flex items-center gap-2 shadow-xl hover:-translate-y-1 transition-all"><Save size={18}/> GUARDAR DATOS</button>
                 </div>
+            </div>
+
+            {/* 2b. CÁMARAS NVR */}
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl">
+                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-4 flex items-center gap-3">
+                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/50 rounded-xl text-indigo-600 dark:text-indigo-400"><Camera size={24}/></div>
+                    CÁMARAS NVR
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Configurá rutas de cámaras, asignación a cliente/objetivo y horarios de atención (ej. solo de noche o fines de semana).</p>
+                <Link
+                    href="/admin/camera-routes"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all"
+                >
+                    Abrir panel de Cámaras NVR
+                    <ArrowRight size={18}/>
+                </Link>
             </div>
 
             {/* 3. ZONA DE MANTENIMIENTO */}

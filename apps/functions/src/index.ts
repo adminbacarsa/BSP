@@ -600,7 +600,8 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
     }
 });
 
-// NVR AI Alert (webhook + trigger FCM)
-export { nvrAlert } from './nvr/nvrAlert';
+// NVR AI Alert: nvrAlertV2 (2nd gen) — usar esta URL en el proxy/webhook. La antigua nvrAlert queda en 1st gen hasta borrarla en consola.
+export { nvrAlertV2 } from './nvr/nvrAlert';
+export { nvrWebhookTest } from './nvr/nvrWebhookTest';
 export { onAlertCreated } from './nvr/onAlertCreated';
 export { simulateNvrAlert } from './nvr/simulateNvrAlert';

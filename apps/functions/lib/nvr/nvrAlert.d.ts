@@ -1,2 +1,1 @@
-import * as functions from 'firebase-functions';
-export declare const nvrAlert: functions.HttpsFunction;
+export declare const nvrAlertV2: import("firebase-functions/v2/https").HttpsFunction;

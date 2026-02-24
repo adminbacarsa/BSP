@@ -1,18 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.nvrAlert = void 0;
-const functions = require("firebase-functions");
+exports.nvrAlertV2 = void 0;
 const admin = require("firebase-admin");
 const Busboy = require("busboy");
 const crypto_1 = require("crypto");
 const date_fns_1 = require("date-fns");
+const https_1 = require("firebase-functions/v2/https");
+const schedule_1 = require("./schedule");
 function ensureAdmin() {
     if (!admin.apps.length)
         admin.initializeApp();
 }
 function getHeader(req, name) {
-    const v = req.header(name);
-    return typeof v === 'string' && v.trim() ? v.trim() : null;
+    const v = req.headers[name.toLowerCase()] ?? req.get?.(name);
+    const s = Array.isArray(v) ? v[0] : v;
+    return typeof s === 'string' && s.trim() ? s.trim() : null;
 }
 function pickFirst(fields, keys) {
     for (const k of keys) {
@@ -37,9 +39,20 @@ function readRawBody(req) {
         req.on('error', reject);
     });
 }
+function toHeaderString(v) {
+    return Array.isArray(v) ? v[0] ?? '' : (v ?? '');
+}
+function headersForBusboy(headers) {
+    const out = {};
+    for (const [k, v] of Object.entries(headers)) {
+        if (v !== undefined)
+            out[k] = toHeaderString(v);
+    }
+    return out;
+}
 function parseMultipart(req) {
     return new Promise((resolve, reject) => {
-        const contentType = req.headers['content-type'];
+        const contentType = toHeaderString(req.headers['content-type']);
         if (!contentType || !contentType.includes('multipart/form-data')) {
             reject(new Error('content-type inválido (se espera multipart/form-data)'));
             return;
@@ -47,7 +60,7 @@ function parseMultipart(req) {
         readRawBody(req)
             .then((rawBody) => {
             const busboy = Busboy({
-                headers: req.headers,
+                headers: headersForBusboy(req.headers),
                 limits: { files: 1, fileSize: 10 * 1024 * 1024 },
             });
             const fields = {};
@@ -105,11 +118,12 @@ async function validateSecret(req) {
     const expected = await getExpectedSecretFromFirestore();
     if (!expected)
         return;
-    const received = (typeof req.query.key === 'string' ? req.query.key : null) ||
+    const qKey = req.query?.key;
+    const received = (typeof qKey === 'string' ? qKey : Array.isArray(qKey) ? qKey[0] : null) ||
         getHeader(req, 'x-webhook-secret') ||
         getHeader(req, 'x-nvr-secret');
     if (!received || received !== expected) {
-        throw new functions.https.HttpsError('permission-denied', 'Webhook secret inválido.');
+        throw new https_1.HttpsError('permission-denied', 'Webhook secret inválido.');
     }
 }
 function buildRouteKey(nvrId, channelId) {
@@ -130,10 +144,16 @@ async function resolveRoute(routeKey) {
         return { disabled: true, data };
     return { disabled: false, data };
 }
-exports.nvrAlert = functions
-    .runWith({ timeoutSeconds: 120, memory: '512MB' })
-    .https.onRequest(async (req, res) => {
+exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512MiB' }, async (req, res) => {
+    const contentType = (Array.isArray(req.headers['content-type']) ? req.headers['content-type'][0] : req.headers['content-type']) || '';
+    const queryKey = req.query?.key != null;
+    console.log('[NVR_ALERT] Request received', { method: req.method, contentType: contentType.slice(0, 50), queryKey });
     try {
+        if (req.method === 'GET') {
+            console.log('[NVR_ALERT] GET (prueba de conexión)');
+            res.status(200).json({ ok: true, message: 'Webhook NVR activo. Enviar POST con multipart/form-data e imagen para alertas.' });
+            return;
+        }
         if (req.method !== 'POST') {
             res.status(405).send('Method Not Allowed');
             return;
@@ -142,6 +162,7 @@ exports.nvrAlert = functions
         ensureAdmin();
         const parsed = await parseMultipart(req);
         if (!parsed.file || !parsed.file.buffer?.length) {
+            console.log('[NVR_ALERT] Rejected: no file in multipart. Fields:', Object.keys(parsed.fields));
             res.status(400).send('Falta archivo (snapshot) en multipart.');
             return;
         }
@@ -161,8 +182,10 @@ exports.nvrAlert = functions
                 : objectTypeRaw.toLowerCase().includes('person')
                     ? 'human'
                     : '';
-        const nvrId = (typeof req.query.nvrId === 'string' ? req.query.nvrId : null) ||
-            (typeof req.query.nvr_id === 'string' ? req.query.nvr_id : null) ||
+        const qNvrId = req.query?.nvrId;
+        const qNvrIdAlt = req.query?.nvr_id;
+        const nvrId = (typeof qNvrId === 'string' ? qNvrId : Array.isArray(qNvrId) ? qNvrId[0] : null) ||
+            (typeof qNvrIdAlt === 'string' ? qNvrIdAlt : Array.isArray(qNvrIdAlt) ? qNvrIdAlt[0] : null) ||
             getHeader(req, 'x-nvr-id') ||
             pickFirst(fields, [
                 'nvr_id',
@@ -175,15 +198,33 @@ exports.nvrAlert = functions
                 'serialNumber',
             ]);
         const routeKey = buildRouteKey(nvrId, channelId);
-        const route = await resolveRoute(routeKey);
+        let route = await resolveRoute(routeKey);
+        const db = admin.firestore();
+        if (routeKey && !route) {
+            const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+            await db.collection('camera_routes').doc(routeKey).set({
+                enabled: true,
+                camera_name: cameraNameFromRequest || `NVR ${routeKey}`,
+                event_type: eventType || 'Tripwire',
+                objective_id: null,
+                post_id: null,
+                created_from_alert: true,
+                first_seen_at: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            route = await resolveRoute(routeKey);
+        }
         if (route?.disabled) {
             res.status(200).send('OK (route disabled)');
+            return;
+        }
+        if (route?.data && !(0, schedule_1.isWithinSchedule)(route.data)) {
+            console.log('[NVR_ALERT] Fuera de horario de atención, no se crea alerta.', { routeKey });
+            res.status(200).json({ ok: true, skipped: 'outside_schedule' });
             return;
         }
         const routeData = route?.data || {};
         const objectiveId = typeof routeData.objective_id === 'string' ? routeData.objective_id : null;
         const postId = typeof routeData.post_id === 'string' ? routeData.post_id : null;
-        const db = admin.firestore();
         const alertRef = db.collection('alerts').doc();
         const alertId = alertRef.id;
         const dayFolder = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
@@ -218,9 +259,14 @@ exports.nvrAlert = functions
     catch (e) {
         const err = e;
         const msg = err?.message || 'Error';
-        const code = err?.code || '';
+        const code = String(err?.code || '');
         console.error('[NVR_ALERT_ERROR]', { code, msg, stack: err?.stack });
-        res.status(code === 'permission-denied' ? 403 : 500).send(msg);
+        if (err instanceof https_1.HttpsError) {
+            res.status(err.httpErrorCode?.status || 403).send(err.message);
+        }
+        else {
+            res.status(code === 'permission-denied' ? 403 : 500).send(msg);
+        }
     }
 });
 //# sourceMappingURL=nvrAlert.js.map

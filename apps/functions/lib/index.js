@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.simulateNvrAlert = exports.onAlertCreated = exports.nvrAlert = exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.simulateNvrAlert = exports.onAlertCreated = exports.nvrWebhookTest = exports.nvrAlertV2 = exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const main_1 = require("./main");
@@ -475,7 +475,9 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
     }
 });
 var nvrAlert_1 = require("./nvr/nvrAlert");
-Object.defineProperty(exports, "nvrAlert", { enumerable: true, get: function () { return nvrAlert_1.nvrAlert; } });
+Object.defineProperty(exports, "nvrAlertV2", { enumerable: true, get: function () { return nvrAlert_1.nvrAlertV2; } });
+var nvrWebhookTest_1 = require("./nvr/nvrWebhookTest");
+Object.defineProperty(exports, "nvrWebhookTest", { enumerable: true, get: function () { return nvrWebhookTest_1.nvrWebhookTest; } });
 var onAlertCreated_1 = require("./nvr/onAlertCreated");
 Object.defineProperty(exports, "onAlertCreated", { enumerable: true, get: function () { return onAlertCreated_1.onAlertCreated; } });
 var simulateNvrAlert_1 = require("./nvr/simulateNvrAlert");

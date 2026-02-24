@@ -1,8 +1,12 @@
-import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import Busboy = require('busboy');
 import { randomUUID } from 'crypto';
 import { format } from 'date-fns';
+import { onRequest, HttpsError } from 'firebase-functions/v2/https';
+import { isWithinSchedule } from './schedule';
+
+// Compatible con Express Request (v2) y con query tipo ParsedQs
+type RequestLike = { method?: string; headers: Record<string, string | string[] | undefined>; query: Record<string, unknown>; on(event: string, cb: (...args: any[]) => void): void };
 
 type ParsedMultipart = {
   fields: Record<string, string>;
@@ -17,9 +21,10 @@ function ensureAdmin() {
   if (!admin.apps.length) admin.initializeApp();
 }
 
-function getHeader(req: functions.https.Request, name: string): string | null {
-  const v = req.header(name);
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
+function getHeader(req: RequestLike, name: string): string | null {
+  const v = req.headers[name.toLowerCase()] ?? (req as any).get?.(name);
+  const s = Array.isArray(v) ? v[0] : v;
+  return typeof s === 'string' && s.trim() ? s.trim() : null;
 }
 
 function pickFirst(fields: Record<string, string>, keys: string[]): string | null {
@@ -36,7 +41,7 @@ function safeNumber(v: unknown): number | null {
   return null;
 }
 
-function readRawBody(req: functions.https.Request): Promise<Buffer> {
+function readRawBody(req: RequestLike): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -45,9 +50,21 @@ function readRawBody(req: functions.https.Request): Promise<Buffer> {
   });
 }
 
-function parseMultipart(req: functions.https.Request): Promise<ParsedMultipart> {
+function toHeaderString(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v[0] ?? '' : (v ?? '');
+}
+
+function headersForBusboy(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (v !== undefined) out[k] = toHeaderString(v);
+  }
+  return out;
+}
+
+function parseMultipart(req: RequestLike): Promise<ParsedMultipart> {
   return new Promise((resolve, reject) => {
-    const contentType = req.headers['content-type'];
+    const contentType = toHeaderString(req.headers['content-type']);
     if (!contentType || !contentType.includes('multipart/form-data')) {
       reject(new Error('content-type inválido (se espera multipart/form-data)'));
       return;
@@ -56,7 +73,7 @@ function parseMultipart(req: functions.https.Request): Promise<ParsedMultipart> 
     readRawBody(req)
       .then((rawBody) => {
         const busboy = Busboy({
-          headers: req.headers,
+          headers: headersForBusboy(req.headers as Record<string, string | string[] | undefined>),
           limits: { files: 1, fileSize: 10 * 1024 * 1024 },
         });
 
@@ -118,17 +135,18 @@ async function getExpectedSecretFromFirestore(): Promise<string | null> {
   }
 }
 
-async function validateSecret(req: functions.https.Request): Promise<void> {
+async function validateSecret(req: RequestLike): Promise<void> {
   const expected = await getExpectedSecretFromFirestore();
   if (!expected) return;
 
+  const qKey = req.query?.key as string | string[] | undefined;
   const received =
-    (typeof req.query.key === 'string' ? req.query.key : null) ||
+    (typeof qKey === 'string' ? qKey : Array.isArray(qKey) ? qKey[0] : null) ||
     getHeader(req, 'x-webhook-secret') ||
     getHeader(req, 'x-nvr-secret');
 
   if (!received || received !== expected) {
-    throw new functions.https.HttpsError('permission-denied', 'Webhook secret inválido.');
+    throw new HttpsError('permission-denied', 'Webhook secret inválido.');
   }
 }
 
@@ -148,10 +166,20 @@ async function resolveRoute(routeKey: string | null) {
   return { disabled: false, data };
 }
 
-export const nvrAlert = functions
-  .runWith({ timeoutSeconds: 120, memory: '512MB' })
-  .https.onRequest(async (req, res) => {
+// 2nd gen: función nueva con otro nombre para evitar upgrade in-place (la URL del webhook cambia a nvrAlertV2)
+export const nvrAlertV2 = onRequest(
+  { timeoutSeconds: 120, memory: '512MiB' },
+  async (req, res) => {
+    const contentType = (Array.isArray(req.headers['content-type']) ? req.headers['content-type'][0] : req.headers['content-type']) || '';
+    const queryKey = req.query?.key != null;
+    console.log('[NVR_ALERT] Request received', { method: req.method, contentType: contentType.slice(0, 50), queryKey });
     try {
+      // Prueba de conexión: GET devuelve 200 para que el NVR no marque "fallido" al testear la URL
+      if (req.method === 'GET') {
+        console.log('[NVR_ALERT] GET (prueba de conexión)');
+        res.status(200).json({ ok: true, message: 'Webhook NVR activo. Enviar POST con multipart/form-data e imagen para alertas.' });
+        return;
+      }
       if (req.method !== 'POST') {
         res.status(405).send('Method Not Allowed');
         return;
@@ -162,6 +190,7 @@ export const nvrAlert = functions
 
       const parsed = await parseMultipart(req);
       if (!parsed.file || !parsed.file.buffer?.length) {
+        console.log('[NVR_ALERT] Rejected: no file in multipart. Fields:', Object.keys(parsed.fields));
         res.status(400).send('Falta archivo (snapshot) en multipart.');
         return;
       }
@@ -188,9 +217,11 @@ export const nvrAlert = functions
               ? 'human'
               : ('' as 'human' | 'vehicle' | '');
 
+      const qNvrId = req.query?.nvrId as string | string[] | undefined;
+      const qNvrIdAlt = req.query?.nvr_id as string | string[] | undefined;
       const nvrId =
-        (typeof req.query.nvrId === 'string' ? req.query.nvrId : null) ||
-        (typeof req.query.nvr_id === 'string' ? req.query.nvr_id : null) ||
+        (typeof qNvrId === 'string' ? qNvrId : Array.isArray(qNvrId) ? qNvrId[0] : null) ||
+        (typeof qNvrIdAlt === 'string' ? qNvrIdAlt : Array.isArray(qNvrIdAlt) ? qNvrIdAlt[0] : null) ||
         getHeader(req, 'x-nvr-id') ||
         pickFirst(fields, [
           'nvr_id',
@@ -204,18 +235,41 @@ export const nvrAlert = functions
         ]);
 
       const routeKey = buildRouteKey(nvrId, channelId);
-      const route = await resolveRoute(routeKey);
+      let route = await resolveRoute(routeKey);
+
+      // Si no existe camera_route para este NVR/canal, crearlo para que aparezca en Firestore y se pueda asignar cliente/objetivo
+      const db = admin.firestore();
+      if (routeKey && !route) {
+        const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+        await db.collection('camera_routes').doc(routeKey).set(
+          {
+            enabled: true,
+            camera_name: cameraNameFromRequest || `NVR ${routeKey}`,
+            event_type: eventType || 'Tripwire',
+            objective_id: null,
+            post_id: null,
+            created_from_alert: true,
+            first_seen_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        route = await resolveRoute(routeKey);
+      }
 
       if (route?.disabled) {
         res.status(200).send('OK (route disabled)');
         return;
       }
 
+      if (route?.data && !isWithinSchedule(route.data as import('./schedule').ScheduleRouteData)) {
+        console.log('[NVR_ALERT] Fuera de horario de atención, no se crea alerta.', { routeKey });
+        res.status(200).json({ ok: true, skipped: 'outside_schedule' });
+        return;
+      }
+
       const routeData = route?.data || {};
       const objectiveId = typeof routeData.objective_id === 'string' ? routeData.objective_id : null;
       const postId = typeof routeData.post_id === 'string' ? routeData.post_id : null;
-
-      const db = admin.firestore();
       const alertRef = db.collection('alerts').doc();
       const alertId = alertRef.id;
 
@@ -256,8 +310,13 @@ export const nvrAlert = functions
     } catch (e: unknown) {
       const err = e as { message?: string; code?: string; stack?: string };
       const msg = err?.message || 'Error';
-      const code = err?.code || '';
+      const code = String(err?.code || '');
       console.error('[NVR_ALERT_ERROR]', { code, msg, stack: err?.stack });
-      res.status(code === 'permission-denied' ? 403 : 500).send(msg);
+      if (err instanceof HttpsError) {
+        res.status(err.httpErrorCode?.status || 403).send(err.message);
+      } else {
+        res.status(code === 'permission-denied' ? 403 : 500).send(msg);
+      }
     }
-  });
+  }
+);
