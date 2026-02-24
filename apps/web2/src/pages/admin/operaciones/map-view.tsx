@@ -396,7 +396,7 @@ export default function TacticalMapView() {
     // En el mapa táctico, además de colorear por categoría, ocultamos objetivos sin datos en la solapa activa
     // (excepto en "MAPA GENERAL").
     const objectivesForMap = useMemo(() => {
-        if (logic.viewTab === 'TODOS') return logic.filteredObjectives;
+        if (logic.viewTab === 'TODOS') return logic.filteredObjectives || [];
         const ids = new Set((logic.listData || []).map((s:any) => s.objectiveId).filter(Boolean));
         return (logic.filteredObjectives || []).filter((o:any) => ids.has(o.id));
     }, [logic.filteredObjectives, logic.listData, logic.viewTab]);
@@ -421,8 +421,8 @@ export default function TacticalMapView() {
             </div>
 
             <OperacionesMap 
+                key={`tactical-${logic.viewTab}-${(objectivesForMap || []).map((o:any)=>o.id).sort().join(',').slice(0,120)}`}
                 center={[-31.4201, -64.1888]} 
-                // 🛑 CRÍTICO: PASAR "allObjectives" (Base instalada) Y "filteredShifts" (Datos)
                 allObjectives={objectivesForMap} 
                 filteredShifts={logic.listData} 
                 

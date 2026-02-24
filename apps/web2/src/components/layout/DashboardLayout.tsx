@@ -7,7 +7,7 @@ import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { 
   Menu, X, LogOut, Briefcase, BarChart3, Users, 
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Siren
 } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -74,6 +74,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           
           <Link href="/admin/planificacion" prefetch={false} className={getLinkClass('/admin/planificacion')} title="Planificador">
             <Calendar size={20}/> {isSidebarOpen && <span>Planificador</span>}
+          </Link>
+
+          <Link href="/admin/pruebas-alertas" prefetch={false} className={getLinkClass('/admin/pruebas-alertas')} title="Pruebas NVR">
+            <Siren size={20}/> {isSidebarOpen && <span>Pruebas NVR</span>}
           </Link>
 
           {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4">Gestión</div>}

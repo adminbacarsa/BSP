@@ -1136,9 +1136,18 @@ export default function EmployeeDashboard() {
       setTestBusy(false);
     }
   };
-  const markNotificationRead = async (id: string) => {
+  const markNotificationRead = async (id: string, subject?: string) => {
     try {
       await updateDoc(doc(db, 'user_notifications', id), { read: true });
+      const empName = displayName || user?.email || 'Empleado';
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'Notificación leída por empleado',
+        module: 'OPERACIONES',
+        details: `${empName} leyó: ${subject || id}`,
+        timestamp: serverTimestamp(),
+        actorName: empName,
+        actorUid: user?.uid || null,
+      });
     } catch (e) {
       console.error(e);
       addToast('No se pudo marcar como leída', 'error');
@@ -1148,6 +1157,15 @@ export default function EmployeeDashboard() {
     if (unreadInbox.length === 0) return;
     try {
       await Promise.all(unreadInbox.map((n) => updateDoc(doc(db, 'user_notifications', n.id), { read: true })));
+      const empName = displayName || user?.email || 'Empleado';
+      await addDoc(collection(db, 'audit_logs'), {
+        action: 'Notificaciones leídas por empleado',
+        module: 'OPERACIONES',
+        details: `${empName} marcó ${unreadInbox.length} notificación(es) como leída(s)`,
+        timestamp: serverTimestamp(),
+        actorName: empName,
+        actorUid: user?.uid || null,
+      });
     } catch (e) {
       console.error(e);
       addToast('No se pudieron marcar todas', 'error');
@@ -1260,7 +1278,7 @@ export default function EmployeeDashboard() {
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-[10px] text-rose-500 font-bold">No leída</span>
                       <button
-                        onClick={() => markNotificationRead(n.id)}
+                        onClick={() => markNotificationRead(n.id, n.title || n.body)}
                         className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white"
                       >
                         Marcar leída
@@ -1308,7 +1326,7 @@ export default function EmployeeDashboard() {
                       return (
                         <div
                           key={n.id}
-                          onClick={() => !n.read && markNotificationRead(n.id)}
+                          onClick={() => !n.read && markNotificationRead(n.id, n.title || n.body)}
                           className={`border border-slate-800 rounded-xl cursor-pointer ${
                             allMonthRead ? 'p-2' : 'p-3'
                           } ${n.read ? 'bg-slate-950/60' : 'bg-slate-950/30'}`}
@@ -1328,7 +1346,7 @@ export default function EmployeeDashboard() {
                             </div>
                             {!n.read && (
                               <button
-                                onClick={() => markNotificationRead(n.id)}
+                                onClick={() => markNotificationRead(n.id, n.title || n.body)}
                                 className="text-[10px] font-black uppercase text-indigo-300"
                               >
                                 Marcar leída

@@ -14,7 +14,7 @@ import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, query, where, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, query, where, orderBy, limit, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
@@ -27,6 +27,27 @@ const formatTimeSimple = (dateObj: any) => { try { return toDate(dateObj).toLoca
 const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Cordoba' }).toUpperCase(); } catch (e) { return '--/--'; } };
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
 const isSameDay = (d1: any, d2: any) => { if (!d1 || !d2) return false; return toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA'); };
+
+const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
+    try {
+        const auth = getAuth();
+        const operatorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        const data: any = {
+            action,
+            module: 'OPERACIONES',
+            details,
+            timestamp: serverTimestamp(),
+            actorName: operatorName,
+            actorUid: auth.currentUser?.uid || null,
+        };
+        if (extra?.objectiveName != null) data.objectiveName = extra.objectiveName;
+        if (extra?.clientName != null) data.clientName = extra.clientName;
+        await addDoc(collection(db, 'audit_logs'), data);
+    } catch (e) {
+        console.error('Error registrando bitácora', e);
+        toast.error('No se pudo registrar en bitácora. Revisar permisos Firestore.');
+    }
+};
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => { if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity; const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180); const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; };
 const estimateEta = (dist: number) => Math.round((dist / 30) * 60);
 
@@ -38,27 +59,27 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 };
 
 // --- MODALES (LÓGICA OPERATIVA) ---
-const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
+const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onAudit }: any) => {
     if (!isOpen || !incomingShift) return null;
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (diffMin > 5) status = 'LATE';
     const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
-    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
+    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } const prevGuard = activeGuards.find((s: any) => s.id === prevShiftId); const details = prevShiftId && prevGuard ? `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName}), relevó a ${prevGuard.employeeName}` : `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName})`; if (onAudit) onAudit(status === 'LATE' ? 'Ingreso tarde' : 'Ingreso / Presente', details, { objectiveName: incomingShift.objectiveName, clientName: incomingShift.clientName }); toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95"> <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
 };
 
-const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
+const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated, onAudit }: any) => {
     if (!isOpen || !shift) return null;
     const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
     const isAlone = colleagues.length === 0;
-    const handleLog = async () => { await addDoc(collection(db, 'novedades'), { type: 'BAJA_CUBIERTA', shiftId: shift.id, details: 'Retiro anticipado. Puesto cubierto por dotación.' }); await updateDoc(doc(db, 'turnos', shift.id), { checkOutTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }); toast.success("Baja registrada. Puesto cubierto."); onClose(); };
-    const handleProtocol = async () => { await updateDoc(doc(db, 'turnos', shift.id), { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }); const newRef = await addDoc(collection(db, 'turnos'), { ...shift, id: undefined, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false }); const newShift = { ...shift, id: newRef.id, isUnassigned: true }; onVacancyCreated(newShift); };
+    const handleLog = async () => { await addDoc(collection(db, 'novedades'), { type: 'BAJA_CUBIERTA', shiftId: shift.id, details: 'Retiro anticipado. Puesto cubierto por dotación.' }); await updateDoc(doc(db, 'turnos', shift.id), { checkOutTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }); if (onAudit) await onAudit('Baja anticipada (cubierto)', `${shift.employeeName} en ${shift.objectiveName} (${shift.positionName}). Puesto cubierto por dotación.`, { objectiveName: shift.objectiveName, clientName: shift.clientName }); toast.success("Baja registrada. Puesto cubierto."); onClose(); };
+    const handleProtocol = async () => { await updateDoc(doc(db, 'turnos', shift.id), { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }); const { id: _omitId, ...rest } = shift; const payload: any = { ...rest, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false }; Object.keys(payload).forEach(k => { if (payload[k] === undefined) delete payload[k]; }); const newRef = await addDoc(collection(db, 'turnos'), payload); const newShift = { ...shift, id: newRef.id, isUnassigned: true }; if (onAudit) await onAudit('Baja anticipada (protocolo)', `${shift.employeeName} en ${shift.objectiveName} (${shift.positionName}). Puesto descubierto, protocolo activado.`, { objectiveName: shift.objectiveName, clientName: shift.clientName }); onVacancyCreated(newShift); };
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
 };
 
 const VECINOS_LABEL = '2. Intercambio (Vecinos < 2km)';
 
-const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
+const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) => {
     const [expanded, setExpanded] = useState<number | null>(3);
     const [loading, setLoading] = useState(false);
     if (!isOpen || !absenceShift) return null;
@@ -221,6 +242,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            const typeLabel = type === 'RETENTION' ? 'Retención/Doble turno' : type === 'SWAP' ? 'Intercambio' : type === 'LIBRE' ? 'Libre/Volante' : type === 'VOLANTE' ? 'Volante' : type;
+            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success(`Asignado: ${emp.fullName || emp.employeeName}`);
             onClose();
         } catch (e) {
@@ -248,6 +271,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            if (onAudit) onAudit('Adelanto de turno', `Adelantó ingreso de ${nextShift.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName})`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success('Turno adelantado');
             onClose();
         } catch (e) {
@@ -287,6 +311,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            if (onAudit) onAudit('Franco convocado', `Convocó franco trabajado: ${francoShift.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName})`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success('Franco convocado');
             onClose();
         } catch (e) {
@@ -429,7 +454,7 @@ const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName }: any) => { c
 const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 const WorkedDayOffModal = (props: any) => <WorkedDayOffModalPro {...props} />;
 
-const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, isCompact, selectedShiftId, onSelectShift }: any) => { 
+const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onSwitchToNoLlego, isCompact, selectedShiftId, onSelectShift }: any) => { 
     let statusColor = 'border-l-slate-400'; let statusBg = 'bg-white';
     let iconStatus = <Shield size={10}/>;
 
@@ -491,9 +516,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <div className="flex flex-col items-end gap-1">
                         {shift.isFranco && <div className="bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm">FRANCO</div>}
                         {shift.isUnassigned && !shift.isReportedToPlanning && <div className="bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm animate-pulse">DESCUBIERTO</div>}
-                        {shift.isAbsenceLike && viewTab === 'AUSENTES' && <div className="bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm">AUSENCIA</div>}
+                        {shift.isAbsenceLike && viewTab === 'AUSENTES' && <div className={`text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm ${shift.isAbsent ? 'bg-rose-600' : 'bg-amber-500'}`}>{shift.isAbsent ? 'AUSENCIA' : 'AÚN NO LLEGÓ'}</div>}
                         {shift.isLateArrival && viewTab !== 'AUSENTES' && <div className="bg-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm">NO LLEGO</div>}
-                        {shift.isAbsenceLike && viewTab !== 'AUSENTES' && !shift.isLateArrival && <div className="bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm">AUSENCIA</div>}
+                        {shift.isAbsenceLike && viewTab !== 'AUSENTES' && !shift.isLateArrival && <div className={`text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm ${shift.isAbsent ? 'bg-rose-600' : 'bg-amber-500'}`}>{shift.isAbsent ? 'AUSENCIA' : 'AÚN NO LLEGÓ'}</div>}
                         {showResolveBadge && <div className="bg-rose-700 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse shadow-sm">RESOLVER</div>}
                         
                         {shift.isReportedToPlanning && <div className="bg-slate-600 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm"><CornerUpLeft size={10}/> DEVUELTO</div>}
@@ -529,28 +554,38 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <Briefcase size={14}/> CONVOCAR
                         </button>
                     )}
+                    {/* Solapa NO LLEGO: Llegó (presente con llegada tarde) o Ausente (modal tratamiento). En NO_LLEGO siempre se puede dar presente para registrar horario de llegada. */}
                     {(viewTab === 'NO_LLEGO' || (viewTab === 'PRIORIDAD' && shift.isLateArrival)) && (
                         <>
                             <button
-                                onClick={(e) => { e.stopPropagation(); if (!canCheckIn) { toast.info('Fuera de ventana de presente.'); return; } onOpenHandover(shift); }}
-                                disabled={!canCheckIn}
-                                className={`flex-[2] py-2 rounded-lg text-[11px] font-bold uppercase shadow-sm flex items-center justify-center gap-1 transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (viewTab !== 'NO_LLEGO' && !canCheckIn) { toast.info('Fuera de ventana de presente.'); return; }
+                                    onOpenHandover(shift);
+                                }}
+                                disabled={viewTab !== 'NO_LLEGO' && !canCheckIn}
+                                className={`flex-[2] py-2 rounded-lg text-[11px] font-bold uppercase shadow-sm flex items-center justify-center gap-1 transition-colors ${(viewTab === 'NO_LLEGO' || canCheckIn) ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                                title={diff > 5 ? 'Registrar llegada tarde y horario de ingreso' : 'Dar presente'}
                             >
-                                <PlayCircle size={14}/> DAR PRESENTE
+                                <PlayCircle size={14}/> {diff > 5 ? 'LLEGÓ (Llegada tarde)' : 'LLEGÓ'}
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); onOpenAttendance(shift); }} className="flex-1 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg text-[11px] font-bold uppercase hover:bg-slate-50 flex items-center justify-center gap-1 shadow-sm"><AlertTriangle size={14}/> AUSENTE</button>
+                            <button onClick={(e) => { e.stopPropagation(); onOpenAttendance(shift); }} className="flex-1 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg text-[11px] font-bold uppercase hover:bg-slate-50 flex items-center justify-center gap-1 shadow-sm" title="Abrir modal de tratamiento de ausencias"><AlertTriangle size={14}/> AUSENTE</button>
                         </>
                     )}
-                    {(viewTab === 'AUSENTES' || (viewTab === 'PRIORIDAD' && shift.isAbsenceLike)) && !shift.isUnassigned && (
-                        <>
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onOpenCoverage(shift); }}
-                                className="flex-[2] py-2 bg-rose-600 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-rose-700 flex items-center justify-center gap-1 transition-colors"
-                            >
-                                <Siren size={14}/> CUBRIR
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); handleReport(e); }} className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-slate-800 flex items-center justify-center gap-1 transition-colors"><CornerUpLeft size={14}/> DEVOLVER</button>
-                        </>
+                    {/* En AUSENTES/PRIO: "Aún no llegó" clickeable → pasa a solapa NO LLEGO; ahí elige Llegó o Ausente. */}
+                    {(viewTab === 'AUSENTES' || (viewTab === 'PRIORIDAD' && shift.isAbsenceLike && !shift.isLateArrival)) && !shift.isUnassigned && !shift.isAbsent && (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onSwitchToNoLlego?.(); }}
+                            className="w-full py-2 rounded-lg text-[11px] font-bold uppercase border-2 border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 flex items-center justify-center gap-1 transition-colors"
+                            title="Ir a solapa Aún no llegó para elegir Llegó o Ausente"
+                        >
+                            <Clock size={14}/> AÚN NO LLEGÓ — Clic para ir a resolver
+                        </button>
+                    )}
+                    {/* Ausencia ya declarada: no mostrar CUBRIR/DEVOLVER (ya se dio solución en el modal). */}
+                    {(viewTab === 'AUSENTES' || (viewTab === 'PRIORIDAD' && shift.isAbsenceLike)) && !shift.isUnassigned && shift.isAbsent && (
+                        <div className="w-full py-2 text-center text-[11px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-lg">Ausencia registrada</div>
                     )}
                     {(shift.isUnassigned) && !shift.isReportedToPlanning && (viewTab === 'VACANTES' || viewTab === 'PRIORIDAD') && (
                         <><button onClick={(e) => { e.stopPropagation(); onOpenCoverage(shift); }} className="flex-[2] py-2 bg-rose-600 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-rose-700 flex items-center justify-center gap-1 transition-colors"><Siren size={14}/> CUBRIR</button><button onClick={(e) => { e.stopPropagation(); handleReport(e); }} className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-slate-800 flex items-center justify-center gap-1 transition-colors"><CornerUpLeft size={14}/> DEVOLVER</button></>
@@ -591,7 +626,7 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
             {expanded && (
                 <div className="p-2 bg-slate-50/50 space-y-2">
                     {group.items.map((s:any) => (
-                        <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} selectedShiftId={selectedShiftId} onSelectShift={onSelectShift} onOpenCheckout={(x:any)=>modals.setCheckoutData({isOpen:true, shift:x})} onOpenAttendance={(x:any)=>modals.setAttendanceData({isOpen:true, shift:x})} onOpenHandover={(x:any)=>modals.setHandoverData({isOpen:true, shift:x})} onOpenInterrupt={(x:any)=>modals.setInterruptData({isOpen:true, shift:x})} onOpenCoverage={(x:any)=>modals.setCoverageData({isOpen:true, shift:x})} onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}/>
+                        <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} selectedShiftId={selectedShiftId} onSelectShift={onSelectShift} onSwitchToNoLlego={modals.setViewTab ? () => modals.setViewTab('NO_LLEGO') : undefined} onOpenCheckout={(x:any)=>modals.setCheckoutData({isOpen:true, shift:x})} onOpenAttendance={(x:any)=>modals.setAttendanceData({isOpen:true, shift:x})} onOpenHandover={(x:any)=>modals.setHandoverData({isOpen:true, shift:x})} onOpenInterrupt={(x:any)=>modals.setInterruptData({isOpen:true, shift:x})} onOpenCoverage={(x:any)=>modals.setCoverageData({isOpen:true, shift:x})} onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}/>
                     ))}
                 </div>
             )}
@@ -601,6 +636,8 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
 
 export default function OperacionesPage() {
     const logic = useOperacionesMonitor();
+    // Bitácora: solo acciones del operador (módulo OPERACIONES), sin planificación ni otros módulos
+    const bitacoraLogs = useMemo(() => (logic.recentLogs || []).filter((l: any) => String(l.module || '').toUpperCase() === 'OPERACIONES'), [logic.recentLogs]);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [checkoutData, setCheckoutData] = useState({isOpen: false, shift: null} as any);
     const [attendanceData, setAttendanceData] = useState({isOpen: false, shift: null} as any);
@@ -612,6 +649,26 @@ export default function OperacionesPage() {
     const [solicitudes, setSolicitudes] = useState([] as any[]);
     const [showHelp, setShowHelp] = useState(false);
     const [selectedShiftId, setSelectedShiftId] = useState(null as string | null);
+    const [bitacoraColWidths, setBitacoraColWidths] = useState([72, 100, 100, 140, 220]);
+    const [bitacoraResizing, setBitacoraResizing] = useState<number | null>(null);
+    const [nvrAlerts, setNvrAlerts] = useState<any[]>([]);
+
+    const handleBitacoraResize = (colIndex: number, delta: number) => {
+        setBitacoraColWidths(prev => {
+            const next = [...prev];
+            const w = Math.max(40, next[colIndex] + delta);
+            next[colIndex] = w;
+            return next;
+        });
+    };
+
+    useEffect(() => {
+        if (bitacoraResizing === null) return;
+        const onMove = (e: MouseEvent) => handleBitacoraResize(bitacoraResizing, e.movementX);
+        const onUp = () => setBitacoraResizing(null);
+        window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+        return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    }, [bitacoraResizing]);
 
     // Solicitudes de presente (CHECKIN_REQUEST, ABSENCE_ALERT) desde novedades
     useEffect(() => {
@@ -635,9 +692,21 @@ export default function OperacionesPage() {
         return () => unsub();
     }, []);
 
+    // Alertas NVR (IVS) pendientes para mostrarlas en el mapa
+    useEffect(() => {
+        const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
+        const unsub = onSnapshot(q, (snap) => {
+            const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), objective_id: d.data().objective_id }));
+            list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
+            setNvrAlerts(list.slice(0, 50));
+        });
+        return () => unsub();
+    }, []);
+
     const handleAcknowledgeAbsence = async (e: any) => {
         try {
             await updateDoc(doc(db, 'novedades', e.id), { status: 'RECEIVED', receivedAt: serverTimestamp() });
+            await registrarBitacora('Novedad vista', `Marcó como visto: ${e.type || 'novedad'} ${e.description || e.id || ''}`);
             toast.success('Marcado como visto');
         } catch {
             toast.error('Error al marcar visto');
@@ -669,6 +738,7 @@ export default function OperacionesPage() {
                 resolvedAt: serverTimestamp(),
                 resolvedBy: getAuth().currentUser?.uid ?? null
             });
+            await registrarBitacora('Presente aprobado', `Aprobó ingreso/presente para turno ${e.shiftId || ''}`);
             toast.success('Presente aprobado');
         } catch (err) {
             console.error(err);
@@ -686,6 +756,7 @@ export default function OperacionesPage() {
                 resolvedAt: serverTimestamp(),
                 resolvedBy: getAuth().currentUser?.uid ?? null
             });
+            await registrarBitacora('Solicitud rechazada', `Rechazó solicitud de presente para turno ${e.shiftId || ''}`);
             toast.success('Solicitud rechazada');
         } catch (err) {
             console.error(err);
@@ -694,8 +765,8 @@ export default function OperacionesPage() {
     };
 
     const handleUndockMap = () => { window.open('/admin/operaciones/map-view', 'CronoMapTactical', 'width=1200,height=800,menubar=no,toolbar=no,location=no,status=no'); setIsExternalMap(true); };
-    const generateDailyReport = () => { const doc = new jsPDF(); const dateStr = new Date().toLocaleDateString('es-AR', {timeZone: 'America/Argentina/Cordoba'}); doc.setFontSize(18); doc.text("Informe de Gestión COSP", 14, 20); doc.setFontSize(10); doc.text(`Fecha: ${new Date().toLocaleString('es-AR', {timeZone: 'America/Argentina/Cordoba'})}`, 14, 30); const validLogs = logic.recentLogs.filter((log: any) => log.formattedActor !== 'VACANTE'); const rows = validLogs.map((log: any) => [formatTimeSimple(log.time), (log.action || 'LOG').replace('MANUAL_', ''), log.formattedActor || 'Sistema', log.targetEmployee || '-', log.fullDetail || log.details || '-']); autoTable(doc, { head: [["Hora", "Evento", "Operador", "Objetivo", "Detalle"]], body: rows, startY: 50, styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42] } }); doc.save(`bitacora_${dateStr}.pdf`); };
-    const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
+    const generateDailyReport = () => { const doc = new jsPDF(); const dateStr = new Date().toLocaleDateString('es-AR', {timeZone: 'America/Argentina/Cordoba'}); doc.setFontSize(18); doc.text("Informe de Gestión COSP", 14, 20); doc.setFontSize(10); doc.text(`Fecha: ${new Date().toLocaleString('es-AR', {timeZone: 'America/Argentina/Cordoba'})}`, 14, 30); const validLogs = bitacoraLogs.filter((log: any) => log.formattedActor !== 'VACANTE'); const rows = validLogs.map((log: any) => [formatTimeSimple(log.time), (log.action || 'LOG').replace('MANUAL_', ''), log.formattedActor || 'Sistema', log.objectiveName || '-', log.fullDetail || log.details || '-']); autoTable(doc, { head: [["Hora", "Evento", "Operador", "Objetivo", "Detalle"]], body: rows, startY: 50, styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42] } }); doc.save(`bitacora_${dateStr}.pdf`); };
+    const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); await registrarBitacora('Marcó ausente', `${shift.employeeName} en ${shift.objectiveName || 'objetivo'} (${shift.positionName || 'puesto'}). No se presentó.`, { objectiveName: shift.objectiveName, clientName: shift.clientName }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
     const handleReportPlanning = async (shift: any) => { 
         try { 
@@ -789,7 +860,7 @@ export default function OperacionesPage() {
         return Object.values(groups).sort((a:any, b:any) => (a.client || '').localeCompare(b.client || ''));
     }, [logic.listData, isGrouped]);
 
-    const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
+    const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setViewTab: logic.setViewTab };
     const tabs = [
         { id: 'PRIORIDAD', label: 'PRIO', count: logic.stats.prioridad, color: 'text-rose-600' },
         { id: 'NO_LLEGO', label: 'NO LLEGO', count: logic.stats.no_llego, color: 'text-amber-600' },
@@ -801,14 +872,38 @@ export default function OperacionesPage() {
         { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
-    // En el mapa incrustado, ocultar objetivos sin datos en la solapa activa.
-    // (en modo "lista", no existe 'TODOS', pero igual dejamos el fallback seguro)
+    // Objetivos que tienen coordenadas (para fallback del mapa)
+    const objectivesWithCoords = useMemo(() => (logic.objectives || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))), [logic.objectives]);
+    // Vacantes reportadas o devueltas a planificación (mismo día) para mostrarlas en el mapa
+    const reportedOrReturnedShifts = useMemo(() => {
+        const now = new Date();
+        const sameDay = (d: Date) => d && now.toLocaleDateString('en-CA') === d.toLocaleDateString('en-CA');
+        return (logic.processedData || []).filter((s: any) => s.isUnassigned && s.isReportedToPlanning && s.shiftDateObj && sameDay(s.shiftDateObj instanceof Date ? s.shiftDateObj : new Date(s.shiftDateObj?.seconds ? s.shiftDateObj.seconds * 1000 : s.shiftDateObj)));
+    }, [logic.processedData]);
+    const reportedObjectiveIds = useMemo(() => new Set(reportedOrReturnedShifts.map((s: any) => s.objectiveId).filter(Boolean)), [reportedOrReturnedShifts]);
+    // Shifts para el mapa: lista de la solapa + vacantes reportadas/devueltas (para que aparezcan en el mapa con su estado)
+    const shiftsForMap = useMemo(() => {
+        const listIds = new Set((logic.listData || []).map((s: any) => s.id));
+        const reported = reportedOrReturnedShifts.filter((s: any) => !listIds.has(s.id));
+        return [...(logic.listData || []), ...reported];
+    }, [logic.listData, reportedOrReturnedShifts]);
+    // En el mapa: objetivos de la solapa + objetivos con alertas NVR + objetivos con vacantes reportadas/devueltas
     const objectivesForMap = useMemo(() => {
         const tab = logic.viewTab as any;
-        if (tab === 'TODOS') return logic.filteredObjectives;
-        const ids = new Set((logic.listData || []).map((s:any) => s.objectiveId).filter(Boolean));
-        return (logic.filteredObjectives || []).filter((o:any) => ids.has(o.id));
-    }, [logic.filteredObjectives, logic.listData, logic.viewTab]);
+        const base = logic.filteredObjectives || [];
+        const allObjs = logic.objectives || [];
+        const alertObjIds = new Set((nvrAlerts || []).map((a: any) => a.objective_id).filter(Boolean));
+        const withAlerts = allObjs.filter((o: any) => alertObjIds.has(o.id));
+        if (tab === 'TODOS') return allObjs.length ? allObjs : base;
+        const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
+        const fromTab = base.filter((o: any) => ids.has(o.id));
+        const withReported = allObjs.filter((o: any) => reportedObjectiveIds.has(o.id));
+        const combined = fromTab.length ? fromTab : base;
+        const extra = withAlerts.filter((o: any) => !combined.some((c: any) => c.id === o.id));
+        const extraReported = withReported.filter((o: any) => !combined.some((c: any) => c.id === o.id) && !extra.some((e: any) => e.id === o.id));
+        const result = [...combined, ...extra, ...extraReported];
+        return result.length ? result : objectivesWithCoords;
+    }, [logic.filteredObjectives, logic.listData, logic.viewTab, nvrAlerts, logic.objectives, objectivesWithCoords, reportedObjectiveIds]);
 
     const Layout = DashboardLayout;
     const layout =
@@ -820,11 +915,13 @@ export default function OperacionesPage() {
             <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">
                 {!isExternalMap && (
                     <div className="flex-1 lg:flex-[3] bg-slate-100 rounded-3xl border border-slate-200 overflow-hidden relative shadow-inner">
-                        {/* 🛑 V184 FIX: MAPA CON ALL OBJECTIVES FILTRADOS */}
+                        {/* Mapa filtra por solapa: objectivesForMap = objetivos con datos en la solapa activa; key fuerza actualización al cambiar tab */}
                         <OperacionesMap 
+                            key={`ops-map-${logic.viewTab}-${(objectivesForMap || []).map((o:any)=>o.id).sort().join(',').slice(0,120)}`}
                             center={[-31.4201, -64.1888]} 
-                            allObjectives={objectivesForMap} 
-                            filteredShifts={logic.listData} 
+                            allObjectives={(objectivesForMap || []).some((o: any) => Number.isFinite(Number(o?.lat)) && Number.isFinite(Number(o?.lng))) ? objectivesForMap : objectivesWithCoords} 
+                            filteredShifts={shiftsForMap}
+                            nvrAlerts={nvrAlerts}
                             onOpenCoverage={(s:any)=> { if (s.isReportedToPlanning) { toast.info("Vacante ya devuelta."); return; } setCoverageData({isOpen:true, shift:s}); }} 
                             onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
                             onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 
@@ -906,11 +1003,46 @@ export default function OperacionesPage() {
                     <div className="flex-1 overflow-y-auto p-3 bg-slate-50/50 space-y-2">
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> : 
                             isGrouped ? (groupedList.map((group: any) => <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} selectedShiftId={selectedShiftId} onSelectShift={(s:any)=>setSelectedShiftId(s?.id ?? null)}/>)) : 
-                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} selectedShiftId={selectedShiftId} onSelectShift={(x:any)=>setSelectedShiftId(x?.id ?? null)} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { if (s.isReportedToPlanning) { toast.info("Vacante ya devuelta."); return; } setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}/>))
+                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} selectedShiftId={selectedShiftId} onSelectShift={(x:any)=>setSelectedShiftId(x?.id ?? null)} onSwitchToNoLlego={() => logic.setViewTab('NO_LLEGO')} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { if (s.isReportedToPlanning) { toast.info("Vacante ya devuelta."); return; } setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}/>))
                         }
                     </div>
 
-                    <div className="h-40 border-t border-slate-200 bg-white flex flex-col"><div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between"><div className="flex items-center gap-2"><ClipboardList size={14} className="text-slate-400"/><h3 className="text-[10px] font-black uppercase text-slate-500">Bitácora</h3></div><button onClick={generateDailyReport} className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg"><Printer size={12}/></button></div><div className="flex-1 overflow-y-auto p-0"><table className="w-full text-[10px] text-left"><thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0"><tr><th className="px-4 py-1">Hora</th><th className="px-2 py-1">Evento</th><th className="px-2 py-1">Actor</th><th className="px-2 py-1">Detalle</th></tr></thead><tbody className="divide-y divide-slate-50">{logic.recentLogs.map((log:any) => (<tr key={log.id}><td className="px-4 py-1 font-mono text-slate-400">{formatTimeSimple(log.time)}</td><td className="px-2 py-1 font-bold">{log.action}</td><td className="px-2 py-1">{log.formattedActor}</td><td className="px-2 py-1 text-slate-500 truncate max-w-[150px]">{log.fullDetail}</td></tr>))}</tbody></table></div></div>
+                    <div className="h-40 border-t border-slate-200 bg-white flex flex-col"><div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between"><div className="flex items-center gap-2"><ClipboardList size={14} className="text-slate-400"/><h3 className="text-[10px] font-black uppercase text-slate-500">Bitácora</h3></div><button onClick={generateDailyReport} className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg"><Printer size={12}/></button></div><div className="flex-1 overflow-y-auto p-0">
+                            <table className="w-full text-[10px] text-left" style={{ tableLayout: 'fixed' }}>
+                                <colgroup>
+                                    {bitacoraColWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
+                                </colgroup>
+                                <thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0">
+                                    <tr>
+                                        {['Hora', 'Evento', 'Actor', 'Objetivo', 'Detalle'].map((label, i) => (
+                                            <th key={i} className="px-2 py-1 relative select-none" style={{ width: bitacoraColWidths[i] }}>
+                                                {label}
+                                                {i < 4 && (
+                                                    <span
+                                                        className="absolute top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-200 right-0"
+                                                        onMouseDown={() => setBitacoraResizing(i)}
+                                                        title="Arrastrar para redimensionar"
+                                                    />
+                                                )}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {bitacoraLogs.length === 0 ? (
+                                        <tr><td colSpan={5} className="px-4 py-3 text-center text-slate-400 text-[10px] italic">No hay movimientos de operaciones (últimos 2 días). Las acciones que hagas aquí se verán en la bitácora.</td></tr>
+                                    ) : bitacoraLogs.map((log: any) => (
+                                        <tr key={log.id}>
+                                            <td className="px-2 py-1 font-mono text-slate-400 truncate">{formatTimeSimple(log.time)}</td>
+                                            <td className="px-2 py-1 font-bold truncate">{log.action}</td>
+                                            <td className="px-2 py-1 truncate">{log.formattedActor}</td>
+                                            <td className="px-2 py-1 text-slate-600 truncate" title={log.objectiveName || ''}>{log.objectiveName || '-'}</td>
+                                            <td className="px-2 py-1 text-slate-500 truncate" title={log.fullDetail}>{log.fullDetail}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div></div>
                 </div>
             </div>
             
@@ -922,7 +1054,7 @@ export default function OperacionesPage() {
                 availableShifts={logic.processedData}
                 referenceDate={logic.now}
             />
-            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
+            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={async (nov:string|null) => { if (checkoutData.shift?.id) { await logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); await registrarBitacora('Salida registrada', `Registró salida de ${checkoutData.shift?.employeeName || 'Guardia'} en ${checkoutData.shift?.objectiveName || 'objetivo'} (${checkoutData.shift?.positionName || ''})${nov ? '. Novedad: ' + nov : ''}`, { objectiveName: checkoutData.shift?.objectiveName, clientName: checkoutData.shift?.clientName }); } }} employeeName={checkoutData.shift?.employeeName} />
             <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
             
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />

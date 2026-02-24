@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.simulateNvrAlert = exports.onAlertCreated = exports.nvrAlert = exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const main_1 = require("./main");
@@ -474,4 +474,10 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
+var nvrAlert_1 = require("./nvr/nvrAlert");
+Object.defineProperty(exports, "nvrAlert", { enumerable: true, get: function () { return nvrAlert_1.nvrAlert; } });
+var onAlertCreated_1 = require("./nvr/onAlertCreated");
+Object.defineProperty(exports, "onAlertCreated", { enumerable: true, get: function () { return onAlertCreated_1.onAlertCreated; } });
+var simulateNvrAlert_1 = require("./nvr/simulateNvrAlert");
+Object.defineProperty(exports, "simulateNvrAlert", { enumerable: true, get: function () { return simulateNvrAlert_1.simulateNvrAlert; } });
 //# sourceMappingURL=index.js.map

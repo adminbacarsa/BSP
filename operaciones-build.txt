@@ -1,0 +1,2344 @@
+﻿(self.webpackChunk_N_E = self.webpackChunk_N_E || []).push([
+    [246], {
+        76584: function(e, t, a) {
+            (window.__NEXT_P = window.__NEXT_P || []).push(["/admin/operaciones", function() {
+                return a(70546)
+            }])
+        },
+        43475: function(e, t, a) {
+            "use strict";
+            a.d(t, {
+                Z: function() {
+                    return DashboardLayout
+                }
+            });
+            var s = a(85893),
+                n = a(67294),
+                i = a(41664),
+                o = a.n(i),
+                l = a(11163),
+                r = a(41503),
+                d = a(28477),
+                c = a(2753),
+                p = a(64712),
+                x = a(54463),
+                m = a(41352),
+                u = a(39483),
+                b = a(72367),
+                h = a(34622),
+                f = a(28909),
+                g = a(81629),
+                v = a(49525),
+                j = a(71408),
+                N = a(78051),
+                A = a(77232);
+
+            function DashboardLayout(e) {
+                let {
+                    children: t
+                } = e, [a, i] = (0, n.useState)(!0), w = (0, l.useRouter)(), {
+                    user: E
+                } = (0, r.a)(), handleLogout = async () => {
+                    try {
+                        await (0, c.w7)(d.I8), window.location.href = "/login"
+                    } catch (e) {
+                        console.error("Error cerrando sesi\xf3n:", e)
+                    }
+                }, isActive = e => w.pathname.startsWith(e), getLinkClass = function(e) {
+                    let t = arguments.length > 1 && void 0 !== arguments[1] && arguments[1],
+                        s = "flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm ".concat(a ? "" : "justify-center px-2");
+                    return isActive(e) ? "".concat(s, " bg-indigo-600 text-white shadow-lg shadow-indigo-900/50") : t ? "".concat(s, " bg-rose-600/10 text-rose-400 hover:bg-rose-600 hover:text-white border border-rose-900/50 hover:border-rose-500") : "".concat(s, " text-slate-300 hover:bg-slate-800 hover:text-white")
+                };
+                return (0, s.jsxs)("div", {
+                    className: "min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300 flex",
+                    children: [(0, s.jsx)(p.x7, {
+                        position: "top-right",
+                        richColors: !0,
+                        closeButton: !0,
+                        expand: !0
+                    }), (0, s.jsxs)("aside", {
+                        className: "fixed top-0 left-0 z-40 h-screen transition-all duration-300 bg-slate-900 text-white border-r border-slate-800 flex flex-col\n        ".concat(a ? "w-64 translate-x-0" : "w-20 -translate-x-full lg:translate-x-0", " \n        "),
+                        children: [(0, s.jsxs)("div", {
+                            className: "p-6 flex items-center ".concat(a ? "justify-between" : "justify-center", " shrink-0"),
+                            children: [a ? (0, s.jsx)("span", {
+                                className: "text-xl font-black tracking-tighter text-indigo-400",
+                                children: "CRONOAPP"
+                            }) : (0, s.jsx)(x.Z, {
+                                className: "text-indigo-400"
+                            }), (0, s.jsx)("button", {
+                                onClick: () => i(!1),
+                                className: "lg:hidden text-slate-400 hover:text-white",
+                                children: (0, s.jsx)(m.Z, {})
+                            })]
+                        }), (0, s.jsxs)("nav", {
+                            className: "px-3 space-y-2 mt-4 flex-1 overflow-y-auto custom-scrollbar",
+                            children: [a && (0, s.jsx)("div", {
+                                className: "px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest",
+                                children: "Operativa"
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/dashboard",
+                                className: getLinkClass("/admin/dashboard"),
+                                title: "Dashboard",
+                                children: [(0, s.jsx)(u.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Dashboard"
+                                })]
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/operaciones",
+                                className: getLinkClass("/admin/operaciones", !0),
+                                title: "Centro Control",
+                                children: [(0, s.jsx)(b.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Centro Control"
+                                })]
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/planificacion",
+                                className: getLinkClass("/admin/planificacion"),
+                                title: "Planificador",
+                                children: [(0, s.jsx)(h.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Planificador"
+                                })]
+                            }), a && (0, s.jsx)("div", {
+                                className: "px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4",
+                                children: "Gesti\xf3n"
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/crm",
+                                className: getLinkClass("/admin/crm"),
+                                title: "CRM Clientes",
+                                children: [(0, s.jsx)(f.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "CRM Clientes"
+                                })]
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/servicios",
+                                className: getLinkClass("/admin/servicios"),
+                                title: "Servicios",
+                                children: [(0, s.jsx)(x.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Servicios"
+                                })]
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/reportes",
+                                className: getLinkClass("/admin/reportes"),
+                                title: "Reportes",
+                                children: [(0, s.jsx)(g.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Reportes"
+                                })]
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/rrhh",
+                                className: getLinkClass("/admin/rrhh"),
+                                title: "RRHH",
+                                children: [(0, s.jsx)(v.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "RRHH"
+                                })]
+                            }), a && (0, s.jsx)("div", {
+                                className: "px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4",
+                                children: "Sistema"
+                            }), (0, s.jsxs)(o(), {
+                                href: "/admin/configuracion",
+                                className: getLinkClass("/admin/configuracion"),
+                                title: "Configuraci\xf3n",
+                                children: [(0, s.jsx)(j.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Configuraci\xf3n"
+                                })]
+                            })]
+                        }), (0, s.jsx)("div", {
+                            className: "p-4 border-t border-slate-800 shrink-0 flex flex-col gap-2",
+                            children: (0, s.jsxs)("button", {
+                                onClick: handleLogout,
+                                className: "w-full flex items-center justify-center gap-3 px-4 py-3 text-rose-400 hover:bg-rose-900/20 hover:text-rose-300 rounded-xl transition-all font-medium text-sm",
+                                title: "Cerrar Sesi\xf3n",
+                                children: [(0, s.jsx)(N.Z, {
+                                    size: 20
+                                }), " ", a && (0, s.jsx)("span", {
+                                    children: "Salir"
+                                })]
+                            })
+                        })]
+                    }), (0, s.jsxs)("div", {
+                        className: "flex-1 transition-all duration-300 ".concat(a ? "lg:ml-64" : "lg:ml-20"),
+                        children: [(0, s.jsxs)("div", {
+                            className: "bg-white dark:bg-slate-800 p-4 shadow-sm border-b border-slate-200 dark:border-slate-700 flex items-center gap-4 sticky top-0 z-30",
+                            children: [(0, s.jsx)("button", {
+                                onClick: () => i(!a),
+                                className: "p-2 rounded-lg hover:bg-slate-100 text-slate-600 dark:text-slate-200 transition-colors",
+                                children: (0, s.jsx)(A.Z, {
+                                    size: 24
+                                })
+                            }), (0, s.jsx)("span", {
+                                className: "font-black text-slate-700 dark:text-white uppercase tracking-tight",
+                                children: a ? "Panel de Control" : "CronoApp"
+                            })]
+                        }), (0, s.jsx)("main", {
+                            className: "p-4 lg:p-8",
+                            children: t
+                        })]
+                    })]
+                })
+            }
+        },
+        48185: function(e, t, a) {
+            "use strict";
+            a.d(t, {
+                o: function() {
+                    return s
+                }
+            });
+            let s = "\n    /* ANIMACIONES */\n    @keyframes pulse-ring { 0% { transform: scale(0.33); opacity: 1; } 80%, 100% { transform: scale(2.5); opacity: 0; } }\n    @keyframes pulse-dot { 0% { transform: scale(0.8); } 50% { transform: scale(1); } 100% { transform: scale(0.8); } }\n    \n    .marker-alert-container { position: relative; width: 30px; height: 30px; }\n    .marker-alert-ring { position: absolute; height: 30px; width: 30px; border-radius: 50%; background-color: rgba(225, 29, 72, 0.6); animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }\n    .marker-alert-dot { position: absolute; left: 0; top: 0; height: 30px; width: 30px; background-color: #e11d48; border: 2px solid white; border-radius: 50%; color: white; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); animation: pulse-dot 1.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) -0.4s infinite; }\n\n    /* TOOLTIPS DARK GLASS */\n    .leaflet-tooltip { background: transparent !important; border: none !important; box-shadow: none !important; }\n    .leaflet-tooltip.custom-tooltip {\n        background-color: #0f172a !important;\n        border: 1px solid rgba(255,255,255,0.2) !important;\n        color: #f8fafc !important;\n        font-family: ui-sans-serif, system-ui, sans-serif !important;\n        font-weight: 800 !important;\n        font-size: 11px !important;\n        text-transform: uppercase !important;\n        border-radius: 6px !important;\n        padding: 5px 10px !important;\n        box-shadow: 0 4px 15px rgba(0,0,0,0.5) !important;\n        white-space: nowrap !important;\n    }\n    .leaflet-tooltip-top:before { border-top-color: #0f172a !important; }\n\n    /* TARJETAS POPUP PRO */\n    .leaflet-popup-content-wrapper { padding: 0 !important; border-radius: 12px !important; overflow: hidden !important; background: white !important; }\n    .leaflet-popup-content { margin: 0 !important; width: 300px !important; font-family: ui-sans-serif, system-ui, sans-serif !important; }\n    \n    .pop-header { padding: 16px; color: white; position: relative; display: flex; justify-content: space-between; align-items: flex-start; }\n    .pop-header.normal { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }\n    .pop-header.alert { background: linear-gradient(135deg, #be123c 0%, #881337 100%); }\n    \n    .pop-info { display: flex; align-items: center; gap: 10px; }\n    .pop-badges { display: flex; gap: 5px; position: absolute; bottom: 12px; right: 12px; }\n    \n    .pop-badge { \n        background: rgba(255,255,255,0.9); color: #334155; \n        font-size: 9px; font-weight: 800; padding: 3px 8px; \n        border-radius: 12px; display: flex; align-items: center; gap: 3px;\n        box-shadow: 0 2px 4px rgba(0,0,0,0.1);\n    }\n    .pop-badge.alert { color: #e11d48; background: #fff; }\n\n    .pop-body { padding: 16px; max-height: 250px; overflow-y: auto; background: #fff; }\n    \n    .pop-address { \n        font-size: 10px; color: #64748b; margin-bottom: 12px; \n        display: flex; align-items: center; gap: 4px; background: #f8fafc;\n        padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;\n    }\n\n    .pop-row { \n        background: #fff; border: 1px solid #e2e8f0; border-left-width: 4px; \n        border-radius: 8px; padding: 10px; margin-bottom: 8px; \n        box-shadow: 0 1px 2px rgba(0,0,0,0.02); transition: all 0.2s;\n    }\n    .pop-row:hover { transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }\n    .pop-row.present { border-left-color: #10b981; }\n    .pop-row.absent { border-left-color: #94a3b8; opacity: 0.6; background: #f8fafc; }\n    .pop-row.late { border-left-color: #e11d48; background: #fff1f2; }\n    .pop-row.expired { border-left-color: #64748b; background: #f1f5f9; opacity: 0.8; }\n    .pop-row.overdue { border-left-color: #ef4444; background: #fef2f2; animation: pulse-soft 2s infinite; }\n\n    .pop-row-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }\n    .pop-name { font-weight: 700; font-size: 12px; color: #334155; display: flex; align-items: center; gap: 5px; }\n    \n    .pop-tag { font-size: 8px; padding: 2px 5px; border-radius: 4px; font-weight: bold; color: white; text-transform: uppercase; }\n    .pop-tag.late { background: #e11d48; }\n    .pop-tag.on { background: #10b981; }\n    .pop-tag.exp { background: #64748b; }\n    .pop-tag.over { background: #ef4444; }\n\n    .pop-time { font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 4px; background: #f1f5f9; padding: 3px 6px; border-radius: 4px; width: fit-content; margin-bottom: 10px; }\n\n    .pop-actions { display: flex; gap: 6px; }\n    .pop-btn { \n        border: none; border-radius: 6px; padding: 8px 10px; \n        font-size: 10px; font-weight: 700; cursor: pointer; \n        text-transform: uppercase; color: white; flex: 1; transition: opacity 0.2s;\n    }\n    .pop-btn:hover { opacity: 0.9; }\n    .btn-checkin { background: #4f46e5; }\n    .btn-checkout { background: #7e22ce; }\n    .btn-alert { background: #e11d48; }\n    .btn-nov { background: #fff; color: #475569; border: 1px solid #cbd5e1; flex: 0 0 auto; }\n    .btn-nov:hover { background: #f1f5f9; }\n\n    @keyframes pulse-soft { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }\n"
+        },
+        70546: function(e, t, a) {
+            "use strict";
+            a.r(t), a.d(t, {
+                default: function() {
+                    return OperacionesPage
+                }
+            });
+            var s = a(85893),
+                n = a(67294),
+                i = a(9008),
+                o = a.n(i),
+                l = a(5152),
+                r = a.n(l),
+                d = a(43475),
+                c = a(84979),
+                p = a(8971),
+                x = a(12652),
+                m = a(5097),
+                u = a(19769),
+                b = a(45077),
+                h = a(87966),
+                f = a(41352),
+                g = a(19931),
+                v = a(51853),
+                j = a(39455),
+                N = a(46309),
+                A = a(54976),
+                w = a(8222),
+                E = a(13756),
+                y = a(34622),
+                C = a(4171),
+                O = a(78051),
+                R = a(64998),
+                I = a(84221),
+                T = a(72367),
+                S = a(14199),
+                k = a(57928),
+                D = a(77480),
+                P = a(87764),
+                L = a(22295),
+                U = a(29445),
+                B = a(64712),
+                z = a(27431),
+                V = a(48185),
+                F = a(10477),
+                Z = a(46841),
+                M = a(31034),
+                _ = a(28477),
+                G = a(2753);
+            let J = r()(() => Promise.all([a.e(269), a.e(513)]).then(a.bind(a, 33513)), {
+                    loadableGenerated: {
+                        webpack: () => [33513]
+                    },
+                    loading: () => (0, s.jsx)("div", {
+                        className: "h-full flex items-center justify-center text-slate-400",
+                        children: "Cargando Mapa..."
+                    }),
+                    ssr: !1
+                }),
+                toDate = e => e ? e instanceof Date ? e : new Date(e.seconds ? 1e3 * e.seconds : e) : new Date,
+                formatTimeSimple = e => {
+                    try {
+                        return toDate(e).toLocaleTimeString("es-AR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            timeZone: "America/Argentina/Cordoba"
+                        })
+                    } catch (e) {
+                        return "-"
+                    }
+                },
+                formatDateShort = e => {
+                    try {
+                        return toDate(e).toLocaleDateString("es-AR", {
+                            weekday: "short",
+                            day: "2-digit",
+                            month: "2-digit",
+                            timeZone: "America/Argentina/Cordoba"
+                        }).toUpperCase()
+                    } catch (e) {
+                        return "--/--"
+                    }
+                },
+                formatTimeRange = (e, t) => {
+                    try {
+                        return "".concat(toDate(e).toLocaleTimeString("es-AR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            timeZone: "America/Argentina/Cordoba"
+                        }), " - ").concat(toDate(t).toLocaleTimeString("es-AR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            timeZone: "America/Argentina/Cordoba"
+                        }))
+                    } catch (e) {
+                        return "--:--"
+                    }
+                },
+                isSameDay = (e, t) => !!e && !!t && toDate(e).toLocaleDateString("en-CA") === toDate(t).toLocaleDateString("en-CA"),
+                calculateDistance = (e, t, a, s) => {
+                    if (null == e || null == t || null == a || null == s) return 1 / 0;
+                    let n = (a - e) * (Math.PI / 180),
+                        i = (s - t) * (Math.PI / 180),
+                        o = Math.sin(n / 2) * Math.sin(n / 2) + Math.cos(e * (Math.PI / 180)) * Math.cos(a * (Math.PI / 180)) * Math.sin(i / 2) * Math.sin(i / 2);
+                    return 6371 * (2 * Math.atan2(Math.sqrt(o), Math.sqrt(1 - o)))
+                },
+                estimateEta = e => Math.round(e / 30 * 60),
+                getCoordsFrom = e => {
+                    var t, a, s, n, i, o, l, r, d, c, p, x, m, u, b, h, f, g, v, j, N, A, w, E, y, C, O, R, I, T;
+                    if (!e) return {
+                        lat: null,
+                        lng: null
+                    };
+                    let S = null !== (A = null !== (N = null !== (j = null !== (v = null !== (g = null !== (f = null !== (h = null !== (b = null == e ? void 0 : e.employeeLat) && void 0 !== b ? b : null == e ? void 0 : e.lat) && void 0 !== h ? h : null == e ? void 0 : null === (t = e.location) || void 0 === t ? void 0 : t.lat) && void 0 !== f ? f : null == e ? void 0 : null === (a = e.coords) || void 0 === a ? void 0 : a.lat) && void 0 !== g ? g : null == e ? void 0 : null === (s = e.geo) || void 0 === s ? void 0 : s.lat) && void 0 !== v ? v : null == e ? void 0 : null === (n = e.geoLocation) || void 0 === n ? void 0 : n.lat) && void 0 !== j ? j : null == e ? void 0 : null === (i = e.lastLocation) || void 0 === i ? void 0 : i.lat) && void 0 !== N ? N : null == e ? void 0 : null === (o = e.lastCoords) || void 0 === o ? void 0 : o.lat) && void 0 !== A ? A : null == e ? void 0 : null === (l = e.lastGeo) || void 0 === l ? void 0 : l.lat,
+                        k = null !== (T = null !== (I = null !== (R = null !== (O = null !== (C = null !== (y = null !== (E = null !== (w = null == e ? void 0 : e.employeeLng) && void 0 !== w ? w : null == e ? void 0 : e.lng) && void 0 !== E ? E : null == e ? void 0 : null === (r = e.location) || void 0 === r ? void 0 : r.lng) && void 0 !== y ? y : null == e ? void 0 : null === (d = e.coords) || void 0 === d ? void 0 : d.lng) && void 0 !== C ? C : null == e ? void 0 : null === (c = e.geo) || void 0 === c ? void 0 : c.lng) && void 0 !== O ? O : null == e ? void 0 : null === (p = e.geoLocation) || void 0 === p ? void 0 : p.lng) && void 0 !== R ? R : null == e ? void 0 : null === (x = e.lastLocation) || void 0 === x ? void 0 : x.lng) && void 0 !== I ? I : null == e ? void 0 : null === (m = e.lastCoords) || void 0 === m ? void 0 : m.lng) && void 0 !== T ? T : null == e ? void 0 : null === (u = e.lastGeo) || void 0 === u ? void 0 : u.lng;
+                    return {
+                        lat: S,
+                        lng: k
+                    }
+                },
+                SectionList = e => {
+                    let {
+                        title: t,
+                        color: a,
+                        expanded: n,
+                        onToggle: i,
+                        items: o,
+                        onAction: l,
+                        onWhatsapp: r,
+                        onPhone: d,
+                        context: b
+                    } = e, h = {
+                        cyan: {
+                            border: "border-cyan-200",
+                            dot: "bg-cyan-500",
+                            text: "text-cyan-700",
+                            bg: "bg-cyan-50",
+                            btn: "bg-cyan-600 hover:bg-cyan-700"
+                        },
+                        purple: {
+                            border: "border-purple-200",
+                            dot: "bg-purple-500",
+                            text: "text-purple-700",
+                            bg: "bg-purple-50",
+                            btn: "bg-purple-600 hover:bg-purple-700"
+                        },
+                        slate: {
+                            border: "border-slate-200",
+                            dot: "bg-slate-400",
+                            text: "text-slate-600",
+                            bg: "bg-white",
+                            btn: "bg-slate-800 hover:bg-slate-900"
+                        }
+                    }, f = h[a] || h.slate;
+                    return (0, s.jsxs)("section", {
+                        className: "relative pl-6 border-l-2 ".concat(f.border),
+                        children: [" ", (0, s.jsx)("div", {
+                            className: "absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 border-white ".concat(f.dot)
+                        }), " ", (0, s.jsxs)("h4", {
+                            className: "text-xs font-black uppercase mb-2 cursor-pointer flex items-center gap-2 ".concat(f.text),
+                            onClick: i,
+                            children: [" ", t, " ", n ? (0, s.jsx)(c.Z, {
+                                size: 14
+                            }) : (0, s.jsx)(p.Z, {
+                                size: 14
+                            }), " "]
+                        }), " ", n && (0, s.jsxs)("div", {
+                            className: "mt-2 space-y-2 max-h-48 overflow-y-auto custom-scrollbar p-1",
+                            children: [" ", (null == o ? void 0 : o.length) > 0 ? o.map(e => (0, s.jsxs)("div", {
+                                className: "flex justify-between items-center p-2 border rounded-lg shadow-sm ".concat(f.bg),
+                                children: [" ", (0, s.jsxs)("div", {
+                                    children: [" ", (0, s.jsx)("span", {
+                                        className: "text-xs font-bold text-slate-800 block",
+                                        children: e.fullName || e.employeeName
+                                    }), " ", "INTERCAMBIO" === b && (0, s.jsxs)("span", {
+                                        className: "text-[10px] text-purple-700 block",
+                                        children: [e.objectiveName, " (Quedan: ", e.remainingGuards, ")"]
+                                    }), " ", Number.isFinite(e.distance) ? (0, s.jsxs)("div", {
+                                        className: "flex items-center gap-2 mt-0.5",
+                                        children: [" ", (0, s.jsxs)("span", {
+                                            className: "text-[9px] bg-white border px-1.5 rounded text-slate-500 flex items-center gap-1",
+                                            children: [(0, s.jsx)(x.Z, {
+                                                size: 8
+                                            }), " ", e.distance.toFixed(1), " km"]
+                                        }), " ", Number.isFinite(e.eta) && (0, s.jsxs)("span", {
+                                            className: "text-[9px] text-slate-400",
+                                            children: ["~", e.eta, " min"]
+                                        }), " "]
+                                    }) : (0, s.jsx)("div", {
+                                        className: "text-[9px] text-slate-400 mt-0.5",
+                                        children: "Sin ubicaci\xf3n"
+                                    }), " "]
+                                }), " ", (0, s.jsxs)("div", {
+                                    className: "flex gap-1",
+                                    children: [" ", (0, s.jsx)("button", {
+                                        onClick: () => r(e),
+                                        className: "p-1.5 bg-white text-emerald-600 border rounded hover:bg-emerald-50",
+                                        children: (0, s.jsx)(m.Z, {
+                                            size: 14
+                                        })
+                                    }), " ", (0, s.jsx)("button", {
+                                        onClick: () => d(e),
+                                        className: "p-1.5 bg-white text-blue-600 border rounded hover:bg-blue-50",
+                                        children: (0, s.jsx)(u.Z, {
+                                            size: 14
+                                        })
+                                    }), " ", (0, s.jsxs)("button", {
+                                        onClick: () => l(e),
+                                        className: "px-2 py-1.5 text-white text-[10px] font-bold rounded shadow-sm ".concat(f.btn),
+                                        children: [" ", "INTERCAMBIO" === b ? "MOVER" : "ASIGNAR", " "]
+                                    }), " "]
+                                }), " "]
+                            }, e.id)) : (0, s.jsx)("p", {
+                                className: "text-[10px] text-slate-400 italic",
+                                children: "No hay candidatos."
+                            }), " "]
+                        }), " "]
+                    })
+                },
+                HandoverModal = e => {
+                    let {
+                        isOpen: t,
+                        onClose: a,
+                        incomingShift: n,
+                        logic: i
+                    } = e;
+                    if (!t || !n) return null;
+                    let o = new Date,
+                        l = toDate(n.shiftDateObj),
+                        r = (o.getTime() - l.getTime()) / 6e4,
+                        d = "ON_TIME";
+                    r > 5 && (d = "LATE");
+                    let c = i.processedData.filter(e => e.objectiveId === n.objectiveId && e.positionName === n.positionName && (e.isPresent || "COMPLETED" === e.status) && e.id !== n.id && e.employeeId !== n.employeeId && toDate(e.endDateObj).getTime() <= l.getTime() + 36e5),
+                        handleConfirm = async e => {
+                            try {
+                                var t;
+                                await (0, M.r7)((0, M.JU)(_.db, "turnos", n.id), {
+                                    isPresent: !0,
+                                    status: "PRESENT",
+                                    checkInTime: (0, M.Bt)(),
+                                    isLate: "LATE" === d
+                                }), e && await (0, M.r7)((0, M.JU)(_.db, "turnos", e), {
+                                    checkOutTime: (0, M.Bt)(),
+                                    isCompleted: !0,
+                                    status: "COMPLETED"
+                                });
+                                let s = (null === (t = (0, G.v0)().currentUser) || void 0 === t ? void 0 : t.email) || "Operador";
+                                await (0, M.ET)((0, M.hJ)(_.db, "audit_logs"), {
+                                    action: e ? "OPERACIONES_RELEVO" : "OPERACIONES_PRESENCIA",
+                                    module: "OPERACIONES",
+                                    actorName: s,
+                                    details: e ? "Relevo confirmado: ".concat(n.employeeName) : "Ingreso confirmado: ".concat(n.employeeName),
+                                    timestamp: (0, M.Bt)(),
+                                    clientId: n.clientId,
+                                    objectiveId: n.objectiveId,
+                                    objectiveName: n.objectiveName,
+                                    positionName: n.positionName,
+                                    shiftId: n.id,
+                                    targetEmployee: n.employeeName
+                                }), B.Am.success("LATE" === d ? "Ingreso Tarde registrado." : "Ingreso Correcto."), a()
+                            } catch (e) {
+                                B.Am.error("Error al procesar relevo.")
+                            }
+                        };
+                    return (0, s.jsxs)("div", {
+                        className: "fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95",
+                        children: [" ", (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden",
+                            children: [" ", (0, s.jsxs)("div", {
+                                className: "p-4 text-white flex justify-between items-center ".concat("LATE" === d ? "bg-amber-500" : "bg-emerald-600"),
+                                children: [" ", (0, s.jsxs)("h3", {
+                                    className: "font-black uppercase flex items-center gap-2",
+                                    children: [" ", "LATE" === d ? (0, s.jsx)(b.Z, {
+                                        size: 20
+                                    }) : (0, s.jsx)(h.Z, {
+                                        size: 20
+                                    }), " ", "LATE" === d ? "Llegada Tarde" : "Ingreso A Tiempo", " "]
+                                }), " ", (0, s.jsx)("button", {
+                                    onClick: a,
+                                    children: (0, s.jsx)(f.Z, {
+                                        size: 20
+                                    })
+                                }), " "]
+                            }), " ", (0, s.jsxs)("div", {
+                                className: "p-6",
+                                children: [" ", (0, s.jsxs)("p", {
+                                    className: "text-sm text-slate-600 mb-4",
+                                    children: [" El guardia ", (0, s.jsx)("b", {
+                                        children: n.employeeName
+                                    }), " est\xe1 listo para ingresar. ", "LATE" === d && (0, s.jsxs)("span", {
+                                        className: "block mt-1 text-amber-600 font-bold",
+                                        children: ["ÔÜá´©Å Retraso de ", Math.round(r), " minutos."]
+                                    }), " "]
+                                }), " ", c.length > 0 ? (0, s.jsxs)("div", {
+                                    className: "space-y-2 mb-4",
+                                    children: [" ", (0, s.jsx)("p", {
+                                        className: "text-xs font-bold text-slate-400 uppercase",
+                                        children: "Seleccione a qui\xe9n relevar:"
+                                    }), " ", c.map(e => (0, s.jsxs)("button", {
+                                        onClick: () => handleConfirm(e.id),
+                                        className: "w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group",
+                                        children: [" ", (0, s.jsxs)("div", {
+                                            className: "text-left",
+                                            children: [" ", (0, s.jsx)("span", {
+                                                className: "block text-xs font-bold text-slate-700",
+                                                children: e.employeeName
+                                            }), " ", (0, s.jsxs)("span", {
+                                                className: "block text-[10px] text-slate-400",
+                                                children: ["Salida: ", formatTimeSimple(e.endDateObj)]
+                                            }), " "]
+                                        }), " ", (0, s.jsx)("span", {
+                                            className: "text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors",
+                                            children: "RELEVAR"
+                                        }), " "]
+                                    }, e.id)), " "]
+                                }) : (0, s.jsxs)("div", {
+                                    className: "p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4",
+                                    children: [" ", (0, s.jsx)("p", {
+                                        className: "text-xs text-slate-400 italic",
+                                        children: "No hay guardia saliente registrado."
+                                    }), " "]
+                                }), " ", (0, s.jsxs)("button", {
+                                    onClick: () => handleConfirm(null),
+                                    className: "w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors",
+                                    children: [" ", c.length > 0 ? "INGRESAR SIN RELEVAR" : "CONFIRMAR INGRESO", " "]
+                                }), " "]
+                            }), " "]
+                        }), " "]
+                    })
+                },
+                InterruptModal = e => {
+                    var t, a, i, o, l, r;
+                    let {
+                        isOpen: d,
+                        onClose: c,
+                        shift: p,
+                        logic: x,
+                        onVacancyCreated: m
+                    } = e, [u, b] = (0, n.useState)(!1), [h, v] = (0, n.useState)(null);
+                    if (!d || !p) return null;
+                    let j = new Date,
+                        N = toDate(p.shiftDateObj),
+                        A = toDate(p.endDateObj),
+                        w = A.getTime();
+                    w <= N.getTime() && (w += 864e5);
+                    let E = Math.max(0, (w - j.getTime()) / 36e5),
+                        y = x.objectives.find(e => e.id === p.objectiveId),
+                        C = null !== (i = null !== (a = null !== (t = p.objectiveLat) && void 0 !== t ? t : null == y ? void 0 : y.lat) && void 0 !== a ? a : p.lat) && void 0 !== i ? i : null,
+                        O = null !== (r = null !== (l = null !== (o = p.objectiveLng) && void 0 !== o ? o : null == y ? void 0 : y.lng) && void 0 !== l ? l : p.lng) && void 0 !== r ? r : null,
+                        R = x.processedData.filter(e => e.objectiveId === p.objectiveId && e.id !== p.id && (e.isPresent || "PRESENT" === e.status) && !e.isCompleted),
+                        I = 0 === R.length,
+                        processGeoList = e => e.map(e => {
+                            let t = getCoordsFrom(e),
+                                a = calculateDistance(C, O, t.lat, t.lng);
+                            return {
+                                ...e,
+                                distance: a,
+                                eta: Number.isFinite(a) ? estimateEta(a) : null
+                            }
+                        }).sort((e, t) => e.distance - t.distance),
+                        T = {};
+                    x.processedData.forEach(e => {
+                        e.isPresent && !e.isCompleted && e.objectiveId !== p.objectiveId && (T[e.objectiveId] || (T[e.objectiveId] = []), T[e.objectiveId].push(e))
+                    });
+                    let S = [];
+                    x.objectives.forEach(e => {
+                        var t, a;
+                        if (e.id === p.objectiveId) return;
+                        let s = calculateDistance(C, O, null !== (t = e.lat) && void 0 !== t ? t : null, null !== (a = e.lng) && void 0 !== a ? a : null);
+                        if (Number.isFinite(s) && s <= 2) {
+                            let t = T[e.id] || [];
+                            t.length >= 2 && t.forEach(a => {
+                                S.push({
+                                    ...a,
+                                    distance: s,
+                                    eta: estimateEta(s),
+                                    objectiveName: e.name,
+                                    remainingGuards: t.length - 1
+                                })
+                            })
+                        }
+                    }), S.sort((e, t) => e.distance - t.distance);
+                    let k = new Set(x.processedData.filter(e => isSameDay(e.shiftDateObj, N)).map(e => e.employeeId)),
+                        D = processGeoList(x.employees.filter(e => !k.has(e.id) && "VACANTE" !== e.id)),
+                        P = processGeoList(x.processedData.filter(e => e.objectiveId === p.objectiveId && e.shiftDateObj > j && !e.isUnassigned && !e.isPresent)),
+                        L = processGeoList(x.processedData.filter(e => isSameDay(e.shiftDateObj, j) && ("F" === e.code || e.isFranco) && !e.isUnassigned)),
+                        toggleSection = e => v(h === e ? null : e),
+                        closeCurrentShift = async e => {
+                            await (0, M.r7)((0, M.JU)(_.db, "turnos", p.id), {
+                                status: "INTERRUPTED",
+                                isCompleted: !0,
+                                isPresent: !1,
+                                checkOutTime: (0, M.Bt)(),
+                                realEndTime: (0, M.Bt)(),
+                                interrupted: !0,
+                                interruptionReason: "BAJA_ANTICIPADA",
+                                comments: e
+                            })
+                        }, createNovedad = async e => {
+                            await (0, M.ET)((0, M.hJ)(_.db, "novedades"), {
+                                type: "BAJA_ANTICIPADA",
+                                shiftId: p.id,
+                                clientId: p.clientId,
+                                clientName: p.clientName,
+                                objectiveId: p.objectiveId,
+                                objectiveName: p.objectiveName,
+                                positionName: p.positionName,
+                                createdAt: (0, M.Bt)(),
+                                ...e
+                            })
+                        }, logAudit = async (e, t) => {
+                            var a;
+                            let s = (null === (a = (0, G.v0)().currentUser) || void 0 === a ? void 0 : a.email) || "Operador";
+                            await (0, M.ET)((0, M.hJ)(_.db, "audit_logs"), {
+                                action: e,
+                                module: "OPERACIONES",
+                                actorName: s,
+                                details: t,
+                                timestamp: (0, M.Bt)(),
+                                clientId: p.clientId,
+                                objectiveId: p.objectiveId,
+                                objectiveName: p.objectiveName,
+                                positionName: p.positionName,
+                                shiftId: p.id,
+                                targetEmployee: p.employeeName
+                            })
+                        }, handleCovered = async () => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Cubierto por dotaci\xf3n)"), await createNovedad({
+                                    status: "CUBIERTO",
+                                    details: "Retiro anticipado. Puesto cubierto por dotaci\xf3n."
+                                }), await logAudit("OPERACIONES_BAJA_CUBIERTA", "Baja anticipada cubierta: ".concat(p.employeeName)), B.Am.success("Baja registrada como cubierta"), c()
+                            } catch (e) {
+                                B.Am.error("Error al registrar baja")
+                            } finally {
+                                b(!1)
+                            }
+                        }, handleVacancy = async () => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Vacante generada)");
+                                let e = new Date(w),
+                                    t = await (0, M.ET)((0, M.hJ)(_.db, "turnos"), {
+                                        employeeId: "VACANTE",
+                                        employeeName: "VACANTE (BAJA)",
+                                        clientId: p.clientId || "",
+                                        clientName: p.clientName || "",
+                                        objectiveId: p.objectiveId || "",
+                                        objectiveName: p.objectiveName || "",
+                                        positionName: p.positionName || "General",
+                                        startTime: (0, M.Bt)(),
+                                        endTime: M.EK.fromDate(e),
+                                        status: "UNCOVERED_REPORTED",
+                                        isReported: !0,
+                                        isUnassigned: !0,
+                                        isPresent: !1,
+                                        origin: "INTERRUPTION",
+                                        originRef: p.id
+                                    });
+                                await createNovedad({
+                                    status: "VACANTE",
+                                    details: "Baja anticipada. Vacante creada para cobertura."
+                                }), await logAudit("OPERACIONES_BAJA_VACANTE", "Baja anticipada genera vacante: ".concat(p.employeeName));
+                                let a = {
+                                    ...p,
+                                    id: t.id,
+                                    isUnassigned: !0
+                                };
+                                m(a)
+                            } catch (e) {
+                                B.Am.error("Error al crear vacante")
+                            } finally {
+                                b(!1)
+                            }
+                        }, handleSwap = async e => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Intercambio con ".concat(e.employeeName, ")")), await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                                    clientId: p.clientId,
+                                    clientName: p.clientName,
+                                    objectiveId: p.objectiveId,
+                                    objectiveName: p.objectiveName,
+                                    positionName: p.positionName,
+                                    movedFromObjectiveId: e.objectiveId,
+                                    movedFromObjectiveName: e.objectiveName,
+                                    movedAt: (0, M.Bt)(),
+                                    assignmentType: "SWAP"
+                                }), await createNovedad({
+                                    status: "RESUELTO",
+                                    resolution: "SWAP",
+                                    details: "Intercambio con ".concat(e.employeeName)
+                                }), await logAudit("OPERACIONES_BAJA_SWAP", "Intercambio con ".concat(e.employeeName)), B.Am.success("Intercambio registrado"), c()
+                            } catch (e) {
+                                B.Am.error("Error al mover guardia")
+                            } finally {
+                                b(!1)
+                            }
+                        }, handleAssignVolante = async e => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Volante ".concat(e.fullName || e.employeeName, ")"));
+                                let t = new Date(w);
+                                await (0, M.ET)((0, M.hJ)(_.db, "turnos"), {
+                                    employeeId: e.id,
+                                    employeeName: e.fullName || e.employeeName,
+                                    clientId: p.clientId || "",
+                                    clientName: p.clientName || "",
+                                    objectiveId: p.objectiveId || "",
+                                    objectiveName: p.objectiveName || "",
+                                    positionName: p.positionName || "General",
+                                    startTime: (0, M.Bt)(),
+                                    endTime: M.EK.fromDate(t),
+                                    status: "PRESENT",
+                                    isPresent: !0,
+                                    isRelief: !0,
+                                    origin: "OPERACIONES",
+                                    originRef: p.id,
+                                    assignmentType: "VOLANTE"
+                                }), await createNovedad({
+                                    status: "RESUELTO",
+                                    resolution: "VOLANTE",
+                                    details: "Asignado volante ".concat(e.fullName || e.employeeName)
+                                }), await logAudit("OPERACIONES_BAJA_VOLANTE", "Asignado volante ".concat(e.fullName || e.employeeName)), B.Am.success("Cobertura asignada"), c()
+                            } catch (e) {
+                                B.Am.error("Error al asignar volante")
+                            } finally {
+                                b(!1)
+                            }
+                        }, handleEarlyStart = async e => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Adelanto ".concat(e.employeeName, ")")), await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                                    startTime: (0, M.Bt)(),
+                                    originalStartTime: e.startTime || e.shiftDateObj,
+                                    isEarlyStart: !0,
+                                    status: "PRESENT",
+                                    isPresent: !0,
+                                    comments: "Adelanto por baja anticipada"
+                                }), await createNovedad({
+                                    status: "RESUELTO",
+                                    resolution: "ADELANTO",
+                                    details: "Adelanto de ".concat(e.employeeName)
+                                }), await logAudit("OPERACIONES_BAJA_ADELANTO", "Adelanto de ".concat(e.employeeName)), B.Am.success("Adelanto registrado"), c()
+                            } catch (e) {
+                                B.Am.error("Error al adelantar turno")
+                            } finally {
+                                b(!1)
+                            }
+                        }, handleFranco = async e => {
+                            b(!0);
+                            try {
+                                await closeCurrentShift("Baja anticipada (Franco trabajado ".concat(e.employeeName, ")")), await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                                    isFranco: !1,
+                                    isFrancoTrabajado: !0,
+                                    status: "PRESENT",
+                                    isPresent: !0,
+                                    startTime: (0, M.Bt)(),
+                                    clientId: p.clientId || "",
+                                    clientName: p.clientName || "",
+                                    objectiveId: p.objectiveId || "",
+                                    objectiveName: p.objectiveName || "",
+                                    positionName: p.positionName || "General",
+                                    comments: "Franco trabajado por baja anticipada"
+                                }), await createNovedad({
+                                    status: "RESUELTO",
+                                    resolution: "FRANCO",
+                                    details: "Franco trabajado ".concat(e.employeeName)
+                                }), await logAudit("OPERACIONES_BAJA_FRANCO", "Franco trabajado ".concat(e.employeeName)), B.Am.success("Franco convertido"), c()
+                            } catch (e) {
+                                B.Am.error("Error al convertir franco")
+                            } finally {
+                                b(!1)
+                            }
+                        };
+                    return (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4",
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[85vh]",
+                            children: [(0, s.jsxs)("div", {
+                                className: "p-4 text-white flex justify-between items-center ".concat(I ? "bg-purple-600" : "bg-emerald-600"),
+                                children: [(0, s.jsxs)("h3", {
+                                    className: "font-black uppercase flex items-center gap-2",
+                                    children: [(0, s.jsx)(g.Z, {
+                                        size: 20
+                                    }), " Baja Anticipada"]
+                                }), (0, s.jsx)("button", {
+                                    onClick: c,
+                                    children: (0, s.jsx)(f.Z, {
+                                        size: 20
+                                    })
+                                })]
+                            }), (0, s.jsxs)("div", {
+                                className: "p-6 overflow-y-auto custom-scrollbar space-y-4",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "p-4 rounded-xl border ".concat(I ? "bg-purple-50 border-purple-100" : "bg-emerald-50 border-emerald-100"),
+                                    children: [(0, s.jsxs)("div", {
+                                        className: "flex items-center justify-between",
+                                        children: [(0, s.jsxs)("div", {
+                                            children: [(0, s.jsx)("p", {
+                                                className: "text-[10px] font-black text-slate-400 uppercase",
+                                                children: "Situaci\xf3n en puesto"
+                                            }), (0, s.jsx)("h4", {
+                                                className: "font-bold text-sm ".concat(I ? "text-purple-800" : "text-emerald-800"),
+                                                children: I ? "GUARDIA SOLO" : "ACOMPA\xd1ADO (".concat(R.length, " M\xc1S)")
+                                            })]
+                                        }), (0, s.jsxs)("div", {
+                                            className: "text-xs font-bold text-slate-600",
+                                            children: ["Remanente: ", E.toFixed(1), " hs"]
+                                        })]
+                                    }), !I && (0, s.jsx)("button", {
+                                        onClick: handleCovered,
+                                        disabled: u,
+                                        className: "w-full mt-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-50",
+                                        children: "REGISTRAR BAJA (CUBIERTO)"
+                                    }), I && (0, s.jsx)("button", {
+                                        onClick: handleVacancy,
+                                        disabled: u,
+                                        className: "w-full mt-3 py-2 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 disabled:opacity-50",
+                                        children: "GENERAR VACANTE Y COBERTURA"
+                                    })]
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "1. Intercambio (Objetivos Cercanos)",
+                                    color: "purple",
+                                    index: 1,
+                                    expanded: 1 === h,
+                                    onToggle: () => toggleSection(1),
+                                    items: S,
+                                    onAction: handleSwap,
+                                    onWhatsapp: e => window.open("https://wa.me/".concat(e.phone || "")),
+                                    onPhone: e => window.open("tel:".concat(e.phone || "")),
+                                    context: "INTERCAMBIO"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "2. Asignaci\xf3n (Volantes)",
+                                    color: "slate",
+                                    index: 2,
+                                    expanded: 2 === h,
+                                    onToggle: () => toggleSection(2),
+                                    items: D,
+                                    onAction: handleAssignVolante,
+                                    onWhatsapp: e => window.open("https://wa.me/".concat(e.phone || "")),
+                                    onPhone: e => window.open("tel:".concat(e.phone || "")),
+                                    context: "COBERTURA"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "3. Adelanto (Turno Siguiente)",
+                                    color: "cyan",
+                                    index: 3,
+                                    expanded: 3 === h,
+                                    onToggle: () => toggleSection(3),
+                                    items: P,
+                                    onAction: handleEarlyStart,
+                                    onWhatsapp: e => window.open("https://wa.me/".concat(e.phone || "")),
+                                    onPhone: e => window.open("tel:".concat(e.phone || "")),
+                                    context: "ADELANTO"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "4. Franco Trabajado",
+                                    color: "slate",
+                                    index: 4,
+                                    expanded: 4 === h,
+                                    onToggle: () => toggleSection(4),
+                                    items: L,
+                                    onAction: handleFranco,
+                                    onWhatsapp: e => window.open("https://wa.me/".concat(e.phone || "")),
+                                    onPhone: e => window.open("tel:".concat(e.phone || "")),
+                                    context: "COBERTURA"
+                                })]
+                            })]
+                        })
+                    })
+                },
+                CoverageModal = e => {
+                    var t, a, i, o, l, r;
+                    let {
+                        isOpen: d,
+                        onClose: c,
+                        absenceShift: p,
+                        logic: x
+                    } = e, [m, u] = (0, n.useState)(null);
+                    if (!d || !p) return null;
+                    let b = x.objectives.find(e => e.id === p.objectiveId),
+                        h = null !== (i = null !== (a = null !== (t = p.objectiveLat) && void 0 !== t ? t : null == b ? void 0 : b.lat) && void 0 !== a ? a : p.lat) && void 0 !== i ? i : null,
+                        v = null !== (r = null !== (l = null !== (o = p.objectiveLng) && void 0 !== o ? o : null == b ? void 0 : b.lng) && void 0 !== l ? l : p.lng) && void 0 !== r ? r : null,
+                        j = toDate(p.shiftDateObj),
+                        processGeoList = e => e.map(e => {
+                            let t = getCoordsFrom(e),
+                                a = calculateDistance(h, v, t.lat, t.lng);
+                            return {
+                                ...e,
+                                distance: a,
+                                eta: Number.isFinite(a) ? estimateEta(a) : null
+                            }
+                        }).sort((e, t) => e.distance - t.distance),
+                        N = x.processedData.filter(e => {
+                            if (e.objectiveId !== p.objectiveId || e.positionName !== p.positionName || !(e.isPresent || "COMPLETED" === e.status) || "VACANTE" === e.employeeId) return !1;
+                            let t = toDate(e.shiftDateObj),
+                                a = toDate(e.endDateObj),
+                                s = toDate(p.shiftDateObj),
+                                n = new Date(s.getTime() - 72e5);
+                            return a <= s && a >= n && t < s
+                        }),
+                        A = x.objectives.filter(e => e.id !== p.objectiveId).map(e => {
+                            var t, a;
+                            let s = calculateDistance(h, v, null !== (t = e.lat) && void 0 !== t ? t : null, null !== (a = e.lng) && void 0 !== a ? a : null),
+                                n = x.processedData.filter(t => t.objectiveId === e.id && t.isPresent).length;
+                            return {
+                                ...e,
+                                distance: s,
+                                activeGuards: n
+                            }
+                        }).filter(e => Number.isFinite(e.distance) && e.distance <= 2 && e.activeGuards >= 2).sort((e, t) => e.distance - t.distance),
+                        w = A.flatMap(e => x.processedData.filter(t => t.objectiveId === e.id && t.isPresent).map(t => ({
+                            ...t,
+                            distance: e.distance,
+                            eta: estimateEta(e.distance),
+                            objectiveName: e.name,
+                            remainingGuards: e.activeGuards - 1
+                        }))),
+                        E = new Set(x.processedData.filter(e => isSameDay(e.shiftDateObj, j)).map(e => e.employeeId)),
+                        y = processGeoList(x.employees.filter(e => !E.has(e.id)).slice(0, 10)),
+                        C = processGeoList(x.processedData.filter(e => e.objectiveId === p.objectiveId && toDate(e.shiftDateObj) > j && !e.isUnassigned && !e.isPresent)),
+                        O = processGeoList(x.processedData.filter(e => isSameDay(e.shiftDateObj, j) && ("F" === e.code || e.isFranco) && !e.isUnassigned)),
+                        logAction = async (e, t) => {
+                            var a;
+                            let s = (null === (a = (0, G.v0)().currentUser) || void 0 === a ? void 0 : a.email) || "Operador";
+                            await (0, M.ET)((0, M.hJ)(_.db, "audit_logs"), {
+                                action: "OPERACIONES_COBERTURA",
+                                module: "OPERACIONES",
+                                actorName: s,
+                                details: e,
+                                timestamp: (0, M.Bt)(),
+                                clientId: p.clientId,
+                                objectiveId: p.objectiveId,
+                                objectiveName: p.objectiveName,
+                                positionName: p.positionName,
+                                shiftId: p.id,
+                                ...t
+                            })
+                        }, handleAssign = async (e, t) => {
+                            try {
+                                await (0, M.r7)((0, M.JU)(_.db, "turnos", p.id), {
+                                    employeeId: e.id,
+                                    employeeName: e.fullName || e.employeeName,
+                                    isUnassigned: !1,
+                                    status: "PENDING",
+                                    assignmentType: t
+                                }), await logAction("Cobertura asignada: ".concat(e.fullName || e.employeeName), {
+                                    resolution: t
+                                }), B.Am.success("Asignado: ".concat(e.fullName || e.employeeName)), c()
+                            } catch (e) {
+                                B.Am.error("Error al asignar")
+                            }
+                        }, handleLeaveUncovered = async () => {
+                            try {
+                                await (0, M.r7)((0, M.JU)(_.db, "turnos", p.id), {
+                                    status: "ABSENT",
+                                    isAbsent: !0,
+                                    resolutionStatus: "UNCOVERED",
+                                    resolutionMethod: "UNCOVERED"
+                                }), await logAction("Cobertura no asignada (dejar descubierto)", {
+                                    resolution: "UNCOVERED"
+                                }), B.Am.success("Marcado como descubierto"), c()
+                            } catch (e) {
+                                B.Am.error("Error al marcar descubierto")
+                            }
+                        }, handleEarlyStart = async e => {
+                            try {
+                                await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                                    startTime: (0, M.Bt)(),
+                                    originalStartTime: e.startTime || e.shiftDateObj,
+                                    isEarlyStart: !0,
+                                    status: "PRESENT",
+                                    isPresent: !0,
+                                    comments: "Adelanto por ausencia"
+                                }), await (0, M.r7)((0, M.JU)(_.db, "turnos", p.id), {
+                                    resolutionStatus: "RESOLVED",
+                                    resolutionMethod: "EARLY_START",
+                                    coveredByShiftId: e.id
+                                }), await logAction("Adelanto de ingreso: ".concat(e.employeeName), {
+                                    resolution: "EARLY_START"
+                                }), B.Am.success("Turno adelantado"), c()
+                            } catch (e) {
+                                B.Am.error("Error al adelantar")
+                            }
+                        }, handleFranco = async e => {
+                            try {
+                                await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                                    isFranco: !1,
+                                    isFrancoTrabajado: !0,
+                                    status: "PRESENT",
+                                    isPresent: !0,
+                                    startTime: (0, M.Bt)(),
+                                    clientId: p.clientId || "",
+                                    clientName: p.clientName || "",
+                                    objectiveId: p.objectiveId || "",
+                                    objectiveName: p.objectiveName || "",
+                                    positionName: p.positionName || "General",
+                                    comments: "Franco trabajado por ausencia"
+                                }), await (0, M.r7)((0, M.JU)(_.db, "turnos", p.id), {
+                                    resolutionStatus: "RESOLVED",
+                                    resolutionMethod: "FRANCO",
+                                    coveredByShiftId: e.id
+                                }), await logAction("Franco trabajado: ".concat(e.employeeName), {
+                                    resolution: "FRANCO"
+                                }), B.Am.success("Franco convertido"), c()
+                            } catch (e) {
+                                B.Am.error("Error al convertir franco")
+                            }
+                        };
+                    return (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in",
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]",
+                            children: [(0, s.jsxs)("div", {
+                                className: "p-4 bg-rose-600 text-white flex justify-between items-center shrink-0",
+                                children: [(0, s.jsxs)("h3", {
+                                    className: "font-black uppercase flex items-center gap-2",
+                                    children: [(0, s.jsx)(g.Z, {
+                                        size: 20
+                                    }), " Cobertura de Vacante"]
+                                }), (0, s.jsx)("button", {
+                                    onClick: c,
+                                    children: (0, s.jsx)(f.Z, {
+                                        size: 20
+                                    })
+                                })]
+                            }), (0, s.jsxs)("div", {
+                                className: "p-6 overflow-y-auto custom-scrollbar space-y-4 flex-1",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "bg-rose-50 p-3 rounded-xl border border-rose-100 text-xs text-rose-800 font-medium",
+                                    children: ["Puesto descubierto en ", (0, s.jsx)("b", {
+                                        children: p.objectiveName
+                                    }), " (", p.positionName, ")."]
+                                }), N.length > 0 && (0, s.jsxs)("div", {
+                                    className: "space-y-2",
+                                    children: [(0, s.jsx)("h4", {
+                                        className: "text-xs font-black text-indigo-700 uppercase",
+                                        children: "1. Retenci\xf3n (Doble Turno)"
+                                    }), N.map(e => (0, s.jsxs)("div", {
+                                        className: "flex justify-between items-center p-2 bg-indigo-50 border border-indigo-100 rounded-lg",
+                                        children: [(0, s.jsx)("span", {
+                                            className: "text-xs font-bold text-slate-700",
+                                            children: e.employeeName
+                                        }), (0, s.jsx)("button", {
+                                            onClick: () => handleAssign({
+                                                id: e.employeeId,
+                                                fullName: e.employeeName
+                                            }, "RETENTION"),
+                                            className: "px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded",
+                                            children: "DOBLAR"
+                                        })]
+                                    }, e.id))]
+                                }), w.length > 0 && (0, s.jsx)(SectionList, {
+                                    title: "2. Intercambio (Vecinos < 2km)",
+                                    color: "purple",
+                                    index: 2,
+                                    expanded: 2 === m,
+                                    onToggle: () => u(2 === m ? null : 2),
+                                    items: w,
+                                    onAction: e => handleAssign(e, "SWAP"),
+                                    context: "INTERCAMBIO"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "3. Volantes (Por Cercan\xeda)",
+                                    color: "slate",
+                                    index: 3,
+                                    expanded: 3 === m,
+                                    onToggle: () => u(3 === m ? null : 3),
+                                    items: y,
+                                    onAction: e => handleAssign(e, "VOLANTE"),
+                                    context: "COBERTURA"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "4. Adelanto (Turno Siguiente)",
+                                    color: "cyan",
+                                    index: 4,
+                                    expanded: 4 === m,
+                                    onToggle: () => u(4 === m ? null : 4),
+                                    items: C,
+                                    onAction: e => handleEarlyStart(e),
+                                    context: "ADELANTO"
+                                }), (0, s.jsx)(SectionList, {
+                                    title: "5. Franco Trabajado",
+                                    color: "slate",
+                                    index: 5,
+                                    expanded: 5 === m,
+                                    onToggle: () => u(5 === m ? null : 5),
+                                    items: O,
+                                    onAction: e => handleFranco(e),
+                                    context: "COBERTURA"
+                                }), (0, s.jsx)("div", {
+                                    className: "pt-2",
+                                    children: (0, s.jsx)("button", {
+                                        onClick: handleLeaveUncovered,
+                                        className: "w-full py-2 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-black uppercase hover:bg-slate-200",
+                                        children: "Dejar descubierto"
+                                    })
+                                })]
+                            })]
+                        })
+                    })
+                },
+                RetentionModal = e => {
+                    let {
+                        isOpen: t,
+                        onClose: a,
+                        retainedShift: n
+                    } = e;
+                    return t ? (0, s.jsxs)("div", {
+                        className: "fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4 animate-in fade-in",
+                        children: [" ", (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-sm rounded-2xl shadow-xl p-6",
+                            children: [" ", (0, s.jsx)("h3", {
+                                className: "font-bold mb-2",
+                                children: "Retenci\xf3n de Guardia"
+                            }), " ", (0, s.jsx)("p", {
+                                className: "text-sm text-slate-500 mb-4",
+                                children: (null == n ? void 0 : n.employeeName) || "Guardia"
+                            }), " ", (0, s.jsx)("button", {
+                                onClick: a,
+                                className: "w-full py-2 bg-slate-100 rounded font-bold",
+                                children: "Cerrar"
+                            }), " "]
+                        }), " "]
+                    }) : null
+                },
+                CheckOutModal = e => {
+                    let {
+                        isOpen: t,
+                        onClose: a,
+                        onConfirm: i,
+                        employeeName: o
+                    } = e, [l, r] = (0, n.useState)("");
+                    return t ? (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4",
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-sm rounded-2xl shadow-xl p-6",
+                            children: [(0, s.jsxs)("h3", {
+                                className: "font-bold mb-4",
+                                children: ["Salida: ", o]
+                            }), (0, s.jsx)("button", {
+                                onClick: () => {
+                                    i(!1), a()
+                                },
+                                className: "w-full py-3 bg-emerald-600 text-white rounded-xl font-bold mb-2",
+                                children: "Salida Normal"
+                            }), (0, s.jsx)("textarea", {
+                                className: "w-full p-2 border rounded mb-2",
+                                placeholder: "Novedad...",
+                                value: l,
+                                onChange: e => r(e.target.value)
+                            }), (0, s.jsx)("button", {
+                                onClick: () => {
+                                    i(l), r(""), a()
+                                },
+                                className: "w-full py-2 bg-slate-100 font-bold rounded",
+                                children: "Reportar y Salir"
+                            }), (0, s.jsx)("button", {
+                                onClick: a,
+                                className: "mt-2 text-sm text-slate-400 w-full",
+                                children: "Cancelar"
+                            })]
+                        })
+                    }) : null
+                },
+                AttendanceModal = e => {
+                    let {
+                        isOpen: t,
+                        onClose: a,
+                        shift: n,
+                        onMarkAbsent: i
+                    } = e;
+                    return t ? (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4",
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center",
+                            children: [(0, s.jsx)(v.Z, {
+                                size: 48,
+                                className: "mx-auto text-amber-500 mb-4"
+                            }), (0, s.jsx)("h3", {
+                                className: "font-bold text-lg mb-2",
+                                children: "Confirmar Ausencia"
+                            }), (0, s.jsxs)("p", {
+                                className: "text-sm text-slate-500 mb-6",
+                                children: ["\xbf", null == n ? void 0 : n.employeeName, " no se present\xf3?"]
+                            }), (0, s.jsx)("button", {
+                                onClick: () => i(n),
+                                className: "w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2",
+                                children: "MARCAR AUSENTE"
+                            }), (0, s.jsx)("button", {
+                                onClick: a,
+                                className: "text-sm text-slate-400",
+                                children: "Cancelar"
+                            })]
+                        })
+                    }) : null
+                },
+                WorkedDayOffModal = e => {
+                    let {
+                        isOpen: t,
+                        onClose: a,
+                        shift: n
+                    } = e;
+                    return t ? (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4",
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-sm rounded-2xl shadow-xl p-6",
+                            children: [(0, s.jsx)("h3", {
+                                className: "font-bold",
+                                children: "Franco Trabajado"
+                            }), (0, s.jsx)("button", {
+                                onClick: a,
+                                className: "w-full mt-4 py-2 bg-slate-100 rounded",
+                                children: "Cerrar"
+                            })]
+                        })
+                    }) : null
+                },
+                GuardCard = e => {
+                    let {
+                        shift: t,
+                        viewTab: a,
+                        onOpenCheckout: n,
+                        onOpenAttendance: i,
+                        onOpenHandover: o,
+                        onOpenInterrupt: l,
+                        onOpenCoverage: r,
+                        onReportPlanning: d,
+                        onOpenWorkedFranco: c,
+                        isCompact: p,
+                        isSelected: x,
+                        onSelect: h
+                    } = e, f = "border-l-slate-400", R = "bg-white", I = (0, s.jsx)(j.Z, {
+                        size: 10
+                    });
+                    t.isReportedToPlanning ? (f = "border-l-slate-500", R = "bg-slate-100 opacity-90") : t.isResolvedByOps ? (f = "border-l-indigo-500", R = "bg-indigo-50") : t.isUnassigned ? (f = "border-l-rose-500", R = "bg-rose-50/50") : t.isRetention ? (f = "border-l-orange-500", R = "bg-orange-50/50") : t.isPresent ? (f = "border-l-emerald-500", R = "bg-emerald-50/30") : t.isAbsenceLike ? (f = "border-l-slate-700", R = "bg-slate-100") : t.isPotentialAbsence ? (f = "border-l-red-600", R = "bg-amber-50") : t.isFranco && (f = "border-l-blue-500", R = "bg-blue-50/30");
+                    let handleCheckIn = () => o(t),
+                        handleReport = e => {
+                            e.stopPropagation(), confirm("\xbfCONFIRMAR NOTIFICACI\xd3N?\nSe enviar\xe1 alerta a Planificaci\xf3n.") && d(t)
+                        },
+                        T = new Date,
+                        S = toDate(t.shiftDateObj),
+                        k = t.endDateObj ? toDate(t.endDateObj) : null,
+                        D = (T.getTime() - S.getTime()) / 6e4,
+                        P = D >= -15 && D <= 60 && !t.isPresent;
+                    D >= -15 && D <= 5 && t.isPresent;
+                    let L = t.employeeName || "Desconocido",
+                        U = t.positionName || "Guardia";
+                    t.isReportedToPlanning ? (L = "DEVUELTO A PLANIFICACI\xd3N", U = (t.employeeName || "").replace("VACANTE: ", "") || "Vacante Reportada") : t.isResolvedByOps ? U = "RESUELTO POR OPERACIONES" : t.isUnassigned && (L = t.employeeName || "VACANTE", U = "COBERTURA PENDIENTE");
+                    let B = !t.isPresent && !t.isAbsenceLike && !t.isUnassigned && (k ? T.getTime() > k.getTime() + 3e5 : D > 60);
+                    return (0, s.jsxs)("div", {
+                        onClick: () => null == h ? void 0 : h(t),
+                        className: "rounded-xl border border-slate-200 shadow-sm relative overflow-hidden group hover:shadow-md transition-all mb-2 ".concat(R, " ").concat(B ? "ring-2 ring-red-500 bg-rose-50/60" : "", " ").concat(x ? "ring-2 ring-indigo-400" : ""),
+                        children: [(0, s.jsx)("div", {
+                            className: "absolute left-0 top-0 bottom-0 w-1.5 ".concat(f.replace("border-l-", "bg-"))
+                        }), (0, s.jsxs)("div", {
+                            className: "pl-4 ".concat(p ? "p-2" : "p-3"),
+                            children: [(0, s.jsxs)("div", {
+                                className: "flex justify-between items-start ".concat(p ? "mb-1" : "mb-2"),
+                                children: [(0, s.jsxs)("div", {
+                                    className: "flex-1 min-w-0 pr-2",
+                                    children: [(0, s.jsxs)("div", {
+                                        className: "flex items-center gap-1 text-[10px] font-black text-slate-400 uppercase tracking-wider truncate",
+                                        children: [(0, s.jsx)(N.Z, {
+                                            size: 10
+                                        }), " ", t.clientName]
+                                    }), (0, s.jsxs)("div", {
+                                        className: "text-xs font-bold text-slate-700 truncate flex items-center gap-1",
+                                        children: [(0, s.jsx)(A.Z, {
+                                            size: 10,
+                                            className: "text-slate-400"
+                                        }), (0, s.jsx)("span", {
+                                            children: t.objectiveName
+                                        }), (0, s.jsx)("span", {
+                                            className: "text-slate-300 mx-1",
+                                            children: "|"
+                                        }), (0, s.jsx)("span", {
+                                            className: "text-indigo-600",
+                                            children: t.positionName
+                                        }), (t.code || t.type) && (0, s.jsx)("span", {
+                                            className: "text-[9px] font-black bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded",
+                                            children: (t.code || t.type).toString()
+                                        })]
+                                    })]
+                                }), (0, s.jsxs)("div", {
+                                    className: "flex flex-col items-end gap-1",
+                                    children: [t.isFranco && (0, s.jsx)("div", {
+                                        className: "bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm",
+                                        children: "FRANCO"
+                                    }), t.isAbsenceLike && "AUSENTES" === a && (0, s.jsx)("div", {
+                                        className: "bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse shadow-sm",
+                                        children: "AUSENCIA"
+                                    }), t.isLateArrival && "AUSENTES" !== a && (0, s.jsx)("div", {
+                                        className: "bg-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm",
+                                        children: "NO LLEGO"
+                                    }), t.isAbsenceLike && "AUSENTES" !== a && !t.isLateArrival && (0, s.jsx)("div", {
+                                        className: "bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse shadow-sm",
+                                        children: "AUSENCIA"
+                                    }), B && (0, s.jsx)("div", {
+                                        className: "bg-rose-700 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse shadow-sm",
+                                        children: "RESOLVER"
+                                    }), t.isReportedToPlanning && (0, s.jsxs)("div", {
+                                        className: "bg-slate-600 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm",
+                                        children: [(0, s.jsx)(w.Z, {
+                                            size: 10
+                                        }), " DEVUELTO"]
+                                    }), t.isResolvedByOps && (0, s.jsxs)("div", {
+                                        className: "bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm",
+                                        children: [(0, s.jsx)(E.Z, {
+                                            size: 10
+                                        }), " OPERACIONES"]
+                                    }), "UNCOVERED" === t.resolutionStatus && (0, s.jsx)("div", {
+                                        className: "bg-rose-700 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm",
+                                        children: "DESCUBIERTO"
+                                    }), t.isRetention && (0, s.jsx)("div", {
+                                        className: "bg-orange-600 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse",
+                                        children: "RECARGO"
+                                    })]
+                                })]
+                            }), p ? (0, s.jsxs)("div", {
+                                className: "flex items-center gap-2",
+                                children: [(0, s.jsx)("div", {
+                                    className: "w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm ".concat(t.isUnassigned && !t.isReportedToPlanning ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-600"),
+                                    children: t.isUnassigned && !t.isReportedToPlanning ? "!" : L[0] || "U"
+                                }), (0, s.jsxs)("div", {
+                                    className: "flex-1 min-w-0",
+                                    children: [(0, s.jsx)("div", {
+                                        className: "text-[11px] font-black truncate ".concat(t.isUnassigned && !t.isReportedToPlanning ? "text-rose-600" : "text-slate-800"),
+                                        children: L
+                                    }), (0, s.jsx)("div", {
+                                        className: "text-[10px] text-slate-500 truncate",
+                                        children: U
+                                    }), t.isUnassigned && (t.isReportedToPlanning || t.isResolvedByOps) && (0, s.jsx)("div", {
+                                        className: "text-[9px] font-black mt-0.5 ".concat(t.isResolvedByOps ? "text-emerald-600" : "text-slate-500"),
+                                        children: t.isResolvedByOps ? "CUBIERTA" : "REPORTADA"
+                                    })]
+                                })]
+                            }) : (0, s.jsxs)("div", {
+                                className: "flex items-center gap-3 mb-3",
+                                children: [(0, s.jsx)("div", {
+                                    className: "w-10 h-10 rounded-full flex items-center justify-center text-sm font-black shadow-sm ".concat(t.isUnassigned && !t.isReportedToPlanning ? "bg-rose-100 text-rose-600" : "bg-slate-200 text-slate-600"),
+                                    children: t.isUnassigned && !t.isReportedToPlanning ? "!" : L[0] || "U"
+                                }), (0, s.jsxs)("div", {
+                                    className: "flex-1 min-w-0",
+                                    children: [(0, s.jsx)("h4", {
+                                        className: "font-black text-sm truncate leading-tight ".concat(t.isUnassigned && !t.isReportedToPlanning ? "text-rose-600" : "text-slate-800"),
+                                        children: L
+                                    }), (0, s.jsxs)("div", {
+                                        className: "text-[11px] text-slate-500 font-medium flex items-center gap-1 mt-0.5",
+                                        children: [I, " ", U]
+                                    }), t.isUnassigned && (t.isReportedToPlanning || t.isResolvedByOps) && (0, s.jsx)("div", {
+                                        className: "text-[10px] font-black mt-1 ".concat(t.isResolvedByOps ? "text-emerald-600" : "text-slate-500"),
+                                        children: t.isResolvedByOps ? "CUBIERTA" : "REPORTADA"
+                                    })]
+                                }), !t.isUnassigned && t.phone && (0, s.jsxs)("div", {
+                                    className: "flex gap-1",
+                                    children: [(0, s.jsx)("button", {
+                                        onClick: () => window.open("https://wa.me/".concat(t.phone.replace(/[^0-9]/g, ""))),
+                                        className: "p-2 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors",
+                                        children: (0, s.jsx)(m.Z, {
+                                            size: 14
+                                        })
+                                    }), (0, s.jsx)("button", {
+                                        onClick: () => window.open("tel:".concat(t.phone)),
+                                        className: "p-2 bg-slate-50 text-slate-600 rounded-lg border border-slate-100 hover:bg-slate-100 transition-colors",
+                                        children: (0, s.jsx)(u.Z, {
+                                            size: 14
+                                        })
+                                    })]
+                                })]
+                            }), !p && !t.isFranco && (0, s.jsxs)("div", {
+                                className: "flex items-center gap-2 text-[11px] text-slate-600 bg-white/80 p-2 rounded-lg border border-slate-100 mb-3 shadow-sm",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "flex items-center gap-1 font-mono font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-700",
+                                    children: [(0, s.jsx)(b.Z, {
+                                        size: 12
+                                    }), " ", formatTimeRange(t.shiftDateObj, t.endDateObj)]
+                                }), (0, s.jsxs)("div", {
+                                    className: "flex items-center gap-1 border-l border-slate-300 pl-2",
+                                    children: [(0, s.jsx)(y.Z, {
+                                        size: 12
+                                    }), " ", formatDateShort(t.shiftDateObj)]
+                                })]
+                            }), (0, s.jsxs)("div", {
+                                className: "flex gap-2 ".concat(p ? "mt-1" : "mt-0"),
+                                children: [t.isUnassigned && !t.isReportedToPlanning && "VACANTES" === a && (0, s.jsxs)(s.Fragment, {
+                                    children: [(0, s.jsxs)("button", {
+                                        onClick: () => r(t),
+                                        className: "flex-[2] py-2 bg-rose-600 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-rose-700 flex items-center justify-center gap-1 transition-colors",
+                                        children: [(0, s.jsx)(g.Z, {
+                                            size: 14
+                                        }), " CUBRIR"]
+                                    }), (0, s.jsxs)("button", {
+                                        onClick: handleReport,
+                                        className: "flex-1 py-2 bg-slate-700 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-slate-800 flex items-center justify-center gap-1 transition-colors",
+                                        children: [(0, s.jsx)(w.Z, {
+                                            size: 14
+                                        }), " DEVOLVER"]
+                                    })]
+                                }), t.isReportedToPlanning && "VACANTES" === a && (0, s.jsx)("div", {
+                                    className: "w-full text-center text-[10px] font-bold py-1 rounded border ".concat("RECIBIDO" === t.planningResponse || "RECEIVED" === t.planningResponse ? "text-emerald-600 bg-emerald-50 border-emerald-100" : "text-slate-400 bg-slate-50 border-slate-100"),
+                                    children: "RECIBIDO" === t.planningResponse || "RECEIVED" === t.planningResponse ? "RECIBIDO POR PLANIFICACI\xd3N" : "ESPERANDO RESPUESTA DE PLANIFICACI\xd3N"
+                                }), "PLAN" === a && (0, s.jsxs)(s.Fragment, {
+                                    children: [(0, s.jsxs)("button", {
+                                        onClick: handleCheckIn,
+                                        disabled: !P,
+                                        className: "flex-[2] py-2 rounded-lg text-[11px] font-bold uppercase shadow-sm flex items-center justify-center gap-1 transition-colors ".concat(P ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-slate-200 text-slate-400 cursor-not-allowed"),
+                                        children: [(0, s.jsx)(C.Z, {
+                                            size: 14
+                                        }), D > 5 && D <= 60 ? "LLEGADA TARDE" : D > 60 ? "AUSENCIA" : "DAR PRESENTE"]
+                                    }), (0, s.jsxs)("button", {
+                                        onClick: () => i(t),
+                                        className: "flex-1 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg text-[11px] font-bold uppercase hover:bg-slate-50 flex items-center justify-center gap-1 shadow-sm",
+                                        children: [(0, s.jsx)(v.Z, {
+                                            size: 14
+                                        }), " AUSENTE"]
+                                    })]
+                                }), "PRIORIDAD" === a && (0, s.jsxs)(s.Fragment, {
+                                    children: [t.isUnassigned && !t.isReportedToPlanning && (0, s.jsxs)(s.Fragment, {
+                                        children: [(0, s.jsxs)("button", {
+                                            onClick: () => r(t),
+                                            className: "flex-[2] py-2 bg-rose-600 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-rose-700 flex items-center justify-center gap-1 transition-colors",
+                                            children: [(0, s.jsx)(g.Z, {
+                                                size: 14
+                                            }), " CUBRIR"]
+                                        }), (0, s.jsxs)("button", {
+                                            onClick: handleReport,
+                                            className: "flex-1 py-2 bg-slate-700 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-slate-800 flex items-center justify-center gap-1 transition-colors",
+                                            children: [(0, s.jsx)(w.Z, {
+                                                size: 14
+                                            }), " DEVOLVER"]
+                                        })]
+                                    }), !t.isUnassigned && !t.isPresent && !t.isCompleted && (D > 60 ? (0, s.jsxs)("button", {
+                                        onClick: () => i(t),
+                                        className: "flex-1 py-2 bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold uppercase hover:bg-rose-200 flex items-center justify-center gap-1 shadow-sm",
+                                        children: [(0, s.jsx)(v.Z, {
+                                            size: 14
+                                        }), " AUSENTE"]
+                                    }) : (0, s.jsxs)("button", {
+                                        onClick: handleCheckIn,
+                                        disabled: !P,
+                                        className: "flex-[2] py-2 rounded-lg text-[11px] font-bold uppercase shadow-sm flex items-center justify-center gap-1 transition-colors ".concat(P ? "bg-indigo-600 text-white hover:bg-indigo-700" : "bg-slate-200 text-slate-400 cursor-not-allowed"),
+                                        children: [(0, s.jsx)(C.Z, {
+                                            size: 14
+                                        }), " ", D > 5 ? "LLEGADA TARDE" : "DAR PRESENTE"]
+                                    }))]
+                                }), ("ACTIVOS" === a || "RETENIDOS" === a) && (0, s.jsxs)(s.Fragment, {
+                                    children: [(0, s.jsxs)("button", {
+                                        onClick: () => n(t),
+                                        className: "flex-[2] py-2 bg-purple-600 text-white rounded-lg text-[11px] font-bold uppercase shadow-sm hover:bg-purple-700 flex items-center justify-center gap-1",
+                                        children: [(0, s.jsx)(O.Z, {
+                                            size: 14
+                                        }), " SALIDA"]
+                                    }), (0, s.jsxs)("button", {
+                                        onClick: () => l(t),
+                                        className: "flex-1 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-[11px] font-bold uppercase hover:bg-red-100 flex items-center justify-center gap-1",
+                                        children: [(0, s.jsx)(g.Z, {
+                                            size: 14
+                                        }), " BAJA"]
+                                    })]
+                                })]
+                            })]
+                        })]
+                    })
+                },
+                ObjectiveGroup = e => {
+                    let {
+                        group: t,
+                        modals: a,
+                        isCompact: i,
+                        onReport: o,
+                        viewTab: l,
+                        onOpenWorkedFranco: r,
+                        selectedShiftId: d,
+                        onSelectShift: c
+                    } = e, [x, m] = (0, n.useState)(!0);
+                    return (0, s.jsxs)("div", {
+                        className: "bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden mb-3",
+                        children: [" ", (0, s.jsxs)("div", {
+                            className: "p-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center cursor-pointer hover:bg-slate-200",
+                            onClick: () => m(!x),
+                            children: [" ", (0, s.jsxs)("div", {
+                                className: "flex items-center gap-2",
+                                children: [(0, s.jsx)("div", {
+                                    className: "bg-slate-700 text-white w-5 h-5 rounded flex items-center justify-center text-[10px] font-black",
+                                    children: t.items.length
+                                }), (0, s.jsx)("h4", {
+                                    className: "font-bold text-xs text-slate-700 uppercase truncate max-w-[200px]",
+                                    children: t.name
+                                })]
+                            }), " ", x ? (0, s.jsx)(p.Z, {
+                                size: 16,
+                                className: "text-slate-400"
+                            }) : (0, s.jsx)(R.Z, {
+                                size: 16,
+                                className: "text-slate-400"
+                            }), " "]
+                        }), " ", x && (0, s.jsx)("div", {
+                            className: "p-2 bg-slate-50/50 space-y-2",
+                            children: t.items.map(e => (0, s.jsx)(GuardCard, {
+                                shift: e,
+                                viewTab: l,
+                                isCompact: i,
+                                isSelected: d === e.id,
+                                onSelect: c,
+                                onOpenCheckout: e => a.setCheckoutData({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenAttendance: e => a.setAttendanceData({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenHandover: e => a.setHandoverData({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenInterrupt: e => a.setInterruptData({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenCoverage: e => a.setCoverageData({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onReportPlanning: o,
+                                onOpenWorkedFranco: r
+                            }, e.id))
+                        }), " "]
+                    })
+                };
+
+            function OperacionesPage() {
+                var e;
+                let t = (0, z.A)(),
+                    [a, i] = (0, n.useState)(!1),
+                    [l, r] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [c, p] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [x, m] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [u, b] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [h, f] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [g, v] = (0, n.useState)({
+                        isOpen: !1,
+                        shift: null
+                    }),
+                    [j, N] = (0, n.useState)(!1),
+                    [A, w] = (0, n.useState)([]),
+                    [E, y] = (0, n.useState)(!1),
+                    [C, O] = (0, n.useState)(null),
+                    R = (0, n.useRef)([]),
+                    H = (0, n.useRef)(!1);
+                (0, n.useEffect)(() => {
+                    let e = (0, M.IO)((0, M.hJ)(_.db, "novedades"), (0, M.ar)("type", "in", ["CHECKIN_REQUEST", "ABSENCE_ALERT"])),
+                        t = (0, M.cf)(e, e => {
+                            let t = e.docs.map(e => ({
+                                    id: e.id,
+                                    ...e.data()
+                                })),
+                                a = t.filter(e => {
+                                    let t = String(e.status || "").toUpperCase();
+                                    return !t || "PENDIENTE" === t || "PENDING" === t
+                                });
+                            a.sort((e, t) => {
+                                var a, s;
+                                let n = (null === (a = e.createdAt) || void 0 === a ? void 0 : a.seconds) ? e.createdAt.seconds : 0,
+                                    i = (null === (s = t.createdAt) || void 0 === s ? void 0 : s.seconds) ? t.createdAt.seconds : 0;
+                                return i - n
+                            }), w(a)
+                        });
+                    return () => t()
+                }, []);
+                let handleAcknowledgeAbsence = async e => {
+                    try {
+                        await (0, M.r7)((0, M.JU)(_.db, "novedades", e.id), {
+                            status: "RECEIVED",
+                            receivedAt: (0, M.Bt)()
+                        })
+                    } catch (e) {
+                        B.Am.error("Error al marcar visto")
+                    }
+                }, enqueueAction = (e, t) => {
+                    let a = "".concat(Date.now(), "_").concat(Math.random().toString(36).slice(2, 8));
+                    R.current.push({
+                        id: a,
+                        label: e,
+                        task: t
+                    }), H.current || processQueue(), B.Am.info("Encolado: ".concat(e))
+                }, processQueue = async () => {
+                    for (H.current = !0; R.current.length > 0;) {
+                        let e = R.current.shift();
+                        if (!e) break;
+                        try {
+                            await e.task()
+                        } catch (t) {
+                            B.Am.error("Error en cola: ".concat(e.label))
+                        }
+                    }
+                    H.current = !1
+                }, handleMarkAbsent = async e => {
+                    try {
+                        var t;
+                        await (0, M.r7)((0, M.JU)(_.db, "turnos", e.id), {
+                            status: "ABSENT",
+                            isAbsent: !0
+                        });
+                        let a = (null === (t = (0, G.v0)().currentUser) || void 0 === t ? void 0 : t.email) || "Operador";
+                        await (0, M.ET)((0, M.hJ)(_.db, "audit_logs"), {
+                            action: "OPERACIONES_AUSENCIA",
+                            module: "OPERACIONES",
+                            actorName: a,
+                            details: "Ausencia confirmada: ".concat(e.employeeName),
+                            timestamp: (0, M.Bt)(),
+                            clientId: e.clientId,
+                            objectiveId: e.objectiveId,
+                            objectiveName: e.objectiveName,
+                            positionName: e.positionName,
+                            shiftId: e.id,
+                            targetEmployee: e.employeeName
+                        }), p({
+                            isOpen: !1,
+                            shift: null
+                        }), f({
+                            isOpen: !0,
+                            shift: e
+                        })
+                    } catch (e) {
+                        B.Am.error("Error al marcar ausencia")
+                    }
+                }, handleReportPlanning = async e => {
+                    try {
+                        var t;
+                        let a = e.isVirtual || !e.id || String(e.id).startsWith("V124_") || String(e.id).startsWith("V124_GAP") || String(e.id).startsWith("SLA_GAP"),
+                            s = e.startTime || e.shiftDateObj,
+                            n = e.endTime || e.endDateObj,
+                            toTimestamp = e => (null == e ? void 0 : e.toDate) ? e : e instanceof Date ? M.EK.fromDate(e) : e,
+                            i = e.id;
+                        if (a) {
+                            let t = (0, M.JU)((0, M.hJ)(_.db, "turnos"));
+                            i = t.id;
+                            let a = {
+                                employeeId: e.employeeId || "VACANTE",
+                                employeeName: e.employeeName || "VACANTE",
+                                clientId: e.clientId || "",
+                                clientName: e.clientName || "",
+                                objectiveId: e.objectiveId || "",
+                                objectiveName: e.objectiveName || "",
+                                positionName: e.positionName || "General",
+                                code: e.code || "V",
+                                type: e.type || e.code || "VACANTE",
+                                startTime: toTimestamp(s) || (0, M.Bt)(),
+                                endTime: toTimestamp(n) || (0, M.Bt)(),
+                                status: "UNCOVERED_REPORTED",
+                                isReported: !0,
+                                isUnassigned: !0,
+                                comments: "Vacante Reportada a Planificaci\xf3n",
+                                createdAt: (0, M.Bt)(),
+                                origin: "OPERACIONES"
+                            };
+                            await (0, M.pl)(t, a)
+                        } else await (0, M.r7)((0, M.JU)(_.db, "turnos", i), {
+                            status: "UNCOVERED_REPORTED",
+                            isReported: !0
+                        });
+                        await (0, M.ET)((0, M.hJ)(_.db, "novedades"), {
+                            type: "VACANTE_NO_CUBIERTA",
+                            title: "Vacante Reportada",
+                            clientId: e.clientId,
+                            clientName: e.clientName,
+                            objectiveId: e.objectiveId,
+                            objectiveName: e.objectiveName,
+                            positionName: e.positionName || "General",
+                            shiftId: i,
+                            description: "Vacante no cubierta en ".concat(e.objectiveName),
+                            status: "pending",
+                            priority: "high",
+                            createdAt: (0, M.Bt)(),
+                            reportedBy: "OPERACIONES"
+                        }), await (0, M.ET)((0, M.hJ)(_.db, "audit_logs"), {
+                            action: "OPERACIONES_REPORTE_PLANIFICACION",
+                            module: "OPERACIONES",
+                            actorName: (null === (t = (0, G.v0)().currentUser) || void 0 === t ? void 0 : t.email) || "Operador",
+                            details: "Devuelto a planificaci\xf3n: ".concat(e.objectiveName, " (").concat(e.positionName || "General", ")"),
+                            timestamp: (0, M.Bt)(),
+                            clientId: e.clientId,
+                            objectiveId: e.objectiveId,
+                            objectiveName: e.objectiveName,
+                            positionName: e.positionName,
+                            shiftId: i,
+                            targetEmployee: e.employeeName
+                        }), B.Am.success("Reporte enviado correctamente")
+                    } catch (e) {
+                        B.Am.error("Error al reportar")
+                    }
+                }, handleSelectShift = e => O((null == e ? void 0 : e.id) || null);
+                (0, n.useEffect)(() => {
+                    let onKeyDown = e => {
+                        let a = e.target;
+                        if (a && ("INPUT" === a.tagName || "TEXTAREA" === a.tagName || "SELECT" === a.tagName) || !C) return;
+                        let s = t.listData.find(e => e.id === C);
+                        if (!s || "PRIORIDAD" !== t.viewTab && "PLAN" !== t.viewTab) return;
+                        let n = e.key.toLowerCase(),
+                            i = s.shiftDateObj ? (new Date().getTime() - s.shiftDateObj.getTime()) / 6e4 : 0,
+                            o = i >= -15 && i <= 60 && !s.isPresent;
+                        if ("a" === n) e.preventDefault(), enqueueAction("Ausente", () => handleMarkAbsent(s));
+                        else if ("p" === n) {
+                            if (e.preventDefault(), !o) {
+                                B.Am.info("Fuera de ventana de presente.");
+                                return
+                            }
+                            m({
+                                isOpen: !0,
+                                shift: s
+                            })
+                        } else "c" === n ? (e.preventDefault(), s.isUnassigned && f({
+                            isOpen: !0,
+                            shift: s
+                        })) : "d" === n && (e.preventDefault(), enqueueAction("Devolver a Planificaci\xf3n", () => handleReportPlanning(s)))
+                    };
+                    return window.addEventListener("keydown", onKeyDown), () => window.removeEventListener("keydown", onKeyDown)
+                }, [C, t.listData, t.viewTab]);
+                let handleApproveCheckIn = async e => {
+                    try {
+                        var t, a, s;
+                        if (!e.shiftId) return B.Am.error("Turno no encontrado");
+                        let n = (0, M.JU)(_.db, "turnos", e.shiftId),
+                            i = await (0, M.QT)(n);
+                        if (!i.exists()) return B.Am.error("Turno no encontrado");
+                        let o = i.data(),
+                            l = (null === (t = o.startTime) || void 0 === t ? void 0 : t.toDate) ? o.startTime.toDate() : null,
+                            r = new Date,
+                            d = !!l && r.getTime() - l.getTime() > 3e5;
+                        await (0, M.r7)(n, {
+                            status: "PRESENT",
+                            isPresent: !0,
+                            isLate: d,
+                            checkInTime: (0, M.Bt)(),
+                            checkInMethod: "OPERATOR",
+                            checkInOperator: (null === (a = (0, G.v0)().currentUser) || void 0 === a ? void 0 : a.uid) || null,
+                            checkInCoords: o.checkInRequestedCoords || null,
+                            checkInRequestStatus: "APPROVED"
+                        }), await (0, M.r7)((0, M.JU)(_.db, "novedades", e.id), {
+                            status: "RESUELTO",
+                            resolution: "APROBADO",
+                            resolvedAt: (0, M.Bt)(),
+                            resolvedBy: (null === (s = (0, G.v0)().currentUser) || void 0 === s ? void 0 : s.uid) || null
+                        }), B.Am.success("Presente aprobado")
+                    } catch (e) {
+                        console.error(e), B.Am.error("Error aprobando presente")
+                    }
+                }, handleRejectCheckIn = async e => {
+                    try {
+                        var t;
+                        e.shiftId && await (0, M.r7)((0, M.JU)(_.db, "turnos", e.shiftId), {
+                            checkInRequestStatus: "REJECTED"
+                        }), await (0, M.r7)((0, M.JU)(_.db, "novedades", e.id), {
+                            status: "RECHAZADO",
+                            resolution: "RECHAZADO",
+                            resolvedAt: (0, M.Bt)(),
+                            resolvedBy: (null === (t = (0, G.v0)().currentUser) || void 0 === t ? void 0 : t.uid) || null
+                        }), B.Am.success("Solicitud rechazada")
+                    } catch (e) {
+                        console.error(e), B.Am.error("Error rechazando solicitud")
+                    }
+                };
+                (0, n.useEffect)(() => {
+                    localStorage.setItem("crono_ops_filters", JSON.stringify({
+                        tab: t.viewTab,
+                        client: t.selectedClientId,
+                        text: t.filterText
+                    }))
+                }, [t.viewTab, t.selectedClientId, t.filterText]);
+                let W = (0, n.useMemo)(() => {
+                        if (!j) return [];
+                        let e = {};
+                        return t.listData.forEach(t => {
+                            let a = t.objectiveId || "unknown";
+                            e[a] || (e[a] = {
+                                id: a,
+                                name: t.objectiveName || "Sin Objetivo",
+                                client: t.clientName || "Cliente",
+                                items: []
+                            }), e[a].items.push(t)
+                        }), Object.values(e).sort((e, t) => (e.client || "").localeCompare(t.client || ""))
+                    }, [t.listData, j]),
+                    q = {
+                        setCheckoutData: r,
+                        setAttendanceData: p,
+                        setHandoverData: m,
+                        setInterruptData: b,
+                        setCoverageData: f
+                    },
+                    K = [{
+                        id: "PRIORIDAD",
+                        label: "PRIO",
+                        count: t.stats.prioridad,
+                        color: "text-rose-600"
+                    }, {
+                        id: "NO_LLEGO",
+                        label: "NO LLEGO",
+                        count: t.stats.no_llego,
+                        color: "text-amber-600"
+                    }, {
+                        id: "PLAN",
+                        label: "PLAN",
+                        count: t.stats.plan,
+                        color: "text-indigo-600"
+                    }, {
+                        id: "ACTIVOS",
+                        label: "ACT",
+                        count: t.stats.activos,
+                        color: "text-emerald-600"
+                    }, {
+                        id: "RETENIDOS",
+                        label: "RET",
+                        count: t.stats.retenidos,
+                        color: "text-orange-600"
+                    }, {
+                        id: "VACANTES",
+                        label: "VAC",
+                        count: t.stats.vacantes,
+                        color: "text-slate-800"
+                    }, {
+                        id: "AUSENTES",
+                        label: "AUS",
+                        count: t.stats.ausentes,
+                        color: "text-slate-500"
+                    }, {
+                        id: "FRANCOS",
+                        label: "FRAN",
+                        count: t.stats.francos,
+                        color: "text-blue-600"
+                    }];
+                return (0, s.jsxs)(d.Z, {
+                    children: [(0, s.jsx)(B.x7, {
+                        position: "top-right"
+                    }), (0, s.jsx)(o(), {
+                        children: (0, s.jsx)("title", {
+                            children: "COSP V184.0"
+                        })
+                    }), (0, s.jsx)("style", {
+                        children: V.o
+                    }), (0, s.jsxs)("div", {
+                        className: "h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in",
+                        children: [!a && (0, s.jsxs)("div", {
+                            className: "flex-1 lg:flex-[3] bg-slate-100 rounded-3xl border border-slate-200 overflow-hidden relative shadow-inner",
+                            children: [(0, s.jsx)(J, {
+                                center: [-31.4201, -64.1888],
+                                allObjectives: t.filteredObjectives,
+                                filteredShifts: t.listData,
+                                showAllObjectives: !1,
+                                onOpenCoverage: e => {
+                                    if (e.isReportedToPlanning) {
+                                        B.Am.info("Vacante ya devuelta.");
+                                        return
+                                    }
+                                    f({
+                                        isOpen: !0,
+                                        shift: e
+                                    })
+                                },
+                                onOpenCheckout: e => r({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenAttendance: e => p({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenHandover: e => m({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onOpenInterrupt: e => b({
+                                    isOpen: !0,
+                                    shift: e
+                                }),
+                                onReportPlanning: handleReportPlanning,
+                                onOpenWorkedFranco: e => v({
+                                    isOpen: !0,
+                                    shift: e
+                                })
+                            }), (0, s.jsx)("button", {
+                                onClick: () => {
+                                    window.open("/admin/operaciones/map-view", "CronoMapTactical", "width=1200,height=800,menubar=no,toolbar=no,location=no,status=no"), i(!0)
+                                },
+                                className: "absolute top-4 right-4 z-[1000] bg-white p-2 rounded-lg shadow hover:bg-slate-100",
+                                children: (0, s.jsx)(I.Z, {
+                                    size: 20,
+                                    className: "text-indigo-600"
+                                })
+                            })]
+                        }), (0, s.jsxs)("div", {
+                            className: "bg-white rounded-3xl border border-slate-200 flex flex-col shadow-xl ".concat(a ? "w-full" : "flex-1 lg:flex-[2]"),
+                            children: [(0, s.jsxs)("div", {
+                                className: "p-4 border-b",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "flex justify-between items-center mb-4",
+                                    children: [(0, s.jsxs)("h2", {
+                                        className: "text-xl font-black text-slate-800 flex items-center gap-2",
+                                        children: [(0, s.jsx)(T.Z, {
+                                            className: "text-rose-600 animate-pulse"
+                                        }), " COSP V184.0"]
+                                    }), (0, s.jsxs)("div", {
+                                        className: "flex items-center gap-2",
+                                        children: [(0, s.jsxs)("button", {
+                                            onClick: () => N(!j),
+                                            className: "px-3 py-1.5 font-bold text-xs rounded-lg border flex items-center gap-2 transition-all ".concat(j ? "bg-indigo-600 text-white border-indigo-700 shadow-md" : "bg-white text-slate-600 hover:bg-slate-50"),
+                                            children: [(0, s.jsx)(S.Z, {
+                                                size: 14
+                                            }), " ", j ? "AGRUPADO" : "LISTA"]
+                                        }), a && (0, s.jsx)("button", {
+                                            onClick: () => i(!1),
+                                            className: "px-3 py-1 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-lg border",
+                                            children: "Restaurar Mapa"
+                                        }), (0, s.jsx)("button", {
+                                            onClick: () => y(!0),
+                                            className: "px-3 py-1.5 bg-slate-900 text-white font-bold text-xs rounded-lg",
+                                            children: "Ayuda"
+                                        }), (0, s.jsx)("button", {
+                                            onClick: () => t.setIsCompact(!t.isCompact),
+                                            className: "p-2 bg-slate-100 rounded-lg text-slate-600",
+                                            children: t.isCompact ? (0, s.jsx)(k.Z, {
+                                                size: 16
+                                            }) : (0, s.jsx)(D.Z, {
+                                                size: 16
+                                            })
+                                        })]
+                                    })]
+                                }), (0, s.jsxs)("div", {
+                                    className: "mb-3 bg-amber-50 border border-amber-100 rounded-xl p-3",
+                                    children: [(0, s.jsx)("div", {
+                                        className: "flex items-center justify-between mb-2",
+                                        children: (0, s.jsxs)("span", {
+                                            className: "text-[10px] font-black uppercase text-amber-700",
+                                            children: ["Solicitudes de Presente (", A.length, ")"]
+                                        })
+                                    }), 0 === A.length ? (0, s.jsx)("div", {
+                                        className: "text-[10px] text-slate-500",
+                                        children: "Sin solicitudes pendientes."
+                                    }) : (0, s.jsx)("div", {
+                                        className: "space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1",
+                                        children: A.map(e => {
+                                            let t = "ABSENCE_ALERT" === String(e.type || "").toUpperCase();
+                                            return (0, s.jsxs)("div", {
+                                                className: "bg-white border rounded-lg p-2 flex items-center justify-between gap-2",
+                                                children: [(0, s.jsxs)("div", {
+                                                    className: "min-w-0",
+                                                    children: [(0, s.jsxs)("div", {
+                                                        className: "text-xs font-bold text-slate-800 truncate",
+                                                        children: [e.employeeName || "Empleado", t && (0, s.jsx)("span", {
+                                                            className: "ml-2 text-[9px] font-black text-rose-600",
+                                                            children: "AUSENCIA <4H"
+                                                        })]
+                                                    }), (0, s.jsxs)("div", {
+                                                        className: "text-[10px] text-slate-500 truncate",
+                                                        children: [e.objectiveName || "Objetivo", " \xb7 ", e.shiftId || "-"]
+                                                    }), (0, s.jsxs)("div", {
+                                                        className: "text-[10px] text-slate-400",
+                                                        children: ["Solicitud: ", formatTimeSimple(e.createdAt)]
+                                                    })]
+                                                }), (0, s.jsx)("div", {
+                                                    className: "flex gap-1",
+                                                    children: t ? (0, s.jsx)("button", {
+                                                        onClick: () => handleAcknowledgeAbsence(e),
+                                                        className: "px-2 py-1 bg-slate-800 text-white text-[10px] font-black rounded",
+                                                        children: "VISTO"
+                                                    }) : (0, s.jsxs)(s.Fragment, {
+                                                        children: [(0, s.jsx)("button", {
+                                                            onClick: () => handleApproveCheckIn(e),
+                                                            className: "px-2 py-1 bg-emerald-600 text-white text-[10px] font-black rounded",
+                                                            children: "APROBAR"
+                                                        }), (0, s.jsx)("button", {
+                                                            onClick: () => handleRejectCheckIn(e),
+                                                            className: "px-2 py-1 bg-rose-600 text-white text-[10px] font-black rounded",
+                                                            children: "RECHAZAR"
+                                                        })]
+                                                    })
+                                                })]
+                                            }, e.id)
+                                        })
+                                    })]
+                                }), (0, s.jsx)("div", {
+                                    className: "mb-3",
+                                    children: (0, s.jsxs)("select", {
+                                        value: t.selectedClientId,
+                                        onChange: e => t.setSelectedClientId(e.target.value),
+                                        className: "w-full p-2 text-xs font-bold border border-slate-300 rounded-lg bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700",
+                                        children: [(0, s.jsx)("option", {
+                                            value: "",
+                                            children: "TODOS LOS CLIENTES"
+                                        }), t.uniqueClients.map(e => (0, s.jsx)("option", {
+                                            value: e.id,
+                                            children: e.name
+                                        }, e.id))]
+                                    })
+                                }), (0, s.jsx)("div", {
+                                    className: "bg-slate-100 rounded-xl mb-3 p-2",
+                                    children: (0, s.jsx)("div", {
+                                        className: "grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2",
+                                        children: K.map(e => {
+                                            let a = t.viewTab === e.id,
+                                                n = e.count || 0;
+                                            return (0, s.jsxs)("button", {
+                                                onClick: () => t.setViewTab(e.id),
+                                                className: "relative w-full px-2 py-2 rounded-lg transition-all border text-[10px] font-black uppercase flex items-center justify-center ".concat(a ? "bg-white shadow-sm border-slate-200 ".concat(e.color) : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-200"),
+                                                children: [(0, s.jsx)("span", {
+                                                    className: "truncate",
+                                                    children: e.label
+                                                }), n > 0 && (0, s.jsx)("span", {
+                                                    className: "absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-black leading-4 text-center ".concat(a ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200"),
+                                                    children: n
+                                                })]
+                                            }, e.id)
+                                        })
+                                    })
+                                }), (0, s.jsxs)("div", {
+                                    className: "flex gap-2 relative",
+                                    children: [(0, s.jsx)(P.Z, {
+                                        className: "absolute left-3 top-2.5 text-slate-400",
+                                        size: 16
+                                    }), (0, s.jsx)("input", {
+                                        className: "w-full bg-slate-50 border border-slate-200 pl-9 pr-3 py-2 rounded-xl text-xs font-bold uppercase outline-none focus:ring-2 focus:ring-indigo-500",
+                                        placeholder: "BUSCAR...",
+                                        value: t.filterText,
+                                        onChange: e => t.setFilterText(e.target.value)
+                                    })]
+                                })]
+                            }), (0, s.jsx)("div", {
+                                className: "flex-1 overflow-y-auto p-3 bg-slate-50/50 space-y-2",
+                                children: 0 === t.listData.length ? (0, s.jsx)("div", {
+                                    className: "text-center py-10 text-slate-400 text-xs",
+                                    children: "Sin novedades en esta categor\xeda"
+                                }) : j ? W.map(e => (0, s.jsx)(ObjectiveGroup, {
+                                    group: e,
+                                    modals: q,
+                                    isCompact: t.isCompact,
+                                    onReport: handleReportPlanning,
+                                    viewTab: t.viewTab,
+                                    onOpenWorkedFranco: e => v({
+                                        isOpen: !0,
+                                        shift: e
+                                    }),
+                                    selectedShiftId: C,
+                                    onSelectShift: handleSelectShift
+                                }, e.id)) : t.listData.map(e => (0, s.jsx)(GuardCard, {
+                                    shift: e,
+                                    viewTab: t.viewTab,
+                                    isCompact: t.isCompact,
+                                    isSelected: C === e.id,
+                                    onSelect: handleSelectShift,
+                                    onOpenCheckout: e => r({
+                                        isOpen: !0,
+                                        shift: e
+                                    }),
+                                    onOpenAttendance: e => p({
+                                        isOpen: !0,
+                                        shift: e
+                                    }),
+                                    onOpenHandover: e => m({
+                                        isOpen: !0,
+                                        shift: e
+                                    }),
+                                    onOpenInterrupt: e => b({
+                                        isOpen: !0,
+                                        shift: e
+                                    }),
+                                    onOpenCoverage: e => {
+                                        if (e.isReportedToPlanning) {
+                                            B.Am.info("Vacante ya devuelta.");
+                                            return
+                                        }
+                                        f({
+                                            isOpen: !0,
+                                            shift: e
+                                        })
+                                    },
+                                    onReportPlanning: handleReportPlanning,
+                                    onOpenWorkedFranco: e => v({
+                                        isOpen: !0,
+                                        shift: e
+                                    })
+                                }, e.id))
+                            }), (0, s.jsxs)("div", {
+                                className: "h-40 border-t border-slate-200 bg-white flex flex-col",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "px-4 py-2 border-b border-slate-100 flex items-center justify-between",
+                                    children: [(0, s.jsxs)("div", {
+                                        className: "flex items-center gap-2",
+                                        children: [(0, s.jsx)(L.Z, {
+                                            size: 14,
+                                            className: "text-slate-400"
+                                        }), (0, s.jsx)("h3", {
+                                            className: "text-[10px] font-black uppercase text-slate-500",
+                                            children: "Bit\xe1cora"
+                                        })]
+                                    }), (0, s.jsx)("button", {
+                                        onClick: () => {
+                                            var e;
+                                            let a = new F.ZP,
+                                                s = new Date,
+                                                n = s.toLocaleDateString("es-AR", {
+                                                    timeZone: "America/Argentina/Cordoba"
+                                                }),
+                                                i = (null === (e = t.operatorInfo) || void 0 === e ? void 0 : e.startTime) || new Date(s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0);
+                                            a.setFontSize(18), a.text("Informe de Gesti\xf3n COSP", 14, 20), a.setFontSize(10), a.text("Desde: ".concat(i.toLocaleString("es-AR", {
+                                                timeZone: "America/Argentina/Cordoba"
+                                            })), 14, 28), a.text("Hasta: ".concat(s.toLocaleString("es-AR", {
+                                                timeZone: "America/Argentina/Cordoba"
+                                            })), 14, 34);
+                                            let o = t.recentLogs.filter(e => "VACANTE" !== e.formattedActor && e.time && e.time >= i && e.time <= s),
+                                                l = o.map(e => [formatTimeSimple(e.time), (e.action || "LOG").replace("MANUAL_", ""), e.formattedActor || "Sistema", e.targetEmployee || "-", e.fullDetail || e.details || "-"]);
+                                            (0, Z.ZP)(a, {
+                                                head: [
+                                                    ["Hora", "Evento", "Operador", "Objetivo", "Detalle"]
+                                                ],
+                                                body: l,
+                                                startY: 50,
+                                                styles: {
+                                                    fontSize: 8
+                                                },
+                                                headStyles: {
+                                                    fillColor: [15, 23, 42]
+                                                }
+                                            }), a.save("bitacora_".concat(n, ".pdf"))
+                                        },
+                                        className: "p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg",
+                                        children: (0, s.jsx)(U.Z, {
+                                            size: 12
+                                        })
+                                    })]
+                                }), (0, s.jsx)("div", {
+                                    className: "flex-1 overflow-y-auto p-0",
+                                    children: (0, s.jsxs)("table", {
+                                        className: "w-full text-[10px] text-left table-fixed",
+                                        children: [(0, s.jsx)("thead", {
+                                            className: "bg-slate-50 text-slate-400 uppercase font-bold sticky top-0",
+                                            children: (0, s.jsxs)("tr", {
+                                                children: [(0, s.jsx)("th", {
+                                                    className: "px-4 py-1 border-r border-slate-100",
+                                                    style: {
+                                                        width: "70px",
+                                                        resize: "horizontal",
+                                                        overflow: "auto"
+                                                    },
+                                                    children: "Hora"
+                                                }), (0, s.jsx)("th", {
+                                                    className: "px-2 py-1 border-r border-slate-100",
+                                                    style: {
+                                                        width: "120px",
+                                                        resize: "horizontal",
+                                                        overflow: "auto"
+                                                    },
+                                                    children: "Evento"
+                                                }), (0, s.jsx)("th", {
+                                                    className: "px-2 py-1 border-r border-slate-100",
+                                                    style: {
+                                                        width: "140px",
+                                                        resize: "horizontal",
+                                                        overflow: "auto"
+                                                    },
+                                                    children: "Actor"
+                                                }), (0, s.jsx)("th", {
+                                                    className: "px-2 py-1",
+                                                    style: {
+                                                        width: "260px",
+                                                        resize: "horizontal",
+                                                        overflow: "auto"
+                                                    },
+                                                    children: "Detalle"
+                                                })]
+                                            })
+                                        }), (0, s.jsx)("tbody", {
+                                            className: "divide-y divide-slate-50",
+                                            children: t.recentLogs.map(e => (0, s.jsxs)("tr", {
+                                                children: [(0, s.jsx)("td", {
+                                                    className: "px-4 py-1 font-mono text-slate-400 truncate",
+                                                    children: formatTimeSimple(e.time)
+                                                }), (0, s.jsx)("td", {
+                                                    className: "px-2 py-1 font-bold truncate",
+                                                    children: e.action
+                                                }), (0, s.jsx)("td", {
+                                                    className: "px-2 py-1 truncate",
+                                                    children: e.formattedActor
+                                                }), (0, s.jsx)("td", {
+                                                    className: "px-2 py-1 text-slate-500 truncate",
+                                                    children: e.fullDetail
+                                                })]
+                                            }, e.id))
+                                        })]
+                                    })
+                                })]
+                            })]
+                        })]
+                    }), (0, s.jsx)(RetentionModal, {
+                        isOpen: !1,
+                        onClose: () => {},
+                        retainedShift: null
+                    }), E && (0, s.jsx)("div", {
+                        className: "fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4",
+                        onClick: () => y(!1),
+                        children: (0, s.jsxs)("div", {
+                            className: "bg-white w-full max-w-2xl rounded-2xl shadow-2xl p-6 space-y-4",
+                            onClick: e => e.stopPropagation(),
+                            children: [(0, s.jsxs)("div", {
+                                className: "flex items-center justify-between",
+                                children: [(0, s.jsx)("h3", {
+                                    className: "text-lg font-black text-slate-800",
+                                    children: "Ayuda Operaciones"
+                                }), (0, s.jsx)("button", {
+                                    onClick: () => y(!1),
+                                    className: "text-slate-500 hover:text-slate-700",
+                                    children: "Cerrar"
+                                })]
+                            }), (0, s.jsxs)("div", {
+                                className: "grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-600",
+                                children: [(0, s.jsxs)("div", {
+                                    className: "bg-slate-50 border rounded-xl p-3",
+                                    children: [(0, s.jsx)("p", {
+                                        className: "font-black text-slate-700 mb-2",
+                                        children: "Mapa"
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Colores: Verde activo, \xc1mbar tarde, Rojo ausencia/vacante, Azul franco."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- DESCUBIERTO parpadea en rojo."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Click en marcador para acciones."
+                                    })]
+                                }), (0, s.jsxs)("div", {
+                                    className: "bg-slate-50 border rounded-xl p-3",
+                                    children: [(0, s.jsx)("p", {
+                                        className: "font-black text-slate-700 mb-2",
+                                        children: "Barra lateral"
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Prioridad: alertas cr\xedticas no resueltas."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Vacantes: SLA no cubierto / reportadas."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Ausentes: turnos iniciados sin presente."
+                                    })]
+                                }), (0, s.jsxs)("div", {
+                                    className: "bg-slate-50 border rounded-xl p-3",
+                                    children: [(0, s.jsx)("p", {
+                                        className: "font-black text-slate-700 mb-2",
+                                        children: "Atajos"
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Seleccion\xe1 una tarjeta."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- A = Ausente, P = Presente, C = Cubrir, D = Devolver."
+                                    })]
+                                }), (0, s.jsxs)("div", {
+                                    className: "bg-slate-50 border rounded-xl p-3",
+                                    children: [(0, s.jsx)("p", {
+                                        className: "font-black text-slate-700 mb-2",
+                                        children: "Resoluci\xf3n"
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Cobertura: retenci\xf3n, intercambio, volantes, adelanto, franco."
+                                    }), (0, s.jsx)("p", {
+                                        children: "- Dejar descubierto marca ausencia y lo saca de prioridad."
+                                    })]
+                                })]
+                            })]
+                        })
+                    }), (0, s.jsx)(WorkedDayOffModal, {
+                        isOpen: g.isOpen,
+                        onClose: () => v({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        shift: g.shift
+                    }), (0, s.jsx)(CheckOutModal, {
+                        isOpen: l.isOpen,
+                        onClose: () => r({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        onConfirm: e => {
+                            var a;
+                            (null === (a = l.shift) || void 0 === a ? void 0 : a.id) && t.handleAction("CHECKOUT", l.shift.id, e)
+                        },
+                        employeeName: null === (e = l.shift) || void 0 === e ? void 0 : e.employeeName
+                    }), (0, s.jsx)(AttendanceModal, {
+                        isOpen: c.isOpen,
+                        onClose: () => p({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        shift: c.shift,
+                        onMarkAbsent: handleMarkAbsent
+                    }), (0, s.jsx)(HandoverModal, {
+                        isOpen: x.isOpen,
+                        onClose: () => m({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        incomingShift: x.shift,
+                        logic: t
+                    }), (0, s.jsx)(InterruptModal, {
+                        isOpen: u.isOpen,
+                        onClose: () => b({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        shift: u.shift,
+                        logic: t,
+                        onVacancyCreated: e => {
+                            b({
+                                isOpen: !1,
+                                shift: null
+                            }), f({
+                                isOpen: !0,
+                                shift: e
+                            })
+                        }
+                    }), (0, s.jsx)(CoverageModal, {
+                        isOpen: h.isOpen,
+                        onClose: () => f({
+                            isOpen: !1,
+                            shift: null
+                        }),
+                        absenceShift: h.shift,
+                        logic: t
+                    })]
+                })
+            }
+        }
+    },
+    function(e) {
+        e.O(0, [70, 275, 678, 973, 460, 590, 431, 774, 888, 179], function() {
+            return e(e.s = 76584)
+        }), _N_E = e.O()
+    }
+]);

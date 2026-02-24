@@ -35,6 +35,7 @@ const Icons = {
     ORANGE: createCustomIcon('#f97316', 'SHIELD'), // Retención
     BLUE: createCustomIcon('#3b82f6', 'SHIELD'),   // Franco
     GRAY: createCustomIcon('#64748b', 'OFF'),      // Sin Actividad / Plan Futuro
+    VIOLET: createCustomIcon('#7c3aed', 'SHIELD'), // Vacante reportada / devuelta a planificación
 };
 
 const MapUpdater = ({ markers }: any) => {
@@ -48,10 +49,19 @@ const MapUpdater = ({ markers }: any) => {
     return null;
 };
 
+const formatAlertTime = (ts: any) => {
+    if (!ts) return '—';
+    try {
+        const s = ts.seconds ?? ts;
+        return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return '—'; }
+};
+
 const OperacionesMap = ({ 
     center, 
-    allObjectives = [], // LISTA MAESTRA DE OBJETIVOS (Para que se vean todos los del filtro)
-    filteredShifts = [], // LISTA DE TURNOS ACTUALES (Para colorearlos)
+    allObjectives = [],
+    filteredShifts = [],
+    nvrAlerts = [],
     onOpenCoverage,
     onOpenCheckout,
     onOpenAttendance,
@@ -61,24 +71,33 @@ const OperacionesMap = ({
 }: any) => {
 
     const markers = useMemo(() => {
-        // 1. Usamos allObjectives que YA VIENE FILTRADO desde el padre
-        return allObjectives.filter((obj: any) => obj.lat && obj.lng).map((obj: any) => {
-            
-            // 2. Buscar turnos para este objetivo
+        return allObjectives.filter((obj: any) => obj != null && Number.isFinite(Number(obj.lat)) && Number.isFinite(Number(obj.lng))).map((obj: any) => {
             const shiftsInObjective = filteredShifts.filter((s: any) => s.objectiveId === obj.id);
+            const alertsInObjective = (nvrAlerts || []).filter((a: any) => a.objective_id === obj.id);
             
-            let icon = Icons.GRAY; // Default: Gris
-            let statusText = 'S/A'; // Sin Actividad
-            let priority = 0; 
+            let icon = Icons.GRAY;
+            let statusText = 'S/A';
+            let priority = 0;
 
-            // 3. Determinar color por gravedad
+            if (alertsInObjective.length > 0 && priority < 6) {
+                icon = Icons.RED;
+                statusText = 'ALERTA NVR';
+                priority = 6;
+            }
+
             if (shiftsInObjective.length > 0) {
                 shiftsInObjective.forEach((s: any) => {
                     const now = new Date();
                     const start = s.shiftDateObj ? (s.shiftDateObj.seconds ? new Date(s.shiftDateObj.seconds * 1000) : s.shiftDateObj) : new Date();
                     const diffMin = (now.getTime() - start.getTime()) / 60000;
+                    const isReportedOrReturned = s.isUnassigned && s.isReportedToPlanning;
 
-                    if ((s.isUnassigned || (!s.isPresent && !s.isCompleted && diffMin > 60)) && priority < 5) {
+                    if (isReportedOrReturned && priority < 5) {
+                        const isReturned = s.status === 'UNCOVERED_REPORTED' || s.origin === 'INTERRUPTION';
+                        icon = Icons.VIOLET;
+                        statusText = isReturned ? 'DEVUELTA A PLANIF.' : 'VACANTE REPORTADA';
+                        priority = 5;
+                    } else if ((s.isUnassigned || (!s.isPresent && !s.isCompleted && diffMin > 60)) && priority < 5) {
                         icon = Icons.RED; statusText = s.isUnassigned ? 'VACANTE' : 'AUSENCIA'; priority = 5;
                     } else if (s.isRetention && priority < 4) {
                         icon = Icons.ORANGE; statusText = 'RETENCIÓN'; priority = 4;
@@ -99,12 +118,13 @@ const OperacionesMap = ({
                 name: obj.name,
                 client: obj.clientName || 'Cliente',
                 shifts: shiftsInObjective,
+                nvrAlerts: alertsInObjective,
                 icon,
                 statusText,
                 hasShift: shiftsInObjective.length > 0
             };
         });
-    }, [allObjectives, filteredShifts]); 
+    }, [allObjectives, filteredShifts, nvrAlerts]); 
 
     return (
         <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} className="z-0">
@@ -120,8 +140,30 @@ const OperacionesMap = ({
                                     <h3 className="font-black text-sm text-slate-800 leading-tight">{marker.name}</h3>
                                     <p className="text-[10px] text-slate-500 font-bold uppercase">{marker.client}</p>
                                 </div>
-                                <span className={`text-[9px] font-black px-2 py-0.5 rounded text-white ${marker.statusText === 'AUSENCIA' || marker.statusText === 'VACANTE' ? 'bg-rose-600' : (marker.statusText === 'TARDE' ? 'bg-amber-500' : (marker.statusText === 'ACTIVO' ? 'bg-emerald-600' : 'bg-slate-400'))}`}>{marker.statusText}</span>
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded text-white ${marker.statusText === 'ALERTA NVR' ? 'bg-rose-600' : (marker.statusText === 'AUSENCIA' || marker.statusText === 'VACANTE' ? 'bg-rose-600' : (marker.statusText === 'TARDE' ? 'bg-amber-500' : (marker.statusText === 'ACTIVO' ? 'bg-emerald-600' : 'bg-slate-400')))}`}>{marker.statusText}</span>
                             </div>
+
+                            {marker.nvrAlerts && marker.nvrAlerts.length > 0 && (
+                                <div className="border-b border-rose-100 pb-2 mb-2">
+                                    <p className="text-[10px] font-black text-rose-700 uppercase mb-1 flex items-center gap-1"><Siren size={12}/> Alertas IVS</p>
+                                    <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                                        {marker.nvrAlerts.map((al: any) => (
+                                            <div key={al.id} className="bg-rose-50 border border-rose-100 rounded p-1.5">
+                                                <div className="flex justify-between items-center gap-1 mb-1">
+                                                    <span className="text-[10px] font-bold text-slate-700 truncate">{al.camera_name || 'Cámara'}</span>
+                                                    <span className="text-[9px] text-slate-500">{formatAlertTime(al.timestamp)}</span>
+                                                </div>
+                                                {al.image_url && (
+                                                    <div className="rounded overflow-hidden border border-rose-200 bg-white">
+                                                        <img src={al.image_url} alt="Alerta IVS" className="w-full h-auto max-h-32 object-cover block" />
+                                                        <a href={al.image_url} target="_blank" rel="noopener noreferrer" className="text-[9px] text-indigo-600 hover:underline block py-0.5 text-center">Abrir en nueva pestaña</a>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="space-y-2 max-h-[250px] overflow-y-auto">
                                 {marker.hasShift ? marker.shifts.map((shift: any) => {

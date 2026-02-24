@@ -1,0 +1,10 @@
+{
+  "projectId": "comtroldata",
+  "webhookUrl": "https://us-central1-comtroldata.cloudfunctions.net/nvrAlert",
+  "secret": "123456",
+  "serviceAccountPath": "service-account.json",
+  "channelId": 2,
+  "cameraName": "Entrada Principal",
+  "objectiveId": "OBJ_PILOTO",
+  "postId": "PUESTO_ENTRADA"
+}

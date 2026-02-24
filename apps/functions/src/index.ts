@@ -599,3 +599,8 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
+
+// NVR AI Alert (webhook + trigger FCM)
+export { nvrAlert } from './nvr/nvrAlert';
+export { onAlertCreated } from './nvr/onAlertCreated';
+export { simulateNvrAlert } from './nvr/simulateNvrAlert';

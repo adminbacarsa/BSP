@@ -1,53 +1,100 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // --- FUNCIONES AUXILIARES ---
-    
-    // Verifica si el usuario tiene un rol administrativo válido
-    function isAdmin() {
+
+    // --- FUNCIONES AUXILIARES (originales) ---
+
+    function isSystemUser() {
       return request.auth != null && (
-        request.auth.token.role == 'admin' || 
-        request.auth.token.role == 'SuperAdmin' || 
-        request.auth.token.role == 'Scheduler' || 
-        request.auth.token.role == 'HR_Manager'
+        request.auth.token.type == 'system_user' ||
+        request.auth.token.type == 'SYSTEM' ||
+        request.auth.token.type == 'SYSTEM_USER' ||
+        request.auth.token.type == 'system'
       );
     }
-    
-    // Verifica si el usuario es el dueño del documento
+
+    function isSystemUserDoc() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/system_users/$(request.auth.uid));
+    }
+
+    function isEmployeeClaim() {
+      return request.auth != null && (
+        request.auth.token.role == 'employee' ||
+        request.auth.token.role == 'EMPLOYEE' ||
+        request.auth.token.type == 'employee' ||
+        request.auth.token.type == 'EMPLOYEE'
+      );
+    }
+
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'Admin' ||
+        request.auth.token.role == 'ADMIN' ||
+        request.auth.token.role == 'SuperAdmin' ||
+        request.auth.token.role == 'SUPERADMIN' ||
+        request.auth.token.role == 'Manager' ||
+        request.auth.token.role == 'MANAGER' ||
+        request.auth.token.role == 'Scheduler' ||
+        request.auth.token.role == 'SCHEDULER' ||
+        request.auth.token.role == 'Supervisor' ||
+        request.auth.token.role == 'SUPERVISOR' ||
+        request.auth.token.role == 'Operator' ||
+        request.auth.token.role == 'OPERATOR' ||
+        request.auth.token.role == 'HR_Manager' ||
+        request.auth.token.role == 'HR_MANAGER' ||
+        isSystemUser() ||
+        isSystemUserDoc() ||
+        !isEmployeeClaim()
+      );
+    }
+
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // --- REGLAS POR COLECCIÓN ---
+    // Alertas NVR (Centro de Control / Pruebas): lectura para autenticados; escritura solo desde Cloud Functions
+    match /alerts/{alertId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // --- Acceso global para usuarios del sistema (admin) ---
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
 
     // 1. Turnos (Operativo)
     match /turnos/{shiftId} {
-      // Admins ven y editan todo
       allow read: if isAdmin();
-      // Empleados solo ven sus propios turnos
       allow read: if request.auth != null && resource.data.employeeId == request.auth.uid;
-      // Solo admins escriben (asignación)
       allow write: if isAdmin();
     }
 
     // 2. Empleados (RRHH)
     match /empleados/{employeeId} {
-      // Admins gestionan todo
       allow read, write: if isAdmin();
-      // Empleado ve su propio perfil
-      allow read: if isOwner(employeeId);
+      allow read: if isOwner(employeeId) ||
+        (request.auth != null &&
+          (
+            resource.data.uid == request.auth.uid ||
+            resource.data.email == request.auth.token.email
+          )
+        );
     }
 
-    // 3. Ausencias / Novedades
+    // 3. Ausencias
     match /ausencias/{absenceId} {
       allow read, write: if isAdmin();
-      // Empleado puede ver sus propias ausencias
       allow read: if request.auth != null && resource.data.employeeId == request.auth.uid;
     }
 
     // 4. Jerarquía Comercial (Clientes, Objetivos, Contratos)
     match /clientes/{clientId} {
+      allow read, write: if isAdmin();
+    }
+    match /clients/{clientId} {
       allow read, write: if isAdmin();
     }
     match /objetivos/{objectiveId} {
@@ -59,14 +106,51 @@ service cloud.firestore {
     match /tipos_turno/{typeId} {
       allow read, write: if isAdmin();
     }
+    match /servicios_sla/{slaId} {
+      allow read, write: if isAdmin();
+    }
 
     // 5. Usuarios del Sistema (Back-Office)
     match /system_users/{userId} {
-      // Solo admins pueden ver/editar usuarios del sistema
       allow read, write: if isAdmin();
+    }
+
+    // 6. Tokens de dispositivos (Notificaciones)
+    match /device_tokens/{tokenId} {
+      allow create, update, delete: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
+    }
+
+    // 7. Notificaciones de usuario (inbox)
+    match /user_notifications/{notifId} {
+      allow read, update: if request.auth != null && (
+        resource.data.uid == request.auth.uid ||
+        (resource.data.employeeId != null &&
+          (
+            get(/databases/$(database)/documents/empleados/$(resource.data.employeeId)).data.uid == request.auth.uid ||
+            get(/databases/$(database)/documents/empleados/$(resource.data.employeeId)).data.email == request.auth.token.email
+          )
+        )
+      );
+      allow create: if false;
+      allow delete: if isAdmin();
+    }
+
+    // 8. Solicitudes de intercambio
+    match /swap_requests/{requestId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 9. Novedades (operaciones, planificación)
+    match /novedades/{novedadId} {
+      allow read, create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // 10. Bitácora / Audit logs (centro de control)
+    match /audit_logs/{logId} {
+      allow read, create: if request.auth != null;
+      allow update, delete: if isAdmin();
     }
   }
 }
-
-
-

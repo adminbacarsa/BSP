@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, updateDoc, doc, serverTimestamp, addDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
@@ -72,8 +72,26 @@ export const useOperacionesMonitor = () => {
     const [filterText, setFilterText] = useState('');
     const [isCompact, setIsCompact] = useState(false);
     const [operatorInfo, setOperatorInfo] = useState<{ name: string; startTime: Date | null }>({ name: 'Operador', startTime: null });
+    const nameByEmailRef = useRef<Record<string, string>>({});
+    const autoAbsentAppliedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
+
+    // Ausente automático: tras 60 min de tolerancia sin presente, marcar turno como ABSENT
+    useEffect(() => {
+        const nowMs = Date.now();
+        rawShifts.forEach((s: any) => {
+            if (!s.id || autoAbsentAppliedRef.current.has(s.id)) return;
+            const start = getSafeDate(s.startTime || s.shiftDateObj);
+            if (!start) return;
+            const diffMin = (nowMs - start.getTime()) / 60000;
+            if (diffMin < 60) return;
+            if (s.isPresent || s.isAbsent) return;
+            if (s.employeeId === 'VACANTE' || !s.employeeId) return;
+            autoAbsentAppliedRef.current.add(s.id);
+            updateDoc(doc(db, 'turnos', s.id), { status: 'ABSENT', isAbsent: true }).catch(() => { autoAbsentAppliedRef.current.delete(s.id); });
+        });
+    }, [rawShifts]);
 
     // SUSCRIPCIONES
     useEffect(() => {
@@ -81,28 +99,57 @@ export const useOperacionesMonitor = () => {
         if (auth.currentUser) setOperatorInfo({ name: auth.currentUser.email?.split('@')[0] || 'Op', startTime: new Date() });
         const unsubs: Function[] = [];
         unsubs.push(onSnapshot(collection(db, 'empleados'), snap => setEmployees(snap.docs.map(d => ({ id: d.id, fullName: `${d.data().lastName} ${d.data().firstName}`, ...d.data() })))));
-        unsubs.push(onSnapshot(collection(db, 'clients'), snap => { const objs: any[] = []; snap.docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); setObjectives(objs); }));
+        const parseCoord = (v: any): number | null => { if (v == null) return null; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+        const normLatLng = (o: any) => { const lat = parseCoord(o.lat ?? o.latitude ?? o.coords?.lat ?? o.coords?.latitude ?? o.location?.lat ?? o.geo?.lat ?? o.geopoint?.latitude); const lng = parseCoord(o.lng ?? o.longitude ?? o.coords?.lng ?? o.coords?.longitude ?? o.location?.lng ?? o.geo?.lng ?? o.geopoint?.longitude); return { lat: lat ?? undefined, lng: lng ?? undefined }; };
+        unsubs.push(onSnapshot(collection(db, 'clients'), snap => {
+            const objs: any[] = [];
+            snap.docs.forEach(d => {
+                const data = d.data();
+                if (data.objetivos && Array.isArray(data.objetivos)) {
+                    data.objetivos.forEach((o: any) => {
+                        const { lat, lng } = normLatLng(o);
+                        objs.push({ ...o, clientName: data.name, clientId: d.id, lat, lng });
+                    });
+                } else {
+                    objs.push({ id: d.id, name: data.name, clientName: data.name || data.fantasyName, clientId: d.id });
+                }
+            });
+            setObjectives(objs);
+        }));
         unsubs.push(onSnapshot(query(collection(db, 'servicios_sla'), where('status', '==', 'active')), snap => setServicesSLA(snap.docs.map(d => ({ id: d.id, ...d.data() })))));
-        const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
-        let unsubAudit: (() => void) | null = null;
+        // Bitácora: suscribirse siempre (no depender de system_users). Mapa de nombres se llena en paralelo.
         getDocs(collection(db, 'system_users')).then((userSnap) => {
-            const nameByEmail: Record<string, string> = {};
+            const map: Record<string, string> = {};
             userSnap.docs.forEach(d => {
                 const u = d.data();
                 const displayName = (u.firstName && u.lastName) ? `${u.lastName} ${u.firstName}`.trim() : (u.name || u.email || '');
-                if (u.email) nameByEmail[u.email] = displayName || u.email;
-                if (d.id) nameByEmail[d.id] = displayName || u.email || d.id;
+                if (u.email) map[u.email] = displayName || u.email;
+                if (d.id) map[d.id] = displayName || u.email || d.id;
             });
-            unsubAudit = onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
-                setRecentLogs(snap.docs.map(d => {
-                    const data = d.data();
-                    const actorName = data.actorName || data.actor || '';
-                    const resolvedName = nameByEmail[data.actorEmail] || nameByEmail[data.actorUid] || nameByEmail[actorName] || actorName;
-                    return { id: d.id, ...data, formattedActor: resolvedName || 'Sistema', time: getSafeDate(data.timestamp), fullDetail: data.details };
-                }));
-            });
-        });
-        return () => { unsubs.forEach(u => u()); unsubAudit?.(); };
+            nameByEmailRef.current = map;
+        }).catch(() => {});
+        // Bitácora: consulta simple (solo orderBy + limit) para evitar índices compuestos; filtramos por fecha en cliente
+        const twoDaysAgo = new Date(); twoDaysAgo.setDate(twoDaysAgo.getDate() - 2); twoDaysAgo.setHours(0, 0, 0, 0);
+        const unsubAudit = onSnapshot(
+            query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(500)),
+            (snap) => {
+                const nameByEmail = nameByEmailRef.current;
+                const twoDaysAgoMs = twoDaysAgo.getTime();
+                const list = snap.docs
+                    .map(d => {
+                        const data = d.data();
+                        const actorName = data.actorName || data.actor || '';
+                        const resolvedName = nameByEmail[data.actorEmail] || nameByEmail[data.actorUid] || nameByEmail[actorName] || actorName;
+                        const time = getSafeDate(data.timestamp);
+                        return { id: d.id, ...data, formattedActor: resolvedName || actorName || 'Sistema', time, fullDetail: data.details };
+                    })
+                    .filter((row: any) => row.time && row.time.getTime() >= twoDaysAgoMs);
+                setRecentLogs(list);
+            },
+            (err) => { console.error('audit_logs subscription error', err); setRecentLogs([]); }
+        );
+        unsubs.push(unsubAudit);
+        return () => { unsubs.forEach(u => u()); };
     }, []);
 
     useEffect(() => {
@@ -296,9 +343,12 @@ export const useOperacionesMonitor = () => {
         const isPriority = (s: any) => {
             if (s.isFranco) return false;
             if (s.isResolvedByOps) return false;
+            if (s.isPresent || s.isCompleted) return false;
+            // Ausencia ya declarada: va a AUSENTES, no sigue en prioridad
+            if (s.isAbsent) return false;
             // Vacantes del día (excluir las ya devueltas a planificación)
             if (s.isUnassigned && !s.isReportedToPlanning && isSameDay(s.shiftDateObj, now)) return true;
-            // Ausencias / no llegó del día (alertas críticas)
+            // Ausencias / no llegó del día aún no operados (alertas críticas)
             if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
             // Presentes por confirmar / retenciones
             if (s.isImminent || s.isRetention) return true;
@@ -311,7 +361,7 @@ export const useOperacionesMonitor = () => {
             case 'PRIORIDAD':
                 return list.filter(isPriority);
             case 'NO_LLEGO':
-                return list.filter((s:any) => s.isLateArrival && isSameDay(s.shiftDateObj, now));
+                return list.filter((s:any) => (s.isLateArrival || (s.isAbsenceLike && !s.isAbsent)) && isSameDay(s.shiftDateObj, now));
             case 'PLAN':
                 return list.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now));
             case 'ACTIVOS':
@@ -332,6 +382,8 @@ export const useOperacionesMonitor = () => {
         const prioridad = processedData.filter((s:any) => {
             if (s.isFranco) return false;
             if (s.isResolvedByOps) return false;
+            if (s.isPresent || s.isCompleted) return false;
+            if (s.isAbsent) return false;
             if (s.isUnassigned && !s.isReportedToPlanning && isSameDay(s.shiftDateObj, now)) return true;
             if ((s.isAbsenceLike || s.isLateArrival) && isSameDay(s.shiftDateObj, now)) return true;
             if (s.isImminent || s.isRetention) return true;
@@ -340,7 +392,7 @@ export const useOperacionesMonitor = () => {
 
         return {
             prioridad,
-            no_llego: processedData.filter(s => s.isLateArrival && isSameDay(s.shiftDateObj, now)).length,
+            no_llego: processedData.filter(s => (s.isLateArrival || (s.isAbsenceLike && !s.isAbsent)) && isSameDay(s.shiftDateObj, now)).length,
             plan: processedData.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && isSameDay(s.shiftDateObj, now)).length,
             activos: processedData.filter(s => s.isPresent && !s.isCompleted).length,
             retenidos: processedData.filter(s => s.isRetention).length,

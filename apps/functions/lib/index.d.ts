@@ -15,3 +15,6 @@ export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Ru
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
+export { nvrAlert } from './nvr/nvrAlert';
+export { onAlertCreated } from './nvr/onAlertCreated';
+export { simulateNvrAlert } from './nvr/simulateNvrAlert';
