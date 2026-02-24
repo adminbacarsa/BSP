@@ -4,8 +4,9 @@ import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { Toaster, toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown } from 'lucide-react';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 
@@ -350,6 +351,81 @@ const RetentionModal = ({ isOpen, onClose, retainedShift }: any) => { if (!isOpe
 const WorkedDayOffModal = (props: any) => <WorkedDayOffModalPro {...props} />;
 const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 
+const NVR_RESOLUTION_OPTIONS = [
+    { id: 'visto', label: 'Visto / Atendido', description: 'Operador revisó y dio por atendido' },
+    { id: 'verificado_guardia', label: 'Verificado por guardia', description: 'Guardia verificó en sitio' },
+    { id: 'incidente_reportado', label: 'Incidente reportado', description: 'Se registró incidente y seguimiento' },
+    { id: 'en_revision', label: 'En revisión (guardia en camino)', description: 'Guardia asignado, pendiente verificación' },
+    { id: 'falso_positivo', label: 'Falso positivo', description: 'Sin novedad, falsa alarma' },
+    { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
+];
+
+const NvrAlertTreatmentModal = ({ alert, onConfirm, onMinimize }: { alert: any; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
+    const [resolutionType, setResolutionType] = useState<string>('visto');
+    const [notes, setNotes] = useState('');
+    const [loading, setLoading] = useState(false);
+    if (!alert) return null;
+    const formatAlertTime = (ts: any) => {
+        if (!ts) return '—';
+        try {
+            const s = ts?.seconds ?? ts;
+            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        } catch { return '—'; }
+    };
+    const handleSubmit = async () => {
+        setLoading(true);
+        try {
+            await onConfirm(alert, resolutionType, notes);
+        } finally {
+            setLoading(false);
+        }
+    };
+    return (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col">
+                <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
+                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Tratamiento de alerta IVS</h3>
+                    {onMinimize && (
+                        <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>
+                    )}
+                </div>
+                <div className="p-6 overflow-y-auto flex-1">
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                        <p className="text-sm font-bold text-slate-800">{alert.camera_name || 'Cámara'}</p>
+                        <span className="text-xs text-slate-500">{formatAlertTime(alert.timestamp)}</span>
+                    </div>
+                    {alert.image_url && (
+                        <div className="rounded-xl overflow-hidden border-2 border-rose-200 mb-4">
+                            <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[40vh] object-contain bg-slate-100" />
+                        </div>
+                    )}
+                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Solución / Resolución</p>
+                    <div className="grid grid-cols-1 gap-2 mb-4 max-h-48 overflow-y-auto">
+                        {NVR_RESOLUTION_OPTIONS.map((opt) => (
+                            <button key={opt.id} type="button" onClick={() => setResolutionType(opt.id)}
+                                className={`text-left py-2.5 px-4 rounded-xl border-2 font-bold text-sm transition-colors ${resolutionType === opt.id ? 'border-rose-600 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                                <span className="block">{opt.label}</span>
+                                <span className="block text-[10px] font-normal text-slate-500 mt-0.5">{opt.description}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 resize-none" rows={3} />
+                    <button onClick={handleSubmit} disabled={loading} className="w-full py-3 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors disabled:opacity-60 mt-4">{loading ? 'Guardando...' : 'Confirmar tratamiento'}</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const NvrAlertMinimizedBar = ({ pendingCount, onExpand }: { pendingCount: number; onExpand: () => void }) => (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-rose-400 animate-in slide-in-from-bottom-2">
+        <Siren size={24} className="shrink-0" />
+        <span className="font-bold">{pendingCount === 1 ? '1 alerta pendiente de tratamiento' : `${pendingCount} alertas pendientes de tratamiento`}</span>
+        <button type="button" onClick={onExpand} className="px-4 py-2 bg-white text-rose-700 rounded-xl font-black text-sm hover:bg-rose-50">Abrir</button>
+    </div>
+);
+
 export default function TacticalMapView() {
     const logic = useOperacionesMonitor();
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -359,10 +435,40 @@ export default function TacticalMapView() {
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [showHelp, setShowHelp] = useState(false);
+    const [nvrAlerts, setNvrAlerts] = useState<any[]>([]);
+    const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
 
     const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
     const handleReportPlanning = async (shift: any) => { toast.info("Reportando..."); };
+
+    // Alertas NVR pendientes: mismo origen que operaciones (se ven en mapa y modal si está abierto)
+    useEffect(() => {
+        const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
+        const unsub = onSnapshot(q, (snap) => {
+            const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), objective_id: d.data().objective_id }));
+            list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
+            setNvrAlerts(list.slice(0, 50));
+        }, (err) => { console.error('alerts subscription (map-view)', err); setNvrAlerts([]); });
+        return () => unsub();
+    }, []);
+
+    const handleNvrAlertTreatment = async (alert: any, resolutionType: string, notes: string) => {
+        try {
+            const status = resolutionType === 'falso_positivo' ? 'false_alarm' : 'acknowledged';
+            await updateDoc(doc(db, 'alerts', alert.id), {
+                status,
+                resolution_type: resolutionType,
+                guard_notes: notes?.trim() || '',
+                acknowledged_at: serverTimestamp(),
+                acknowledged_by: getAuth().currentUser?.uid ?? null,
+            });
+            toast.success(resolutionType === 'falso_positivo' ? 'Marcada como falso positivo' : 'Alerta marcada como tratada');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo guardar el tratamiento');
+        }
+    };
 
     // --- SYNC FILTROS ---
     useEffect(() => {
@@ -393,13 +499,28 @@ export default function TacticalMapView() {
         { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
-    // En el mapa táctico, además de colorear por categoría, ocultamos objetivos sin datos en la solapa activa
-    // (excepto en "MAPA GENERAL").
+    const objectivesWithCoords = useMemo(() => (logic.objectives || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))), [logic.objectives]);
+    // Objetivos de la solapa + objetivos con alertas NVR (para que las alertas se vean en el mapa externo)
     const objectivesForMap = useMemo(() => {
-        if (logic.viewTab === 'TODOS') return logic.filteredObjectives || [];
-        const ids = new Set((logic.listData || []).map((s:any) => s.objectiveId).filter(Boolean));
-        return (logic.filteredObjectives || []).filter((o:any) => ids.has(o.id));
-    }, [logic.filteredObjectives, logic.listData, logic.viewTab]);
+        const norm = (x: any) => String(x ?? '').trim();
+        const base = logic.filteredObjectives || [];
+        const allObjs = logic.objectives || [];
+        const alertObjIds = new Set((nvrAlerts || []).map((a: any) => norm(a.objective_id)).filter(Boolean));
+        const withAlerts = allObjs.filter((o: any) => alertObjIds.has(norm(o.id)));
+        if (logic.viewTab === 'TODOS') {
+            const extra = withAlerts.filter((o: any) => !base.some((c: any) => c.id === o.id));
+            const result = base.length ? [...base, ...extra] : allObjs;
+            return result.length ? result : objectivesWithCoords;
+        }
+        const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
+        const fromTab = base.filter((o: any) => ids.has(o.id));
+        const combined = fromTab.length ? fromTab : base;
+        const extra = withAlerts.filter((o: any) => !combined.some((c: any) => c.id === o.id));
+        const result = [...combined, ...extra];
+        return result.length ? result : objectivesWithCoords;
+    }, [logic.filteredObjectives, logic.listData, logic.viewTab, logic.objectives, nvrAlerts, objectivesWithCoords]);
+
+    const firstPendingAlert = (nvrAlerts && nvrAlerts.length > 0) ? nvrAlerts[0] : null;
 
     return (
         <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
@@ -420,12 +541,19 @@ export default function TacticalMapView() {
                 </div>
             </div>
 
+            {nvrModalMinimized && nvrAlerts.length > 0 && (
+                <NvrAlertMinimizedBar pendingCount={nvrAlerts.length} onExpand={() => setNvrModalMinimized(false)} />
+            )}
+            {firstPendingAlert && !nvrModalMinimized && (
+                <NvrAlertTreatmentModal alert={firstPendingAlert} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+            )}
+
             <OperacionesMap 
                 key={`tactical-${logic.viewTab}-${(objectivesForMap || []).map((o:any)=>o.id).sort().join(',').slice(0,120)}`}
                 center={[-31.4201, -64.1888]} 
                 allObjectives={objectivesForMap} 
                 filteredShifts={logic.listData} 
-                
+                nvrAlerts={nvrAlerts}
                 onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})} 
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
                 onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 

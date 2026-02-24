@@ -54,10 +54,12 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Alertas NVR (Centro de Control / Pruebas): lectura para autenticados; escritura solo desde Cloud Functions
+    // Alertas NVR: lectura para autenticados; create solo Cloud Functions; update para marcar como tratada (operador)
     match /alerts/{alertId} {
       allow read: if request.auth != null;
-      allow write: if false;
+      allow create: if false;
+      allow update: if request.auth != null && resource.data.status == 'pending';
+      allow delete: if false;
     }
 
     // --- Acceso global para usuarios del sistema (admin) ---

@@ -68,6 +68,108 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onAudit }: any) 
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95"> <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
 };
 
+// Opciones de resolución precargadas para alertas NVR
+const NVR_RESOLUTION_OPTIONS = [
+    { id: 'visto', label: 'Visto / Atendido', description: 'Operador revisó y dio por atendido' },
+    { id: 'verificado_guardia', label: 'Verificado por guardia', description: 'Guardia verificó en sitio' },
+    { id: 'incidente_reportado', label: 'Incidente reportado', description: 'Se registró incidente y seguimiento' },
+    { id: 'en_revision', label: 'En revisión (guardia en camino)', description: 'Guardia asignado, pendiente verificación' },
+    { id: 'falso_positivo', label: 'Falso positivo', description: 'Sin novedad, falsa alarma' },
+    { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
+];
+
+// Modal de tratamiento de alerta NVR: minimizable + resoluciones precargadas
+const NvrAlertTreatmentModal = ({ alert, pendingCount, onConfirm, onMinimize }: { alert: any; pendingCount?: number; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
+    const [resolutionType, setResolutionType] = useState<string>('visto');
+    const [notes, setNotes] = useState('');
+    const [loading, setLoading] = useState(false);
+    if (!alert) return null;
+    const formatAlertTime = (ts: any) => {
+        if (!ts) return '—';
+        try {
+            const s = ts?.seconds ?? ts;
+            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        } catch { return '—'; }
+    };
+    const handleSubmit = async () => {
+        setLoading(true);
+        try {
+            await onConfirm(alert, resolutionType, notes);
+        } finally {
+            setLoading(false);
+        }
+    };
+    return (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col">
+                <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
+                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Tratamiento de alerta IVS</h3>
+                    <div className="flex items-center gap-2">
+                        {onMinimize && (
+                            <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">
+                                Minimizar
+                            </button>
+                        )}
+                    </div>
+                </div>
+                <div className="p-6 overflow-y-auto flex-1">
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                        <p className="text-sm font-bold text-slate-800">{alert.camera_name || 'Cámara'}</p>
+                        <span className="text-xs text-slate-500">{formatAlertTime(alert.timestamp)}</span>
+                    </div>
+                    {alert.image_url && (
+                        <div className="rounded-xl overflow-hidden border-2 border-rose-200 mb-4">
+                            <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[40vh] object-contain bg-slate-100" />
+                        </div>
+                    )}
+                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Solución / Resolución</p>
+                    <div className="grid grid-cols-1 gap-2 mb-4 max-h-48 overflow-y-auto">
+                        {NVR_RESOLUTION_OPTIONS.map((opt) => (
+                            <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setResolutionType(opt.id)}
+                                className={`text-left py-2.5 px-4 rounded-xl border-2 font-bold text-sm transition-colors ${resolutionType === opt.id ? 'border-rose-600 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}
+                            >
+                                <span className="block">{opt.label}</span>
+                                <span className="block text-[10px] font-normal text-slate-500 mt-0.5">{opt.description}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
+                    <textarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="Ej: Guardia notificado, revisó el sector..."
+                        className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 resize-none"
+                        rows={3}
+                    />
+                    <button
+                        onClick={handleSubmit}
+                        disabled={loading}
+                        className="w-full py-3 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors disabled:opacity-60 mt-4"
+                    >
+                        {loading ? 'Guardando...' : 'Confirmar tratamiento'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Barra flotante cuando el modal está minimizado (esperando resolución del guardia)
+const NvrAlertMinimizedBar = ({ pendingCount, onExpand }: { pendingCount: number; onExpand: () => void }) => (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-rose-400 animate-in slide-in-from-bottom-2">
+        <Siren size={24} className="shrink-0" />
+        <span className="font-bold">
+            {pendingCount === 1 ? '1 alerta pendiente de tratamiento' : `${pendingCount} alertas pendientes de tratamiento`}
+        </span>
+        <button type="button" onClick={onExpand} className="px-4 py-2 bg-white text-rose-700 rounded-xl font-black text-sm hover:bg-rose-50">
+            Abrir
+        </button>
+    </div>
+);
+
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated, onAudit }: any) => {
     if (!isOpen || !shift) return null;
     const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
@@ -652,6 +754,7 @@ export default function OperacionesPage() {
     const [bitacoraColWidths, setBitacoraColWidths] = useState([72, 100, 100, 140, 220]);
     const [bitacoraResizing, setBitacoraResizing] = useState<number | null>(null);
     const [nvrAlerts, setNvrAlerts] = useState<any[]>([]);
+    const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
 
     const handleBitacoraResize = (colIndex: number, delta: number) => {
         setBitacoraColWidths(prev => {
@@ -692,16 +795,39 @@ export default function OperacionesPage() {
         return () => unsub();
     }, []);
 
-    // Alertas NVR (IVS) pendientes para mostrarlas en el mapa
+    // Alertas NVR (IVS) pendientes: modal obligatorio hasta dar tratamiento
     useEffect(() => {
         const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
-        const unsub = onSnapshot(q, (snap) => {
-            const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), objective_id: d.data().objective_id }));
-            list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
-            setNvrAlerts(list.slice(0, 50));
-        });
+        const unsub = onSnapshot(
+            q,
+            (snap) => {
+                const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), objective_id: d.data().objective_id }));
+                list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
+                setNvrAlerts(list.slice(0, 50));
+            },
+            (err) => { console.error('alerts subscription', err); setNvrAlerts([]); }
+        );
         return () => unsub();
     }, []);
+
+    const handleNvrAlertTreatment = async (alert: any, resolutionType: string, notes: string) => {
+        try {
+            const status = resolutionType === 'falso_positivo' ? 'false_alarm' : 'acknowledged';
+            await updateDoc(doc(db, 'alerts', alert.id), {
+                status,
+                resolution_type: resolutionType,
+                guard_notes: notes?.trim() || '',
+                acknowledged_at: serverTimestamp(),
+                acknowledged_by: getAuth().currentUser?.uid ?? null,
+            });
+            const detalle = resolutionType === 'falso_positivo' ? 'Falso positivo' : 'Visto / Atendido';
+            await registrarBitacora('Alerta NVR tratada', `Operador: ${detalle}. ${alert.camera_name || alert.id}${notes?.trim() ? '. Notas: ' + notes.trim() : ''}`, {});
+            toast.success(resolutionType === 'falso_positivo' ? 'Marcada como falso positivo' : 'Alerta marcada como tratada');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo guardar el tratamiento');
+        }
+    };
 
     const handleAcknowledgeAbsence = async (e: any) => {
         try {
@@ -889,11 +1015,12 @@ export default function OperacionesPage() {
     }, [logic.listData, reportedOrReturnedShifts]);
     // En el mapa: objetivos de la solapa + objetivos con alertas NVR + objetivos con vacantes reportadas/devueltas
     const objectivesForMap = useMemo(() => {
+        const norm = (x: any) => String(x ?? '').trim();
         const tab = logic.viewTab as any;
         const base = logic.filteredObjectives || [];
         const allObjs = logic.objectives || [];
-        const alertObjIds = new Set((nvrAlerts || []).map((a: any) => a.objective_id).filter(Boolean));
-        const withAlerts = allObjs.filter((o: any) => alertObjIds.has(o.id));
+        const alertObjIds = new Set((nvrAlerts || []).map((a: any) => norm(a.objective_id)).filter(Boolean));
+        const withAlerts = allObjs.filter((o: any) => alertObjIds.has(norm(o.id)));
         if (tab === 'TODOS') return allObjs.length ? allObjs : base;
         const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
         const fromTab = base.filter((o: any) => ids.has(o.id));
@@ -905,13 +1032,23 @@ export default function OperacionesPage() {
         return result.length ? result : objectivesWithCoords;
     }, [logic.filteredObjectives, logic.listData, logic.viewTab, nvrAlerts, logic.objectives, objectivesWithCoords, reportedObjectiveIds]);
 
+    const firstPendingAlert = (nvrAlerts && nvrAlerts.length > 0) ? nvrAlerts[0] : null;
+
     const Layout = DashboardLayout;
     const layout =
         <Layout>
             <Toaster position="top-right" />
             <Head><title>COSP V184.0</title></Head>
             <style>{POPUP_STYLES}</style>
-            
+
+            {/* Modal de tratamiento de alerta NVR: minimizable + resoluciones precargadas */}
+            {nvrModalMinimized && nvrAlerts.length > 0 && (
+                <NvrAlertMinimizedBar pendingCount={nvrAlerts.length} onExpand={() => setNvrModalMinimized(false)} />
+            )}
+            {firstPendingAlert && !nvrModalMinimized && (
+                <NvrAlertTreatmentModal alert={firstPendingAlert} pendingCount={nvrAlerts.length} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+            )}
+
             <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">
                 {!isExternalMap && (
                     <div className="flex-1 lg:flex-[3] bg-slate-100 rounded-3xl border border-slate-200 overflow-hidden relative shadow-inner">

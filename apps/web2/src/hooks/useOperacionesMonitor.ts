@@ -106,9 +106,10 @@ export const useOperacionesMonitor = () => {
             snap.docs.forEach(d => {
                 const data = d.data();
                 if (data.objetivos && Array.isArray(data.objetivos)) {
-                    data.objetivos.forEach((o: any) => {
+                    data.objetivos.forEach((o: any, idx: number) => {
                         const { lat, lng } = normLatLng(o);
-                        objs.push({ ...o, clientName: data.name, clientId: d.id, lat, lng });
+                        const objectiveId = o.id || o.name || `obj_${d.id}_${idx}`;
+                        objs.push({ ...o, id: objectiveId, name: o.name || o.id || 'Objetivo', clientName: data.name, clientId: d.id, lat, lng });
                     });
                 } else {
                     objs.push({ id: d.id, name: data.name, clientName: data.name || data.fantasyName, clientId: d.id });

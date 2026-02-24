@@ -71,9 +71,10 @@ const OperacionesMap = ({
 }: any) => {
 
     const markers = useMemo(() => {
+        const normId = (x: any) => String(x ?? '').trim();
         return allObjectives.filter((obj: any) => obj != null && Number.isFinite(Number(obj.lat)) && Number.isFinite(Number(obj.lng))).map((obj: any) => {
-            const shiftsInObjective = filteredShifts.filter((s: any) => s.objectiveId === obj.id);
-            const alertsInObjective = (nvrAlerts || []).filter((a: any) => a.objective_id === obj.id);
+            const shiftsInObjective = filteredShifts.filter((s: any) => normId(s.objectiveId) === normId(obj.id));
+            const alertsInObjective = (nvrAlerts || []).filter((a: any) => normId(a.objective_id) === normId(obj.id));
             
             let icon = Icons.GRAY;
             let statusText = 'S/A';
@@ -111,6 +112,11 @@ const OperacionesMap = ({
                 });
             }
 
+            // Orden de capas: dibujar primero = abajo. Grises (S/A) abajo; colores en medio; alertas arriba.
+            let layerOrder = 1;
+            if (alertsInObjective.length > 0) layerOrder = 2;
+            else if (statusText === 'S/A' || icon === Icons.GRAY) layerOrder = 0;
+
             return {
                 id: obj.id,
                 lat: obj.lat,
@@ -121,9 +127,10 @@ const OperacionesMap = ({
                 nvrAlerts: alertsInObjective,
                 icon,
                 statusText,
-                hasShift: shiftsInObjective.length > 0
+                hasShift: shiftsInObjective.length > 0,
+                layerOrder
             };
-        });
+        }).sort((a: any, b: any) => (a.layerOrder || 0) - (b.layerOrder || 0));
     }, [allObjectives, filteredShifts, nvrAlerts]); 
 
     return (
@@ -132,7 +139,12 @@ const OperacionesMap = ({
             <MapUpdater markers={markers} />
 
             {markers.map((marker: any) => (
-                <Marker key={marker.id} position={[marker.lat, marker.lng]} icon={marker.icon}>
+                <Marker
+                    key={marker.id}
+                    position={[marker.lat, marker.lng]}
+                    icon={marker.icon}
+                    zIndexOffset={marker.layerOrder === 0 ? 0 : (marker.layerOrder === 2 ? 1000 : 500)}
+                >
                     <Popup className="custom-popup">
                         <div className="min-w-[240px]">
                             <div className="border-b pb-2 mb-2 flex justify-between items-start">
