@@ -360,8 +360,7 @@ const NVR_RESOLUTION_OPTIONS = [
     { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
 ];
 
-const NvrAlertTreatmentModal = ({ alert, onConfirm, onMinimize }: { alert: any; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
-    const [resolutionType, setResolutionType] = useState<string>('visto');
+const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
     if (!alert) return null;
@@ -369,10 +368,10 @@ const NvrAlertTreatmentModal = ({ alert, onConfirm, onMinimize }: { alert: any; 
         if (!ts) return '—';
         try {
             const s = ts?.seconds ?? ts;
-            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         } catch { return '—'; }
     };
-    const handleSubmit = async () => {
+    const handleAction = async (resolutionType: string) => {
         setLoading(true);
         try {
             await onConfirm(alert, resolutionType, notes);
@@ -382,36 +381,44 @@ const NvrAlertTreatmentModal = ({ alert, onConfirm, onMinimize }: { alert: any; 
     };
     return (
         <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col">
                 <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
-                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Tratamiento de alerta IVS</h3>
+                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Alerta IVS {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold">({pendingCount} pendientes)</span>}</h3>
                     {onMinimize && (
                         <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>
                     )}
                 </div>
-                <div className="p-6 overflow-y-auto flex-1">
-                    <div className="flex justify-between items-start gap-2 mb-2">
-                        <p className="text-sm font-bold text-slate-800">{alert.camera_name || 'Cámara'}</p>
-                        <span className="text-xs text-slate-500">{formatAlertTime(alert.timestamp)}</span>
-                    </div>
-                    {alert.image_url && (
-                        <div className="rounded-xl overflow-hidden border-2 border-rose-200 mb-4">
-                            <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[40vh] object-contain bg-slate-100" />
+                <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>{alert.image_url && (
+                            <div className="rounded-xl overflow-hidden border-2 border-rose-200">
+                                <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
+                            </div>
+                        )}</div>
+                        <div className="space-y-3">
+                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                                <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Información</p>
+                                <dl className="space-y-1.5 text-sm">
+                                    <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{alert.camera_name || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Ruta: </dt><dd className="font-mono text-slate-700 inline">{alert.route_key || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || alert.objective_id || 'Sin asignar'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{alert.event_type || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Hora: </dt><dd className="text-slate-700 inline">{formatAlertTime(alert.timestamp)}</dd></div>
+                                </dl>
+                            </div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
+                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm" rows={2} />
                         </div>
-                    )}
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Solución / Resolución</p>
-                    <div className="grid grid-cols-1 gap-2 mb-4 max-h-48 overflow-y-auto">
+                    </div>
+                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Acciones — elegir una</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {NVR_RESOLUTION_OPTIONS.map((opt) => (
-                            <button key={opt.id} type="button" onClick={() => setResolutionType(opt.id)}
-                                className={`text-left py-2.5 px-4 rounded-xl border-2 font-bold text-sm transition-colors ${resolutionType === opt.id ? 'border-rose-600 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
-                                <span className="block">{opt.label}</span>
-                                <span className="block text-[10px] font-normal text-slate-500 mt-0.5">{opt.description}</span>
+                            <button key={opt.id} type="button" onClick={() => handleAction(opt.id)} disabled={loading}
+                                className="py-3 px-4 rounded-xl border-2 border-slate-200 bg-white hover:border-rose-400 hover:bg-rose-50 font-bold text-sm text-slate-700 hover:text-rose-700 transition-colors disabled:opacity-50 text-center">
+                                {opt.label}
                             </button>
                         ))}
                     </div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
-                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-800 placeholder:text-slate-400 resize-none" rows={3} />
-                    <button onClick={handleSubmit} disabled={loading} className="w-full py-3 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors disabled:opacity-60 mt-4">{loading ? 'Guardando...' : 'Confirmar tratamiento'}</button>
                 </div>
             </div>
         </div>
@@ -446,7 +453,12 @@ export default function TacticalMapView() {
     useEffect(() => {
         const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
         const unsub = onSnapshot(q, (snap) => {
-            const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), objective_id: d.data().objective_id }));
+            const list = snap.docs.map((d) => {
+                const data = d.data();
+                const oid = data.objective_id;
+                const objective_id = typeof oid === 'string' ? oid.trim() : (oid && typeof (oid as any).id === 'string' ? (oid as any).id : String(oid ?? '')).trim();
+                return { id: d.id, ...data, objective_id };
+            });
             list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
             setNvrAlerts(list.slice(0, 50));
         }, (err) => { console.error('alerts subscription (map-view)', err); setNvrAlerts([]); });
@@ -507,17 +519,22 @@ export default function TacticalMapView() {
         const allObjs = logic.objectives || [];
         const alertObjIds = new Set((nvrAlerts || []).map((a: any) => norm(a.objective_id)).filter(Boolean));
         const withAlerts = allObjs.filter((o: any) => alertObjIds.has(norm(o.id)));
+        const centerLat = -31.4201, centerLng = -64.1888;
+        const ensureCoords = (arr: any[]) => arr.map((o: any) => {
+            const hasCoords = o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng));
+            return hasCoords ? o : { ...o, lat: centerLat, lng: centerLng };
+        });
         if (logic.viewTab === 'TODOS') {
             const extra = withAlerts.filter((o: any) => !base.some((c: any) => c.id === o.id));
             const result = base.length ? [...base, ...extra] : allObjs;
-            return result.length ? result : objectivesWithCoords;
+            return ensureCoords(result.length ? result : objectivesWithCoords);
         }
         const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
         const fromTab = base.filter((o: any) => ids.has(o.id));
         const combined = fromTab.length ? fromTab : base;
         const extra = withAlerts.filter((o: any) => !combined.some((c: any) => c.id === o.id));
         const result = [...combined, ...extra];
-        return result.length ? result : objectivesWithCoords;
+        return ensureCoords(result.length ? result : objectivesWithCoords);
     }, [logic.filteredObjectives, logic.listData, logic.viewTab, logic.objectives, nvrAlerts, objectivesWithCoords]);
 
     const firstPendingAlert = (nvrAlerts && nvrAlerts.length > 0) ? nvrAlerts[0] : null;
@@ -545,7 +562,7 @@ export default function TacticalMapView() {
                 <NvrAlertMinimizedBar pendingCount={nvrAlerts.length} onExpand={() => setNvrModalMinimized(false)} />
             )}
             {firstPendingAlert && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alert={firstPendingAlert} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+                <NvrAlertTreatmentModal alert={firstPendingAlert} pendingCount={nvrAlerts.length} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlert?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
             )}
 
             <OperacionesMap 

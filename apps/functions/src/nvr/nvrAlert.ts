@@ -5,6 +5,9 @@ import { format } from 'date-fns';
 import { onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { isWithinSchedule } from './schedule';
 
+/** Segundos durante los cuales imágenes de la misma cámara se agrupan en una sola alerta (actualizando la existente) */
+const ALERT_COOLDOWN_SECONDS = 90;
+
 // Compatible con Express Request (v2) y con query tipo ParsedQs
 type RequestLike = { method?: string; headers: Record<string, string | string[] | undefined>; query: Record<string, unknown>; on(event: string, cb: (...args: any[]) => void): void };
 
@@ -407,20 +410,65 @@ export const nvrAlertV2 = onRequest(
       const routeData = route?.data || {};
       const objectiveId = typeof routeData.objective_id === 'string' ? routeData.objective_id : null;
       const postId = typeof routeData.post_id === 'string' ? routeData.post_id : null;
-      const alertRef = db.collection('alerts').doc();
-      const alertId = alertRef.id;
 
       const dayFolder = format(new Date(), 'yyyy-MM-dd');
-      const storagePath = `alerts/${dayFolder}/${alertId}.jpg`;
-
       const bucket = admin.storage().bucket();
+      const nowMs = Date.now();
+      const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
+
+      // Buscar alerta pendiente reciente de la misma cámara para agrupar (no crear muchas alertas en secuencia)
+      const recentPending = await db
+        .collection('alerts')
+        .where('route_key', '==', routeKey)
+        .where('status', '==', 'pending')
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+
+      let existingAlertId: string | null = null;
+      if (!recentPending.empty) {
+        const lastDoc = recentPending.docs[0];
+        const lastData = lastDoc.data();
+        const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
+        if (nowMs - lastTs <= cooldownMs) {
+          existingAlertId = lastDoc.id;
+        }
+      }
+
+      if (existingAlertId) {
+        // Actualizar alerta existente con la nueva imagen (misma cámara en secuencia)
+        const storagePathByRoute = `alerts/${dayFolder}/${routeKey!.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`;
+        const token = randomUUID();
+        await bucket.file(storagePathByRoute).save(parsed.file.buffer, {
+          resumable: false,
+          contentType: parsed.file.mimeType || 'image/jpeg',
+          metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+        });
+        const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
+          storagePathByRoute
+        )}?alt=media&token=${token}`;
+        await db.collection('alerts').doc(existingAlertId).update({
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          image_url: imageUrl,
+          camera_name: cameraName || routeData.camera_name || (await db.collection('alerts').doc(existingAlertId).get()).data()?.camera_name || '',
+          event_type: eventType || routeData.event_type || '',
+          object_type: objectType || null,
+          raw_fields: fields,
+        });
+        console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey);
+        res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
+        return;
+      }
+
+      const alertRef = db.collection('alerts').doc();
+      const alertId = alertRef.id;
+      const storagePath = `alerts/${dayFolder}/${alertId}.jpg`;
       const token = randomUUID();
       await bucket.file(storagePath).save(parsed.file.buffer, {
         resumable: false,
         contentType: parsed.file.mimeType || 'image/jpeg',
         metadata: { metadata: { firebaseStorageDownloadTokens: token } },
       });
-
       const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
         storagePath
       )}?alt=media&token=${token}`;

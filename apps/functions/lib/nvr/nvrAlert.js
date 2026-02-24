@@ -7,6 +7,7 @@ const crypto_1 = require("crypto");
 const date_fns_1 = require("date-fns");
 const https_1 = require("firebase-functions/v2/https");
 const schedule_1 = require("./schedule");
+const ALERT_COOLDOWN_SECONDS = 90;
 function ensureAdmin() {
     if (!admin.apps.length)
         admin.initializeApp();
@@ -353,11 +354,50 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
         const routeData = route?.data || {};
         const objectiveId = typeof routeData.objective_id === 'string' ? routeData.objective_id : null;
         const postId = typeof routeData.post_id === 'string' ? routeData.post_id : null;
+        const dayFolder = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
+        const bucket = admin.storage().bucket();
+        const nowMs = Date.now();
+        const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
+        const recentPending = await db
+            .collection('alerts')
+            .where('route_key', '==', routeKey)
+            .where('status', '==', 'pending')
+            .orderBy('timestamp', 'desc')
+            .limit(1)
+            .get();
+        let existingAlertId = null;
+        if (!recentPending.empty) {
+            const lastDoc = recentPending.docs[0];
+            const lastData = lastDoc.data();
+            const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
+            if (nowMs - lastTs <= cooldownMs) {
+                existingAlertId = lastDoc.id;
+            }
+        }
+        if (existingAlertId) {
+            const storagePathByRoute = `alerts/${dayFolder}/${routeKey.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`;
+            const token = (0, crypto_1.randomUUID)();
+            await bucket.file(storagePathByRoute).save(parsed.file.buffer, {
+                resumable: false,
+                contentType: parsed.file.mimeType || 'image/jpeg',
+                metadata: { metadata: { firebaseStorageDownloadTokens: token } },
+            });
+            const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePathByRoute)}?alt=media&token=${token}`;
+            await db.collection('alerts').doc(existingAlertId).update({
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                image_url: imageUrl,
+                camera_name: cameraName || routeData.camera_name || (await db.collection('alerts').doc(existingAlertId).get()).data()?.camera_name || '',
+                event_type: eventType || routeData.event_type || '',
+                object_type: objectType || null,
+                raw_fields: fields,
+            });
+            console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey);
+            res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
+            return;
+        }
         const alertRef = db.collection('alerts').doc();
         const alertId = alertRef.id;
-        const dayFolder = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
         const storagePath = `alerts/${dayFolder}/${alertId}.jpg`;
-        const bucket = admin.storage().bucket();
         const token = (0, crypto_1.randomUUID)();
         await bucket.file(storagePath).save(parsed.file.buffer, {
             resumable: false,
