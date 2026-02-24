@@ -41,12 +41,24 @@ function safeNumber(v: unknown): number | null {
   return null;
 }
 
+const BODY_READ_TIMEOUT_MS = 90000;
+
 function readRawBody(req: RequestLike): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const finish = (err?: Error) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (err) reject(err);
+      else resolve(Buffer.concat(chunks));
+    };
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      reject(new Error('Timeout leyendo body (90s)'));
+    }, BODY_READ_TIMEOUT_MS);
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => finish());
+    req.on('error', (e) => finish(e));
   });
 }
 
@@ -62,56 +74,164 @@ function headersForBusboy(headers: Record<string, string | string[] | undefined>
   return out;
 }
 
-function parseMultipart(req: RequestLike): Promise<ParsedMultipart> {
+/** Extrae el boundary del header Content-Type (ej. "multipart/...; boundary=myboundary") */
+function getBoundary(contentType: string): string | null {
+  const m = contentType.match(/\bboundary\s*=\s*["']?([^"'\s;]+)["']?/i);
+  return m ? m[1].trim() : null;
+}
+
+/** Indica si el buffer parece un JPEG (magic bytes) */
+function looksLikeJpeg(buf: Buffer): boolean {
+  return buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+}
+
+/** Busca magic bytes JPEG (FF D8 FF) en buffer y devuelve el tramo hasta el siguiente boundary o fin */
+function extractJpegFromBuffer(buf: Buffer, boundaryStr: string): Buffer | null {
+  const delim = Buffer.from('--' + boundaryStr, 'utf8');
+  for (let i = 0; i < buf.length - 2; i++) {
+    if (buf[i] === 0xff && buf[i + 1] === 0xd8 && buf[i + 2] === 0xff) {
+      const next = buf.indexOf(delim, i);
+      const end = next >= 0 ? next : buf.length;
+      const chunk = buf.subarray(i, end);
+      if (chunk.length > 100 && chunk.length <= 10 * 1024 * 1024) return chunk;
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Parsea multipart/x-mixed-replace (típico de NVR/cámaras): primer part con datos = imagen */
+function parseMixedReplace(rawBody: Buffer, contentType: string): ParsedMultipart {
+  const boundary = getBoundary(contentType);
+  if (!boundary) throw new Error('multipart sin boundary');
+  const boundaryStr = boundary.replace(/^["']|["']$/g, '');
+  const delim = Buffer.from('--' + boundaryStr, 'utf8');
+  const delimEnd = Buffer.from('--' + boundaryStr + '--', 'utf8');
+
+  let idx = rawBody.indexOf(delim);
+  if (idx < 0) idx = rawBody.indexOf(Buffer.from('\r\n' + '--' + boundaryStr, 'utf8'));
+  if (idx < 0) idx = rawBody.indexOf(Buffer.from('\n' + '--' + boundaryStr, 'utf8'));
+  if (idx < 0) {
+    const jpeg = extractJpegFromBuffer(rawBody, boundaryStr);
+    if (jpeg) return { fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } };
+    throw new Error('boundary no encontrado en body');
+  }
+  if (rawBody[idx] === 0x0d || rawBody[idx] === 0x0a) idx += rawBody[idx] === 0x0d && rawBody[idx + 1] === 0x0a ? 2 : 1;
+  idx += delim.length;
+  while (idx < rawBody.length && (rawBody[idx] === 0x0d || rawBody[idx] === 0x0a)) idx++;
+
+  const nextDelim = rawBody.indexOf(delim, idx);
+  const endDelim = rawBody.indexOf(delimEnd, idx);
+  const partEnd = nextDelim >= 0 ? nextDelim : endDelim >= 0 ? endDelim : rawBody.length;
+  const part = rawBody.subarray(idx, partEnd);
+
+  const dblCrlf = part.indexOf(Buffer.from('\r\n\r\n'));
+  const dblLf = part.indexOf(Buffer.from('\n\n'));
+  const headerEnd = dblCrlf >= 0 ? dblCrlf + 4 : dblLf >= 0 ? dblLf + 2 : -1;
+  let body = headerEnd >= 0 ? part.subarray(headerEnd) : part;
+  if (body[0] === 0x0d || body[0] === 0x0a) body = body.subarray(body[0] === 0x0d && body[1] === 0x0a ? 2 : 1);
+  if (body.length > 10 * 1024 * 1024) throw new Error('Archivo demasiado grande (limit 10MB)');
+  if (body.length < 100 || !looksLikeJpeg(body)) {
+    const jpeg = extractJpegFromBuffer(part, boundaryStr);
+    if (jpeg) return { fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } };
+    throw new Error('Parte multipart demasiado pequeña o no es JPEG');
+  }
+
+  return {
+    fields: {},
+    file: { buffer: Buffer.from(body), filename: 'snapshot.jpg', mimeType: 'image/jpeg' },
+  };
+}
+
+/** Si el body es directamente un JPEG (sin multipart), aceptarlo */
+function parseRawJpeg(rawBody: Buffer): ParsedMultipart | null {
+  if (rawBody.length < 100 || rawBody.length > 10 * 1024 * 1024) return null;
+  if (!looksLikeJpeg(rawBody)) return null;
+  return {
+    fields: {},
+    file: { buffer: Buffer.from(rawBody), filename: 'snapshot.jpg', mimeType: 'image/jpeg' },
+  };
+}
+
+/** Parsea body ya leído (evita colgar el stream si se lee después de un await) */
+function parseMultipartFromBuffer(
+  rawBody: Buffer,
+  contentType: string,
+  headers: Record<string, string | string[] | undefined>
+): Promise<ParsedMultipart> {
   return new Promise((resolve, reject) => {
-    const contentType = toHeaderString(req.headers['content-type']);
-    if (!contentType || !contentType.includes('multipart/form-data')) {
-      reject(new Error('content-type inválido (se espera multipart/form-data)'));
+    const rawJpeg = parseRawJpeg(rawBody);
+    if (rawJpeg && (!contentType || !contentType.includes('multipart'))) {
+      resolve(rawJpeg);
+      return;
+    }
+    if (!contentType || !contentType.includes('multipart')) {
+      reject(new Error('content-type inválido (se espera multipart o body JPEG)'));
+      return;
+    }
+        if (contentType.includes('multipart/x-mixed-replace')) {
+          try {
+            resolve(parseMixedReplace(rawBody, contentType));
+          } catch (e) {
+            const boundary = getBoundary(contentType);
+            const jpeg = boundary ? extractJpegFromBuffer(rawBody, boundary.replace(/^["']|["']$/g, '')) : null;
+            if (jpeg) resolve({ fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } });
+            else if (rawJpeg) resolve(rawJpeg);
+            else reject(e);
+          }
+          return;
+        }
+    if (!contentType.includes('multipart/form-data')) {
+      if (rawJpeg) resolve(rawJpeg);
+      else reject(new Error('content-type inválido'));
       return;
     }
 
-    readRawBody(req)
-      .then((rawBody) => {
-        const busboy = Busboy({
-          headers: headersForBusboy(req.headers as Record<string, string | string[] | undefined>),
-          limits: { files: 1, fileSize: 10 * 1024 * 1024 },
-        });
+    const busboy = Busboy({
+      headers: headersForBusboy(headers as Record<string, string | string[] | undefined>),
+      limits: { files: 1, fileSize: 10 * 1024 * 1024 },
+    });
 
-        const fields: Record<string, string> = {};
-        const fileChunks: Buffer[] = [];
-        let fileMeta: { filename: string; mimeType: string } | null = null;
+    const fields: Record<string, string> = {};
+    const fileChunks: Buffer[] = [];
+    let fileMeta: { filename: string; mimeType: string } | null = null;
 
-        busboy.on('field', (name, val) => {
-          if (typeof name === 'string' && name) fields[name] = String(val ?? '');
-        });
+    busboy.on('field', (name, val) => {
+      if (typeof name === 'string' && name) fields[name] = String(val ?? '');
+    });
 
-        busboy.on('file', (_name, file, info) => {
-          const filename = info?.filename || 'snapshot.jpg';
-          const mimeType = info?.mimeType || 'application/octet-stream';
-          fileMeta = { filename, mimeType };
+    busboy.on('file', (_name, file, info) => {
+      const filename = info?.filename || 'snapshot.jpg';
+      const mimeType = info?.mimeType || 'application/octet-stream';
+      fileMeta = { filename, mimeType };
 
-          file.on('data', (d: Buffer) => fileChunks.push(d));
-          file.on('limit', () => reject(new Error('Archivo demasiado grande (limit 10MB)')));
-        });
+      file.on('data', (d: Buffer) => fileChunks.push(d));
+      file.on('limit', () => reject(new Error('Archivo demasiado grande (limit 10MB)')));
+    });
 
-        busboy.on('error', (e) => reject(e));
-        busboy.on('finish', () => {
-          const parsed: ParsedMultipart = { fields };
-          if (fileMeta) {
-            parsed.file = {
-              buffer: Buffer.concat(fileChunks),
-              filename: fileMeta.filename,
-              mimeType: fileMeta.mimeType,
-            };
-          }
-          resolve(parsed);
-        });
+    busboy.on('error', (e) => reject(e));
+    busboy.on('finish', () => {
+      const parsed: ParsedMultipart = { fields };
+      if (fileMeta) {
+        parsed.file = {
+          buffer: Buffer.concat(fileChunks),
+          filename: fileMeta.filename,
+          mimeType: fileMeta.mimeType,
+        };
+      }
+      resolve(parsed);
+    });
 
-        busboy.write(rawBody);
-        busboy.end();
-      })
-      .catch(reject);
+    busboy.write(rawBody);
+    busboy.end();
   });
+}
+
+function parseMultipart(req: RequestLike): Promise<ParsedMultipart> {
+  const contentType = toHeaderString(req.headers['content-type']);
+  return readRawBody(req).then((rawBody) =>
+    parseMultipartFromBuffer(rawBody, contentType, req.headers as Record<string, string | string[] | undefined>)
+  );
 }
 
 let cachedSecret: { value: string | null; fetchedAtMs: number } = { value: null, fetchedAtMs: 0 };
@@ -185,10 +305,21 @@ export const nvrAlertV2 = onRequest(
         return;
       }
 
+      // En Cloud Functions el body puede venir en req.rawBody (evita timeout del stream)
+      const rawBody: Buffer =
+        typeof (req as { rawBody?: Buffer }).rawBody === 'object' && Buffer.isBuffer((req as { rawBody?: Buffer }).rawBody)
+          ? (req as { rawBody: Buffer }).rawBody
+          : await readRawBody(req);
+
       await validateSecret(req);
       ensureAdmin();
-
-      const parsed = await parseMultipart(req);
+      const contentType = toHeaderString(req.headers['content-type']);
+      console.log('[NVR_ALERT] Body recibido:', rawBody.length, 'bytes', 'Content-Type:', (contentType || '(vacío)').slice(0, 70));
+      const parsed = await parseMultipartFromBuffer(
+        rawBody,
+        contentType,
+        req.headers as Record<string, string | string[] | undefined>
+      );
       if (!parsed.file || !parsed.file.buffer?.length) {
         console.log('[NVR_ALERT] Rejected: no file in multipart. Fields:', Object.keys(parsed.fields));
         res.status(400).send('Falta archivo (snapshot) en multipart.');
@@ -202,7 +333,11 @@ export const nvrAlertV2 = onRequest(
         safeNumber(fields.channelId) ??
         safeNumber(fields.Channel) ??
         safeNumber(fields.channel) ??
-        null;
+        safeNumber(fields.ChannelNo) ??
+        safeNumber(fields.ChannelNumber) ??
+        safeNumber(fields.ch) ??
+        // Si la NVR no envía canal, usamos 1 para poder crear camera_routes y que aparezca en el panel
+        1;
 
       const cameraName = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
       const eventType = pickFirst(fields, ['event_type', 'eventType', 'EventType', 'event', 'Event']) || '';
@@ -235,11 +370,13 @@ export const nvrAlertV2 = onRequest(
         ]);
 
       const routeKey = buildRouteKey(nvrId, channelId);
+      console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'fields keys=', Object.keys(fields).join(', '));
       let route = await resolveRoute(routeKey);
 
       // Si no existe camera_route para este NVR/canal, crearlo para que aparezca en Firestore y se pueda asignar cliente/objetivo
       const db = admin.firestore();
       if (routeKey && !route) {
+        console.log('[NVR_ALERT] Creando camera_routes/', routeKey, '(primera vez para este NVR/canal)');
         const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
         await db.collection('camera_routes').doc(routeKey).set(
           {
@@ -306,6 +443,7 @@ export const nvrAlertV2 = onRequest(
         raw_fields: fields,
       });
 
+      console.log('[NVR_ALERT] OK alertId=', alertId, 'routeKey=', routeKey);
       res.status(200).json({ ok: true, alertId });
     } catch (e: unknown) {
       const err = e as { message?: string; code?: string; stack?: string };

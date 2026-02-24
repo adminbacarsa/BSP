@@ -3,7 +3,7 @@ import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Toaster, toast } from 'sonner';
 import {
   Building2,
@@ -14,6 +14,7 @@ import {
   MapPin,
   Plus,
   Siren,
+  Trash2,
   X,
 } from 'lucide-react';
 
@@ -146,7 +147,7 @@ function CameraRoutesPage() {
     if (!editingId) return;
     try {
       await updateDoc(doc(db, 'camera_routes', editingId), {
-        camera_name: form.camera_name.trim() || null,
+        camera_name: (form.camera_name ?? '').trim() || null,
         enabled: form.enabled,
         objective_id: form.objective_id || null,
         post_id: form.post_id.trim() || null,
@@ -162,6 +163,32 @@ function CameraRoutesPage() {
     } catch (e) {
       console.error(e);
       toast.error('Error al guardar');
+    }
+  };
+
+  const handleDeleteRoute = async (routeId: string) => {
+    if (!confirm('¿Eliminar esta cámara/ruta? Dejará de recibir alertas y tendrás que volver a configurarla si la agregás de nuevo.')) return;
+    try {
+      await deleteDoc(doc(db, 'camera_routes', routeId));
+      toast.success('Ruta eliminada');
+      setEditingId(null);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al eliminar');
+    }
+  };
+
+  const handleDeleteNvr = async (nvrId: string) => {
+    const toDelete = routes.filter((r) => r.id === nvrId || r.id.startsWith(nvrId + '__'));
+    if (toDelete.length === 0) return;
+    if (!confirm(`¿Eliminar todo el NVR "${nvrId}"? Se borrarán ${toDelete.length} ruta(s): ${toDelete.map((r) => r.id).join(', ')}. Esta acción no se puede deshacer.`)) return;
+    try {
+      await Promise.all(toDelete.map((r) => deleteDoc(doc(db, 'camera_routes', r.id))));
+      toast.success(`NVR "${nvrId}" eliminado (${toDelete.length} ruta(s))`);
+      setEditingId(null);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al eliminar NVR');
     }
   };
 
@@ -247,13 +274,16 @@ function CameraRoutesPage() {
             </h3>
             <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside">
               <li>
-                <strong>Automático:</strong> Cuando el NVR envía la <strong>primera alerta</strong> al webhook (HTTP POST con imagen), el sistema crea la ruta con id <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">NVR_ID__CANAL</code> (ej. <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">default__2</code>) y aparece en esta tabla. Después editá la fila para asignar cliente, objetivo y horario.
+                <strong>Automático:</strong> Cuando el NVR envía la <strong>primera alerta</strong> al webhook (HTTP POST con imagen), el sistema <strong>agrega la cámara</strong> con id <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">NVR_ID__CANAL</code> (ej. <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">default__2</code>). Si el NVR envía el nombre de la cámara (campo <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">camera_name</code> o similar), se usa como nombre de la ruta; si no, se muestra un nombre por defecto. Después editá cada fila para asignar <strong>objetivo</strong>, activar/desactivar esa cámara y horario.
               </li>
               <li>
                 <strong>Dónde envía la NVR:</strong> Configurá el equipo para que suba las fotos a la URL del webhook. Si la NVR solo soporta HTTP, usá el proxy (<code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">scripts/nvr-http-to-https-proxy.js</code>) en una PC de la misma red; el proxy reenvía por HTTPS a la Cloud Function. La URL final debe incluir <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">?key=TU_SECRETO</code> (el mismo que está en Firestore <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">nvr_config/webhook</code>).
               </li>
               <li>
                 <strong>Manual:</strong> Si querés pre-crear la ruta antes de que llegue cualquier evento, usá el botón &quot;Crear ruta manualmente&quot; abajo e ingresá el ID de NVR y el número de canal. La ruta aparecerá en la lista para que la edites; luego configurá el dispositivo para que envíe a la misma URL del webhook.
+              </li>
+              <li>
+                <strong>Varias cámaras:</strong> Cada cámara del NVR suele enviar con un canal distinto (1, 2, 3…). Aparecerá una fila por cada una: <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">default__1</code>, <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">default__2</code>, etc. En &quot;Editar&quot; asigná <strong>objetivo</strong>, nombre y horario. Podés <strong>activar o desactivar</strong> cada cámara (checkbox &quot;Ruta activa&quot;). Para quitar una cámara usá &quot;Eliminar esta ruta&quot;; para quitar todo el NVR, &quot;Eliminar NVR …&quot;.
               </li>
             </ul>
             <div className="mt-4 flex flex-wrap gap-3">
@@ -309,13 +339,13 @@ function CameraRoutesPage() {
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 text-left text-slate-500 dark:text-slate-400">
                     <th className="px-4 py-3 font-bold">Ruta (NVR__canal)</th>
-                    <th className="px-4 py-3 font-bold">Cámara</th>
+                    <th className="px-4 py-3 font-bold">Nombre de la ruta</th>
                     <th className="px-4 py-3 font-bold">Cliente</th>
                     <th className="px-4 py-3 font-bold">Objetivo</th>
                     <th className="px-4 py-3 font-bold">Puesto</th>
                     <th className="px-4 py-3 font-bold">Horario atención</th>
                     <th className="px-4 py-3 font-bold">Estado</th>
-                    <th className="px-4 py-3 font-bold w-20">Acción</th>
+                    <th className="px-4 py-3 font-bold w-28">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -346,7 +376,7 @@ function CameraRoutesPage() {
                           {r.enabled !== false ? 'Activa' : 'Desactivada'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => openEdit(r)}
@@ -354,6 +384,14 @@ function CameraRoutesPage() {
                           title="Editar"
                         >
                           <Edit2 size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRoute(r.id)}
+                          className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400"
+                          title="Eliminar esta ruta"
+                        >
+                          <Trash2 size={18} />
                         </button>
                       </td>
                     </tr>
@@ -382,14 +420,15 @@ function CameraRoutesPage() {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Nombre cámara</label>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Nombre de la ruta</label>
                   <input
                     type="text"
-                    value={form.camera_name}
+                    value={form.camera_name ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, camera_name: e.target.value }))}
-                    placeholder="Ej: Entrada principal"
+                    placeholder="Ej: Entrada principal, Patio, NVR cocina"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                   />
+                  <p className="text-xs text-slate-500 mt-1">Identificador visible de esta ruta; se usa en alertas y Centro de Control. El ID técnico (NVR__canal) no se puede cambiar.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -521,11 +560,11 @@ function CameraRoutesPage() {
                   )}
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-wrap gap-3 pt-4">
                   <button
                     type="button"
                     onClick={handleSave}
-                    className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl"
+                    className="flex-1 min-w-[120px] px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl"
                   >
                     Guardar
                   </button>
@@ -536,6 +575,28 @@ function CameraRoutesPage() {
                   >
                     Cancelar
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => editingId && handleDeleteRoute(editingId)}
+                    className="px-4 py-2 border border-red-300 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                  >
+                    Eliminar esta ruta
+                  </button>
+                  {editingId && (() => {
+                    const nvrId = editingId.split('__')[0];
+                    const nvrRoutes = routes.filter((r) => r.id.startsWith(nvrId + '__'));
+                    if (nvrRoutes.length === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteNvr(nvrId)}
+                        className="px-4 py-2 border border-red-400 dark:border-red-700 rounded-xl text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 font-medium"
+                        title={`Elimina todas las cámaras del NVR ${nvrId}`}
+                      >
+                        Eliminar NVR {nvrId} ({nvrRoutes.length} cámara{nvrRoutes.length !== 1 ? 's' : ''})
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

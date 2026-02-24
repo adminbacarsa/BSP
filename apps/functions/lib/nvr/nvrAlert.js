@@ -31,12 +31,26 @@ function safeNumber(v) {
         return Number(v);
     return null;
 }
+const BODY_READ_TIMEOUT_MS = 90000;
 function readRawBody(req) {
     return new Promise((resolve, reject) => {
         const chunks = [];
+        let timeoutId = null;
+        const finish = (err) => {
+            if (timeoutId)
+                clearTimeout(timeoutId);
+            if (err)
+                reject(err);
+            else
+                resolve(Buffer.concat(chunks));
+        };
+        timeoutId = setTimeout(() => {
+            timeoutId = null;
+            reject(new Error('Timeout leyendo body (90s)'));
+        }, BODY_READ_TIMEOUT_MS);
         req.on('data', (chunk) => chunks.push(chunk));
-        req.on('end', () => resolve(Buffer.concat(chunks)));
-        req.on('error', reject);
+        req.on('end', () => finish());
+        req.on('error', (e) => finish(e));
     });
 }
 function toHeaderString(v) {
@@ -50,50 +64,154 @@ function headersForBusboy(headers) {
     }
     return out;
 }
-function parseMultipart(req) {
+function getBoundary(contentType) {
+    const m = contentType.match(/\bboundary\s*=\s*["']?([^"'\s;]+)["']?/i);
+    return m ? m[1].trim() : null;
+}
+function looksLikeJpeg(buf) {
+    return buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+}
+function extractJpegFromBuffer(buf, boundaryStr) {
+    const delim = Buffer.from('--' + boundaryStr, 'utf8');
+    for (let i = 0; i < buf.length - 2; i++) {
+        if (buf[i] === 0xff && buf[i + 1] === 0xd8 && buf[i + 2] === 0xff) {
+            const next = buf.indexOf(delim, i);
+            const end = next >= 0 ? next : buf.length;
+            const chunk = buf.subarray(i, end);
+            if (chunk.length > 100 && chunk.length <= 10 * 1024 * 1024)
+                return chunk;
+            return null;
+        }
+    }
+    return null;
+}
+function parseMixedReplace(rawBody, contentType) {
+    const boundary = getBoundary(contentType);
+    if (!boundary)
+        throw new Error('multipart sin boundary');
+    const boundaryStr = boundary.replace(/^["']|["']$/g, '');
+    const delim = Buffer.from('--' + boundaryStr, 'utf8');
+    const delimEnd = Buffer.from('--' + boundaryStr + '--', 'utf8');
+    let idx = rawBody.indexOf(delim);
+    if (idx < 0)
+        idx = rawBody.indexOf(Buffer.from('\r\n' + '--' + boundaryStr, 'utf8'));
+    if (idx < 0)
+        idx = rawBody.indexOf(Buffer.from('\n' + '--' + boundaryStr, 'utf8'));
+    if (idx < 0) {
+        const jpeg = extractJpegFromBuffer(rawBody, boundaryStr);
+        if (jpeg)
+            return { fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } };
+        throw new Error('boundary no encontrado en body');
+    }
+    if (rawBody[idx] === 0x0d || rawBody[idx] === 0x0a)
+        idx += rawBody[idx] === 0x0d && rawBody[idx + 1] === 0x0a ? 2 : 1;
+    idx += delim.length;
+    while (idx < rawBody.length && (rawBody[idx] === 0x0d || rawBody[idx] === 0x0a))
+        idx++;
+    const nextDelim = rawBody.indexOf(delim, idx);
+    const endDelim = rawBody.indexOf(delimEnd, idx);
+    const partEnd = nextDelim >= 0 ? nextDelim : endDelim >= 0 ? endDelim : rawBody.length;
+    const part = rawBody.subarray(idx, partEnd);
+    const dblCrlf = part.indexOf(Buffer.from('\r\n\r\n'));
+    const dblLf = part.indexOf(Buffer.from('\n\n'));
+    const headerEnd = dblCrlf >= 0 ? dblCrlf + 4 : dblLf >= 0 ? dblLf + 2 : -1;
+    let body = headerEnd >= 0 ? part.subarray(headerEnd) : part;
+    if (body[0] === 0x0d || body[0] === 0x0a)
+        body = body.subarray(body[0] === 0x0d && body[1] === 0x0a ? 2 : 1);
+    if (body.length > 10 * 1024 * 1024)
+        throw new Error('Archivo demasiado grande (limit 10MB)');
+    if (body.length < 100 || !looksLikeJpeg(body)) {
+        const jpeg = extractJpegFromBuffer(part, boundaryStr);
+        if (jpeg)
+            return { fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } };
+        throw new Error('Parte multipart demasiado pequeña o no es JPEG');
+    }
+    return {
+        fields: {},
+        file: { buffer: Buffer.from(body), filename: 'snapshot.jpg', mimeType: 'image/jpeg' },
+    };
+}
+function parseRawJpeg(rawBody) {
+    if (rawBody.length < 100 || rawBody.length > 10 * 1024 * 1024)
+        return null;
+    if (!looksLikeJpeg(rawBody))
+        return null;
+    return {
+        fields: {},
+        file: { buffer: Buffer.from(rawBody), filename: 'snapshot.jpg', mimeType: 'image/jpeg' },
+    };
+}
+function parseMultipartFromBuffer(rawBody, contentType, headers) {
     return new Promise((resolve, reject) => {
-        const contentType = toHeaderString(req.headers['content-type']);
-        if (!contentType || !contentType.includes('multipart/form-data')) {
-            reject(new Error('content-type inválido (se espera multipart/form-data)'));
+        const rawJpeg = parseRawJpeg(rawBody);
+        if (rawJpeg && (!contentType || !contentType.includes('multipart'))) {
+            resolve(rawJpeg);
             return;
         }
-        readRawBody(req)
-            .then((rawBody) => {
-            const busboy = Busboy({
-                headers: headersForBusboy(req.headers),
-                limits: { files: 1, fileSize: 10 * 1024 * 1024 },
-            });
-            const fields = {};
-            const fileChunks = [];
-            let fileMeta = null;
-            busboy.on('field', (name, val) => {
-                if (typeof name === 'string' && name)
-                    fields[name] = String(val ?? '');
-            });
-            busboy.on('file', (_name, file, info) => {
-                const filename = info?.filename || 'snapshot.jpg';
-                const mimeType = info?.mimeType || 'application/octet-stream';
-                fileMeta = { filename, mimeType };
-                file.on('data', (d) => fileChunks.push(d));
-                file.on('limit', () => reject(new Error('Archivo demasiado grande (limit 10MB)')));
-            });
-            busboy.on('error', (e) => reject(e));
-            busboy.on('finish', () => {
-                const parsed = { fields };
-                if (fileMeta) {
-                    parsed.file = {
-                        buffer: Buffer.concat(fileChunks),
-                        filename: fileMeta.filename,
-                        mimeType: fileMeta.mimeType,
-                    };
-                }
-                resolve(parsed);
-            });
-            busboy.write(rawBody);
-            busboy.end();
-        })
-            .catch(reject);
+        if (!contentType || !contentType.includes('multipart')) {
+            reject(new Error('content-type inválido (se espera multipart o body JPEG)'));
+            return;
+        }
+        if (contentType.includes('multipart/x-mixed-replace')) {
+            try {
+                resolve(parseMixedReplace(rawBody, contentType));
+            }
+            catch (e) {
+                const boundary = getBoundary(contentType);
+                const jpeg = boundary ? extractJpegFromBuffer(rawBody, boundary.replace(/^["']|["']$/g, '')) : null;
+                if (jpeg)
+                    resolve({ fields: {}, file: { buffer: jpeg, filename: 'snapshot.jpg', mimeType: 'image/jpeg' } });
+                else if (rawJpeg)
+                    resolve(rawJpeg);
+                else
+                    reject(e);
+            }
+            return;
+        }
+        if (!contentType.includes('multipart/form-data')) {
+            if (rawJpeg)
+                resolve(rawJpeg);
+            else
+                reject(new Error('content-type inválido'));
+            return;
+        }
+        const busboy = Busboy({
+            headers: headersForBusboy(headers),
+            limits: { files: 1, fileSize: 10 * 1024 * 1024 },
+        });
+        const fields = {};
+        const fileChunks = [];
+        let fileMeta = null;
+        busboy.on('field', (name, val) => {
+            if (typeof name === 'string' && name)
+                fields[name] = String(val ?? '');
+        });
+        busboy.on('file', (_name, file, info) => {
+            const filename = info?.filename || 'snapshot.jpg';
+            const mimeType = info?.mimeType || 'application/octet-stream';
+            fileMeta = { filename, mimeType };
+            file.on('data', (d) => fileChunks.push(d));
+            file.on('limit', () => reject(new Error('Archivo demasiado grande (limit 10MB)')));
+        });
+        busboy.on('error', (e) => reject(e));
+        busboy.on('finish', () => {
+            const parsed = { fields };
+            if (fileMeta) {
+                parsed.file = {
+                    buffer: Buffer.concat(fileChunks),
+                    filename: fileMeta.filename,
+                    mimeType: fileMeta.mimeType,
+                };
+            }
+            resolve(parsed);
+        });
+        busboy.write(rawBody);
+        busboy.end();
     });
+}
+function parseMultipart(req) {
+    const contentType = toHeaderString(req.headers['content-type']);
+    return readRawBody(req).then((rawBody) => parseMultipartFromBuffer(rawBody, contentType, req.headers));
 }
 let cachedSecret = { value: null, fetchedAtMs: 0 };
 async function getExpectedSecretFromFirestore() {
@@ -158,9 +276,14 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             res.status(405).send('Method Not Allowed');
             return;
         }
+        const rawBody = typeof req.rawBody === 'object' && Buffer.isBuffer(req.rawBody)
+            ? req.rawBody
+            : await readRawBody(req);
         await validateSecret(req);
         ensureAdmin();
-        const parsed = await parseMultipart(req);
+        const contentType = toHeaderString(req.headers['content-type']);
+        console.log('[NVR_ALERT] Body recibido:', rawBody.length, 'bytes', 'Content-Type:', (contentType || '(vacío)').slice(0, 70));
+        const parsed = await parseMultipartFromBuffer(rawBody, contentType, req.headers);
         if (!parsed.file || !parsed.file.buffer?.length) {
             console.log('[NVR_ALERT] Rejected: no file in multipart. Fields:', Object.keys(parsed.fields));
             res.status(400).send('Falta archivo (snapshot) en multipart.');
@@ -171,7 +294,10 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             safeNumber(fields.channelId) ??
             safeNumber(fields.Channel) ??
             safeNumber(fields.channel) ??
-            null;
+            safeNumber(fields.ChannelNo) ??
+            safeNumber(fields.ChannelNumber) ??
+            safeNumber(fields.ch) ??
+            1;
         const cameraName = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
         const eventType = pickFirst(fields, ['event_type', 'eventType', 'EventType', 'event', 'Event']) || '';
         const objectTypeRaw = pickFirst(fields, ['object_type', 'objectType', 'ObjectType', 'object', 'Object']) || '';
@@ -198,9 +324,11 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
                 'serialNumber',
             ]);
         const routeKey = buildRouteKey(nvrId, channelId);
+        console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'fields keys=', Object.keys(fields).join(', '));
         let route = await resolveRoute(routeKey);
         const db = admin.firestore();
         if (routeKey && !route) {
+            console.log('[NVR_ALERT] Creando camera_routes/', routeKey, '(primera vez para este NVR/canal)');
             const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
             await db.collection('camera_routes').doc(routeKey).set({
                 enabled: true,
@@ -254,6 +382,7 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             route_key: routeKey,
             raw_fields: fields,
         });
+        console.log('[NVR_ALERT] OK alertId=', alertId, 'routeKey=', routeKey);
         res.status(200).json({ ok: true, alertId });
     }
     catch (e) {

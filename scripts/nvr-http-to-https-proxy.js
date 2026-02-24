@@ -50,7 +50,8 @@ const server = http.createServer((req, res) => {
   req.on('data', (chunk) => chunks.push(chunk));
   req.on('end', () => {
     const body = Buffer.concat(chunks);
-    console.log('[PROXY] Recibido:', req.method, pathWithQuery, '| body:', body.length, 'bytes', '| desde:', clientIp);
+    const contentType = req.headers['content-type'] || '(no enviado)';
+    console.log('[PROXY] Recibido:', req.method, pathWithQuery, '| body:', body.length, 'bytes', '| Content-Type:', String(contentType).slice(0, 60), '| desde:', clientIp);
 
     const options = {
       hostname: TARGET_HOST,
@@ -68,10 +69,20 @@ const server = http.createServer((req, res) => {
       res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
       proxyRes.pipe(res);
     });
+    proxyReq.setTimeout(130000, () => {
+      proxyReq.destroy();
+      console.error('[PROXY] Timeout 130s esperando respuesta de la Cloud Function');
+      if (!res.headersSent) {
+        res.writeHead(504, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Timeout: la función no respondió en 130s');
+      }
+    });
     proxyReq.on('error', (e) => {
       console.error('[PROXY] Error hacia HTTPS:', e.message);
-      res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Error de proxy: ' + e.message);
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Error de proxy: ' + e.message);
+      }
     });
     if (body.length) proxyReq.write(body);
     proxyReq.end();
