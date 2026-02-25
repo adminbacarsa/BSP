@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -7,7 +7,18 @@ import { Toaster, toast } from 'sonner';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
-import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown } from 'lucide-react';
+
+const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
+    try {
+        const auth = getAuth();
+        const operatorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        const data: any = { action, module: 'OPERACIONES', details, timestamp: serverTimestamp(), actorName: operatorName, actorUid: auth.currentUser?.uid || null };
+        if (extra?.objectiveName != null) data.objectiveName = extra.objectiveName;
+        if (extra?.clientName != null) data.clientName = extra.clientName;
+        await addDoc(collection(db, 'audit_logs'), data);
+    } catch (e) { console.error('Error registrando bitácora', e); toast.error('No se pudo registrar en bitácora.'); }
+};
+import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
@@ -45,7 +56,7 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
 };
 
-const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
+const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) => {
     const [expanded, setExpanded] = useState<number | null>(3);
     const [loading, setLoading] = useState(false);
     if (!isOpen || !absenceShift) return null;
@@ -191,6 +202,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            const typeLabel = type === 'RETENTION' ? 'Retención/Doble turno' : type === 'SWAP' ? 'Intercambio' : type === 'LIBRE' ? 'Libre/Volante' : type === 'VOLANTE' ? 'Volante' : type;
+            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success(`Asignado: ${emp.fullName || emp.employeeName}`);
             onClose();
         } catch (e) {
@@ -218,6 +231,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            if (onAudit) onAudit('Adelanto de turno', `Adelantó ingreso de ${nextShift.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName})`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success('Turno adelantado');
             onClose();
         } catch (e) {
@@ -257,6 +271,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
             });
+            if (onAudit) onAudit('Franco convocado', `Convocó franco trabajado: ${francoShift.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName})`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
             toast.success('Franco convocado');
             onClose();
         } catch (e) {
@@ -363,7 +378,12 @@ const NVR_RESOLUTION_OPTIONS = [
 const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
     if (!alert) return null;
+    const images: string[] = Array.isArray(alert.image_urls) && alert.image_urls.length > 0
+        ? alert.image_urls
+        : alert.image_url ? [alert.image_url] : [];
+    const numImages = images.length;
     const formatAlertTime = (ts: any) => {
         if (!ts) return '—';
         try {
@@ -379,22 +399,48 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
             setLoading(false);
         }
     };
+    const goPrev = () => setCurrentImageIndex((i) => (i <= 0 ? numImages - 1 : i - 1));
+    const goNext = () => setCurrentImageIndex((i) => (i >= numImages - 1 ? 0 : i + 1));
+    const prevNumRef = useRef(numImages);
+    useEffect(() => { setCurrentImageIndex(0); }, [alert?.id]);
+    useEffect(() => {
+        if (numImages > prevNumRef.current) setCurrentImageIndex(numImages - 1);
+        prevNumRef.current = numImages;
+    }, [numImages]);
     return (
         <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col">
                 <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
-                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Alerta IVS {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold">({pendingCount} pendientes)</span>}</h3>
+                    <h3 className="font-black uppercase flex items-center gap-2">
+                        <Siren size={24} /> Alerta IVS — Evento
+                        {numImages > 1 && <span className="text-rose-200 font-bold"> ({numImages} imágenes)</span>}
+                        {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold"> · {pendingCount} pendientes</span>}
+                    </h3>
                     {onMinimize && (
                         <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>
                     )}
                 </div>
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>{alert.image_url && (
-                            <div className="rounded-xl overflow-hidden border-2 border-rose-200">
-                                <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
-                            </div>
-                        )}</div>
+                        <div>
+                            {numImages > 0 && (
+                                <div className="rounded-xl overflow-hidden border-2 border-rose-200 relative">
+                                    <img src={images[currentImageIndex]} alt={`Alerta IVS ${currentImageIndex + 1}`} className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
+                                    {numImages > 1 && (
+                                        <>
+                                            <button type="button" onClick={goPrev} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Anterior"><ChevronLeft size={24} /></button>
+                                            <button type="button" onClick={goNext} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Siguiente"><ChevronRight size={24} /></button>
+                                            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                                                {images.map((_, i) => (
+                                                    <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`w-2 h-2 rounded-full transition-colors ${i === currentImageIndex ? 'bg-white' : 'bg-white/50 hover:bg-white/80'}`} aria-label={`Imagen ${i + 1}`} />
+                                                ))}
+                                            </div>
+                                            <span className="absolute top-2 right-2 bg-slate-900/70 text-white text-xs font-bold px-2 py-1 rounded">Imagen {currentImageIndex + 1} de {numImages}</span>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                         <div className="space-y-3">
                             <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Información</p>
@@ -616,7 +662,7 @@ export default function TacticalMapView() {
             <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
+            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} onAudit={async (action, details, extra) => await registrarBitacora(action, details, extra)} />
             <WorkedDayOffModal
                 isOpen={workedFrancoData.isOpen}
                 onClose={() => setWorkedFrancoData({ isOpen: false, shift: null })}

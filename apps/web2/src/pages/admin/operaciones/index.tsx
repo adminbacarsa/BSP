@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield, 
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer, 
-    Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp, 
+    Phone, MessageCircle, Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, 
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft, 
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight 
 } from 'lucide-react';
@@ -78,11 +78,16 @@ const NVR_RESOLUTION_OPTIONS = [
     { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
 ];
 
-// Modal de tratamiento de alerta NVR: minimizable + resoluciones precargadas
+// Modal de tratamiento de alerta NVR: carrusel por evento (misma cámara) + resoluciones
 const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
     if (!alert) return null;
+    const images: string[] = Array.isArray(alert.image_urls) && alert.image_urls.length > 0
+        ? alert.image_urls
+        : alert.image_url ? [alert.image_url] : [];
+    const numImages = images.length;
     const formatAlertTime = (ts: any) => {
         if (!ts) return '—';
         try {
@@ -98,20 +103,46 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
             setLoading(false);
         }
     };
+    const goPrev = () => setCurrentImageIndex((i) => (i <= 0 ? numImages - 1 : i - 1));
+    const goNext = () => setCurrentImageIndex((i) => (i >= numImages - 1 ? 0 : i + 1));
+    const prevNumRef = useRef(numImages);
+    useEffect(() => { setCurrentImageIndex(0); }, [alert?.id]);
+    useEffect(() => {
+        if (numImages > prevNumRef.current) setCurrentImageIndex(numImages - 1);
+        prevNumRef.current = numImages;
+    }, [numImages]);
     return (
         <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col">
                 <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
-                    <h3 className="font-black uppercase flex items-center gap-2"><Siren size={24} /> Alerta IVS {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold">({pendingCount} pendientes)</span>}</h3>
+                    <h3 className="font-black uppercase flex items-center gap-2">
+                        <Siren size={24} /> Alerta IVS — Evento
+                        {numImages > 1 && <span className="text-rose-200 font-bold"> ({numImages} imágenes)</span>}
+                        {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold"> · {pendingCount} pendientes</span>}
+                    </h3>
                     {onMinimize && <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>}
                 </div>
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>{alert.image_url && (
-                            <div className="rounded-xl overflow-hidden border-2 border-rose-200">
-                                <img src={alert.image_url} alt="Alerta IVS" className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
-                            </div>
-                        )}</div>
+                        <div>
+                            {numImages > 0 && (
+                                <div className="rounded-xl overflow-hidden border-2 border-rose-200 relative">
+                                    <img src={images[currentImageIndex]} alt={`Alerta IVS ${currentImageIndex + 1}`} className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
+                                    {numImages > 1 && (
+                                        <>
+                                            <button type="button" onClick={goPrev} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Anterior"><ChevronLeft size={24} /></button>
+                                            <button type="button" onClick={goNext} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Siguiente"><ChevronRight size={24} /></button>
+                                            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                                                {images.map((_, i) => (
+                                                    <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`w-2 h-2 rounded-full transition-colors ${i === currentImageIndex ? 'bg-white' : 'bg-white/50 hover:bg-white/80'}`} aria-label={`Imagen ${i + 1}`} />
+                                                ))}
+                                            </div>
+                                            <span className="absolute top-2 right-2 bg-slate-900/70 text-white text-xs font-bold px-2 py-1 rounded">Imagen {currentImageIndex + 1} de {numImages}</span>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                         <div className="space-y-3">
                             <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Información</p>
@@ -583,6 +614,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     } else if (shift.isUnassigned) {
         title = shift.employeeName || 'VACANTE';
         subtitle = "COBERTURA PENDIENTE";
+    } else if (shift.isRetention && typeof shift.retentionMinutes === 'number') {
+        subtitle = `Retención: ${shift.retentionMinutes} min`;
     }
 
     const isSelected = selectedShiftId === shift.id;
@@ -616,7 +649,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         
                         {shift.isReportedToPlanning && <div className="bg-slate-600 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm"><CornerUpLeft size={10}/> DEVUELTO</div>}
                         {shift.isResolvedByOps && <div className="bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded flex items-center gap-1 shadow-sm"><CheckCircle size={10}/> OPERACIONES</div>}
-                        {shift.isRetention && <div className="bg-orange-600 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse">RECARGO</div>}
+                        {shift.isRetention && <div className="bg-orange-600 text-white text-[9px] font-black px-2 py-0.5 rounded animate-pulse">{typeof shift.retentionMinutes === 'number' ? `${shift.retentionMinutes} min` : 'RECARGO'}</div>}
                     </div>
                 </div>
                 <div className="flex items-center gap-3 mb-3">
@@ -1191,13 +1224,14 @@ export default function OperacionesPage() {
                 shift={workedFrancoData.shift}
                 availableShifts={logic.processedData}
                 referenceDate={logic.now}
+                onAudit={async (action, details, extra) => await registrarBitacora(action, details, extra)}
             />
             <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={async (nov:string|null) => { if (checkoutData.shift?.id) { await logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); await registrarBitacora('Salida registrada', `Registró salida de ${checkoutData.shift?.employeeName || 'Guardia'} en ${checkoutData.shift?.objectiveName || 'objetivo'} (${checkoutData.shift?.positionName || ''})${nov ? '. Novedad: ' + nov : ''}`, { objectiveName: checkoutData.shift?.objectiveName, clientName: checkoutData.shift?.clientName }); } }} employeeName={checkoutData.shift?.employeeName} />
             <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
             
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
+            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} onAudit={async (action, details, extra) => await registrarBitacora(action, details, extra)} />
 
             {showHelp && (
                 <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>

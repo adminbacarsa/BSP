@@ -441,27 +441,37 @@ export const nvrAlertV2 = onRequest(
       }
 
       if (existingAlertId) {
-        // Actualizar alerta existente con la nueva imagen (misma cámara en secuencia)
-        const storagePathByRoute = `alerts/${dayFolder}/${routeKey!.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`;
+        // Mismo evento (misma cámara en cooldown): añadir imagen al carrusel del evento, no reemplazar
+        const existingSnap = await db.collection('alerts').doc(existingAlertId).get();
+        const existingData = existingSnap.data() || {};
+        const prevUrls: string[] = Array.isArray(existingData.image_urls)
+          ? existingData.image_urls
+          : existingData.image_url
+            ? [existingData.image_url]
+            : [];
+        const uniqueSuffix = Date.now();
+        const storagePathAppend = `alerts/${dayFolder}/${existingAlertId}_${uniqueSuffix}.jpg`;
         const token = randomUUID();
-        await bucket.file(storagePathByRoute).save(parsed.file.buffer, {
+        await bucket.file(storagePathAppend).save(parsed.file.buffer, {
           resumable: false,
           contentType: parsed.file.mimeType || 'image/jpeg',
           metadata: { metadata: { firebaseStorageDownloadTokens: token } },
         });
         const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
-          storagePathByRoute
+          storagePathAppend
         )}?alt=media&token=${token}`;
+        const image_urls = [...prevUrls, imageUrl];
         await db.collection('alerts').doc(existingAlertId).update({
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           image_url: imageUrl,
+          image_urls,
           camera_name: canonicalCameraName,
           event_type: eventType || routeData.event_type || '',
           object_type: objectType || null,
           raw_fields: fields,
           event_time_readable: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
         });
-        console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey);
+        console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey, 'imágenes=', image_urls.length);
         res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
         return;
       }
@@ -488,6 +498,7 @@ export const nvrAlertV2 = onRequest(
         event_type: eventType || routeData.event_type || '',
         object_type: objectType || null,
         image_url: imageUrl,
+        image_urls: [imageUrl],
         status: 'pending',
         assigned_guard: null,
         resolution_time: 0,
