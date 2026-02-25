@@ -7,7 +7,7 @@ import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { 
   Menu, X, LogOut, Briefcase, BarChart3, Users, 
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Siren, Camera
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Siren, Camera, ClipboardList
 } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -81,6 +81,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
           <Link href="/admin/camera-routes" prefetch={false} className={getLinkClass('/admin/camera-routes')} title="Cámaras NVR">
             <Camera size={20}/> {isSidebarOpen && <span>Cámaras NVR</span>}
+          </Link>
+          <Link href="/admin/reportes-eventos-camaras" prefetch={false} className={getLinkClass('/admin/reportes-eventos-camaras')} title="Reporte eventos cámaras">
+            <ClipboardList size={20}/> {isSidebarOpen && <span>Reporte eventos cámaras</span>}
           </Link>
 
           {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4">Gestión</div>}

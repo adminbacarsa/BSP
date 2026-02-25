@@ -273,10 +273,17 @@ async function validateSecret(req: RequestLike): Promise<void> {
   }
 }
 
-function buildRouteKey(nvrId: string | null, channelId: number | null): string | null {
-  if (channelId == null || Number.isNaN(channelId)) return null;
+/** Route key por cámara: NVR__canal. Si channelId es null no agrupamos (clave única por request). */
+function buildRouteKey(nvrId: string | null, channelId: number | null, nowMs?: number): string {
   const safeNvr = nvrId && nvrId.trim() ? nvrId.trim() : 'default';
+  if (channelId == null || Number.isNaN(channelId)) {
+    return `${safeNvr}__?_${nowMs ?? Date.now()}`;
+  }
   return `${safeNvr}__${channelId}`;
+}
+
+function isGroupableRouteKey(routeKey: string): boolean {
+  return !routeKey.includes('__?_');
 }
 
 async function resolveRoute(routeKey: string | null) {
@@ -330,6 +337,13 @@ export const nvrAlertV2 = onRequest(
       }
 
       const fields = parsed.fields;
+      const query = (req.query || {}) as Record<string, unknown>;
+      const queryNum = (key: string) => {
+        const v = query[key];
+        if (v == null) return null;
+        const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : null;
+        return Number.isFinite(n) ? n : null;
+      };
 
       const channelId =
         safeNumber(fields.channel_id) ??
@@ -339,10 +353,19 @@ export const nvrAlertV2 = onRequest(
         safeNumber(fields.ChannelNo) ??
         safeNumber(fields.ChannelNumber) ??
         safeNumber(fields.ch) ??
-        // Si la NVR no envía canal, usamos 1 para poder crear camera_routes y que aparezca en el panel
-        1;
+        queryNum('channel') ??
+        queryNum('channelId') ??
+        queryNum('channel_id') ??
+        queryNum('ch') ??
+        null;
 
       const cameraName = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+      const sourceCameraName =
+        pickFirst(fields, [
+          'camera_name', 'cameraName', 'CameraName', 'camera', 'Camera',
+          'DeviceName', 'deviceName', 'ChannelName', 'channelName', 'Name', 'CameraTitle', 'CameraLabel',
+          'SourceName', 'sourceName', 'InputName', 'inputName',
+        ]) || cameraName || null;
       const eventType = pickFirst(fields, ['event_type', 'eventType', 'EventType', 'event', 'Event']) || '';
       const objectTypeRaw = pickFirst(fields, ['object_type', 'objectType', 'ObjectType', 'object', 'Object']) || '';
 
@@ -373,14 +396,14 @@ export const nvrAlertV2 = onRequest(
         ]);
 
       const routeKey = buildRouteKey(nvrId, channelId);
-      console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'fields keys=', Object.keys(fields).join(', '));
+      const canGroup = isGroupableRouteKey(routeKey);
+      console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'canGroup=', canGroup, 'fields keys=', Object.keys(fields).join(', '));
       let route = await resolveRoute(routeKey);
 
-      // Si no existe camera_route para este NVR/canal, crearlo para que aparezca en Firestore y se pueda asignar cliente/objetivo
       const db = admin.firestore();
-      if (routeKey && !route) {
+      if (routeKey && canGroup && !route) {
         console.log('[NVR_ALERT] Creando camera_routes/', routeKey, '(primera vez para este NVR/canal)');
-        const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+        const cameraNameFromRequest = sourceCameraName || pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
         await db.collection('camera_routes').doc(routeKey).set(
           {
             enabled: true,
@@ -421,22 +444,24 @@ export const nvrAlertV2 = onRequest(
       const nowMs = Date.now();
       const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
 
-      // Buscar alerta pendiente reciente de la misma cámara para agrupar (no crear muchas alertas en secuencia)
-      const recentPending = await db
-        .collection('alerts')
-        .where('route_key', '==', routeKey)
-        .where('status', '==', 'pending')
-        .orderBy('timestamp', 'desc')
-        .limit(1)
-        .get();
-
       let existingAlertId: string | null = null;
-      if (!recentPending.empty) {
-        const lastDoc = recentPending.docs[0];
-        const lastData = lastDoc.data();
-        const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
-        if (nowMs - lastTs <= cooldownMs) {
-          existingAlertId = lastDoc.id;
+      if (canGroup) {
+        const recentPending = await db
+          .collection('alerts')
+          .where('route_key', '==', routeKey)
+          .where('status', '==', 'pending')
+          .orderBy('timestamp', 'desc')
+          .limit(1)
+          .get();
+
+        if (!recentPending.empty) {
+          const lastDoc = recentPending.docs[0];
+          const lastData = lastDoc.data();
+          const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
+          const existingChannel = lastData?.channel_id ?? lastData?.channelId;
+          if (nowMs - lastTs <= cooldownMs && (existingChannel === undefined || existingChannel === channelId)) {
+            existingAlertId = lastDoc.id;
+          }
         }
       }
 
@@ -466,6 +491,7 @@ export const nvrAlertV2 = onRequest(
           image_url: imageUrl,
           image_urls,
           camera_name: canonicalCameraName,
+          ...(sourceCameraName ? { source_camera_name: sourceCameraName } : {}),
           event_type: eventType || routeData.event_type || '',
           object_type: objectType || null,
           raw_fields: fields,
@@ -494,6 +520,7 @@ export const nvrAlertV2 = onRequest(
         id: alertId,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         camera_name: canonicalCameraName,
+        ...(sourceCameraName ? { source_camera_name: sourceCameraName } : {}),
         channel_id: channelId ?? null,
         event_type: eventType || routeData.event_type || '',
         object_type: objectType || null,

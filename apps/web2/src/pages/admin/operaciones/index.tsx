@@ -79,15 +79,19 @@ const NVR_RESOLUTION_OPTIONS = [
 ];
 
 // Modal de tratamiento de alerta NVR: carrusel por evento (misma cámara) + resoluciones
-const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
+const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; queueIndex?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
-    const [currentImageIndex, setCurrentImageIndex] = useState(0);
     if (!alert) return null;
     const images: string[] = Array.isArray(alert.image_urls) && alert.image_urls.length > 0
         ? alert.image_urls
         : alert.image_url ? [alert.image_url] : [];
     const numImages = images.length;
+    const [currentImageIndex, setCurrentImageIndex] = useState(Math.max(0, numImages - 1));
+    useEffect(() => {
+        const last = Math.max(0, numImages - 1);
+        setCurrentImageIndex(last);
+    }, [alert?.id, numImages]);
     const formatAlertTime = (ts: any) => {
         if (!ts) return '—';
         try {
@@ -105,20 +109,34 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
     };
     const goPrev = () => setCurrentImageIndex((i) => (i <= 0 ? numImages - 1 : i - 1));
     const goNext = () => setCurrentImageIndex((i) => (i >= numImages - 1 ? 0 : i + 1));
-    const prevNumRef = useRef(numImages);
-    useEffect(() => { setCurrentImageIndex(0); }, [alert?.id]);
-    useEffect(() => {
-        if (numImages > prevNumRef.current) setCurrentImageIndex(numImages - 1);
-        prevNumRef.current = numImages;
-    }, [numImages]);
+    const displayCameraName = alert.source_camera_name || alert.camera_name || alert.route_key || '—';
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    const eventId = alert.id || alert.alertId || '—';
+    const copyEventId = () => { if (eventId && eventId !== '—') { navigator.clipboard.writeText(eventId); toast.success('ID copiado'); } };
     return (
-        <div className="fixed inset-0 z-[9999] bg-slate-900/90 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-[9999] bg-slate-900/95 flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
+            {lightboxOpen && numImages > 0 && (
+                <div className="fixed inset-0 z-[10000] bg-black/95 flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && setLightboxOpen(false)} role="presentation" tabIndex={0} onKeyDown={(e) => e.key === 'Escape' && setLightboxOpen(false)}>
+                    <button type="button" onClick={() => setLightboxOpen(false)} className="absolute top-4 right-4 z-10 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white" aria-label="Cerrar"><X size={24} /></button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); goPrev(); }} className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white" aria-label="Anterior"><ChevronLeft size={28} /></button>
+                    <img src={images[currentImageIndex]} alt="Expandida" className="max-w-full max-h-[85vh] object-contain select-none" onClick={(e) => e.stopPropagation()} />
+                    <button type="button" onClick={(e) => { e.stopPropagation(); goNext(); }} className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white" aria-label="Siguiente"><ChevronRight size={28} /></button>
+                    <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        {images.map((_, i) => (
+                            <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`h-2 rounded-full transition-all ${i === currentImageIndex ? 'w-8 bg-rose-500' : 'w-2 bg-white/50 hover:bg-white/80'}`} aria-label={`Imagen ${i + 1}`} />
+                        ))}
+                    </div>
+                    <span className="absolute top-4 left-4 bg-black/60 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">Imagen {currentImageIndex + 1} de {numImages}</span>
+                </div>
+            )}
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col border border-slate-200/50">
                 <div className="bg-rose-600 text-white px-6 py-4 flex items-center justify-between shrink-0">
-                    <h3 className="font-black uppercase flex items-center gap-2">
+                    <h3 className="font-black uppercase flex items-center gap-2 flex-wrap">
                         <Siren size={24} /> Alerta IVS — Evento
-                        {numImages > 1 && <span className="text-rose-200 font-bold"> ({numImages} imágenes)</span>}
-                        {pendingCount != null && pendingCount > 1 && <span className="text-rose-200 font-bold"> · {pendingCount} pendientes</span>}
+                        {queueIndex != null && pendingCount != null && pendingCount > 0 && (
+                            <span className="text-rose-200 font-bold bg-rose-500/30 px-2 py-0.5 rounded">Evento {queueIndex} de {pendingCount} en cola</span>
+                        )}
+                        {numImages > 1 && <span className="text-rose-200 font-normal"> ({numImages} imágenes)</span>}
                     </h3>
                     {onMinimize && <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>}
                 </div>
@@ -126,18 +144,18 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             {numImages > 0 && (
-                                <div className="rounded-xl overflow-hidden border-2 border-rose-200 relative">
-                                    <img src={images[currentImageIndex]} alt={`Alerta IVS ${currentImageIndex + 1}`} className="w-full h-auto max-h-[280px] object-contain bg-slate-100" />
+                                <div className="rounded-2xl overflow-hidden bg-slate-100 border border-slate-200/80 relative shadow-inner">
+                                    <img src={images[currentImageIndex]} alt={`Alerta IVS ${currentImageIndex + 1}`} className="w-full h-auto max-h-[280px] object-contain cursor-zoom-in" onClick={() => setLightboxOpen(true)} title="Clic para ampliar" />
                                     {numImages > 1 && (
                                         <>
-                                            <button type="button" onClick={goPrev} className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Anterior"><ChevronLeft size={24} /></button>
-                                            <button type="button" onClick={goNext} className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900/90" aria-label="Siguiente"><ChevronRight size={24} /></button>
-                                            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                                            <button type="button" onClick={goPrev} className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/95 text-slate-800 shadow-lg flex items-center justify-center hover:bg-white hover:scale-105 transition-all border border-slate-200/80" aria-label="Anterior"><ChevronLeft size={22} strokeWidth={2.5} /></button>
+                                            <button type="button" onClick={goNext} className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/95 text-slate-800 shadow-lg flex items-center justify-center hover:bg-white hover:scale-105 transition-all border border-slate-200/80" aria-label="Siguiente"><ChevronRight size={22} strokeWidth={2.5} /></button>
+                                            <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
                                                 {images.map((_, i) => (
-                                                    <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`w-2 h-2 rounded-full transition-colors ${i === currentImageIndex ? 'bg-white' : 'bg-white/50 hover:bg-white/80'}`} aria-label={`Imagen ${i + 1}`} />
+                                                    <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`h-1.5 rounded-full transition-all duration-200 ${i === currentImageIndex ? 'w-6 bg-rose-500' : 'w-1.5 bg-white/70 hover:bg-white'}`} aria-label={`Imagen ${i + 1}`} />
                                                 ))}
                                             </div>
-                                            <span className="absolute top-2 right-2 bg-slate-900/70 text-white text-xs font-bold px-2 py-1 rounded">Imagen {currentImageIndex + 1} de {numImages}</span>
+                                            <span className="absolute top-3 right-3 bg-slate-900/80 text-white text-xs font-semibold px-2.5 py-1 rounded-lg backdrop-blur-sm">Imagen {currentImageIndex + 1} de {numImages}</span>
                                         </>
                                     )}
                                 </div>
@@ -147,13 +165,19 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
                             <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Información</p>
                                 <dl className="space-y-1.5 text-sm">
-                                    <div><dt className="text-slate-500 inline">Nombre de la cámara: </dt><dd className="font-bold text-slate-800 inline">{alert.camera_name || alert.route_key || '—'}</dd></div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <dt className="text-slate-500">ID de evento:</dt>
+                                        <dd className="font-mono text-slate-800 font-bold text-xs break-all">{eventId}</dd>
+                                        {eventId !== '—' && <button type="button" onClick={copyEventId} className="text-[10px] font-bold text-rose-600 hover:underline">Copiar</button>}
+                                    </div>
+                                    <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{displayCameraName}</dd></div>
+                                    {alert.source_camera_name && alert.camera_name && alert.source_camera_name !== alert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{alert.camera_name}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{alert.route_key || '—'}</dd></div>
                                     <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || alert.objective_id || 'Sin asignar'}</dd></div>
                                     <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{alert.event_type || '—'}</dd></div>
                                     <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(alert.timestamp)}</dd></div>
                                 </dl>
-                                <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Todos los datos (cámara, hora, resolución) se guardan para reportes.</p>
+                                <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Usá el ID de evento en bitácora y reportes. Todos los datos se guardan.</p>
                             </div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
                             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm" rows={2} />
@@ -184,7 +208,7 @@ const NvrAlertMinimizedBar = ({ pendingCount, onExpand }: { pendingCount: number
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-rose-400 animate-in slide-in-from-bottom-2">
         <Siren size={24} className="shrink-0" />
         <span className="font-bold">
-            {pendingCount === 1 ? '1 alerta pendiente de tratamiento' : `${pendingCount} alertas pendientes de tratamiento`}
+            {pendingCount === 1 ? '1 evento en cola — terminá este para continuar' : `${pendingCount} eventos en cola — Evento 1 de ${pendingCount} pendiente`}
         </span>
         <button type="button" onClick={onExpand} className="px-4 py-2 bg-white text-rose-700 rounded-xl font-black text-sm hover:bg-rose-50">
             Abrir
@@ -1080,7 +1104,7 @@ export default function OperacionesPage() {
                 <NvrAlertMinimizedBar pendingCount={nvrAlerts.length} onExpand={() => setNvrModalMinimized(false)} />
             )}
             {firstPendingAlert && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alert={firstPendingAlert} pendingCount={nvrAlerts.length} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlert?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+                <NvrAlertTreatmentModal alert={firstPendingAlert} pendingCount={nvrAlerts.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlert?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
             )}
 
             <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">

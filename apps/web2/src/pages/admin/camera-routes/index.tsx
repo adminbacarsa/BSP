@@ -521,15 +521,15 @@ function CameraRoutesPage() {
               </div>
               <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Nombre de la ruta</label>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Nombre real de la cámara (manual)</label>
                   <input
                     type="text"
                     value={form.camera_name ?? ''}
                     onChange={(e) => setForm((f) => ({ ...f, camera_name: e.target.value }))}
-                    placeholder="Ej: Entrada principal, Patio, NVR cocina"
+                    placeholder="Ej: Entrada principal, Patio, Hall planta baja"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white"
                   />
-                  <p className="text-xs text-slate-500 mt-1">Identificador visible de esta ruta; se usa en alertas y Centro de Control. El ID técnico (NVR__canal) no se puede cambiar.</p>
+                  <p className="text-xs text-slate-500 mt-1">Si la NVR no envía el nombre de la cámara, escribilo acá. Este nombre se mostrará en las alertas y en Operaciones. El ID técnico (NVR__canal) no se puede cambiar.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
