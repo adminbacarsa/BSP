@@ -52,8 +52,8 @@ const MapUpdater = ({ markers }: any) => {
 const formatAlertTime = (ts: any) => {
     if (!ts) return '—';
     try {
-        const s = ts.seconds ?? ts;
-        return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+        const s = ts?.seconds ?? ts;
+        return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch { return '—'; }
 };
 
@@ -161,9 +161,9 @@ const OperacionesMap = ({
                                     <div className="space-y-2 max-h-[280px] overflow-y-auto">
                                         {marker.nvrAlerts.map((al: any) => (
                                             <div key={al.id} className="bg-rose-50 border border-rose-100 rounded p-1.5">
-                                                <div className="flex justify-between items-center gap-1 mb-1">
-                                                    <span className="text-[10px] font-bold text-slate-700 truncate">{al.camera_name || 'Cámara'}</span>
-                                                    <span className="text-[9px] text-slate-500">{formatAlertTime(al.timestamp)}</span>
+                                                <div className="mb-1">
+                                                    <p className="text-[10px] font-bold text-slate-700 truncate" title={al.camera_name || al.route_key}>Nombre: {al.camera_name || al.route_key || 'Cámara'}</p>
+                                                    <p className="text-[9px] text-slate-500">Hora del evento: {formatAlertTime(al.timestamp)}</p>
                                                 </div>
                                                 {al.image_url && (
                                                     <div className="rounded overflow-hidden border border-rose-200 bg-white">

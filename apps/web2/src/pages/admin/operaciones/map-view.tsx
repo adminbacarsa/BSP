@@ -399,12 +399,13 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, objectiveName, onConfirm,
                             <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Información</p>
                                 <dl className="space-y-1.5 text-sm">
-                                    <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{alert.camera_name || '—'}</dd></div>
-                                    <div><dt className="text-slate-500 inline">Ruta: </dt><dd className="font-mono text-slate-700 inline">{alert.route_key || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Nombre de la cámara: </dt><dd className="font-bold text-slate-800 inline">{alert.camera_name || alert.route_key || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{alert.route_key || '—'}</dd></div>
                                     <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || alert.objective_id || 'Sin asignar'}</dd></div>
                                     <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{alert.event_type || '—'}</dd></div>
-                                    <div><dt className="text-slate-500 inline">Hora: </dt><dd className="text-slate-700 inline">{formatAlertTime(alert.timestamp)}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(alert.timestamp)}</dd></div>
                                 </dl>
+                                <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Todos los datos (cámara, hora, resolución) se guardan para reportes.</p>
                             </div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
                             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm" rows={2} />

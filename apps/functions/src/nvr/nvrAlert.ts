@@ -410,6 +410,11 @@ export const nvrAlertV2 = onRequest(
       const routeData = route?.data || {};
       const objectiveId = typeof routeData.objective_id === 'string' ? routeData.objective_id : null;
       const postId = typeof routeData.post_id === 'string' ? routeData.post_id : null;
+      // Nombre real de la cámara: priorizar el que está en el panel (camera_routes), luego el que envía la NVR
+      const canonicalCameraName =
+        (typeof routeData.camera_name === 'string' && routeData.camera_name.trim()) ||
+        (cameraName && cameraName.trim()) ||
+        `NVR ${routeKey}`;
 
       const dayFolder = format(new Date(), 'yyyy-MM-dd');
       const bucket = admin.storage().bucket();
@@ -450,10 +455,11 @@ export const nvrAlertV2 = onRequest(
         await db.collection('alerts').doc(existingAlertId).update({
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           image_url: imageUrl,
-          camera_name: cameraName || routeData.camera_name || (await db.collection('alerts').doc(existingAlertId).get()).data()?.camera_name || '',
+          camera_name: canonicalCameraName,
           event_type: eventType || routeData.event_type || '',
           object_type: objectType || null,
           raw_fields: fields,
+          event_time_readable: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
         });
         console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey);
         res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
@@ -473,10 +479,11 @@ export const nvrAlertV2 = onRequest(
         storagePath
       )}?alt=media&token=${token}`;
 
+      const now = new Date();
       await alertRef.set({
         id: alertId,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        camera_name: cameraName || routeData.camera_name || '',
+        camera_name: canonicalCameraName,
         channel_id: channelId ?? null,
         event_type: eventType || routeData.event_type || '',
         object_type: objectType || null,
@@ -489,6 +496,10 @@ export const nvrAlertV2 = onRequest(
         post_id: postId,
         route_key: routeKey,
         raw_fields: fields,
+        event_time_readable: format(now, 'yyyy-MM-dd HH:mm:ss'),
+        schedule_enabled: routeData.schedule_enabled === true,
+        schedule_time_start: typeof routeData.schedule_time_start === 'string' ? routeData.schedule_time_start : null,
+        schedule_time_end: typeof routeData.schedule_time_end === 'string' ? routeData.schedule_time_end : null,
       });
 
       console.log('[NVR_ALERT] OK alertId=', alertId, 'routeKey=', routeKey);
