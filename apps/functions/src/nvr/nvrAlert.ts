@@ -407,12 +407,27 @@ export const nvrAlertV2 = onRequest(
         await db.collection('camera_routes').doc(routeKey).set(
           {
             enabled: true,
-            camera_name: cameraNameFromRequest || `NVR ${routeKey}`,
+            camera_name: cameraNameFromRequest || `Canal ${channelId}`,
             event_type: eventType || 'Tripwire',
             objective_id: null,
             post_id: null,
             created_from_alert: true,
             first_seen_at: admin.firestore.FieldValue.serverTimestamp(),
+            nvr_serial: nvrId?.trim() || null,
+          },
+          { merge: true }
+        );
+        const safeNvrId = (nvrId && nvrId.trim()) || 'default';
+        const nvrRef = db.collection('nvr_devices').doc(safeNvrId);
+        const nvrSnap = await nvrRef.get();
+        const existingChannelCount = nvrSnap.exists && typeof nvrSnap.data()?.channel_count === 'number' ? nvrSnap.data()!.channel_count : 0;
+        const newChannelCount = Math.max(existingChannelCount, channelId ?? 0);
+        await nvrRef.set(
+          {
+            serial_number: safeNvrId,
+            channel_count: newChannelCount,
+            updated_at: admin.firestore.FieldValue.serverTimestamp(),
+            ...(nvrSnap.exists ? {} : { created_from_alert: true, first_seen_at: admin.firestore.FieldValue.serverTimestamp() }),
           },
           { merge: true }
         );
@@ -424,8 +439,24 @@ export const nvrAlertV2 = onRequest(
         return;
       }
 
+      const safeNvrId = (nvrId && nvrId.trim()) || 'default';
+      const nvrSnap = await db.collection('nvr_devices').doc(safeNvrId).get();
+      if (nvrSnap.exists) {
+        const nvrData = nvrSnap.data() || {};
+        if (nvrData.enabled === false) {
+          console.log('[NVR_ALERT] NVR desactivado, no se crea alerta.', { routeKey });
+          res.status(200).json({ ok: true, skipped: 'nvr_disabled' });
+          return;
+        }
+        if (nvrData.schedule_enabled === true && !isWithinSchedule(nvrData as import('./schedule').ScheduleRouteData)) {
+          console.log('[NVR_ALERT] Fuera de horario del NVR, no se crea alerta.', { routeKey });
+          res.status(200).json({ ok: true, skipped: 'outside_nvr_schedule' });
+          return;
+        }
+      }
+
       if (route?.data && !isWithinSchedule(route.data as import('./schedule').ScheduleRouteData)) {
-        console.log('[NVR_ALERT] Fuera de horario de atención, no se crea alerta.', { routeKey });
+        console.log('[NVR_ALERT] Fuera de horario de atención del canal, no se crea alerta.', { routeKey });
         res.status(200).json({ ok: true, skipped: 'outside_schedule' });
         return;
       }
@@ -496,6 +527,7 @@ export const nvrAlertV2 = onRequest(
           object_type: objectType || null,
           raw_fields: fields,
           event_time_readable: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+          ...(typeof routeData.alert_group_id === 'string' && routeData.alert_group_id.trim() ? { alert_group_id: routeData.alert_group_id.trim() } : {}),
         });
         console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey, 'imágenes=', image_urls.length);
         res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
@@ -538,6 +570,7 @@ export const nvrAlertV2 = onRequest(
         schedule_enabled: routeData.schedule_enabled === true,
         schedule_time_start: typeof routeData.schedule_time_start === 'string' ? routeData.schedule_time_start : null,
         schedule_time_end: typeof routeData.schedule_time_end === 'string' ? routeData.schedule_time_end : null,
+        ...(typeof routeData.alert_group_id === 'string' && routeData.alert_group_id.trim() ? { alert_group_id: routeData.alert_group_id.trim() } : {}),
       });
 
       console.log('[NVR_ALERT] OK alertId=', alertId, 'routeKey=', routeKey);

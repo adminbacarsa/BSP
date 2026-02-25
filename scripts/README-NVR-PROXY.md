@@ -41,9 +41,9 @@ Podés sumar parámetros a la URL para que el backend identifique cámara y nomb
 | `channel`  | `?channel=1` | Número de canal/cámara (si la NVR no lo manda en el body). |
 | `channelId`| `?channelId=2` | Igual que `channel`. |
 | `ch`       | `?ch=3`   | Forma corta de canal. |
-| `nvrId`    | `?nvrId=NVR-001` | Identificador del NVR (si no viene en el body). |
+| `nvrId`    | `?nvrId=17589859` | **Número de serie del NVR** (recomendado). Identifica el equipo; los canales (1, 2, 3…) son las cámaras. |
 
-Ejemplo por cámara: una URL distinta por canal para que cada una sea un evento distinto:
+Ejemplo: NVR con serie 17589859, 16 canales. En la plataforma se agrega el NVR con ese serial; cada canal se parametriza (nombre, posición). URL por canal:
 
 - Cámara 1: `http://IP:8080/nvrAlertV2?key=123456&channel=1`
 - Cámara 2: `http://IP:8080/nvrAlertV2?key=123456&channel=2`
@@ -73,6 +73,23 @@ En consola verás líneas como:
 - `[PROXY] NVR campos (texto): {"channel_id":"1","camera_name":"Entrada",...}`
 
 Así podés saber qué nombres de campo usa tu NVR (p. ej. `channel_id`, `Channel`, `camera_name`, `DeviceName`) para configurar rutas o informar al backend si hace falta soportar más nombres.
+
+## ¿Podemos distinguir cada cámara?
+
+**Sí**, pero solo si **cada envío** (cada request HTTP al webhook) incluye **qué cámara es**:
+
+- **Por URL:** en el proxy podés usar una URL distinta por canal, por ejemplo:
+  - Cámara 1: `http://IP:8080/nvrAlertV2?key=123456&channel=1`
+  - Cámara 2: `http://IP:8080/nvrAlertV2?key=123456&channel=2`
+  Si en la NVR se puede configurar una URL (o un “destino”) por canal, cada cámara enviará con su propio `channel` y en la plataforma se verán como dos cámaras (dos alertas o dos eventos en cola).
+- **Por body:** si la NVR manda en el multipart campos como `channel_id`, `channel`, `Channel`, `camera_name`, etc., el backend usa eso para el `route_key` (`nvrId__channelId`) y así distingue cámaras.
+
+**No** podemos distinguir si:
+
+- La NVR envía **un solo request por “evento”** y en ese request **no** viene número de canal ni identificador de cámara (o viene el mismo para todas las imágenes). En ese caso todo se ve como **una sola fuente** (una NVR, una alerta) y no hay forma de saber qué frame es de qué cámara.
+- La NVR mezcla varias cámaras en un mismo body sin indicar en cada parte qué canal es (y nosotros hoy solo tomamos una imagen y un conjunto de campos por request).
+
+**Conclusión:** para saber si en tu caso se pueden distinguir las dos cámaras, hay que ver **qué llega** en cada request. Con `NVR_LOG_BODY=1` en el proxy revisá si en los logs aparece algo como `channel_id`, `channel`, `Channel` o nombre de cámara, y si la NVR envía **un request por cámara** o **un request con las dos**. Si envía uno por cámara (o con URL con `channel` distinto), sí se distinguen; si envía uno solo sin datos de canal, no.
 
 ## Variables de entorno
 

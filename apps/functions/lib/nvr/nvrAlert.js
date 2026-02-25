@@ -245,11 +245,15 @@ async function validateSecret(req) {
         throw new https_1.HttpsError('permission-denied', 'Webhook secret inválido.');
     }
 }
-function buildRouteKey(nvrId, channelId) {
-    if (channelId == null || Number.isNaN(channelId))
-        return null;
+function buildRouteKey(nvrId, channelId, nowMs) {
     const safeNvr = nvrId && nvrId.trim() ? nvrId.trim() : 'default';
+    if (channelId == null || Number.isNaN(channelId)) {
+        return `${safeNvr}__?_${nowMs ?? Date.now()}`;
+    }
     return `${safeNvr}__${channelId}`;
+}
+function isGroupableRouteKey(routeKey) {
+    return !routeKey.includes('__?_');
 }
 async function resolveRoute(routeKey) {
     ensureAdmin();
@@ -291,6 +295,14 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             return;
         }
         const fields = parsed.fields;
+        const query = (req.query || {});
+        const queryNum = (key) => {
+            const v = query[key];
+            if (v == null)
+                return null;
+            const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : null;
+            return Number.isFinite(n) ? n : null;
+        };
         const channelId = safeNumber(fields.channel_id) ??
             safeNumber(fields.channelId) ??
             safeNumber(fields.Channel) ??
@@ -298,8 +310,17 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             safeNumber(fields.ChannelNo) ??
             safeNumber(fields.ChannelNumber) ??
             safeNumber(fields.ch) ??
-            1;
+            queryNum('channel') ??
+            queryNum('channelId') ??
+            queryNum('channel_id') ??
+            queryNum('ch') ??
+            null;
         const cameraName = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+        const sourceCameraName = pickFirst(fields, [
+            'camera_name', 'cameraName', 'CameraName', 'camera', 'Camera',
+            'DeviceName', 'deviceName', 'ChannelName', 'channelName', 'Name', 'CameraTitle', 'CameraLabel',
+            'SourceName', 'sourceName', 'InputName', 'inputName',
+        ]) || cameraName || null;
         const eventType = pickFirst(fields, ['event_type', 'eventType', 'EventType', 'event', 'Event']) || '';
         const objectTypeRaw = pickFirst(fields, ['object_type', 'objectType', 'ObjectType', 'object', 'Object']) || '';
         const objectType = objectTypeRaw.toLowerCase().includes('vehicle')
@@ -325,20 +346,33 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
                 'serialNumber',
             ]);
         const routeKey = buildRouteKey(nvrId, channelId);
-        console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'fields keys=', Object.keys(fields).join(', '));
+        const canGroup = isGroupableRouteKey(routeKey);
+        console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'canGroup=', canGroup, 'fields keys=', Object.keys(fields).join(', '));
         let route = await resolveRoute(routeKey);
         const db = admin.firestore();
-        if (routeKey && !route) {
+        if (routeKey && canGroup && !route) {
             console.log('[NVR_ALERT] Creando camera_routes/', routeKey, '(primera vez para este NVR/canal)');
-            const cameraNameFromRequest = pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
+            const cameraNameFromRequest = sourceCameraName || pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
             await db.collection('camera_routes').doc(routeKey).set({
                 enabled: true,
-                camera_name: cameraNameFromRequest || `NVR ${routeKey}`,
+                camera_name: cameraNameFromRequest || `Canal ${channelId}`,
                 event_type: eventType || 'Tripwire',
                 objective_id: null,
                 post_id: null,
                 created_from_alert: true,
                 first_seen_at: admin.firestore.FieldValue.serverTimestamp(),
+                nvr_serial: nvrId?.trim() || null,
+            }, { merge: true });
+            const safeNvrId = (nvrId && nvrId.trim()) || 'default';
+            const nvrRef = db.collection('nvr_devices').doc(safeNvrId);
+            const nvrSnap = await nvrRef.get();
+            const existingChannelCount = nvrSnap.exists && typeof nvrSnap.data()?.channel_count === 'number' ? nvrSnap.data().channel_count : 0;
+            const newChannelCount = Math.max(existingChannelCount, channelId ?? 0);
+            await nvrRef.set({
+                serial_number: safeNvrId,
+                channel_count: newChannelCount,
+                updated_at: admin.firestore.FieldValue.serverTimestamp(),
+                ...(nvrSnap.exists ? {} : { created_from_alert: true, first_seen_at: admin.firestore.FieldValue.serverTimestamp() }),
             }, { merge: true });
             route = await resolveRoute(routeKey);
         }
@@ -361,20 +395,23 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
         const bucket = admin.storage().bucket();
         const nowMs = Date.now();
         const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
-        const recentPending = await db
-            .collection('alerts')
-            .where('route_key', '==', routeKey)
-            .where('status', '==', 'pending')
-            .orderBy('timestamp', 'desc')
-            .limit(1)
-            .get();
         let existingAlertId = null;
-        if (!recentPending.empty) {
-            const lastDoc = recentPending.docs[0];
-            const lastData = lastDoc.data();
-            const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
-            if (nowMs - lastTs <= cooldownMs) {
-                existingAlertId = lastDoc.id;
+        if (canGroup) {
+            const recentPending = await db
+                .collection('alerts')
+                .where('route_key', '==', routeKey)
+                .where('status', '==', 'pending')
+                .orderBy('timestamp', 'desc')
+                .limit(1)
+                .get();
+            if (!recentPending.empty) {
+                const lastDoc = recentPending.docs[0];
+                const lastData = lastDoc.data();
+                const lastTs = lastData?.timestamp?.toMillis?.() ?? (lastData?.timestamp?.seconds ?? 0) * 1000;
+                const existingChannel = lastData?.channel_id ?? lastData?.channelId;
+                if (nowMs - lastTs <= cooldownMs && (existingChannel === undefined || existingChannel === channelId)) {
+                    existingAlertId = lastDoc.id;
+                }
             }
         }
         if (existingAlertId) {
@@ -400,10 +437,12 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
                 image_url: imageUrl,
                 image_urls,
                 camera_name: canonicalCameraName,
+                ...(sourceCameraName ? { source_camera_name: sourceCameraName } : {}),
                 event_type: eventType || routeData.event_type || '',
                 object_type: objectType || null,
                 raw_fields: fields,
                 event_time_readable: (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+                ...(typeof routeData.alert_group_id === 'string' && routeData.alert_group_id.trim() ? { alert_group_id: routeData.alert_group_id.trim() } : {}),
             });
             console.log('[NVR_ALERT] Agrupado: actualizada alerta', existingAlertId, 'routeKey=', routeKey, 'imágenes=', image_urls.length);
             res.status(200).json({ ok: true, alertId: existingAlertId, updated: true });
@@ -424,6 +463,7 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             id: alertId,
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
             camera_name: canonicalCameraName,
+            ...(sourceCameraName ? { source_camera_name: sourceCameraName } : {}),
             channel_id: channelId ?? null,
             event_type: eventType || routeData.event_type || '',
             object_type: objectType || null,
@@ -441,6 +481,7 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             schedule_enabled: routeData.schedule_enabled === true,
             schedule_time_start: typeof routeData.schedule_time_start === 'string' ? routeData.schedule_time_start : null,
             schedule_time_end: typeof routeData.schedule_time_end === 'string' ? routeData.schedule_time_end : null,
+            ...(typeof routeData.alert_group_id === 'string' && routeData.alert_group_id.trim() ? { alert_group_id: routeData.alert_group_id.trim() } : {}),
         });
         console.log('[NVR_ALERT] OK alertId=', alertId, 'routeKey=', routeKey);
         res.status(200).json({ ok: true, alertId });

@@ -600,8 +600,13 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
     }
 });
 
-// NVR AI Alert: nvrAlertV2 (2nd gen) — usar esta URL en el proxy/webhook. La antigua nvrAlert queda en 1st gen hasta borrarla en consola.
+// NVR AI Alert: nvrAlertV2 (2nd gen) — usar esta URL en el proxy/webhook.
 export { nvrAlertV2 } from './nvr/nvrAlert';
+// Stub 1st gen nvrAlert: reemplaza la función antigua en Firebase para poder desplegar; responde 410 y redirige a nvrAlertV2.
+export const nvrAlert = functions.region('us-central1').https.onRequest((req, res) => {
+  res.status(410).setHeader('X-NVR-Deprecated', 'Use nvrAlertV2').send(JSON.stringify({ error: 'Deprecated', use: 'nvrAlertV2' }));
+});
 export { nvrWebhookTest } from './nvr/nvrWebhookTest';
 export { onAlertCreated } from './nvr/onAlertCreated';
 export { simulateNvrAlert } from './nvr/simulateNvrAlert';
+export { cleanupExpiredNvrAlerts } from './nvr/alertRetention';

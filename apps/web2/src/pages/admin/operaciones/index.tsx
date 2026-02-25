@@ -78,20 +78,13 @@ const NVR_RESOLUTION_OPTIONS = [
     { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
 ];
 
-// Modal de tratamiento de alerta NVR: carrusel por evento (misma cámara) + resoluciones
-const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName, onConfirm, onMinimize }: { alert: any; pendingCount?: number; queueIndex?: number; objectiveName?: string; onConfirm: (alert: any, resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
+// Modal de tratamiento de alerta NVR: una o varias cámaras (grupo); carrusel por cámara + resoluciones
+const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objectiveName, onConfirm, onMinimize }: { alertsGroup: any[]; pendingCount?: number; queueIndex?: number; objectiveName?: string; onConfirm: (alertOrAlerts: any | any[], resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
-    if (!alert) return null;
-    const images: string[] = Array.isArray(alert.image_urls) && alert.image_urls.length > 0
-        ? alert.image_urls
-        : alert.image_url ? [alert.image_url] : [];
-    const numImages = images.length;
-    const [currentImageIndex, setCurrentImageIndex] = useState(Math.max(0, numImages - 1));
-    useEffect(() => {
-        const last = Math.max(0, numImages - 1);
-        setCurrentImageIndex(last);
-    }, [alert?.id, numImages]);
+    if (!alertsGroup || alertsGroup.length === 0) return null;
+    const isGroup = alertsGroup.length > 1;
+    const firstAlert = alertsGroup[0];
     const formatAlertTime = (ts: any) => {
         if (!ts) return '—';
         try {
@@ -102,17 +95,27 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName
     const handleAction = async (resolutionType: string) => {
         setLoading(true);
         try {
-            await onConfirm(alert, resolutionType, notes);
+            await onConfirm(alertsGroup, resolutionType, notes);
         } finally {
             setLoading(false);
         }
     };
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    const [lightboxCameraIndex, setLightboxCameraIndex] = useState(0);
+    const [lightboxImageIndex, setLightboxImageIndex] = useState(0);
+    const eventIds = alertsGroup.map((a: any) => a.id).filter(Boolean);
+    const copyEventId = () => { const id = eventIds[0]; if (id) { navigator.clipboard.writeText(id); toast.success('ID copiado'); } };
+    const totalImages = alertsGroup.reduce((sum: number, a: any) => sum + (Array.isArray(a.image_urls) ? a.image_urls.length : a.image_url ? 1 : 0), 0);
+    const [selectedCamIdx, setSelectedCamIdx] = useState(0);
+    const selectedAlert = alertsGroup[selectedCamIdx] || firstAlert;
+    const images: string[] = Array.isArray(selectedAlert.image_urls) && selectedAlert.image_urls.length > 0 ? selectedAlert.image_urls : selectedAlert.image_url ? [selectedAlert.image_url] : [];
+    const numImages = images.length;
+    const [currentImageIndex, setCurrentImageIndex] = useState(Math.max(0, numImages - 1));
+    useEffect(() => { setCurrentImageIndex(Math.max(0, numImages - 1)); }, [selectedCamIdx, numImages]);
     const goPrev = () => setCurrentImageIndex((i) => (i <= 0 ? numImages - 1 : i - 1));
     const goNext = () => setCurrentImageIndex((i) => (i >= numImages - 1 ? 0 : i + 1));
-    const displayCameraName = alert.source_camera_name || alert.camera_name || alert.route_key || '—';
-    const [lightboxOpen, setLightboxOpen] = useState(false);
-    const eventId = alert.id || alert.alertId || '—';
-    const copyEventId = () => { if (eventId && eventId !== '—') { navigator.clipboard.writeText(eventId); toast.success('ID copiado'); } };
+    const displayCameraName = selectedAlert.source_camera_name || selectedAlert.camera_name || selectedAlert.route_key || '—';
+    const eventId = eventIds[0] || '—';
     return (
         <div className="fixed inset-0 z-[9999] bg-slate-900/95 flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
             {lightboxOpen && numImages > 0 && (
@@ -126,7 +129,7 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName
                             <button key={i} type="button" onClick={() => setCurrentImageIndex(i)} className={`h-2 rounded-full transition-all ${i === currentImageIndex ? 'w-8 bg-rose-500' : 'w-2 bg-white/50 hover:bg-white/80'}`} aria-label={`Imagen ${i + 1}`} />
                         ))}
                     </div>
-                    <span className="absolute top-4 left-4 bg-black/60 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">Imagen {currentImageIndex + 1} de {numImages}</span>
+                    <span className="absolute top-4 left-4 bg-black/60 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">{displayCameraName} — Imagen {currentImageIndex + 1} de {numImages}</span>
                 </div>
             )}
             <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col border border-slate-200/50">
@@ -136,11 +139,22 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName
                         {queueIndex != null && pendingCount != null && pendingCount > 0 && (
                             <span className="text-rose-200 font-bold bg-rose-500/30 px-2 py-0.5 rounded">Evento {queueIndex} de {pendingCount} en cola</span>
                         )}
-                        {numImages > 1 && <span className="text-rose-200 font-normal"> ({numImages} imágenes)</span>}
+                        {isGroup && <span className="text-rose-200 font-normal"> ({alertsGroup.length} cámaras)</span>}
+                        {totalImages > 1 && !isGroup && <span className="text-rose-200 font-normal"> ({totalImages} imágenes)</span>}
                     </h3>
                     {onMinimize && <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>}
                 </div>
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
+                    {isGroup && (
+                        <div className="flex flex-wrap gap-2">
+                            <span className="text-xs font-bold text-slate-500 uppercase self-center">Cámara:</span>
+                            {alertsGroup.map((a: any, idx: number) => (
+                                <button key={a.id} type="button" onClick={() => setSelectedCamIdx(idx)} className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all ${selectedCamIdx === idx ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                                    {a.source_camera_name || a.camera_name || a.route_key || `Cámara ${idx + 1}`}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             {numImages > 0 && (
@@ -171,19 +185,20 @@ const NvrAlertTreatmentModal = ({ alert, pendingCount, queueIndex, objectiveName
                                         {eventId !== '—' && <button type="button" onClick={copyEventId} className="text-[10px] font-bold text-rose-600 hover:underline">Copiar</button>}
                                     </div>
                                     <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{displayCameraName}</dd></div>
-                                    {alert.source_camera_name && alert.camera_name && alert.source_camera_name !== alert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{alert.camera_name}</dd></div>}
-                                    <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{alert.route_key || '—'}</dd></div>
-                                    <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || alert.objective_id || 'Sin asignar'}</dd></div>
-                                    <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{alert.event_type || '—'}</dd></div>
-                                    <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(alert.timestamp)}</dd></div>
+                                    {selectedAlert.source_camera_name && selectedAlert.camera_name && selectedAlert.source_camera_name !== selectedAlert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{selectedAlert.camera_name}</dd></div>}
+                                    <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{selectedAlert.route_key || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || selectedAlert.objective_id || 'Sin asignar'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{selectedAlert.event_type || '—'}</dd></div>
+                                    <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(selectedAlert.timestamp)}</dd></div>
+                                    {isGroup && <div><dt className="text-slate-500 inline">Cámaras en este evento: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
                                 </dl>
-                                <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Usá el ID de evento en bitácora y reportes. Todos los datos se guardan.</p>
+                                <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Usá el ID de evento en bitácora y reportes. Al confirmar se aplica a todas las cámaras del grupo.</p>
                             </div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas (opcional)</label>
                             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: Guardia notificado..." className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm" rows={2} />
                         </div>
                     </div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Acciones — elegir una</p>
+                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Acciones — elegir una (aplica a {isGroup ? 'todas las cámaras del evento' : 'este evento'})</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {NVR_RESOLUTION_OPTIONS.map((opt) => (
                             <button
@@ -802,6 +817,8 @@ export default function OperacionesPage() {
     const [bitacoraColWidths, setBitacoraColWidths] = useState([72, 100, 100, 140, 220]);
     const [bitacoraResizing, setBitacoraResizing] = useState<number | null>(null);
     const [nvrAlerts, setNvrAlerts] = useState<any[]>([]);
+    /** Eventos agrupados: mismo alert_group_id = un solo evento (array de alertas) */
+    const [nvrEventGroups, setNvrEventGroups] = useState<{ alerts: any[] }[]>([]);
     const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
 
     const handleBitacoraResize = (colIndex: number, delta: number) => {
@@ -856,25 +873,39 @@ export default function OperacionesPage() {
                     return { id: d.id, ...data, objective_id };
                 });
                 list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
-                setNvrAlerts(list.slice(0, 50));
+                const limited = list.slice(0, 50);
+                setNvrAlerts(limited);
+                // Agrupar por alert_group_id: mismo grupo = un solo "evento" en cola
+                const groupKey = (a: any) => (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+                const groupMap = new Map<string, any[]>();
+                limited.forEach((a: any) => {
+                    const key = groupKey(a);
+                    if (!groupMap.has(key)) groupMap.set(key, []);
+                    groupMap.get(key)!.push(a);
+                });
+                setNvrEventGroups(Array.from(groupMap.values()).map((alerts) => ({ alerts })));
             },
-            (err) => { console.error('alerts subscription', err); setNvrAlerts([]); }
+            (err) => { console.error('alerts subscription', err); setNvrAlerts([]); setNvrEventGroups([]); }
         );
         return () => unsub();
     }, []);
 
-    const handleNvrAlertTreatment = async (alert: any, resolutionType: string, notes: string) => {
+    const handleNvrAlertTreatment = async (alertOrAlerts: any | any[], resolutionType: string, notes: string) => {
+        const toProcess = Array.isArray(alertOrAlerts) ? alertOrAlerts : [alertOrAlerts];
         try {
             const status = resolutionType === 'falso_positivo' ? 'false_alarm' : 'acknowledged';
-            await updateDoc(doc(db, 'alerts', alert.id), {
-                status,
-                resolution_type: resolutionType,
-                guard_notes: notes?.trim() || '',
-                acknowledged_at: serverTimestamp(),
-                acknowledged_by: getAuth().currentUser?.uid ?? null,
-            });
+            for (const alert of toProcess) {
+                await updateDoc(doc(db, 'alerts', alert.id), {
+                    status,
+                    resolution_type: resolutionType,
+                    guard_notes: notes?.trim() || '',
+                    acknowledged_at: serverTimestamp(),
+                    acknowledged_by: getAuth().currentUser?.uid ?? null,
+                });
+            }
             const detalle = resolutionType === 'falso_positivo' ? 'Falso positivo' : 'Visto / Atendido';
-            await registrarBitacora('Alerta NVR tratada', `Operador: ${detalle}. ${alert.camera_name || alert.id}${notes?.trim() ? '. Notas: ' + notes.trim() : ''}`, {});
+            const names = toProcess.map((a: any) => a.camera_name || a.route_key || a.id).join(', ');
+            await registrarBitacora('Alerta NVR tratada', `Operador: ${detalle}. ${names}${notes?.trim() ? '. Notas: ' + notes.trim() : ''}`, {});
             toast.success(resolutionType === 'falso_positivo' ? 'Marcada como falso positivo' : 'Alerta marcada como tratada');
         } catch (e) {
             console.error(e);
@@ -1090,7 +1121,8 @@ export default function OperacionesPage() {
         });
     }, [logic.filteredObjectives, logic.listData, logic.viewTab, nvrAlerts, logic.objectives, objectivesWithCoords, reportedObjectiveIds]);
 
-    const firstPendingAlert = (nvrAlerts && nvrAlerts.length > 0) ? nvrAlerts[0] : null;
+    const firstPendingEvent = nvrEventGroups.length > 0 ? nvrEventGroups[0] : null;
+    const firstPendingAlerts = firstPendingEvent?.alerts ?? [];
 
     const Layout = DashboardLayout;
     const layout =
@@ -1100,11 +1132,11 @@ export default function OperacionesPage() {
             <style>{POPUP_STYLES}</style>
 
             {/* Modal de tratamiento de alerta NVR: minimizable + resoluciones precargadas */}
-            {nvrModalMinimized && nvrAlerts.length > 0 && (
-                <NvrAlertMinimizedBar pendingCount={nvrAlerts.length} onExpand={() => setNvrModalMinimized(false)} />
+            {nvrModalMinimized && nvrEventGroups.length > 0 && (
+                <NvrAlertMinimizedBar pendingCount={nvrEventGroups.length} onExpand={() => setNvrModalMinimized(false)} />
             )}
-            {firstPendingAlert && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alert={firstPendingAlert} pendingCount={nvrAlerts.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlert?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+            {firstPendingAlerts.length > 0 && !nvrModalMinimized && (
+                <NvrAlertTreatmentModal alertsGroup={firstPendingAlerts} pendingCount={nvrEventGroups.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
             )}
 
             <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">
