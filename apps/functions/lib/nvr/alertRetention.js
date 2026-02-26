@@ -21,41 +21,57 @@ function storagePathFromUrl(url) {
         return null;
     }
 }
+function nvrIdFromRouteKey(routeKey) {
+    if (!routeKey || typeof routeKey !== 'string')
+        return 'default';
+    const idx = routeKey.indexOf('__');
+    return idx >= 0 ? routeKey.slice(0, idx) : routeKey;
+}
 exports.cleanupExpiredNvrAlerts = (0, scheduler_1.onSchedule)({ schedule: '0 3 * * *', timeZone: 'America/Argentina/Buenos_Aires', timeoutSeconds: 540 }, async () => {
     ensureAdmin();
     const db = admin.firestore();
     const bucket = admin.storage().bucket();
-    let retentionDays = DEFAULT_RETENTION_DAYS;
-    try {
-        const settingsSnap = await db.doc('nvr_config/settings').get();
-        if (settingsSnap.exists && typeof settingsSnap.data()?.alert_retention_days === 'number') {
-            retentionDays = Math.max(1, settingsSnap.data().alert_retention_days);
-        }
-    }
-    catch (e) {
-        console.warn('[ALERT_RETENTION] No se pudo leer nvr_config/settings, usando', DEFAULT_RETENTION_DAYS, 'días');
-    }
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - retentionDays);
-    const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
     const resolved = await db
         .collection('alerts')
         .where('status', 'in', ['acknowledged', 'false_alarm'])
-        .where('timestamp', '<', cutoffTimestamp)
-        .limit(500)
+        .limit(1000)
         .get();
+    const nvrRetentionCache = {};
+    async function getRetentionDays(nvrId) {
+        if (nvrRetentionCache[nvrId] !== undefined)
+            return nvrRetentionCache[nvrId];
+        let days = DEFAULT_RETENTION_DAYS;
+        try {
+            const nvrSnap = await db.collection('nvr_devices').doc(nvrId).get();
+            if (nvrSnap.exists && typeof nvrSnap.data()?.alert_retention_days === 'number') {
+                days = Math.max(1, nvrSnap.data().alert_retention_days);
+            }
+        }
+        catch {
+        }
+        nvrRetentionCache[nvrId] = days;
+        return days;
+    }
     let deletedFiles = 0;
     let updatedDocs = 0;
+    const now = Date.now();
     for (const docSnap of resolved.docs) {
         const data = docSnap.data();
+        if (data.images_expired === true)
+            continue;
+        const routeKey = data.route_key;
+        const nvrId = nvrIdFromRouteKey(routeKey);
+        const retentionDays = await getRetentionDays(nvrId);
+        const ts = data.timestamp?.toMillis?.() ?? (data.timestamp?.seconds ?? 0) * 1000;
+        const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
+        if (ts >= cutoff)
+            continue;
         const urls = Array.isArray(data.image_urls)
             ? data.image_urls
             : data.image_url
                 ? [data.image_url]
                 : [];
         if (urls.length === 0 && !data.image_url)
-            continue;
-        if (data.images_expired === true)
             continue;
         for (const url of urls) {
             const path = storagePathFromUrl(url);
@@ -80,7 +96,7 @@ exports.cleanupExpiredNvrAlerts = (0, scheduler_1.onSchedule)({ schedule: '0 3 *
         updatedDocs++;
     }
     if (updatedDocs > 0) {
-        console.log('[ALERT_RETENTION] Limpieza:', updatedDocs, 'alertas actualizadas,', deletedFiles, 'archivos borrados de Storage. Retención:', retentionDays, 'días.');
+        console.log('[ALERT_RETENTION] Limpieza:', updatedDocs, 'alertas,', deletedFiles, 'archivos borrados. Política por NVR.');
     }
 });
 //# sourceMappingURL=alertRetention.js.map

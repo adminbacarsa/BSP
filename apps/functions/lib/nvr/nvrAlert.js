@@ -380,8 +380,23 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             res.status(200).send('OK (route disabled)');
             return;
         }
+        const safeNvrId = (nvrId && nvrId.trim()) || 'default';
+        const nvrSnap = await db.collection('nvr_devices').doc(safeNvrId).get();
+        if (nvrSnap.exists) {
+            const nvrData = nvrSnap.data() || {};
+            if (nvrData.enabled === false) {
+                console.log('[NVR_ALERT] NVR desactivado, no se crea alerta.', { routeKey });
+                res.status(200).json({ ok: true, skipped: 'nvr_disabled' });
+                return;
+            }
+            if (nvrData.schedule_enabled === true && !(0, schedule_1.isWithinSchedule)(nvrData)) {
+                console.log('[NVR_ALERT] Fuera de horario del NVR, no se crea alerta.', { routeKey });
+                res.status(200).json({ ok: true, skipped: 'outside_nvr_schedule' });
+                return;
+            }
+        }
         if (route?.data && !(0, schedule_1.isWithinSchedule)(route.data)) {
-            console.log('[NVR_ALERT] Fuera de horario de atención, no se crea alerta.', { routeKey });
+            console.log('[NVR_ALERT] Fuera de horario de atención del canal, no se crea alerta.', { routeKey });
             res.status(200).json({ ok: true, skipped: 'outside_schedule' });
             return;
         }

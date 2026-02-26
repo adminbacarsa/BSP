@@ -20,6 +20,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
 };
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
+import { playAlertSiren } from '@/utils/alertSiren';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
 
@@ -375,7 +376,7 @@ const NVR_RESOLUTION_OPTIONS = [
     { id: 'otro', label: 'Otro', description: 'Otra resolución (indicar en notas)' },
 ];
 
-const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objectiveName, onConfirm, onMinimize }: { alertsGroup: any[]; pendingCount?: number; queueIndex?: number; objectiveName?: string; onConfirm: (alertOrAlerts: any | any[], resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
+const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objectiveName, clientName, onConfirm, onMinimize }: { alertsGroup: any[]; pendingCount?: number; queueIndex?: number; objectiveName?: string; clientName?: string; onConfirm: (alertOrAlerts: any | any[], resolutionType: string, notes: string) => void; onMinimize?: () => void }) => {
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
     if (!alertsGroup || alertsGroup.length === 0) return null;
@@ -481,8 +482,11 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                                     <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{displayCameraName}</dd></div>
                                     {selectedAlert.source_camera_name && selectedAlert.camera_name && selectedAlert.source_camera_name !== selectedAlert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{selectedAlert.camera_name}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{selectedAlert.route_key || '—'}</dd></div>
+                                    {clientName && <div><dt className="text-slate-500 inline">Cliente: </dt><dd className="font-bold text-slate-800 inline">{clientName}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || selectedAlert.objective_id || 'Sin asignar'}</dd></div>
+                                    {selectedAlert.post_id && <div><dt className="text-slate-500 inline">Puesto: </dt><dd className="text-slate-700 inline">{selectedAlert.post_id}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{selectedAlert.event_type || '—'}</dd></div>
+                                    {selectedAlert.object_type && <div><dt className="text-slate-500 inline">Tipo objeto: </dt><dd className="text-slate-700 inline capitalize">{selectedAlert.object_type}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(selectedAlert.timestamp)}</dd></div>
                                     {isGroup && <div><dt className="text-slate-500 inline">Cámaras en este evento: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
                                 </dl>
@@ -524,15 +528,50 @@ export default function TacticalMapView() {
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [showHelp, setShowHelp] = useState(false);
-    const [nvrAlerts, setNvrAlerts] = useState<any[]>([]);
-    const [nvrEventGroups, setNvrEventGroups] = useState<{ alerts: any[] }[]>([]);
+    const [nvrAlertsRaw, setNvrAlertsRaw] = useState<any[]>([]);
+    const [cameraRoutesByKey, setCameraRoutesByKey] = useState<Record<string, { enabled?: boolean }>>({});
+    const [nvrDevicesById, setNvrDevicesById] = useState<Record<string, { enabled?: boolean }>>({});
+    const nvrAlerts = useMemo(() => {
+        return nvrAlertsRaw.filter((a: any) => {
+            const routeKey = (a.route_key || '').trim();
+            const nvrId = routeKey.includes('__') ? routeKey.split('__')[0] : routeKey || '';
+            if (routeKey && cameraRoutesByKey[routeKey]?.enabled === false) return false;
+            if (nvrId && nvrDevicesById[nvrId]?.enabled === false) return false;
+            return true;
+        });
+    }, [nvrAlertsRaw, cameraRoutesByKey, nvrDevicesById]);
+    const nvrEventGroups = useMemo(() => {
+        const groupKey = (a: any) => (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+        const groupMap = new Map<string, any[]>();
+        nvrAlerts.forEach((a: any) => {
+            const key = groupKey(a);
+            if (!groupMap.has(key)) groupMap.set(key, []);
+            groupMap.get(key)!.push(a);
+        });
+        return Array.from(groupMap.values()).map((alerts) => ({ alerts }));
+    }, [nvrAlerts]);
     const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
 
     const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
     const handleReportPlanning = async (shift: any) => { toast.info("Reportando..."); };
 
-    // Alertas NVR pendientes: mismo origen que operaciones (se ven en mapa y modal si está abierto)
+    // Rutas y NVRs: para filtrar alertas de cámaras/NVR desactivados
+    useEffect(() => {
+        const unsubRoutes = onSnapshot(collection(db, 'camera_routes'), (snap) => {
+            const map: Record<string, { enabled?: boolean }> = {};
+            snap.docs.forEach((d) => { map[d.id] = { enabled: d.get('enabled') }; });
+            setCameraRoutesByKey(map);
+        }, (err) => { console.error('camera_routes (map-view)', err); });
+        const unsubNvr = onSnapshot(collection(db, 'nvr_devices'), (snap) => {
+            const map: Record<string, { enabled?: boolean }> = {};
+            snap.docs.forEach((d) => { map[d.id] = { enabled: d.get('enabled') }; });
+            setNvrDevicesById(map);
+        }, (err) => { console.error('nvr_devices (map-view)', err); });
+        return () => { unsubRoutes(); unsubNvr(); };
+    }, []);
+
+    // Alertas NVR pendientes: se filtran por ruta/NVR activos en useMemo
     useEffect(() => {
         const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
         const unsub = onSnapshot(q, (snap) => {
@@ -543,17 +582,8 @@ export default function TacticalMapView() {
                 return { id: d.id, ...data, objective_id };
             });
             list.sort((a: any, b: any) => (b.timestamp?.seconds ?? 0) - (a.timestamp?.seconds ?? 0));
-            const limited = list.slice(0, 50);
-            setNvrAlerts(limited);
-            const groupKey = (a: any) => (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
-            const groupMap = new Map<string, any[]>();
-            limited.forEach((a: any) => {
-                const key = groupKey(a);
-                if (!groupMap.has(key)) groupMap.set(key, []);
-                groupMap.get(key)!.push(a);
-            });
-            setNvrEventGroups(Array.from(groupMap.values()).map((alerts) => ({ alerts })));
-        }, (err) => { console.error('alerts subscription (map-view)', err); setNvrAlerts([]); setNvrEventGroups([]); });
+            setNvrAlertsRaw(list.slice(0, 50));
+        }, (err) => { console.error('alerts subscription (map-view)', err); setNvrAlertsRaw([]); });
         return () => unsub();
     }, []);
 
@@ -635,6 +665,15 @@ export default function TacticalMapView() {
     const firstPendingEvent = nvrEventGroups.length > 0 ? nvrEventGroups[0] : null;
     const firstPendingAlerts = firstPendingEvent?.alerts ?? [];
 
+    const nvrAlertCountRef = useRef(0);
+    useEffect(() => {
+        const count = nvrEventGroups.length;
+        if (count > 0 && count > nvrAlertCountRef.current) {
+            playAlertSiren();
+        }
+        nvrAlertCountRef.current = count;
+    }, [nvrEventGroups.length]);
+
     return (
         <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
             <Head><title>COSP TACTICAL V184.0</title></Head>
@@ -658,7 +697,7 @@ export default function TacticalMapView() {
                 <NvrAlertMinimizedBar pendingCount={nvrEventGroups.length} onExpand={() => setNvrModalMinimized(false)} />
             )}
             {firstPendingAlerts.length > 0 && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alertsGroup={firstPendingAlerts} pendingCount={nvrEventGroups.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.name} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+                <NvrAlertTreatmentModal alertsGroup={firstPendingAlerts} pendingCount={nvrEventGroups.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.name} clientName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.clientName} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
             )}
 
             <OperacionesMap 
