@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { Toaster, toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, query, where, onSnapshot } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 
@@ -18,7 +19,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
         await addDoc(collection(db, 'audit_logs'), data);
     } catch (e) { console.error('Error registrando bitácora', e); toast.error('No se pudo registrar en bitácora.'); }
 };
-import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Video } from 'lucide-react';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { playAlertSiren } from '@/utils/alertSiren';
 
@@ -44,7 +45,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (diffMin > 5) status = 'LATE';
     const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
-    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
+    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE', coveragePendingArrival: false, resolvedBy: 'OPERACIONES' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
 };
 
@@ -194,18 +195,20 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         setLoading(true);
         try {
             const realId = await ensureRealShiftId();
+            // Pendiente de llegada 30 min; si no marca presente vuelve a Prioridad (falla de programación, no ausencia).
             await updateDoc(doc(db, 'turnos', realId), {
                 employeeId: emp.id,
                 employeeName: emp.fullName || emp.employeeName,
                 isUnassigned: false,
                 status: 'PENDING',
                 assignmentType: type,
-                resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
+                coveragePendingArrival: true,
+                coverageAssignedAt: serverTimestamp(),
             });
             const typeLabel = type === 'RETENTION' ? 'Retención/Doble turno' : type === 'SWAP' ? 'Intercambio' : type === 'LIBRE' ? 'Libre/Volante' : type === 'VOLANTE' ? 'Volante' : type;
-            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
-            toast.success(`Asignado: ${emp.fullName || emp.employeeName}`);
+            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}. Pendiente de llegada (30 min).`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
+            toast.success(`${emp.fullName || emp.employeeName} asignado. Debe marcar presente en 30 min (Aún no llegó).`);
             onClose();
         } catch (e) {
             toast.error('Error al asignar');
@@ -382,6 +385,8 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
     if (!alertsGroup || alertsGroup.length === 0) return null;
     const isGroup = alertsGroup.length > 1;
     const firstAlert = alertsGroup[0];
+    const isAgentOffline = firstAlert?.event_type === 'AGENT_OFFLINE';
+    const groupLabel = isAgentOffline ? 'señales' : 'cámaras';
     const [selectedCamIdx, setSelectedCamIdx] = useState(0);
     const selectedAlert = alertsGroup[selectedCamIdx] || firstAlert;
     const images: string[] = Array.isArray(selectedAlert.image_urls) && selectedAlert.image_urls.length > 0 ? selectedAlert.image_urls : selectedAlert.image_url ? [selectedAlert.image_url] : [];
@@ -434,7 +439,7 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                         {queueIndex != null && pendingCount != null && pendingCount > 0 && (
                             <span className="text-rose-200 font-bold bg-rose-500/30 px-2 py-0.5 rounded">Evento {queueIndex} de {pendingCount} en cola</span>
                         )}
-                        {isGroup && <span className="text-rose-200 font-normal"> ({alertsGroup.length} cámaras)</span>}
+                        {isGroup && <span className="text-rose-200 font-normal"> ({alertsGroup.length} {groupLabel})</span>}
                         {totalImages > 1 && !isGroup && <span className="text-rose-200 font-normal"> ({totalImages} imágenes)</span>}
                     </h3>
                     {onMinimize && <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>}
@@ -442,10 +447,10 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
                     {isGroup && (
                         <div className="flex flex-wrap gap-2">
-                            <span className="text-xs font-bold text-slate-500 uppercase self-center">Cámara:</span>
+                            <span className="text-xs font-bold text-slate-500 uppercase self-center">{isAgentOffline ? 'Señal:' : 'Cámara:'}</span>
                             {alertsGroup.map((a: any, idx: number) => (
                                 <button key={a.id} type="button" onClick={() => setSelectedCamIdx(idx)} className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all ${selectedCamIdx === idx ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                                    {a.source_camera_name || a.camera_name || a.route_key || `Cámara ${idx + 1}`}
+                                    {a.source_camera_name || a.camera_name || a.route_key || (isAgentOffline ? `Señal ${idx + 1}` : `Cámara ${idx + 1}`)}
                                 </button>
                             ))}
                         </div>
@@ -482,13 +487,26 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                                     <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{displayCameraName}</dd></div>
                                     {selectedAlert.source_camera_name && selectedAlert.camera_name && selectedAlert.source_camera_name !== selectedAlert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{selectedAlert.camera_name}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{selectedAlert.route_key || '—'}</dd></div>
+                                    {selectedAlert.route_key && selectedAlert.event_type !== 'AGENT_OFFLINE' && (() => {
+                                        const parts = (selectedAlert.route_key || '').split('__');
+                                        const nvrId = parts[0]?.trim() || '';
+                                        const ch = parts[1]?.trim() || '1';
+                                        if (!nvrId) return null;
+                                        return (
+                                            <div className="mt-2">
+                                                <Link href={`/admin/operaciones/vivo?nvrId=${encodeURIComponent(nvrId)}&channel=${encodeURIComponent(ch)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold">
+                                                    <Video size={16} /> Ver canal en vivo
+                                                </Link>
+                                            </div>
+                                        );
+                                    })()}
                                     {clientName && <div><dt className="text-slate-500 inline">Cliente: </dt><dd className="font-bold text-slate-800 inline">{clientName}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || selectedAlert.objective_id || 'Sin asignar'}</dd></div>
                                     {selectedAlert.post_id && <div><dt className="text-slate-500 inline">Puesto: </dt><dd className="text-slate-700 inline">{selectedAlert.post_id}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{selectedAlert.event_type || '—'}</dd></div>
                                     {selectedAlert.object_type && <div><dt className="text-slate-500 inline">Tipo objeto: </dt><dd className="text-slate-700 inline capitalize">{selectedAlert.object_type}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(selectedAlert.timestamp)}</dd></div>
-                                    {isGroup && <div><dt className="text-slate-500 inline">Cámaras en este evento: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
+                                    {isGroup && <div><dt className="text-slate-500 inline">{isAgentOffline ? 'Señales agrupadas' : 'Cámaras en este evento'}: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
                                 </dl>
                                 <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Al confirmar se aplica a todas las cámaras del grupo.</p>
                             </div>
@@ -511,13 +529,69 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
     );
 };
 
-const NvrAlertMinimizedBar = ({ pendingCount, onExpand }: { pendingCount: number; onExpand: () => void }) => (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-rose-400 animate-in slide-in-from-bottom-2">
-        <Siren size={24} className="shrink-0" />
-        <span className="font-bold">{pendingCount === 1 ? '1 evento en cola — terminá este para continuar' : `${pendingCount} eventos en cola — Evento 1 de ${pendingCount} pendiente`}</span>
-        <button type="button" onClick={onExpand} className="px-4 py-2 bg-white text-rose-700 rounded-xl font-black text-sm hover:bg-rose-50">Abrir</button>
-    </div>
-);
+const NvrAlertsPanel = ({ eventGroups, onResolve, onOpenDetail, formatTime }: { eventGroups: { alerts: any[] }[]; onResolve: (alerts: any[], resolutionType: string, notes: string) => Promise<void>; onOpenDetail: (groupIndex: number) => void; formatTime: (ts: any) => string }) => {
+    const [loadingIdx, setLoadingIdx] = useState<number | null>(null);
+    const [collapsed, setCollapsed] = useState(false);
+    const handleQuick = async (groupIndex: number, resolutionType: string) => {
+        const alerts = eventGroups[groupIndex]?.alerts ?? [];
+        if (alerts.length === 0) return;
+        setLoadingIdx(groupIndex);
+        try { await onResolve(alerts, resolutionType, ''); } finally { setLoadingIdx(null); }
+    };
+    if (eventGroups.length === 0) return null;
+    return (
+        <div className={`fixed right-0 top-0 bottom-0 z-[9998] bg-white/98 backdrop-blur shadow-2xl border-l-2 border-rose-300 flex flex-col transition-all duration-200 ${collapsed ? 'w-16' : 'w-[380px]'}`}>
+            <button type="button" onClick={() => setCollapsed(!collapsed)} className="w-full px-4 py-3 flex items-center justify-between bg-rose-600 text-white shrink-0 min-h-[52px]">
+                {collapsed ? (
+                    <span className="flex flex-col items-center gap-0.5 w-full">
+                        <Siren size={20} className="animate-pulse" />
+                        <span className="bg-white/20 rounded font-black text-xs">{eventGroups.length}</span>
+                    </span>
+                ) : (
+                    <>
+                        <span className="text-sm font-black uppercase flex items-center gap-2"><Siren size={18} className="animate-pulse" /> Alertas NVR</span>
+                        <span className="flex items-center gap-2">
+                            <span className="bg-white/20 px-2.5 py-0.5 rounded-lg font-black text-sm">{eventGroups.length}</span>
+                            <span className="text-rose-200"><ChevronRight size={18} /></span>
+                        </span>
+                    </>
+                )}
+            </button>
+            {!collapsed && (
+                <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                    {eventGroups.map((grp, idx) => {
+                        const first = grp.alerts[0];
+                        const name = first?.source_camera_name || first?.camera_name || first?.route_key || first?.nvr_id || '—';
+                        const eventType = first?.event_type || 'Alerta';
+                        const loading = loadingIdx === idx;
+                        const img = first?.image_url || (Array.isArray(first?.image_urls) && first.image_urls[0]) || null;
+                        return (
+                            <div key={idx} className="bg-white rounded-xl border-2 border-rose-100 shadow-md overflow-hidden hover:border-rose-200 transition-colors">
+                                {img && (
+                                    <div className="relative h-32 bg-slate-100">
+                                        <img src={img} alt="" className="w-full h-full object-cover" />
+                                        <span className="absolute top-2 left-2 bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded">#{idx + 1}</span>
+                                    </div>
+                                )}
+                                <div className="p-3 space-y-2">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-bold text-slate-800 truncate" title={name}>{name}</div>
+                                        <div className="text-xs text-slate-500">{eventType} · {formatTime(first?.timestamp)}</div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button type="button" onClick={() => handleQuick(idx, 'acknowledged')} disabled={loading} className="flex-1 min-w-0 px-3 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50">Visto</button>
+                                        <button type="button" onClick={() => handleQuick(idx, 'falso_positivo')} disabled={loading} className="flex-1 min-w-0 px-3 py-2 bg-slate-600 text-white text-xs font-bold rounded-lg hover:bg-slate-700 disabled:opacity-50">Falso+</button>
+                                        <button type="button" onClick={() => onOpenDetail(idx)} className="flex-1 min-w-0 px-3 py-2 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 flex items-center justify-center gap-1"><Video size={12} /> Detalle</button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
 
 export default function TacticalMapView() {
     const logic = useOperacionesMonitor();
@@ -541,7 +615,14 @@ export default function TacticalMapView() {
         });
     }, [nvrAlertsRaw, cameraRoutesByKey, nvrDevicesById]);
     const nvrEventGroups = useMemo(() => {
-        const groupKey = (a: any) => (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+        const groupKey = (a: any) => {
+            if (a.event_type === 'AGENT_OFFLINE') {
+                const rk = (a.route_key || '').trim();
+                const nvrId = rk.includes('__') ? rk.split('__')[0] : rk || a.nvr_id || 'default';
+                return `agent_offline_${nvrId}`;
+            }
+            return (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+        };
         const groupMap = new Map<string, any[]>();
         nvrAlerts.forEach((a: any) => {
             const key = groupKey(a);
@@ -550,7 +631,14 @@ export default function TacticalMapView() {
         });
         return Array.from(groupMap.values()).map((alerts) => ({ alerts }));
     }, [nvrAlerts]);
-    const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
+    const [nvrModalGroupIndex, setNvrModalGroupIndex] = useState<number | null>(null);
+    const formatAlertTime = (ts: any) => {
+        if (!ts) return '—';
+        try {
+            const s = ts?.seconds ?? ts;
+            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch { return '—'; }
+    };
 
     const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
@@ -600,6 +688,24 @@ export default function TacticalMapView() {
                     acknowledged_by: getAuth().currentUser?.uid ?? null,
                 });
             }
+            const first = toProcess[0];
+            const eventType = first?.event_type || 'Alerta';
+            const routeKey = (first?.route_key || '').trim();
+            const nvrId = routeKey.includes('__') ? routeKey.split('__')[0] : routeKey || first?.nvr_id || '';
+            const groupLabel = eventType === 'AGENT_OFFLINE' ? `${nvrId || 'NVR'} (AGENT_OFFLINE)` : (first?.camera_name || routeKey || first?.id || '');
+            await addDoc(collection(db, 'nvr_alert_resolution_log'), {
+                group_label: groupLabel,
+                event_type: eventType,
+                nvr_id: nvrId || null,
+                route_key: routeKey || null,
+                resolution_type: resolutionType,
+                notes: notes?.trim() || '',
+                count: toProcess.length,
+                alert_ids: toProcess.map((a: any) => a.id),
+                timestamp: serverTimestamp(),
+                operator_uid: getAuth().currentUser?.uid ?? null,
+                operator_name: getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador',
+            });
             toast.success(resolutionType === 'falso_positivo' ? 'Marcada como falso positivo' : 'Alerta marcada como tratada');
         } catch (e) {
             console.error(e);
@@ -607,16 +713,16 @@ export default function TacticalMapView() {
         }
     };
 
-    // --- SYNC FILTROS ---
+    // --- SYNC FILTROS (cliente y búsqueda; la solapa NO se hereda del panel: el mapa expandido abre siempre en MAPA GENERAL) ---
     useEffect(() => {
+        logic.setViewTab('TODOS');
         const syncFilters = () => {
             const saved = localStorage.getItem('crono_ops_filters');
             if (saved) {
                 try {
-                    const { tab, client, text } = JSON.parse(saved);
-                    logic.setViewTab(tab);
-                    logic.setSelectedClientId(client);
-                    logic.setFilterText(text);
+                    const { client, text } = JSON.parse(saved);
+                    logic.setSelectedClientId(client ?? '');
+                    logic.setFilterText(text ?? '');
                 } catch (e) { console.error(e); }
             }
         };
@@ -637,7 +743,7 @@ export default function TacticalMapView() {
     ];
 
     const objectivesWithCoords = useMemo(() => (logic.objectives || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))), [logic.objectives]);
-    // Objetivos de la solapa + objetivos con alertas NVR (para que las alertas se vean en el mapa externo)
+    // En mapa expandido las solapas de ESTA vista (MAPA GENERAL, PRIO, NO LLEGO, etc.) sí filtran el mapa.
     const objectivesForMap = useMemo(() => {
         const norm = (x: any) => String(x ?? '').trim();
         const base = logic.filteredObjectives || [];
@@ -686,18 +792,36 @@ export default function TacticalMapView() {
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200"><Filter size={14} className="text-slate-400 ml-1"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none w-40 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><Search size={14} className="text-slate-400 ml-1"/><input className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
                 </div>
-                <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 pointer-events-auto border border-slate-200">
-                    <button onClick={() => logic.setViewTab('TODOS')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
-                    {tabs.map(t => (<button key={t.id} onClick={() => logic.setViewTab(t.id as any)} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === t.id ? 'bg-white shadow-md ring-1 ring-slate-200 ' + t.color : 'hover:bg-slate-100 text-slate-400'}`}>{t.label} <span className="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">{t.count}</span></button>))}
-                    <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
+                <div className="flex items-center gap-2 pointer-events-auto">
+                    <div className={`rounded-2xl px-4 py-2.5 flex items-center gap-2 border-2 shadow-lg transition-all ${nvrEventGroups.length > 0 ? 'bg-rose-600 border-rose-500 text-white animate-pulse' : 'bg-white/95 backdrop-blur border-slate-200 text-slate-600'}`}>
+                        <Siren size={20} className={nvrEventGroups.length > 0 ? 'text-white' : 'text-slate-400'} />
+                        <span className="text-xs font-black uppercase">Alertas NVR</span>
+                        <span className={`min-w-[1.75rem] text-center font-black rounded-lg px-1.5 py-0.5 text-sm ${nvrEventGroups.length > 0 ? 'bg-white text-rose-600' : 'bg-slate-100 text-slate-500'}`}>{nvrEventGroups.length}</span>
+                    </div>
+                    <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 border border-slate-200">
+                        <button onClick={() => logic.setViewTab('TODOS')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
+                        {tabs.map(t => (<button key={t.id} onClick={() => logic.setViewTab(t.id as any)} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === t.id ? 'bg-white shadow-md ring-1 ring-slate-200 ' + t.color : 'hover:bg-slate-100 text-slate-400'}`}>{t.label} <span className="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">{t.count}</span></button>))}
+                        <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
+                    </div>
                 </div>
             </div>
 
-            {nvrModalMinimized && nvrEventGroups.length > 0 && (
-                <NvrAlertMinimizedBar pendingCount={nvrEventGroups.length} onExpand={() => setNvrModalMinimized(false)} />
+            {nvrEventGroups.length > 0 && (
+                <NvrAlertsPanel eventGroups={nvrEventGroups} onResolve={handleNvrAlertTreatment} onOpenDetail={(idx) => setNvrModalGroupIndex(idx)} formatTime={formatAlertTime} />
             )}
-            {firstPendingAlerts.length > 0 && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alertsGroup={firstPendingAlerts} pendingCount={nvrEventGroups.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.name} clientName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.clientName} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+            {nvrModalGroupIndex !== null && nvrEventGroups[nvrModalGroupIndex] && (
+                <NvrAlertTreatmentModal
+                    alertsGroup={nvrEventGroups[nvrModalGroupIndex].alerts}
+                    pendingCount={nvrEventGroups.length}
+                    queueIndex={nvrModalGroupIndex + 1}
+                    objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(nvrEventGroups[nvrModalGroupIndex].alerts[0]?.objective_id))?.name}
+                    clientName={logic.objectives?.find((o: any) => String(o?.id) === String(nvrEventGroups[nvrModalGroupIndex].alerts[0]?.objective_id))?.clientName}
+                    onConfirm={async (alertOrAlerts, resolutionType, notes) => {
+                        await handleNvrAlertTreatment(alertOrAlerts, resolutionType, notes);
+                        setNvrModalGroupIndex(null);
+                    }}
+                    onMinimize={() => setNvrModalGroupIndex(null)}
+                />
             )}
 
             <OperacionesMap 
@@ -727,6 +851,7 @@ export default function TacticalMapView() {
                                 <p>- Colores: Verde activo, Ámbar tarde, Rojo ausencia/vacante, Azul franco.</p>
                                 <p>- DESCUBIERTO parpadea en rojo.</p>
                                 <p>- Click en marcador para acciones.</p>
+                                <p>- <strong>Alertas NVR:</strong> indicador arriba a la derecha y panel lateral con miniaturas; Visto / Falso+ / Detalle desde la tarjeta.</p>
                             </div>
                             <div className="bg-slate-50 border rounded-xl p-3">
                                 <p className="font-black text-slate-700 mb-2">Filtros</p>

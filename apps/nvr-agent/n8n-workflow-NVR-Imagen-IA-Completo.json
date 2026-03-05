@@ -1,0 +1,315 @@
+{
+  "name": "NVR Alert con imagen, IA y enlace a vivo (comtroldata.web.app)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "nvr-alertas",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-nvr",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "webhookId": "nvr-alertas"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-alerta",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "heartbeat",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combineOperation": "and"
+        },
+        "options": {}
+      },
+      "id": "if-no-heartbeat",
+      "name": "Solo alertas (no heartbeat)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mapeo NVR -> IP y credenciales (mismo que config.properties / Bacar M102)\nconst body = $input.first().json.body || $input.first().json;\nconst map = {\n  'Bacar M102': { nvr_ip: '192.168.0.102', nvr_user: 'admin', nvr_pass: '18July75$' }\n};\nconst cfg = map[body.nvrId] || {};\nreturn [{ json: { ...($input.first().json), body, nvr_ip: cfg.nvr_ip || '', nvr_user: cfg.nvr_user || 'admin', nvr_pass: cfg.nvr_pass || '' } }];"
+      },
+      "id": "code-nvr-map",
+      "name": "NVR → IP y credenciales",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 280]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://{{ $json.nvr_ip }}/cgi-bin/snapshot.cgi?channel={{ $json.body.channel + 1 }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "http-snapshot",
+      "name": "GET snapshot NVR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 200],
+      "notesInFlow": true,
+      "notes": "Añadir credencial HTTP Basic Auth (user/pass del NVR). Response Format = File."
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-body-binary",
+      "name": "Merge (body + imagen)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Añade imageBase64 para OpenAI Vision (desde binary.data)\nconst item = $input.first();\nconst json = item.json || {};\nconst binary = item.binary;\nlet imageBase64 = '';\nif (binary?.data) {\n  const b = binary.data;\n  if (typeof b.data === 'string') imageBase64 = b.data;\n  else if (Buffer.isBuffer(b.data)) imageBase64 = b.data.toString('base64');\n}\nreturn [{ json: { ...json, imageBase64 }, binary: item.binary }];"
+      },
+      "id": "code-add-base64",
+      "name": "Añadir imageBase64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"max_tokens\": 50,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        { \"type\": \"text\", \"text\": \"Esta imagen es de una cámara de seguridad. Responde ÚNICAMENTE una de estas etiquetas, sin explicación: VACIO (nada relevante), VEHICULO (solo vehículo), PERSONA_OK (persona normal), PERSONA_SOSPECHOSA (merodeo, ocultarse, sospechoso), CONDUCTA_INDEBIDA (forcejeo, forzar puerta, agresión, objeto peligroso). Solo la etiqueta.\" },\n        { \"type\": \"image_url\", \"image_url\": { \"url\": \"data:image/jpeg;base64,\" + $json.imageBase64 } }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "http-openai",
+      "name": "OpenAI Vision (etiqueta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 200],
+      "notesInFlow": true,
+      "notes": "Configurar OPENAI_API_KEY en Variables de N8N o usar Header Authorization con credencial."
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-ia",
+      "name": "Merge (ítem + resultado IA)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1740, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) ? $json.choices[0].message.content.toUpperCase() : '' }}",
+              "rightValue": "PERSONA_SOSPECHOSA",
+              "operator": { "type": "string", "operation": "contains" }
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) ? $json.choices[0].message.content.toUpperCase() : '' }}",
+              "rightValue": "CONDUCTA_INDEBIDA",
+              "operator": { "type": "string", "operation": "contains" }
+            }
+          ],
+          "combineOperation": "or"
+        },
+        "options": {}
+      },
+      "id": "if-sospechoso",
+      "name": "¿Sospechoso o conducta indebida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1960, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-central1-comtroldata.cloudfunctions.net/nvrAlertV2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-API-Key", "value": "123456" }]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "image", "inputDataFieldName": "data", "binaryPropertyName": "data" },
+            { "parameterType": "string", "name": "channel_id", "value": "={{ $json.body.channel + 1 }}" },
+            { "parameterType": "string", "name": "nvrId", "value": "={{ $json.body.nvrId }}" },
+            { "parameterType": "string", "name": "event_type", "value": "={{ $json.body.eventTypeName }}" },
+            { "parameterType": "string", "name": "camera_name", "value": "={{ $json.body.channelName || 'Canal ' + ($json.body.channel + 1) }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-nvrAlertV2",
+      "name": "Enviar imagen a CronoApp (nvrAlertV2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 200],
+      "notesInFlow": true,
+      "notes": "Revisar que el parámetro image use binary.data. Si falla multipart, usar nodo Code + form-data."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-central1-comtroldata.cloudfunctions.net/nvrAgentEvents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-API-Key", "value": "123456" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ $json.body.nvrId }}\",\n  \"channel\": {{ $json.body.channel }},\n  \"eventTypeName\": \"{{ $json.body.eventTypeName }}\",\n  \"status\": \"{{ $json.body.status }}\",\n  \"timestamp\": \"{{ $json.body.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "http-nvrAgentEvents",
+      "name": "Enviar evento a CronoApp (nvrAgentEvents)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 380]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Hoja 1", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha/Hora": "={{ $json.body.timestamp }}",
+            "NVR": "={{ $json.body.nvrId }}",
+            "Evento": "={{ $json.body.eventTypeName }}",
+            "Canal": "={{ $json.body.channel }}",
+            "Status": "={{ $json.body.status }}",
+            "IA": "={{ $json.choices && $json.choices[0] && $json.choices[0].message ? $json.choices[0].message.content : '' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-alertas",
+      "name": "Google Sheets (alertas)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2180, 520]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://hooks.slack.com/services/TU/WEBHOOK/SLACK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Alerta posible persona sospechosa o conducta indebida – NVR \" + $json.body.nvrId + \", Canal \" + ($json.body.channel + 1) + \". IA: \" + ($json.choices && $json.choices[0] && $json.choices[0].message ? $json.choices[0].message.content : '') + \". Abrir canal en vivo: https://comtroldata.web.app/admin/operaciones/vivo?nvrId=\" + encodeURIComponent($json.body.nvrId) + \"&channel=\" + ($json.body.channel + 1)\n}",
+        "options": {}
+      },
+      "id": "http-slack",
+      "name": "Slack (enlace a vivo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 80],
+      "notesInFlow": true,
+      "notes": "Reemplazar URL por tu Incoming Webhook de Slack. O usar nodo Slack nativo."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Heartbeats", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nvrId": "={{ $json.body.nvrId }}",
+            "LastHeartbeat": "={{ $json.body.timestamp }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheet-heartbeats",
+      "name": "Google Sheets (heartbeats)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [640, 560]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Solo alertas (no heartbeat)", "type": "main", "index": 0 }]] },
+    "Solo alertas (no heartbeat)": {
+      "main": [
+        [
+          { "node": "NVR → IP y credenciales", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Google Sheets (heartbeats)", "type": "main", "index": 0 }]
+      ]
+    },
+    "NVR → IP y credenciales": {
+      "main": [
+        [
+          { "node": "Merge (body + imagen)", "type": "main", "index": 0 },
+          { "node": "GET snapshot NVR", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "GET snapshot NVR": { "main": [[{ "node": "Merge (body + imagen)", "type": "main", "index": 1 }]] },
+    "Merge (body + imagen)": { "main": [[{ "node": "Añadir imageBase64", "type": "main", "index": 0 }]] },
+    "Añadir imageBase64": {
+      "main": [
+        [
+          { "node": "Merge (ítem + resultado IA)", "type": "main", "index": 0 },
+          { "node": "OpenAI Vision (etiqueta)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "OpenAI Vision (etiqueta)": { "main": [[{ "node": "Merge (ítem + resultado IA)", "type": "main", "index": 1 }]] },
+    "Merge (ítem + resultado IA)": {
+      "main": [
+        [
+          { "node": "¿Sospechoso o conducta indebida?", "type": "main", "index": 0 },
+          { "node": "Enviar imagen a CronoApp (nvrAlertV2)", "type": "main", "index": 0 },
+          { "node": "Enviar evento a CronoApp (nvrAgentEvents)", "type": "main", "index": 0 },
+          { "node": "Google Sheets (alertas)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "¿Sospechoso o conducta indebida?": {
+      "main": [
+        [{ "node": "Slack (enlace a vivo)", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}

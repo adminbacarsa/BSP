@@ -64,8 +64,8 @@ export function Sidebar() {
     // MODIFICADO: Agregada clase 'print:hidden' para ocultar al imprimir
     <aside className="w-64 bg-gray-900 text-white min-h-screen p-4 flex flex-col print:hidden">
       <div className="mb-8 px-2">
-        <h1 className="text-2xl font-bold text-blue-400">CRONOAPP</h1>
-        <p className="text-xs text-gray-400">Enterprise Edition</p>
+        <h1 className="text-2xl font-bold text-blue-400">COSP V 1.0</h1>
+        <p className="text-[11px] text-gray-400 truncate max-w-[14rem]">Grupo Bacar</p>
       </div>
 
       <nav className="space-y-2 flex-1">

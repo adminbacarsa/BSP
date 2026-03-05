@@ -468,19 +468,7 @@ export default function ServiciosSLAPage() {
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in">
         <header className="flex justify-between items-end">
-          <div>
-              <h1 className="text-4xl font-black text-slate-900 dark:text-white uppercase">Servicios & SLA</h1>
-              <div className="flex items-center gap-3 mt-1">
-                 <p className="text-[10px] text-indigo-500">Operador: <b>{currentUserName}</b></p>
-                 {loading ? (
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full"><RotateCw size={10} className="animate-spin"/> SINCRONIZANDO...</span>
-                 ) : dbStatus === 'online' ? (
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100"><Activity size={10}/> ONLINE</span>
-                 ) : (
-                    <span className="flex items-center gap-1 text-[9px] font-bold text-amber-500 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100"><AlertCircle size={10}/> OFFLINE</span>
-                 )}
-              </div>
-          </div>
+          <h1 className="text-4xl font-black text-slate-900 dark:text-white uppercase">Servicios & SLA</h1>
           {view === 'list' && <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-xl flex gap-2"><Plus size={16}/> Nuevo Contrato</button>}
         </header>
 

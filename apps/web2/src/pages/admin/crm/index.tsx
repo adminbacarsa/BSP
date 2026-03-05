@@ -686,7 +686,6 @@ export default function CRMPage() {
         <div className="flex justify-between items-end">
           <div>
             <h1 className="text-4xl font-black text-slate-900 uppercase">Centro de Comando</h1>
-            <p className="text-sm font-bold text-indigo-600">Operador: {currentUserName}</p>
           </div>
           {view === 'detail' && (
             <button onClick={() => setView('list')} className="bg-white border px-6 py-3 rounded-2xl text-[10px] font-black uppercase text-slate-500">

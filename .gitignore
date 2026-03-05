@@ -60,6 +60,9 @@ lerna-debug.log*
 _SNAPSHOTS_ROOT/
 Thumbs.db
 
+# --- NVR Agent: SDK Dahua (terceros, no commitear) ---
+apps/nvr-agent/sdk/
+
 # --- Excepción: snapshot final compartido en repo ---
 !apps/web2/out/
 !apps/web2/out/**

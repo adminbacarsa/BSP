@@ -1,0 +1,29 @@
+# Caddy como proxy HTTPS delante de N8N (N8N corre con "n8n start" en el host).
+# Uso: docker compose -f docker-compose.n8n-https.yml up -d
+#
+# Requisitos:
+# - N8N ya corriendo en el host (n8n start), puerto 5678.
+# - En el router: reenviar puertos 80 y 443 a la IP de esta PC.
+# - bacarsa.dyndns.org debe apuntar a tu IP pública.
+#
+# Después: https://bacarsa.dyndns.org (certificado Let's Encrypt automático).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: cronoapp-n8n-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./apps/nvr-agent/Caddyfile.https:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  caddy_data:
+  caddy_config:

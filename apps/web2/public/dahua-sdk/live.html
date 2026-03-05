@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vivo Dahua - NVR/Cámara</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #1e293b; color: #e2e8f0; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 1.25rem; margin-bottom: 16px; }
+    .form { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; padding: 12px; background: #334155; border-radius: 8px; }
+    .form label { font-size: 12px; color: #94a3b8; }
+    .form input[type="text"], .form input[type="number"] { padding: 6px 10px; border: 1px solid #475569; border-radius: 6px; background: #1e293b; color: #e2e8f0; width: 100px; }
+    .form input#ip { width: 140px; }
+    .form button { padding: 8px 16px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .btn-connect { background: #22c55e; color: #fff; }
+    .btn-connect:hover { background: #16a34a; }
+    .btn-stop { background: #ef4444; color: #fff; }
+    .btn-stop:hover { background: #dc2626; }
+    .btn-snap { background: #3b82f6; color: #fff; }
+    .btn-snap:hover { background: #2563eb; }
+    .btn-stop:disabled, .btn-connect:disabled { opacity: 0.5; cursor: not-allowed; }
+    .video-wrap { position: relative; width: 100%; aspect-ratio: 16/9; max-height: 70vh; background: #0f172a; border-radius: 8px; overflow: hidden; }
+    .video-wrap canvas, .video-wrap video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; }
+    .video-wrap .loading { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #94a3b8; }
+    .status { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+    .error { color: #f87171; }
+    .warn { background: #78350f; color: #fcd34d; padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; }
+    .warn a { color: #fde68a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="httpsWarn" class="warn" style="display:none;"></div>
+    <h1>Video en vivo – Dahua H5 Player (NVR/Cámara)</h1>
+    <div class="form">
+      <div>
+        <label>IP</label>
+        <input type="text" id="ip" value="192.168.0.102" placeholder="192.168.0.102" />
+      </div>
+      <div>
+        <label>Puerto</label>
+        <input type="number" id="port" value="80" min="1" max="65535" />
+      </div>
+      <div>
+        <label>Usuario</label>
+        <input type="text" id="user" value="admin" placeholder="admin" />
+      </div>
+      <div>
+        <label>Contraseña</label>
+        <input type="text" id="pass" value="" placeholder="contraseña" />
+      </div>
+      <div>
+        <label>Canal</label>
+        <input type="number" id="channel" value="1" min="1" />
+      </div>
+      <div>
+        <label>Sub stream</label>
+        <input type="number" id="subtype" value="0" min="0" title="0=main, 1+=sub" />
+      </div>
+      <button type="button" class="btn-connect" id="btnConnect">Conectar</button>
+      <button type="button" class="btn-stop" id="btnStop" disabled>Detener</button>
+      <button type="button" class="btn-snap" id="btnSnap" disabled>Captura</button>
+    </div>
+    <div class="video-wrap">
+      <canvas id="h5_canvas" style="display:none;"></canvas>
+      <video id="h5_video" style="display:none;" muted playsinline></video>
+      <p class="loading" id="loading">Ingrese datos y pulse Conectar. Debe estar en la misma red que el NVR.</p>
+    </div>
+    <p class="status" id="status"></p>
+  </div>
+  <script src="./PlayerControl.js"></script>
+  <script>
+    (function() {
+      var player = null;
+      var connectTimeout = null;
+      var canvas = document.getElementById('h5_canvas');
+      var video = document.getElementById('h5_video');
+      var loading = document.getElementById('loading');
+      var statusEl = document.getElementById('status');
+      var btnConnect = document.getElementById('btnConnect');
+      var btnStop = document.getElementById('btnStop');
+      var btnSnap = document.getElementById('btnSnap');
+      var httpsWarn = document.getElementById('httpsWarn');
+
+      if (window.location.protocol === 'https:') {
+        httpsWarn.style.display = 'block';
+        httpsWarn.innerHTML = '⚠️ Esta página se carga por <b>HTTPS</b>. El navegador suele bloquear la conexión WebSocket a <code>ws://192.168.x.x</code> (contenido mixto). ' +
+          'Para conectar al NVR: abrí la plataforma por <b>HTTP</b> en la misma red (ej. <a href="http://' + window.location.hostname + '/dahua-sdk/live.html">http://' + (window.location.hostname || 'localhost') + '/dahua-sdk/live.html</a>) o usá la PC donde corre la app con <code>http://localhost:3000/admin/operaciones/vivo</code>.';
+      }
+
+      function setStatus(msg, isError) {
+        statusEl.textContent = msg || '';
+        statusEl.className = 'status' + (isError ? ' error' : '');
+      }
+
+      function setPlaying(playing) {
+        btnConnect.disabled = playing;
+        btnStop.disabled = !playing;
+        btnSnap.disabled = !playing;
+        loading.style.display = playing ? 'none' : 'block';
+        if (!playing) {
+          canvas.style.display = 'none';
+          video.style.display = 'none';
+        }
+      }
+
+      function clearConnectTimeout() {
+        if (connectTimeout) {
+          clearTimeout(connectTimeout);
+          connectTimeout = null;
+        }
+      }
+
+      document.getElementById('btnConnect').addEventListener('click', function() {
+        if (player) {
+          player.stop();
+          player.close();
+          player = null;
+        }
+        clearConnectTimeout();
+        var ip = document.getElementById('ip').value.trim();
+        var port = parseInt(document.getElementById('port').value, 10) || 80;
+        var user = document.getElementById('user').value.trim();
+        var pass = document.getElementById('pass').value;
+        var channel = parseInt(document.getElementById('channel').value, 10) || 1;
+        var subtype = parseInt(document.getElementById('subtype').value, 10) || 0;
+        if (!ip) {
+          setStatus('Indique la IP del NVR/cámara.', true);
+          return;
+        }
+        loading.textContent = 'Cargando reproductor (workers/WASM)...';
+        setStatus('Paso 1: Inicializando reproductor...');
+        var options = {
+          wsURL: 'ws://' + ip + ':' + port + '/rtspoverwebsocket',
+          rtspURL: 'rtsp://' + ip + ':' + port + '/cam/realmonitor?channel=' + channel + '&subtype=' + subtype + '&proto=Private3',
+          username: user,
+          password: pass,
+          lessRateCanvas: true,
+          wndIndex: 0
+        };
+        try {
+          player = new window.PlayerControl(options);
+        } catch (err) {
+          loading.textContent = 'Error al cargar el reproductor.';
+          setStatus('Error: ' + (err && err.message ? err.message : String(err)), true);
+          return;
+        }
+        player.on('WorkerReady', function() {
+          loading.textContent = 'Conectando WebSocket al NVR...';
+          setStatus('Paso 2: Conectando a ' + ip + ':' + port + ' ...');
+          player.connect();
+        });
+        player.on('PlayStart', function() {
+          clearConnectTimeout();
+          setPlaying(true);
+          setStatus('Reproduciendo.');
+        });
+        player.on('DecodeStart', function(e) {
+          if (e.decodeMode === 'video') {
+            canvas.style.display = 'none';
+            video.style.display = '';
+          } else {
+            video.style.display = 'none';
+            canvas.style.display = '';
+          }
+        });
+        player.on('Error', function(e) {
+          clearConnectTimeout();
+          var errMsg = (e && (e.message || e.msg || e.errorMessage)) ? (e.message || e.msg || e.errorMessage) : (e ? JSON.stringify(e) : 'Error desconocido');
+          setStatus('Error: ' + errMsg + (window.location.protocol === 'https:' ? ' (Si estás en HTTPS, probá por HTTP en la misma red.)' : ''), true);
+          setPlaying(false);
+          loading.textContent = 'Error. Revisar credenciales y que el NVR soporte H5 sin plugins.';
+        });
+        connectTimeout = setTimeout(function() {
+          connectTimeout = null;
+          if (player && loading.style.display !== 'none') {
+            setStatus('Tiempo de espera agotado. ¿La página es HTTPS? El navegador puede bloquear ws://. Probá abrir por HTTP (ej. http://localhost:3000/.../vivo).', true);
+            loading.textContent = 'Sin respuesta del NVR. Comprobar: misma red, usuario/contraseña, y usar HTTP si la app está en HTTPS.';
+          }
+        }, 18000);
+        player.init(canvas, video);
+      });
+
+      document.getElementById('btnStop').addEventListener('click', function() {
+        clearConnectTimeout();
+        if (player) {
+          player.stop();
+          player.close();
+          player = null;
+        }
+        setPlaying(false);
+        setStatus('Detenido.');
+      });
+
+      document.getElementById('btnSnap').addEventListener('click', function() {
+        if (player) {
+          var name = 'snap_' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          player.capture(name);
+          setStatus('Captura guardada: ' + name);
+        }
+      });
+
+      setPlaying(false);
+
+      window.addEventListener('message', function(event) {
+        var d = event.data;
+        if (!d || d.type !== 'DahuaConnect') return;
+        if (document.getElementById('ip')) document.getElementById('ip').value = d.ip || '';
+        if (document.getElementById('port')) document.getElementById('port').value = String(d.port || 80);
+        if (document.getElementById('user')) document.getElementById('user').value = d.user || '';
+        if (document.getElementById('pass')) document.getElementById('pass').value = d.pass || '';
+        if (document.getElementById('channel')) document.getElementById('channel').value = String(d.channel || 1);
+        if (document.getElementById('subtype')) document.getElementById('subtype').value = String(d.subtype != null ? d.subtype : 0);
+        setStatus('Datos cargados. Conectando…');
+        if (d.autoConnect !== false && document.getElementById('btnConnect')) {
+          document.getElementById('btnConnect').click();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

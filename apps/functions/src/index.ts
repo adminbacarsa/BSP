@@ -606,6 +606,8 @@ export { nvrAlertV2 } from './nvr/nvrAlert';
 export const nvrAlert = functions.region('us-central1').https.onRequest((req, res) => {
   res.status(410).setHeader('X-NVR-Deprecated', 'Use nvrAlertV2').send(JSON.stringify({ error: 'Deprecated', use: 'nvrAlertV2' }));
 });
+export { nvrAgentEvents } from './nvr/nvrAgentEvents';
+export { nvrOnboard } from './nvr/nvrOnboard';
 export { nvrWebhookTest } from './nvr/nvrWebhookTest';
 export { onAlertCreated } from './nvr/onAlertCreated';
 export { simulateNvrAlert } from './nvr/simulateNvrAlert';

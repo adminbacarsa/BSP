@@ -1,0 +1,486 @@
+{
+  "name": "NVR Alert con imagen, IA y enlace a vivo (comtroldata.web.app)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Configuración\n\n1. **URL eventos**: Este workflow usa https://nvragentevents-2cmypxemla-uc.a.run.app (Cloud Run). Si usás Cloud Functions, cambiá la URL en los nodos que envían a CronoApp.\n\n2. **Authorization**: Bearer = agent_secret (platform.key del agente). Si da \"Secreto inválido\", en Firebase poné ese mismo valor en nvr_config/webhook → campo secret, O en nvr_devices/{nvrId} → agent_secret.\n\n3. **OPENAI_API_KEY**: En N8N → Settings → Variables, añadí OPENAI_API_KEY con tu key de OpenAI. La IA etiqueta la imagen (VACIO, VEHICULO, PERSONA_SOSPECHOSA, etc.). Futuro: usar etiqueta para no enviar falsas alarmas.\n\n4. **Video en vivo**: El enlace en Slack apunta a comtroldata.web.app. Para vivo por túnel: desplegar tunnel-server (Cloud Run), configurar NEXT_PUBLIC_TUNNEL_WS_URL en la app y platform.tunnel_url en el agente. Ver PASO-A-PASO-CONEXION-Y-VIVO.md.\n\n5. **Slack**: Reemplazá la URL del webhook en \"Slack (enlace a vivo)\".\n\n6. **Monitor NVR (3 min)**: Cada 2 min se lee la hoja Heartbeats. Si un NVR no tiene señal en los últimos 3 min → se envía AGENT_OFFLINE (una sola vez). Si vuelve a haber señal → se envía AGENT_ONLINE (una sola vez). La hoja debe tener columna Ts (timestamp ISO) para comparar; si no, se usa LastHeartbeat.",
+        "height": 460,
+        "width": 380
+      },
+      "id": "note-config-workflow",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-4680, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nvr-alertas",
+        "options": {}
+      },
+      "id": "3ce3c88c-4865-4df1-9a8c-88a4a0ecee7f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1856, 400],
+      "webhookId": "nvr-alertas",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7qcrwrgAjPc", "mode": "id" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Hoja 1" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha/Hora": "=  {{ new Date($json.body.timestamp).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', dateStyle: 'short', timeStyle: 'medium' }) }}",
+            "NVR": "={{ $json.body.nvrId }}",
+            "Evento": "={{ $json.body.eventTypeName }}",
+            "Canal": "={{ $json.body.channel }}",
+            "Status": "={{ $json.body.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Fecha/Hora", "displayName": "Fecha/Hora", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "NVR", "displayName": "NVR", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "Evento", "displayName": "Evento", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "Canal", "displayName": "Canal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "Status", "displayName": "Status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "e90bf981-31b3-4450-a80e-8f160ac4ab73",
+      "name": "Google Sheets (alertas)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1392, 256],
+      "credentials": { "googleApi": { "id": "epuix0RSiuTB1Khm", "name": "Google Service Account account 3" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7qcrwrgAjPc", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Heartbeats", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nvrId": "={{ $json.body.nvrId }}",
+            "LastHeartbeat": "=  {{ new Date($json.body.timestamp).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', dateStyle: 'short', timeStyle: 'medium' }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "nvrId", "displayName": "nvrId", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "LastHeartbeat", "displayName": "LastHeartbeat", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "5cbe80a0-e774-4b20-9fb9-871545c75efd",
+      "name": "Google Sheets (heartbeats)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1392, 608],
+      "credentials": { "googleApi": { "id": "epuix0RSiuTB1Khm", "name": "Google Service Account account 3" } }
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 }, "conditions": [{ "id": "cond-alerta", "leftValue": "={{ $json.body.type }}", "rightValue": "heartbeat", "operator": { "type": "string", "operation": "notEquals" } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "ee64f95d-7c34-4722-9790-671b36e577eb",
+      "name": "Solo alertas (no heartbeat)1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-1632, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvragentevents-2cmypxemla-uc.a.run.app",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ $json.body.nvrId }}\",\n  \"channel\": {{ $json.body.channel ?? -1 }},\n  \"eventTypeName\": \"{{ $json.body.eventTypeName }}\",\n  \"status\": \"{{ $json.body.status }}\",\n  \"timestamp\": \"{{ $json.body.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "ad6582ce-76dd-4db9-9a8c-5f031e91d2e9",
+      "name": "Enviar a CronoApp1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1392, 432]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7qcrwrgAjPc", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Heartbeats", "mode": "name" },
+        "options": {}
+      },
+      "id": "a6e6d473-ecdf-445d-be30-3ea62d83eadd",
+      "name": "Leer Heartbeats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-4432, 1104],
+      "credentials": { "googleApi": { "id": "Mv9mohGVTSYm1bxd", "name": "Google Service Account account" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ventana 3 min: si no hay heartbeat en los últimos 3 min = desconectado. Una sola señal por cambio (desconectado → AGENT_OFFLINE, reconectado → AGENT_ONLINE).\nconst MINUTES_OFFLINE = 3;\nconst now = new Date();\nconst cutoffMs = now.getTime() - MINUTES_OFFLINE * 60 * 1000;\nconst state = $getWorkflowStaticData('global');\nif (!state.nvrStates) state.nvrStates = {};\nconst byNvr = {};\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  const nvrId = (j.nvrId || j.NVR || '').toString().trim();\n  if (!nvrId) continue;\n  const tsStr = j.Ts || j.LastHeartbeat || j['Último'] || '';\n  let lastMs = NaN;\n  if (tsStr) {\n    const d = new Date(tsStr);\n    lastMs = isNaN(d.getTime()) ? 0 : d.getTime();\n  }\n  if (!byNvr[nvrId] || (lastMs && lastMs > (byNvr[nvrId] || 0))) byNvr[nvrId] = lastMs || byNvr[nvrId];\n}\nconst toSend = [];\nfor (const [nvrId, lastMs] of Object.entries(byNvr)) {\n  const isOffline = isNaN(lastMs) || lastMs < cutoffMs;\n  const prev = state.nvrStates[nvrId];\n  if (isOffline) {\n    if (prev !== 'offline') {\n      state.nvrStates[nvrId] = 'offline';\n      toSend.push({ json: { nvrId, eventTypeName: 'AGENT_OFFLINE', status: 'start', timestamp: now.toISOString() } });\n    }\n  } else {\n    if (prev === 'offline') {\n      state.nvrStates[nvrId] = 'online';\n      toSend.push({ json: { nvrId, eventTypeName: 'AGENT_ONLINE', status: 'start', timestamp: now.toISOString() } });\n    } else if (prev !== 'online') state.nvrStates[nvrId] = 'online';\n  }\n}\nreturn toSend;"
+      },
+      "id": "3be2c724-3667-4c16-a7a4-86cc9d0c20ff",
+      "name": "Estado NVR (3 min, una vez por cambio)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-4208, 1104]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvragentevents-2cmypxemla-uc.a.run.app",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ $json.nvrId }}\",\n  \"channel\": -1,\n  \"eventTypeName\": \"{{ $json.eventTypeName }}\",\n  \"status\": \"{{ $json.status }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "3087e50a-587f-4f9b-b15d-1412a5b0c6de",
+      "name": "Enviar estado NVR a CronoApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3984, 1104],
+      "notesInFlow": true,
+      "notes": "Envía AGENT_OFFLINE (desconectado) o AGENT_ONLINE (reconectado) una sola vez por cambio. Requiere trigger activo."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 }, "conditions": [{ "id": "cond-alerta", "leftValue": "={{ ($json.body || $json).type }}", "rightValue": "heartbeat", "operator": { "type": "string", "operation": "notEquals" } }], "combinator": "and" },
+        "options": {}
+      },
+      "id": "9105ee23-5f4d-452e-b03c-22905537195c",
+      "name": "Solo alertas (no heartbeat)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-4416, 672]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvragentevents-2cmypxemla-uc.a.run.app",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ ($json.body || $json).nvrId }}\",\n  \"channel\": {{ ($json.body || $json).channel ?? 0 }},\n  \"eventTypeName\": \"{{ ($json.body || $json).eventTypeName || 'ALARM' }}\",\n  \"status\": \"{{ ($json.body || $json).status || 'start' }}\",\n  \"timestamp\": \"{{ ($json.body || $json).timestamp || new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-directo-001",
+      "name": "Enviar evento a CronoApp (directo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-4304, 672],
+      "notesInFlow": true,
+      "notes": "Envía cada alerta a CronoApp en cuanto llega (sin depender de snapshot/IA). Reemplazá REEMPLAZAR_AGENT_SECRET por platform.key o nvr_config/webhook.secret."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mapeo NVR -> IP y credenciales. Añadí aquí cada NVR (nvrId o nombre) con su IP y credenciales.\nconst body = $input.first().json.body || $input.first().json;\nconst map = {\n  'Bacar M102': { nvr_ip: '192.168.0.102', nvr_user: 'admin', nvr_pass: '18July75$' },\n  '8F0001CPAZ21EFD': { nvr_ip: '192.168.0.102', nvr_user: 'admin', nvr_pass: '18July75$' }\n};\nconst cfg = map[body.nvrId] || {};\nreturn [{ json: { ...($input.first().json), body, nvr_ip: cfg.nvr_ip || '', nvr_user: cfg.nvr_user || 'admin', nvr_pass: cfg.nvr_pass || '' } }];"
+      },
+      "id": "dff7bf51-5151-43ff-96bc-ea133fd0f34d",
+      "name": "NVR → IP y credenciales",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-4192, 544]
+    },
+    {
+      "parameters": {
+        "url": "=https://tunnel-server-698108879063.us-central1.run.app/snapshot?nvrId={{ ($json.body || $json).nvrId }}&channel={{ Math.max(1, (($json.body || $json).channel ?? -1) + 1) }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0" }] },
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "93d79c99-01e0-45b8-b2ea-89ea08193564",
+      "name": "GET snapshot NVR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3984, 464],
+      "notesInFlow": true,
+      "notes": "Snapshot por túnel (tunnel-server-698108879063.us-central1.run.app). Authorization = agent_secret (platform.key)."
+    },
+    {
+      "parameters": { "mode": "combine", "combineBy": "combineByPosition", "options": {} },
+      "id": "15a8c8ba-003e-48dc-9698-a5ad2a917428",
+      "name": "Merge (body + imagen)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-3760, 592]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Añade imageBase64 para OpenAI Vision (desde binary.data)\nconst item = $input.first();\nconst json = item.json || {};\nconst binary = item.binary;\nlet imageBase64 = '';\nif (binary?.data) {\n  const b = binary.data;\n  if (typeof b.data === 'string') imageBase64 = b.data;\n  else if (Buffer.isBuffer(b.data)) imageBase64 = b.data.toString('base64');\n}\nreturn [{ json: { ...json, imageBase64 }, binary: item.binary }];"
+      },
+      "id": "5abf0ce6-0dfa-412e-aec6-2171cb2b315f",
+      "name": "Añadir imageBase64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-3536, 592]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"max_tokens\": 50,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        { \"type\": \"text\", \"text\": \"Esta imagen es de una cámara de seguridad. Responde ÚNICAMENTE una de estas etiquetas, sin explicación: VACIO (nada relevante), VEHICULO (solo vehículo), PERSONA_OK (persona normal), PERSONA_SOSPECHOSA (merodeo, ocultarse, sospechoso), CONDUCTA_INDEBIDA (forcejeo, forzar puerta, agresión, objeto peligroso). Solo la etiqueta.\" },\n        { \"type\": \"image_url\", \"image_url\": { \"url\": \"data:image/jpeg;base64,\" + $json.imageBase64 } }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "7b0c6add-2472-43c6-81d4-8b787787f8c5",
+      "name": "OpenAI Vision (etiqueta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3312, 480],
+      "notesInFlow": true,
+      "notes": "Variables de N8N: OPENAI_API_KEY. Futuro: usar etiqueta para no enviar a CronoApp si VACIO/VEHICULO (falsas alarmas)."
+    },
+    {
+      "parameters": { "mode": "combine", "combineBy": "combineByPosition", "options": {} },
+      "id": "7bb99a89-54b9-4543-9fe1-ab18a189c832",
+      "name": "Merge (ítem + resultado IA)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-3104, 592]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) ? $json.choices[0].message.content.toUpperCase() : '' }}", "rightValue": "PERSONA_SOSPECHOSA", "operator": { "type": "string", "operation": "contains" } },
+            { "id": "c2", "leftValue": "={{ ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) ? $json.choices[0].message.content.toUpperCase() : '' }}", "rightValue": "CONDUCTA_INDEBIDA", "operator": { "type": "string", "operation": "contains" } }
+          ],
+          "combineOperation": "or"
+        },
+        "options": {}
+      },
+      "id": "5750dc16-adc1-4454-8f31-2ab72d52ea4c",
+      "name": "¿Sospechoso o conducta indebida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-2880, 592]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-central1-comtroldata.cloudfunctions.net/nvrAlertV2",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "X-API-Key", "value": "123456" }] },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "image", "inputDataFieldName": "data" },
+            { "parameterType": "string", "name": "channel_id" },
+            { "parameterType": "string", "name": "nvrId" },
+            { "parameterType": "string", "name": "event_type" },
+            { "parameterType": "string", "name": "camera_name" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7473f2d5-1687-427a-a5d7-79830203a671",
+      "name": "Enviar imagen a CronoApp (nvrAlertV2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-2656, 464],
+      "notesInFlow": true,
+      "notes": "Imagen adjunta a la alerta. Parámetro image = binary.data."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nvragentevents-2cmypxemla-uc.a.run.app",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ $json.body.nvrId }}\",\n  \"channel\": {{ $json.body.channel }},\n  \"eventTypeName\": \"{{ $json.body.eventTypeName }}\",\n  \"status\": \"{{ $json.body.status }}\",\n  \"timestamp\": \"{{ $json.body.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "49b59fea-70f1-42f6-91bd-23a219512448",
+      "name": "Enviar evento a CronoApp (nvrAgentEvents)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-2656, 656],
+      "disabled": true,
+      "notes": "Opcional: ya se envió por nodo (directo). Dejado por si querés reenviar tras IA."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://hooks.slack.com/services/TU/WEBHOOK/SLACK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Alerta posible persona sospechosa o conducta indebida – NVR \" + $json.body.nvrId + \", Canal \" + ($json.body.channel + 1) + \". IA: \" + ($json.choices && $json.choices[0] && $json.choices[0].message ? $json.choices[0].message.content : '') + \". Abrir canal en vivo: https://comtroldata.web.app/admin/operaciones/vivo?nvrId=\" + encodeURIComponent($json.body.nvrId) + \"&channel=\" + ($json.body.channel + 1)\n}",
+        "options": {}
+      },
+      "id": "3a790614-f151-46ac-b95b-a72b815bc34b",
+      "name": "Slack (enlace a vivo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-2656, 352],
+      "notesInFlow": true,
+      "notes": "Reemplazar URL por tu Incoming Webhook de Slack. El enlace a vivo usa tunnel si está configurado NEXT_PUBLIC_TUNNEL_WS_URL."
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "nvr-alertas", "options": {} },
+      "id": "c4d50e22-ca0b-48cb-a78d-8eab2223dba4",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-4640, 672],
+      "webhookId": "nvr-alertas"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7qcrwrgAjPc", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Hoja 1", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha/Hora": "={{ ($json.body || $json).timestamp }}",
+            "NVR": "={{ ($json.body || $json).nvrId }}",
+            "Evento": "={{ ($json.body || $json).eventTypeName }}",
+            "Canal": "={{ ($json.body || $json).channel ?? '' }}",
+            "Status": "={{ ($json.body || $json).status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Fecha/Hora", "displayName": "Fecha/Hora", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "NVR", "displayName": "NVR", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Evento", "displayName": "Evento", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Canal", "displayName": "Canal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Status", "displayName": "Status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "aab499f6-00eb-4477-8ffd-f4c59bf9d2a6",
+      "name": "Google Sheets (alertas)1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-2656, 784],
+      "credentials": { "googleApi": { "id": "Mv9mohGVTSYm1bxd", "name": "Google Service Account account" } }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "1fmbMGSEUBjH-eBgR3SlzDqCrxMz-jbsL7qcrwrgAjPc", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Heartbeats", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "nvrId": "={{ $json.body.nvrId }}",
+            "LastHeartbeat": "=  {{ new Date($json.body.timestamp).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', dateStyle: 'short', timeStyle: 'medium' }) }}",
+            "Ts": "={{ $json.body.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "nvrId", "displayName": "nvrId", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "LastHeartbeat", "displayName": "LastHeartbeat", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Ts", "displayName": "Ts", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "005b177f-8ce3-4503-8b59-3b3a025ce81e",
+      "name": "Google Sheets (heartbeats)1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-4192, 832],
+      "credentials": { "googleApi": { "id": "Mv9mohGVTSYm1bxd", "name": "Google Service Account account" } }
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 2 }] } },
+      "id": "8df56e6e-6d52-4228-a37a-5343c28840fb",
+      "name": "Cada 2 minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-4656, 1104]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Solo alertas (no heartbeat)1", "type": "main", "index": 0 }]] },
+    "Solo alertas (no heartbeat)1": {
+      "main": [
+        [{ "node": "Google Sheets (alertas)", "type": "main", "index": 0 }, { "node": "Enviar a CronoApp1", "type": "main", "index": 0 }],
+        [{ "node": "Google Sheets (heartbeats)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Leer Heartbeats": { "main": [[{ "node": "Estado NVR (3 min, una vez por cambio)", "type": "main", "index": 0 }]] },
+    "Estado NVR (3 min, una vez por cambio)": { "main": [[{ "node": "Enviar estado NVR a CronoApp", "type": "main", "index": 0 }]] },
+    "Solo alertas (no heartbeat)": {
+      "main": [
+        [{ "node": "Enviar evento a CronoApp (directo)", "type": "main", "index": 0 }, { "node": "Google Sheets (alertas)1", "type": "main", "index": 0 }],
+        [{ "node": "Google Sheets (heartbeats)1", "type": "main", "index": 0 }]
+      ]
+    },
+    "Enviar evento a CronoApp (directo)": {
+      "main": [[{ "node": "NVR → IP y credenciales", "type": "main", "index": 0 }]]
+    },
+    "NVR → IP y credenciales": {
+      "main": [[{ "node": "Merge (body + imagen)", "type": "main", "index": 0 }, { "node": "GET snapshot NVR", "type": "main", "index": 0 }]]
+    },
+    "GET snapshot NVR": { "main": [[{ "node": "Merge (body + imagen)", "type": "main", "index": 1 }]] },
+    "Merge (body + imagen)": { "main": [[{ "node": "Añadir imageBase64", "type": "main", "index": 0 }]] },
+    "Añadir imageBase64": {
+      "main": [[{ "node": "Merge (ítem + resultado IA)", "type": "main", "index": 0 }, { "node": "OpenAI Vision (etiqueta)", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Vision (etiqueta)": { "main": [[{ "node": "Merge (ítem + resultado IA)", "type": "main", "index": 1 }]] },
+    "Merge (ítem + resultado IA)": {
+      "main": [[
+        { "node": "¿Sospechoso o conducta indebida?", "type": "main", "index": 0 },
+        { "node": "Enviar imagen a CronoApp (nvrAlertV2)", "type": "main", "index": 0 }
+      ]]
+    },
+    "¿Sospechoso o conducta indebida?": { "main": [[{ "node": "Slack (enlace a vivo)", "type": "main", "index": 0 }]] },
+    "Webhook1": { "main": [[{ "node": "Solo alertas (no heartbeat)", "type": "main", "index": 0 }]] },
+    "Cada 2 minuto": { "main": [[{ "node": "Leer Heartbeats", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "dynamic",
+    "timezone": "America/Argentina/Buenos_Aires",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

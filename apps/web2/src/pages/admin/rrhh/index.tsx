@@ -654,7 +654,6 @@ export default function EmployeesPage() {
                     <div>
                         <h1 className="text-3xl font-black text-slate-900 dark:text-white uppercase">Gestión RRHH</h1>
                         <p className="text-slate-500 text-sm font-medium">Personal, Novedades y Reglas.</p>
-                        <p className="text-[10px] text-indigo-500 mt-1">Usuario Activo: <b>{currentUserName}</b></p>
                     </div>
                     <div className="flex gap-2">
                         {activeTab === 'legajos' && view === 'list' && (

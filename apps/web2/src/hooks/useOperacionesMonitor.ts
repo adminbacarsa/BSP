@@ -77,11 +77,25 @@ export const useOperacionesMonitor = () => {
 
     useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
-    // Ausente automático: tras 60 min de tolerancia sin presente, marcar turno como ABSENT
+    // Ausente automático: tras 60 min de tolerancia sin presente, marcar turno como ABSENT. No aplicar a coberturas pendientes de llegada (falla de programación).
+    const coverageExpiredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         const nowMs = Date.now();
         rawShifts.forEach((s: any) => {
-            if (!s.id || autoAbsentAppliedRef.current.has(s.id)) return;
+            if (!s.id) return;
+            // Cobertura pendiente de llegada: tras 30 min sin presente, volver a Prioridad (no marcar ausente).
+            if (s.coveragePendingArrival && s.coverageAssignedAt) {
+                const assignedAt = getSafeDate(s.coverageAssignedAt);
+                if (assignedAt && !coverageExpiredRef.current.has(s.id)) {
+                    const elapsedMin = (nowMs - assignedAt.getTime()) / 60000;
+                    if (elapsedMin >= 30 && !s.isPresent) {
+                        coverageExpiredRef.current.add(s.id);
+                        updateDoc(doc(db, 'turnos', s.id), { coveragePendingArrival: false }).catch(() => { coverageExpiredRef.current.delete(s.id); });
+                    }
+                }
+                return; // Nunca marcar ausente a una cobertura pendiente
+            }
+            if (autoAbsentAppliedRef.current.has(s.id)) return;
             const start = getSafeDate(s.startTime || s.shiftDateObj);
             if (!start) return;
             const diffMin = (nowMs - start.getTime()) / 60000;
@@ -197,7 +211,8 @@ export const useOperacionesMonitor = () => {
             const isAbsent = !!shift.isAbsent;
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
-            const isResolvedByOps = shift.origin === 'OPERATIONS_COVERAGE' || shift.resolvedBy === 'OPERACIONES';
+            // Cobertura: resuelta solo si marcaron presente/completado o si es otra resolución (adelanto, franco). Si sigue pendiente de llegada o ya pasaron 30 min sin presente, no resuelta → va a Prioridad.
+            const isResolvedByOps = (shift.resolvedBy === 'OPERACIONES') || (shift.origin === 'OPERATIONS_COVERAGE' && !shift.coveragePendingArrival && (!!shift.isPresent || !!shift.isCompleted));
             const countsForCoverage = isValidEmployee || isReportedToPlanning; 
 
             const isUnassigned = !isValidEmployee;

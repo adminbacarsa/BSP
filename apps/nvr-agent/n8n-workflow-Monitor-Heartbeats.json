@@ -1,0 +1,69 @@
+{
+  "name": "Monitor Heartbeats (alerta si agente desconectado)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 1 }]
+        }
+      },
+      "id": "schedule-1min",
+      "name": "Cada 1 minuto",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "PONER_ID_DE_TU_HOJA", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Heartbeats", "mode": "name" },
+        "options": { "range": "A:B" }
+      },
+      "id": "read-heartbeats",
+      "name": "Leer Heartbeats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst nowMs = now.getTime();\nconst maxAgeMs = 90 * 1000;\nfunction parseHeartbeatTime(val) {\n  if (!val) return NaN;\n  const d = new Date(val);\n  if (!isNaN(d.getTime())) return d.getTime();\n  return NaN;\n}\nconst byNvr = {};\nfor (const item of $input.all()) {\n  const j = item.json || {};\n  const nvrId = String(j.nvrId || j.NVR || '').trim();\n  const lastRaw = j.LastHeartbeat || j['Último'] || '';\n  if (!nvrId || !lastRaw) continue;\n  const lastMs = parseHeartbeatTime(lastRaw);\n  if (isNaN(lastMs)) continue;\n  if (!byNvr[nvrId] || lastMs > byNvr[nvrId]) byNvr[nvrId] = lastMs;\n}\nconst offline = [];\nfor (const [nvrId, lastMs] of Object.entries(byNvr)) {\n  if (nowMs - lastMs > maxAgeMs)\n    offline.push({\n      json: {\n        nvrId,\n        eventTypeName: 'AGENT_OFFLINE',\n        status: 'start',\n        timestamp: now.toISOString()\n      }\n    });\n}\nreturn offline;"
+      },
+      "id": "code-offline",
+      "name": "NVRs sin heartbeat en 1 min",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us-central1-TU_PROYECTO.cloudfunctions.net/nvrAgentEvents",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nvrId\": \"{{ $json.nvrId }}\",\n  \"channel\": -1,\n  \"eventTypeName\": \"{{ $json.eventTypeName }}\",\n  \"status\": \"{{ $json.status }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "id": "http-offline",
+      "name": "Enviar AGENT_OFFLINE a CronoApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Cada 1 minuto": {
+      "main": [[{ "node": "Leer Heartbeats", "type": "main", "index": 0 }]]
+    },
+    "Leer Heartbeats": {
+      "main": [[{ "node": "NVRs sin heartbeat en 1 min", "type": "main", "index": 0 }]]
+    },
+    "NVRs sin heartbeat en 1 min": {
+      "main": [[{ "node": "Enviar AGENT_OFFLINE a CronoApp", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}

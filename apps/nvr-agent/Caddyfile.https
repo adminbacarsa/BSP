@@ -1,0 +1,7 @@
+# Proxy HTTPS para N8N. N8N corre en el host en el puerto 5678.
+# Caddy obtiene y renueva el certificado Let's Encrypt automáticamente.
+# (Este archivo se usa si corrés Caddy en Docker; si no, usá el Caddyfile de N8N-HTTPS.md.)
+
+autbacar.dnsalias.com {
+    reverse_proxy host.docker.internal:5678
+}

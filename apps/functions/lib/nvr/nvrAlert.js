@@ -347,9 +347,18 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             ]);
         const routeKey = buildRouteKey(nvrId, channelId);
         const canGroup = isGroupableRouteKey(routeKey);
-        console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'canGroup=', canGroup, 'fields keys=', Object.keys(fields).join(', '));
-        let route = await resolveRoute(routeKey);
+        const safeNvrId = (nvrId && nvrId.trim()) || 'default';
+        console.log('[NVR_ALERT] routeKey=', routeKey, 'channelId=', channelId, 'nvrId=', nvrId, 'safeNvrId=', safeNvrId, 'canGroup=', canGroup, 'fields keys=', Object.keys(fields).join(', '));
         const db = admin.firestore();
+        const nvrRef = db.collection('nvr_devices').doc(safeNvrId);
+        const nvrSnap = await nvrRef.get();
+        const nvrData = nvrSnap.exists ? (nvrSnap.data() || {}) : null;
+        if (nvrData && nvrData.enabled === false) {
+            console.log('[NVR_ALERT] NVR desactivado, no se crea alerta.', { routeKey, safeNvrId });
+            res.status(200).json({ ok: true, skipped: 'nvr_disabled' });
+            return;
+        }
+        let route = await resolveRoute(routeKey);
         if (routeKey && canGroup && !route) {
             console.log('[NVR_ALERT] Creando camera_routes/', routeKey, '(primera vez para este NVR/canal)');
             const cameraNameFromRequest = sourceCameraName || pickFirst(fields, ['camera_name', 'cameraName', 'CameraName', 'camera', 'Camera']) || '';
@@ -363,9 +372,6 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
                 first_seen_at: admin.firestore.FieldValue.serverTimestamp(),
                 nvr_serial: nvrId?.trim() || null,
             }, { merge: true });
-            const safeNvrId = (nvrId && nvrId.trim()) || 'default';
-            const nvrRef = db.collection('nvr_devices').doc(safeNvrId);
-            const nvrSnap = await nvrRef.get();
             const existingChannelCount = nvrSnap.exists && typeof nvrSnap.data()?.channel_count === 'number' ? nvrSnap.data().channel_count : 0;
             const newChannelCount = Math.max(existingChannelCount, channelId ?? 0);
             await nvrRef.set({
@@ -377,18 +383,11 @@ exports.nvrAlertV2 = (0, https_1.onRequest)({ timeoutSeconds: 120, memory: '512M
             route = await resolveRoute(routeKey);
         }
         if (route?.disabled) {
+            console.log('[NVR_ALERT] Canal desactivado (camera_routes.enabled=false), no se crea alerta.', { routeKey });
             res.status(200).send('OK (route disabled)');
             return;
         }
-        const safeNvrId = (nvrId && nvrId.trim()) || 'default';
-        const nvrSnap = await db.collection('nvr_devices').doc(safeNvrId).get();
-        if (nvrSnap.exists) {
-            const nvrData = nvrSnap.data() || {};
-            if (nvrData.enabled === false) {
-                console.log('[NVR_ALERT] NVR desactivado, no se crea alerta.', { routeKey });
-                res.status(200).json({ ok: true, skipped: 'nvr_disabled' });
-                return;
-            }
+        if (nvrSnap.exists && nvrData) {
             if (nvrData.schedule_enabled === true && !(0, schedule_1.isWithinSchedule)(nvrData)) {
                 console.log('[NVR_ALERT] Fuera de horario del NVR, no se crea alerta.', { routeKey });
                 res.status(200).json({ ok: true, skipped: 'outside_nvr_schedule' });

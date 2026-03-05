@@ -45,8 +45,8 @@ export default function LoginPage() {
           <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white mb-4 shadow-lg shadow-indigo-500/30">
             <ShieldCheck size={28} />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">CronoApp</h1>
-          <p className="text-slate-500 font-medium">Acceso Administrativo</p>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">COSP V 1.0</h1>
+          <p className="text-[11px] text-slate-500 font-medium truncate max-w-[14rem]">Grupo Bacar</p>
         </div>
 
         {error && (

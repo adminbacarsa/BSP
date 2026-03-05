@@ -1,0 +1,27 @@
+# n8n para automatizaciones (NVR, webhooks, Cronoapp).
+# Uso: docker compose -f docker-compose.n8n.yml up -d
+#
+# Acceso local:  http://localhost:5678
+# Acceso externo (DNS): configurar N8N_HOST=0.0.0.0 y WEBHOOK_URL con tu URL pública (ver abajo).
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: cronoapp-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Escuchar en todas las interfaces (necesario para acceso desde internet)
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      # URL con la que accedés a N8N desde fuera (sin barra final). Sin HTTPS a menos que uses proxy.
+      - WEBHOOK_URL=http://autbacar.dnsalias.com:5678
+      # Opcional: timezone
+      # - GENERIC_TIMEZONE=America/Argentina/Cordoba
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

@@ -17,6 +17,8 @@ export declare const registrarFichadaManual: functions.HttpsFunction & functions
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export { nvrAlertV2 } from './nvr/nvrAlert';
 export declare const nvrAlert: functions.HttpsFunction;
+export { nvrAgentEvents } from './nvr/nvrAgentEvents';
+export { nvrOnboard } from './nvr/nvrOnboard';
 export { nvrWebhookTest } from './nvr/nvrWebhookTest';
 export { onAlertCreated } from './nvr/onAlertCreated';
 export { simulateNvrAlert } from './nvr/simulateNvrAlert';

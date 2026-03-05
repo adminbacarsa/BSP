@@ -1,17 +1,107 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
+import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import { 
   Menu, X, LogOut, Briefcase, BarChart3, Users, 
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Siren, Camera, ClipboardList
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Camera, ClipboardList, ChevronDown, ChevronRight, Activity, AlertCircle
 } from 'lucide-react';
+
+/** Título del header según el módulo (ruta) actual */
+function getTitleByPath(pathname: string): string | null {
+  if (pathname.startsWith('/admin/dashboard')) return 'Dashboard';
+  if (pathname.startsWith('/admin/operaciones')) {
+    if (pathname.includes('/vivo')) return 'Vivo';
+    if (pathname.includes('/map-view')) return 'Mapa táctico';
+    return 'Operaciones | COSP';
+  }
+  if (pathname.startsWith('/admin/planificacion')) return 'Planificador';
+  if (pathname.startsWith('/admin/camera-routes')) return 'NVR | Servidor';
+  if (pathname.startsWith('/admin/reportes-eventos-camaras')) return 'Reporte eventos';
+  if (pathname.startsWith('/admin/alertas-dashboard')) return 'Dashboard alertas';
+  if (pathname.startsWith('/admin/crm')) return 'CRM Clientes';
+  if (pathname.startsWith('/admin/servicios')) return 'Servicios';
+  if (pathname.startsWith('/admin/reportes')) return 'Reportes';
+  if (pathname.startsWith('/admin/rrhh')) return 'RRHH';
+  if (pathname.startsWith('/admin/configuracion')) return 'Configuración';
+  if (pathname.startsWith('/admin/empleados')) return 'Empleados';
+  if (pathname.startsWith('/admin/cotizador')) return 'Cotizador';
+  return null;
+}
+
+function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: boolean; onToggleSidebar: () => void }) {
+  const router = useRouter();
+  const { user } = useAuth();
+  const pageHeader = usePageHeader();
+  // Inicializar siempre true para evitar hydration mismatch (servidor no tiene navigator)
+  const [isOnline, setIsOnline] = useState(true);
+  const [userRole, setUserRole] = useState<string>('');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setIsOnline(navigator.onLine);
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+  useEffect(() => {
+    if (!user) {
+      setUserRole('');
+      return;
+    }
+    user.getIdTokenResult()
+      .then((res) => {
+        const claims = (res?.claims || {}) as Record<string, unknown>;
+        const role = (claims?.role ?? claims?.type ?? '') as string;
+        setUserRole(role ? String(role) : '');
+      })
+      .catch(() => setUserRole(''));
+  }, [user]);
+  const titleByPath = getTitleByPath(router.pathname);
+  const title = pageHeader.title ?? titleByPath ?? (isSidebarOpen ? 'Panel de Control' : 'CronoApp');
+  const operatorName = user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+  const roleLabel = userRole || 'Operador';
+  return (
+    <div className="bg-white dark:bg-slate-800 p-4 shadow-sm border-b border-slate-200 dark:border-slate-700 flex items-center gap-4 sticky top-0 z-30 flex-wrap">
+      <button
+        onClick={onToggleSidebar}
+        className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 dark:text-slate-200 transition-colors shrink-0"
+      >
+        <Menu size={24} />
+      </button>
+      <span className="font-black text-slate-700 dark:text-white uppercase tracking-tight shrink-0">
+        {title}
+      </span>
+      <div className="flex items-center gap-3 ml-auto min-w-0 flex-1 justify-end">
+        {pageHeader.right != null && <div className="flex items-center gap-2">{pageHeader.right}</div>}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-400 hidden sm:inline">{roleLabel}: <b className="text-slate-800 dark:text-slate-200">{operatorName}</b></span>
+          {isOnline ? (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+              <Activity size={12} /> ONLINE
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-1 rounded-full border border-amber-200 dark:border-amber-800">
+              <AlertCircle size={12} /> OFFLINE
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [nvrMenuOpen, setNvrMenuOpen] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
 
@@ -53,7 +143,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         
         <div className={`p-6 flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center'} shrink-0`}>
           {isSidebarOpen ? (
-             <span className="text-xl font-black tracking-tighter text-indigo-400">CRONOAPP</span>
+             <div className="flex flex-col min-w-0">
+               <span className="text-xl font-black tracking-tighter text-indigo-400">COSP V 1.0</span>
+               <span className="text-[11px] text-slate-400 truncate max-w-[14rem]">Grupo Bacar</span>
+             </div>
           ) : (
              <ShieldCheck className="text-indigo-400" />
           )}
@@ -76,15 +169,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Calendar size={20}/> {isSidebarOpen && <span>Planificador</span>}
           </Link>
 
-          <Link href="/admin/pruebas-alertas" prefetch={false} className={getLinkClass('/admin/pruebas-alertas')} title="Pruebas NVR">
-            <Siren size={20}/> {isSidebarOpen && <span>Pruebas NVR</span>}
-          </Link>
-          <Link href="/admin/camera-routes" prefetch={false} className={getLinkClass('/admin/camera-routes')} title="Cámaras NVR">
-            <Camera size={20}/> {isSidebarOpen && <span>Cámaras NVR</span>}
-          </Link>
-          <Link href="/admin/reportes-eventos-camaras" prefetch={false} className={getLinkClass('/admin/reportes-eventos-camaras')} title="Reporte eventos cámaras">
-            <ClipboardList size={20}/> {isSidebarOpen && <span>Reporte eventos cámaras</span>}
-          </Link>
+          {/* NVR | Servidor: al hacer clic se despliegan Reporte eventos y Dashboard alertas */}
+          {isSidebarOpen ? (
+            <>
+              <button type="button" onClick={() => setNvrMenuOpen(!nvrMenuOpen)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm text-slate-300 hover:bg-slate-800 hover:text-white ${isActive('/admin/camera-routes') || isActive('/admin/reportes-eventos-camaras') || isActive('/admin/alertas-dashboard') ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : ''}`}>
+                <Camera size={20}/>
+                <span className="flex-1 text-left">NVR | Servidor</span>
+                {nvrMenuOpen ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
+              </button>
+              {nvrMenuOpen && (
+                <div className="pl-8 space-y-1">
+                  <Link href="/admin/camera-routes" prefetch={false} className={getLinkClass('/admin/camera-routes')} title="NVR | Servidor">
+                    <Camera size={18}/> <span>Cámaras / Servidor</span>
+                  </Link>
+                  <Link href="/admin/reportes-eventos-camaras" prefetch={false} className={getLinkClass('/admin/reportes-eventos-camaras')} title="Reporte eventos cámaras">
+                    <ClipboardList size={18}/> <span>Reporte eventos</span>
+                  </Link>
+                  <Link href="/admin/alertas-dashboard" prefetch={false} className={getLinkClass('/admin/alertas-dashboard')} title="Dashboard alertas">
+                    <BarChart3 size={18}/> <span>Dashboard alertas</span>
+                  </Link>
+                </div>
+              )}
+            </>
+          ) : (
+            <Link href="/admin/camera-routes" prefetch={false} className={getLinkClass('/admin/camera-routes')} title="NVR | Servidor">
+              <Camera size={20}/> {!isSidebarOpen && <span className="sr-only">NVR</span>}
+            </Link>
+          )}
 
           {isSidebarOpen && <div className="px-4 py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest mt-4">Gestión</div>}
           
@@ -121,21 +232,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* CONTENIDO */}
       <div className={`flex-1 transition-all duration-300 ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
-        <div className="bg-white dark:bg-slate-800 p-4 shadow-sm border-b border-slate-200 dark:border-slate-700 flex items-center gap-4 sticky top-0 z-30">
-           <button 
-             onClick={() => setSidebarOpen(!isSidebarOpen)} 
-             className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 dark:text-slate-200 transition-colors"
-           >
-             <Menu size={24} />
-           </button>
-           <span className="font-black text-slate-700 dark:text-white uppercase tracking-tight">
-             {isSidebarOpen ? 'Panel de Control' : 'CronoApp'}
-           </span>
-        </div>
-
-        <main className="p-4 lg:p-8">
-          {children}
-        </main>
+        <PageHeaderProvider>
+          <DashboardHeader isSidebarOpen={isSidebarOpen} onToggleSidebar={() => setSidebarOpen(!isSidebarOpen)} />
+          <main className="p-4 lg:p-8">
+            {children}
+          </main>
+        </PageHeaderProvider>
       </div>
     </div>
   );

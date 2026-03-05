@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
+import { useSetPageHeader } from '@/context/PageHeaderContext';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, query, where, onSnapshot, serverTimestamp, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Toaster, toast } from 'sonner';
 import {
   Building2,
   Camera,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Edit2,
   HelpCircle,
@@ -22,7 +25,7 @@ import {
 
 type ClientDoc = { id: string; name?: string; fantasyName?: string; objetivos?: any[] };
 type ObjectiveFlat = { id: string; name: string; clientId: string; clientName: string };
-/** Dispositivo NVR: número de serie, cliente, objetivo, canales, retención, activación y horario */
+/** Dispositivo NVR: número de serie, cliente, objetivo, canales, retención, activación, horario y conexión para vivo */
 type NvrDevice = {
   id: string;
   serial_number?: string;
@@ -40,6 +43,14 @@ type NvrDevice = {
   created_from_alert?: boolean;
   first_seen_at?: any;
   updated_at?: any;
+  /** IP del NVR para video en vivo (ej. 192.168.0.102) */
+  stream_ip?: string | null;
+  /** Puerto HTTP/WebSocket (por defecto 80) */
+  stream_port?: number | string | null;
+  /** Usuario para conectar al NVR */
+  stream_user?: string | null;
+  /** Contraseña (se guarda en Firestore; solo para uso interno "Ver en vivo") */
+  stream_password?: string | null;
 };
 type CameraRoute = {
   id: string;
@@ -78,6 +89,7 @@ function formatScheduleSummary(r: CameraRoute): string {
 }
 
 function CameraRoutesPage() {
+  const setPageHeader = useSetPageHeader();
   const [routes, setRoutes] = useState<CameraRoute[]>([]);
   const [nvrDevices, setNvrDevices] = useState<NvrDevice[]>([]);
   const [clients, setClients] = useState<ClientDoc[]>([]);
@@ -88,7 +100,11 @@ function CameraRoutesPage() {
   const [newNvrId, setNewNvrId] = useState('default');
   const [newChannel, setNewChannel] = useState('1');
   const [creating, setCreating] = useState(false);
-  const [viewMode, setViewMode] = useState<'cards' | 'flat' | 'byNvr' | 'byObjective'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [tableGroupBy, setTableGroupBy] = useState<'byNvr' | 'byObjective' | 'flat'>('byNvr');
+  const [expandedObjectiveKey, setExpandedObjectiveKey] = useState<string | null>(null);
+  /** En vista por objetivo: NVR expandido para ver canales (formato "objectiveKey__nvrId") */
+  const [expandedNvrUnderObjective, setExpandedNvrUnderObjective] = useState<string | null>(null);
   const [filterClientId, setFilterClientId] = useState('');
   const [searchText, setSearchText] = useState('');
   const [selectedNvrId, setSelectedNvrId] = useState<string | null>(null);
@@ -103,6 +119,10 @@ function CameraRoutesPage() {
     schedule_time_start: '',
     schedule_time_end: '',
     schedule_timezone: 'America/Argentina/Buenos_Aires',
+    stream_ip: '',
+    stream_port: '80',
+    stream_user: 'admin',
+    stream_password: '',
   });
   const [nvrSaving, setNvrSaving] = useState(false);
   /** Número de canal para "Agregar canal" dentro del modal NVR */
@@ -339,8 +359,17 @@ function CameraRoutesPage() {
       schedule_time_start: device?.schedule_time_start ?? '',
       schedule_time_end: device?.schedule_time_end ?? '',
       schedule_timezone: device?.schedule_timezone ?? 'America/Argentina/Buenos_Aires',
+      stream_ip: device?.stream_ip ?? '',
+      stream_port: device?.stream_port != null ? String(device.stream_port) : '80',
+      stream_user: device?.stream_user ?? 'admin',
+      stream_password: device?.stream_password ?? '',
     });
   }, [selectedNvrId, nvrDevices, routes, objectives]);
+
+  useEffect(() => {
+    setPageHeader({ title: 'NVR | Servidor' });
+    return () => setPageHeader({ title: null });
+  }, [setPageHeader]);
 
   /** Siguiente número de canal sugerido para este NVR (1, 2, 3... sin huecos) */
   const nextChannelForSelectedNvr = useMemo(() => {
@@ -439,6 +468,7 @@ function CameraRoutesPage() {
         {
           enabled: true,
           camera_name: `Canal ${newChannelForNvr}`,
+          client_id: nvrForm.clientId || null,
           objective_id: nvrForm.objective_id || null,
           post_id: null,
           event_type: 'Tripwire',
@@ -491,6 +521,7 @@ function CameraRoutesPage() {
         await setDoc(doc(db, 'camera_routes', routeKey), {
           enabled: true,
           camera_name: `Canal ${ch}`,
+          client_id: addNvrForm.clientId || null,
           objective_id: addNvrForm.objective_id || null,
           post_id: null,
           event_type: 'Tripwire',
@@ -515,14 +546,16 @@ function CameraRoutesPage() {
     if (!selectedNvrId) return;
     const days = Math.max(1, Math.min(365, parseInt(nvrForm.alert_retention_days, 10) || 30));
     const chCount = Math.max(1, Math.min(64, parseInt(nvrForm.channel_count, 10) || 16));
+    const clientId = nvrForm.clientId || null;
+    const objectiveId = nvrForm.objective_id || null;
     setNvrSaving(true);
     try {
       await setDoc(
         doc(db, 'nvr_devices', selectedNvrId),
         {
           serial_number: selectedNvrId,
-          client_id: nvrForm.clientId || null,
-          objective_id: nvrForm.objective_id || null,
+          client_id: clientId,
+          objective_id: objectiveId,
           channel_count: chCount,
           alert_retention_days: days,
           enabled: nvrForm.enabled,
@@ -531,12 +564,25 @@ function CameraRoutesPage() {
           schedule_time_start: (nvrForm.schedule_time_start || '').trim() || null,
           schedule_time_end: (nvrForm.schedule_time_end || '').trim() || null,
           schedule_timezone: (nvrForm.schedule_timezone || '').trim() || 'America/Argentina/Buenos_Aires',
+          stream_ip: (nvrForm.stream_ip || '').trim() || null,
+          stream_port: (nvrForm.stream_port || '').toString().trim() || null,
+          stream_user: (nvrForm.stream_user || '').trim() || null,
+          stream_password: (nvrForm.stream_password || '').trim() || null,
           updated_at: serverTimestamp(),
         },
         { merge: true }
       );
+      // Sincronizar cliente y objetivo a todos los canales de esta NVR (los canales pertenecen a la NVR)
+      const routesSnap = await getDocs(query(collection(db, 'camera_routes'), where('nvr_serial', '==', selectedNvrId)));
+      for (const d of routesSnap.docs) {
+        await updateDoc(d.ref, { client_id: clientId, objective_id: objectiveId });
+      }
+      if (routesSnap.size > 0) {
+        toast.success(`Parámetros del NVR guardados. ${routesSnap.size} canal(es) actualizados con el mismo cliente y objetivo.`);
+      } else {
+        toast.success('Parámetros del NVR guardados.');
+      }
       setNvrForm((f) => ({ ...f, alert_retention_days: String(days), channel_count: String(chCount) }));
-      toast.success('Parámetros del NVR guardados.');
     } catch (e) {
       console.error(e);
       toast.error('Error al guardar');
@@ -570,7 +616,7 @@ function CameraRoutesPage() {
   return (
     <>
       <Head>
-        <title>Cámaras NVR · CronoApp</title>
+        <title>NVR | Servidor · CronoApp</title>
       </Head>
       <DashboardLayout>
         <div className="space-y-6">
@@ -579,9 +625,9 @@ function CameraRoutesPage() {
               <Camera className="text-indigo-600 dark:text-indigo-400" size={28} />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-slate-800 dark:text-white">NVR y canales</h1>
+              <h1 className="text-xl font-black text-slate-800 dark:text-white">NVR | Servidor</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Lo que conectamos son <strong>NVRs</strong> (número de serie); cada NVR tiene canales que son las cámaras. Asigná cliente y objetivo por NVR; por canal: nombre, posición y horario.
+                Cada <strong>NVR</strong> tiene cliente y objetivo; al hacer clic en un NVR ves sus canales y la configuración.
               </p>
             </div>
           </div>
@@ -594,16 +640,19 @@ function CameraRoutesPage() {
             </h3>
             <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-2 list-disc list-inside">
               <li>
-                <strong>Agregar NVR:</strong> Usá &quot;Agregar NVR&quot; con el <strong>número de serie</strong> del equipo (ej. 17589859), cantidad de canales (ej. 16), cliente y objetivo. Se crean los canales 1 a N para ese NVR. En la URL del webhook configurá <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">?nvrId=17589859</code> (o el serial) para que las alertas se asocien a ese NVR.
+                <strong>Alta desde agente (recomendado):</strong> Si tenés el <strong>agente</strong> en la PC que monitorea el NVR, usá el script <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">registrar-nvr.ps1</code> (o la API <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">nvrOnboard</code>) con el <strong>token de registro</strong> (Firestore <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">nvr_config/registration</code>), número de serie, IP, cliente y objetivo. La plataforma crea la NVR y todos los canales con ese cliente/objetivo y devuelve un <strong>agent_secret</strong> para el agente. Así las alertas y el &quot;Ver en vivo&quot; (incluso por túnel si el agente está en otra red) quedan asociados a esta NVR. Ver <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">PASO-A-PASO-CONEXION-Y-VIVO.md</code> en el repo.
               </li>
               <li>
-                <strong>Automático:</strong> Si llega una alerta de un NVR/canal aún no registrado, se crea el canal (id <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">SERIAL__CANAL</code>) y el registro del NVR. Configurá en el dispositivo la URL con el número de serie si lo permite.
+                <strong>Agregar NVR (manual):</strong> Usá el botón &quot;Agregar NVR&quot; con el <strong>número de serie</strong>, cantidad de canales, cliente y objetivo. Se crean los canales 1 a N para ese NVR. En la URL del webhook del agente/N8N configurá el mismo <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">nvrId</code> para que las alertas se asocien.
               </li>
               <li>
-                <strong>Por canal:</strong> Editá cada canal para poner <strong>nombre de cámara</strong>, <strong>posición/clasificación</strong>, grupo de alertas y horario. La posición sirve para reportes (ej. Entrada, Perimetral).
+                <strong>Automático:</strong> Si llega una alerta de un NVR/canal aún no registrado, se crea el canal (id <code className="bg-slate-200 dark:bg-slate-600 px-1 rounded font-mono text-xs">SERIAL__CANAL</code>) y el registro del NVR. Después asigná cliente y objetivo desde acá (clic en la NVR).
               </li>
               <li>
-                <strong>Retención:</strong> En cada NVR (al hacer clic en la tarjeta) definís cuántos días se guardan las imágenes de las alertas de ese NVR; después se borran y solo queda el informe del evento.
+                <strong>Por canal:</strong> En el modal del NVR (clic en la tarjeta o fila) editá cada canal: <strong>nombre de cámara</strong>, <strong>posición</strong>, grupo de alertas y horario. La posición sirve para reportes (ej. Entrada, Perimetral).
+              </li>
+              <li>
+                <strong>Retención:</strong> En cada NVR (clic en la tarjeta o fila) definís cuántos días se guardan las imágenes de las alertas; después se borran y solo queda el informe del evento.
               </li>
             </ul>
             <div className="mt-4 flex flex-wrap gap-3">
@@ -696,11 +745,19 @@ function CameraRoutesPage() {
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-3">
               <span className="text-sm font-bold text-slate-600 dark:text-slate-300">Vista:</span>
               <div className="flex rounded-xl bg-slate-100 dark:bg-slate-700/50 p-1 gap-1">
-                <button type="button" onClick={() => setViewMode('cards')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1 ${viewMode === 'cards' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`}><Layers size={14} /> Tarjetas</button>
-                <button type="button" onClick={() => setViewMode('flat')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${viewMode === 'flat' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`}>Tabla</button>
-                <button type="button" onClick={() => setViewMode('byNvr')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1 ${viewMode === 'byNvr' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`}>Por NVR</button>
-                <button type="button" onClick={() => setViewMode('byObjective')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1 ${viewMode === 'byObjective' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`}><MapPin size={14} /> Por objetivo</button>
+                <button type="button" onClick={() => setViewMode('cards')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1 ${viewMode === 'cards' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`} title="Tarjetas por NVR; clic para ver canales"><Layers size={14} /> Tarjetas</button>
+                <button type="button" onClick={() => setViewMode('table')} className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${viewMode === 'table' ? 'bg-white dark:bg-slate-600 shadow text-indigo-600 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800'}`} title="Tabla; agrupación debajo">Tabla</button>
               </div>
+              {viewMode === 'table' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Agrupar por:</span>
+                  <div className="flex rounded-lg bg-slate-100 dark:bg-slate-700/50 p-0.5 gap-0.5">
+                    <button type="button" onClick={() => setTableGroupBy('byNvr')} className={`px-2 py-1 rounded text-xs font-medium ${tableGroupBy === 'byNvr' ? 'bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-300' : 'text-slate-500 hover:text-slate-700'}`}>NVR</button>
+                    <button type="button" onClick={() => setTableGroupBy('byObjective')} className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${tableGroupBy === 'byObjective' ? 'bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-300' : 'text-slate-500 hover:text-slate-700'}`}><MapPin size={12} /> Objetivo</button>
+                    <button type="button" onClick={() => setTableGroupBy('flat')} className={`px-2 py-1 rounded text-xs font-medium ${tableGroupBy === 'flat' ? 'bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-300' : 'text-slate-500 hover:text-slate-700'}`}>Lista plana</button>
+                  </div>
+                </div>
+              )}
               <select value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm">
                 <option value="">Todos los clientes</option>
                 {clients.map((c) => (
@@ -709,9 +766,14 @@ function CameraRoutesPage() {
               </select>
               <div className="relative flex-1 min-w-[180px]">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Buscar por nombre, ruta, objetivo..." className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm" />
+                <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Buscar NVR, canal, objetivo..." className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm" />
               </div>
-              <span className="text-xs text-slate-500">{viewMode === 'cards' ? nvrListForCards.length + ' NVR' + (nvrListForCards.length !== 1 ? 's' : '') : filteredRoutes.length + ' canal' + (filteredRoutes.length !== 1 ? 'es' : '')}</span>
+              <span className="text-xs text-slate-500">
+                {viewMode === 'cards' && nvrListForCards.length + ' NVR' + (nvrListForCards.length !== 1 ? 's' : '')}
+                {viewMode === 'table' && tableGroupBy === 'byNvr' && groupedByNvr.length + ' NVR' + (groupedByNvr.length !== 1 ? 's' : '')}
+                {viewMode === 'table' && tableGroupBy === 'byObjective' && groupedByObjective.length + ' objetivo' + (groupedByObjective.length !== 1 ? 's' : '')}
+                {viewMode === 'table' && tableGroupBy === 'flat' && groupedByNvr.length + ' NVR' + (groupedByNvr.length !== 1 ? 's' : '')}
+              </span>
             </div>
             {viewMode === 'cards' && (
               <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -774,92 +836,139 @@ function CameraRoutesPage() {
                       </td>
                     </tr>
                   )}
-                  {viewMode === 'flat' && filteredRoutes.map((r) => (
-                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getNvrId(r)}</td>
-                      <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getChannelFromId(r)}</td>
-                      <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">{r.id}</td>
-                      <td className="px-4 py-3 text-slate-800 dark:text-white">{r.camera_name || '—'}</td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).position || '—'}</td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).alert_group_id || '—'}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getClientName(r.objective_id)}</td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getObjectiveName(r.objective_id)}</td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{r.post_id || '—'}</td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{formatScheduleSummary(r)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${r.enabled !== false ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200' : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300'}`}>{r.enabled !== false ? 'Activa' : 'Desactivada'}</span>
-                      </td>
-                      <td className="px-4 py-3 flex items-center gap-1">
-                        <button type="button" onClick={() => openEdit(r)} className="p-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400" title="Editar"><Edit2 size={18} /></button>
-                        <button type="button" onClick={() => handleDeleteRoute(r.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400" title="Eliminar esta ruta"><Trash2 size={18} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {viewMode === 'byNvr' && groupedByNvr.map(([nvrId, nvrRoutes]) => {
+                  {tableGroupBy === 'flat' && groupedByNvr.map(([nvrId, nvrRoutes]) => {
                     const nvrMeta = nvrDevices.find((n) => n.id === nvrId);
+                    const device = nvrDevices.find((n) => n.id === nvrId);
+                    const clientName = device?.client_id ? (clients.find((c) => c.id === device.client_id)?.name || clients.find((c) => c.id === device.client_id)?.fantasyName) : getClientName(nvrRoutes[0]?.objective_id);
+                    const objectiveName = device?.objective_id ? getObjectiveName(device.objective_id) : getObjectiveName(nvrRoutes[0]?.objective_id);
                     return (
-                    <React.Fragment key={nvrId}>
-                      <tr className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600">
-                        <td colSpan={12} className="px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200">
-                          NVR <span className="font-mono">{nvrId}</span>
-                          {nvrMeta?.channel_count != null && <span className="text-slate-500 font-normal"> ({nvrMeta.channel_count} canales)</span>}
-                          — {nvrRoutes.length} canal{nvrRoutes.length !== 1 ? 'es' : ''} configurado{nvrRoutes.length !== 1 ? 's' : ''}
+                      <tr
+                        key={nvrId}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedNvrId(nvrId)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedNvrId(nvrId); } }}
+                        className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-600 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                      >
+                        <td colSpan={12} className="px-4 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200">
+                          <span className="flex items-center gap-2">
+                            <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                            <Camera size={16} className="text-indigo-500 shrink-0" />
+                            NVR <span className="font-mono text-indigo-600 dark:text-indigo-400">{nvrId}</span>
+                            <span className="text-slate-500 font-normal text-xs">— {clientName} · {objectiveName}</span>
+                            {nvrMeta?.channel_count != null && <span className="text-slate-400 font-normal">({nvrRoutes.length}/{nvrMeta.channel_count} canales)</span>}
+                          </span>
+                          <span className="block text-xs font-normal text-slate-500 mt-0.5 pl-6">Clic para ver canales y configurar</span>
                         </td>
                       </tr>
-                      {nvrRoutes.map((r) => (
-                        <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getNvrId(r)}</td>
-                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getChannelFromId(r)}</td>
-                          <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">{r.id}</td>
-                          <td className="px-4 py-3 text-slate-800 dark:text-white">{r.camera_name || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).position || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).alert_group_id || '—'}</td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getClientName(r.objective_id)}</td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getObjectiveName(r.objective_id)}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{r.post_id || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{formatScheduleSummary(r)}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${r.enabled !== false ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200' : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300'}`}>{r.enabled !== false ? 'Activa' : 'Desactivada'}</span>
-                          </td>
-                          <td className="px-4 py-3 flex items-center gap-1">
-                            <button type="button" onClick={() => openEdit(r)} className="p-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400" title="Editar"><Edit2 size={18} /></button>
-                            <button type="button" onClick={() => handleDeleteRoute(r.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400" title="Eliminar esta ruta"><Trash2 size={18} /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
                     );
                   })}
-                  {viewMode === 'byObjective' && groupedByObjective.map(([key, { name, routes: objRoutes }]) => (
-                    <React.Fragment key={key}>
-                      <tr className="bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-800/50">
-                        <td colSpan={12} className="px-4 py-2 text-sm font-bold text-indigo-800 dark:text-indigo-200">
-                          Objetivo: {name} — {objRoutes.length} cámara{objRoutes.length !== 1 ? 's' : ''}
+                  {tableGroupBy === 'byNvr' && groupedByNvr.map(([nvrId, nvrRoutes]) => {
+                    const nvrMeta = nvrDevices.find((n) => n.id === nvrId);
+                    const device = nvrDevices.find((n) => n.id === nvrId);
+                    const clientName = device?.client_id ? (clients.find((c) => c.id === device.client_id)?.name || clients.find((c) => c.id === device.client_id)?.fantasyName) : getClientName(nvrRoutes[0]?.objective_id);
+                    const objectiveName = device?.objective_id ? getObjectiveName(device.objective_id) : getObjectiveName(nvrRoutes[0]?.objective_id);
+                    return (
+                      <tr
+                        key={nvrId}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedNvrId(nvrId)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedNvrId(nvrId); } }}
+                        className="bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                      >
+                        <td colSpan={12} className="px-4 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200">
+                          <span className="flex items-center gap-2">
+                            <Camera size={16} className="text-indigo-500 shrink-0" />
+                            NVR <span className="font-mono text-indigo-600 dark:text-indigo-400">{nvrId}</span>
+                            <span className="text-slate-500 font-normal text-xs">— {clientName} · {objectiveName}</span>
+                            {nvrMeta?.channel_count != null && <span className="text-slate-400 font-normal">({nvrRoutes.length}/{nvrMeta.channel_count} canales)</span>}
+                          </span>
+                          <span className="block text-xs font-normal text-slate-500 mt-0.5">Clic para ver canales y configurar</span>
                         </td>
                       </tr>
-                      {objRoutes.map((r) => (
-                        <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getNvrId(r)}</td>
-                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{getChannelFromId(r)}</td>
-                          <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300">{r.id}</td>
-                          <td className="px-4 py-3 text-slate-800 dark:text-white">{r.camera_name || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).position || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{(r as any).alert_group_id || '—'}</td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getClientName(r.objective_id)}</td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{getObjectiveName(r.objective_id)}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{r.post_id || '—'}</td>
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{formatScheduleSummary(r)}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${r.enabled !== false ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200' : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300'}`}>{r.enabled !== false ? 'Activa' : 'Desactivada'}</span>
-                          </td>
-                          <td className="px-4 py-3 flex items-center gap-1">
-                            <button type="button" onClick={() => openEdit(r)} className="p-2 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400" title="Editar"><Edit2 size={18} /></button>
-                            <button type="button" onClick={() => handleDeleteRoute(r.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400" title="Eliminar esta ruta"><Trash2 size={18} /></button>
+                    );
+                  })}
+                  {tableGroupBy === 'byObjective' && groupedByObjective.map(([key, { name, routes: objRoutes }]) => {
+                    const isObjExpanded = expandedObjectiveKey === key;
+                    const byNvr: Record<string, CameraRoute[]> = {};
+                    objRoutes.forEach((r) => {
+                      const nvrId = getNvrId(r) || 'sin-nvr';
+                      if (!byNvr[nvrId]) byNvr[nvrId] = [];
+                      byNvr[nvrId].push(r);
+                    });
+                    const nvrsUnderObjective = Object.entries(byNvr).sort((a, b) => a[0].localeCompare(b[0]));
+                    return (
+                      <React.Fragment key={key}>
+                        <tr
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => { setExpandedObjectiveKey((prev) => (prev === key ? null : key)); setExpandedNvrUnderObjective(null); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedObjectiveKey((prev) => (prev === key ? null : key)); setExpandedNvrUnderObjective(null); } }}
+                          className="bg-indigo-50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-800/50 cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors"
+                        >
+                          <td colSpan={12} className="px-4 py-2 text-sm font-bold text-indigo-800 dark:text-indigo-200">
+                            <span className="flex items-center gap-2">
+                              {isObjExpanded ? <ChevronDown size={18} className="shrink-0 text-indigo-600" /> : <ChevronRight size={18} className="shrink-0 text-indigo-600" />}
+                              <MapPin size={16} className="shrink-0" />
+                              Objetivo: {name} — {nvrsUnderObjective.length} NVR{nvrsUnderObjective.length !== 1 ? 's' : ''}, {objRoutes.length} cámara{objRoutes.length !== 1 ? 's' : ''}
+                            </span>
+                            <span className="block text-xs font-normal text-slate-500 mt-0.5 pl-6">{isObjExpanded ? 'Clic para ocultar' : 'Clic para ver NVRs'}</span>
                           </td>
                         </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
+                        {isObjExpanded && nvrsUnderObjective.map(([nvrId, nvrChannels]) => {
+                          const nvrExpandKey = `${key}__${nvrId}`;
+                          const isNvrExpanded = expandedNvrUnderObjective === nvrExpandKey;
+                          const device = nvrDevices.find((n) => n.id === nvrId);
+                          const clientName = device?.client_id ? (clients.find((c) => c.id === device.client_id)?.name || clients.find((c) => c.id === device.client_id)?.fantasyName) : getClientName(nvrChannels[0]?.objective_id);
+                          return (
+                            <React.Fragment key={nvrExpandKey}>
+                              <tr
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => { e.stopPropagation(); setExpandedNvrUnderObjective((prev) => (prev === nvrExpandKey ? null : nvrExpandKey)); }}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setExpandedNvrUnderObjective((prev) => (prev === nvrExpandKey ? null : nvrExpandKey)); } }}
+                                className="bg-slate-100 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-600 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors"
+                              >
+                                <td colSpan={12} className="px-4 py-2 pl-10 text-sm font-medium text-slate-700 dark:text-slate-200">
+                                  <span className="flex items-center gap-2">
+                                    {isNvrExpanded ? <ChevronDown size={16} className="shrink-0 text-slate-500" /> : <ChevronRight size={16} className="shrink-0 text-slate-500" />}
+                                    <Camera size={14} className="text-indigo-500 shrink-0" />
+                                    NVR <span className="font-mono text-indigo-600 dark:text-indigo-400">{nvrId}</span>
+                                    <span className="text-slate-500 font-normal text-xs">— {clientName}</span>
+                                    <span className="text-slate-400 text-xs">({nvrChannels.length} canales)</span>
+                                  </span>
+                                  <span className="block text-xs font-normal text-slate-500 mt-0.5 pl-6">{isNvrExpanded ? 'Clic para ocultar canales' : 'Clic para ver canales'}</span>
+                                </td>
+                              </tr>
+                              {isNvrExpanded && nvrChannels.map((r) => (
+                                <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 bg-white dark:bg-slate-800/40">
+                                  <td className="px-4 py-2 pl-14 font-mono text-slate-600 dark:text-slate-400 text-xs">{getNvrId(r)}</td>
+                                  <td className="px-4 py-2 font-mono text-slate-600 dark:text-slate-400 text-xs">{getChannelFromId(r)}</td>
+                                  <td className="px-4 py-2 font-mono text-slate-700 dark:text-slate-300 text-xs">{r.id}</td>
+                                  <td className="px-4 py-2 text-slate-800 dark:text-white text-xs">{r.camera_name || '—'}</td>
+                                  <td className="px-4 py-2 text-slate-500 dark:text-slate-400 text-xs">{(r as any).position || '—'}</td>
+                                  <td className="px-4 py-2 text-slate-500 dark:text-slate-400 text-xs">{(r as any).alert_group_id || '—'}</td>
+                                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300 text-xs">{getClientName(r.objective_id)}</td>
+                                  <td className="px-4 py-2 text-slate-600 dark:text-slate-300 text-xs">{getObjectiveName(r.objective_id)}</td>
+                                  <td className="px-4 py-2 text-slate-500 dark:text-slate-400 text-xs">{r.post_id || '—'}</td>
+                                  <td className="px-4 py-2 text-slate-500 dark:text-slate-400 text-xs">{formatScheduleSummary(r)}</td>
+                                  <td className="px-4 py-2">
+                                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${r.enabled !== false ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200' : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300'}`}>{r.enabled !== false ? 'Activa' : 'Desactivada'}</span>
+                                  </td>
+                                  <td className="px-4 py-2 flex items-center gap-1">
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedNvrId(nvrId); }} className="p-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400" title="Abrir NVR"> <Camera size={14} /></button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(r); }} className="p-1.5 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400" title="Editar"><Edit2 size={14} /></button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteRoute(r.id); }} className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400" title="Eliminar"><Trash2 size={14} /></button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                   </tbody>
               </table>
             </div>
@@ -954,6 +1063,28 @@ function CameraRoutesPage() {
                       </div>
                     </div>
                   )}
+                </div>
+                <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20">
+                  <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">Conexión para video en vivo</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Al hacer clic en &quot;Ver en vivo&quot; en una alerta de este NVR, se usan estos datos para conectar al reproductor. Misma red que el NVR.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">IP del NVR</label>
+                      <input type="text" value={nvrForm.stream_ip} onChange={(e) => setNvrForm((f) => ({ ...f, stream_ip: e.target.value }))} placeholder="192.168.0.102" className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Puerto</label>
+                      <input type="text" value={nvrForm.stream_port} onChange={(e) => setNvrForm((f) => ({ ...f, stream_port: e.target.value }))} placeholder="80" className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Usuario</label>
+                      <input type="text" value={nvrForm.stream_user} onChange={(e) => setNvrForm((f) => ({ ...f, stream_user: e.target.value }))} placeholder="admin" className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Contraseña</label>
+                      <input type="password" value={nvrForm.stream_password} onChange={(e) => setNvrForm((f) => ({ ...f, stream_password: e.target.value }))} placeholder="••••••••" autoComplete="off" className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm" />
+                    </div>
+                  </div>
                 </div>
                 <button type="button" onClick={handleSaveNvrParams} disabled={nvrSaving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl text-sm">Guardar parámetros del NVR</button>
 

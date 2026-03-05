@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredNvrAlerts = exports.simulateNvrAlert = exports.onAlertCreated = exports.nvrWebhookTest = exports.nvrAlert = exports.nvrAlertV2 = exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.cleanupExpiredNvrAlerts = exports.simulateNvrAlert = exports.onAlertCreated = exports.nvrWebhookTest = exports.nvrOnboard = exports.nvrAgentEvents = exports.nvrAlert = exports.nvrAlertV2 = exports.reportarAusencia = exports.registrarFichadaManual = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const main_1 = require("./main");
@@ -479,6 +479,10 @@ Object.defineProperty(exports, "nvrAlertV2", { enumerable: true, get: function (
 exports.nvrAlert = functions.region('us-central1').https.onRequest((req, res) => {
     res.status(410).setHeader('X-NVR-Deprecated', 'Use nvrAlertV2').send(JSON.stringify({ error: 'Deprecated', use: 'nvrAlertV2' }));
 });
+var nvrAgentEvents_1 = require("./nvr/nvrAgentEvents");
+Object.defineProperty(exports, "nvrAgentEvents", { enumerable: true, get: function () { return nvrAgentEvents_1.nvrAgentEvents; } });
+var nvrOnboard_1 = require("./nvr/nvrOnboard");
+Object.defineProperty(exports, "nvrOnboard", { enumerable: true, get: function () { return nvrOnboard_1.nvrOnboard; } });
 var nvrWebhookTest_1 = require("./nvr/nvrWebhookTest");
 Object.defineProperty(exports, "nvrWebhookTest", { enumerable: true, get: function () { return nvrWebhookTest_1.nvrWebhookTest; } });
 var onAlertCreated_1 = require("./nvr/onAlertCreated");

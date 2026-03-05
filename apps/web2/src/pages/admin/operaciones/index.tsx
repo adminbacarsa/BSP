@@ -2,12 +2,13 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import Link from 'next/link';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield, 
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer, 
     Phone, MessageCircle, Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, 
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft, 
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight 
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, Video 
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -19,6 +20,7 @@ import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { playAlertSiren } from '@/utils/alertSiren';
+import { useSetPageHeader } from '@/context/PageHeaderContext';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 
@@ -65,7 +67,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onAudit }: any) 
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (diffMin > 5) status = 'LATE';
     const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
-    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } const prevGuard = activeGuards.find((s: any) => s.id === prevShiftId); const details = prevShiftId && prevGuard ? `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName}), relevó a ${prevGuard.employeeName}` : `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName})`; if (onAudit) onAudit(status === 'LATE' ? 'Ingreso tarde' : 'Ingreso / Presente', details, { objectiveName: incomingShift.objectiveName, clientName: incomingShift.clientName }); toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
+    const handleConfirm = async (prevShiftId: string | null) => { try { await updateDoc(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', checkInTime: serverTimestamp(), isLate: status === 'LATE', coveragePendingArrival: false, resolvedBy: 'OPERACIONES' }); if (prevShiftId) { await updateDoc(doc(db, 'turnos', prevShiftId), { checkOutTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' }); } const prevGuard = activeGuards.find((s: any) => s.id === prevShiftId); const details = prevShiftId && prevGuard ? `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName}), relevó a ${prevGuard.employeeName}` : `Ingreso de ${incomingShift.employeeName} en ${incomingShift.objectiveName} (${incomingShift.positionName})`; if (onAudit) onAudit(status === 'LATE' ? 'Ingreso tarde' : 'Ingreso / Presente', details, { objectiveName: incomingShift.objectiveName, clientName: incomingShift.clientName }); toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.'); onClose(); } catch (e) { toast.error("Error al procesar relevo."); } };
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95"> <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
 };
 
@@ -86,6 +88,8 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
     if (!alertsGroup || alertsGroup.length === 0) return null;
     const isGroup = alertsGroup.length > 1;
     const firstAlert = alertsGroup[0];
+    const isAgentOffline = firstAlert?.event_type === 'AGENT_OFFLINE';
+    const groupLabel = isAgentOffline ? 'señales' : 'cámaras';
     const formatAlertTime = (ts: any) => {
         if (!ts) return '—';
         try {
@@ -140,7 +144,7 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                         {queueIndex != null && pendingCount != null && pendingCount > 0 && (
                             <span className="text-rose-200 font-bold bg-rose-500/30 px-2 py-0.5 rounded">Evento {queueIndex} de {pendingCount} en cola</span>
                         )}
-                        {isGroup && <span className="text-rose-200 font-normal"> ({alertsGroup.length} cámaras)</span>}
+                        {isGroup && <span className="text-rose-200 font-normal"> ({alertsGroup.length} {groupLabel})</span>}
                         {totalImages > 1 && !isGroup && <span className="text-rose-200 font-normal"> ({totalImages} imágenes)</span>}
                     </h3>
                     {onMinimize && <button type="button" onClick={onMinimize} className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-sm font-bold uppercase">Minimizar</button>}
@@ -148,10 +152,10 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                 <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
                     {isGroup && (
                         <div className="flex flex-wrap gap-2">
-                            <span className="text-xs font-bold text-slate-500 uppercase self-center">Cámara:</span>
+                            <span className="text-xs font-bold text-slate-500 uppercase self-center">{isAgentOffline ? 'Señal:' : 'Cámara:'}</span>
                             {alertsGroup.map((a: any, idx: number) => (
                                 <button key={a.id} type="button" onClick={() => setSelectedCamIdx(idx)} className={`px-3 py-1.5 rounded-xl text-sm font-bold transition-all ${selectedCamIdx === idx ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                                    {a.source_camera_name || a.camera_name || a.route_key || `Cámara ${idx + 1}`}
+                                    {a.source_camera_name || a.camera_name || a.route_key || (isAgentOffline ? `Señal ${idx + 1}` : `Cámara ${idx + 1}`)}
                                 </button>
                             ))}
                         </div>
@@ -188,13 +192,26 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
                                     <div><dt className="text-slate-500 inline">Cámara: </dt><dd className="font-bold text-slate-800 inline">{displayCameraName}</dd></div>
                                     {selectedAlert.source_camera_name && selectedAlert.camera_name && selectedAlert.source_camera_name !== selectedAlert.camera_name && <div><dt className="text-slate-500 inline">Nombre en panel: </dt><dd className="text-slate-600 inline">{selectedAlert.camera_name}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Ruta (NVR__canal): </dt><dd className="font-mono text-slate-700 inline">{selectedAlert.route_key || '—'}</dd></div>
+                                    {selectedAlert.route_key && selectedAlert.event_type !== 'AGENT_OFFLINE' && (() => {
+                                        const parts = (selectedAlert.route_key || '').split('__');
+                                        const nvrId = parts[0]?.trim() || '';
+                                        const ch = parts[1]?.trim() || '1';
+                                        if (!nvrId) return null;
+                                        return (
+                                            <div className="mt-2">
+                                                <Link href={`/admin/operaciones/vivo?nvrId=${encodeURIComponent(nvrId)}&channel=${encodeURIComponent(ch)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold">
+                                                    <Video size={16} /> Ver canal en vivo
+                                                </Link>
+                                            </div>
+                                        );
+                                    })()}
                                     {clientName && <div><dt className="text-slate-500 inline">Cliente: </dt><dd className="font-bold text-slate-800 inline">{clientName}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Objetivo: </dt><dd className="font-bold text-slate-800 inline">{objectiveName || selectedAlert.objective_id || 'Sin asignar'}</dd></div>
                                     {selectedAlert.post_id && <div><dt className="text-slate-500 inline">Puesto: </dt><dd className="text-slate-700 inline">{selectedAlert.post_id}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Tipo evento: </dt><dd className="text-slate-700 inline">{selectedAlert.event_type || '—'}</dd></div>
                                     {selectedAlert.object_type && <div><dt className="text-slate-500 inline">Tipo objeto: </dt><dd className="text-slate-700 inline capitalize">{selectedAlert.object_type}</dd></div>}
                                     <div><dt className="text-slate-500 inline">Hora del evento: </dt><dd className="text-slate-700 inline font-medium">{formatAlertTime(selectedAlert.timestamp)}</dd></div>
-                                    {isGroup && <div><dt className="text-slate-500 inline">Cámaras en este evento: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
+                                    {isGroup && <div><dt className="text-slate-500 inline">{isAgentOffline ? 'Señales agrupadas' : 'Cámaras en este evento'}: </dt><dd className="text-slate-700 inline">{alertsGroup.length}</dd></div>}
                                 </dl>
                                 <p className="text-[10px] text-slate-500 mt-2 border-t border-slate-100 pt-2">Usá el ID de evento en bitácora y reportes. Al confirmar se aplica a todas las cámaras del grupo.</p>
                             </div>
@@ -222,18 +239,64 @@ const NvrAlertTreatmentModal = ({ alertsGroup, pendingCount, queueIndex, objecti
     );
 };
 
-// Barra flotante cuando el modal está minimizado (esperando resolución del guardia)
-const NvrAlertMinimizedBar = ({ pendingCount, onExpand }: { pendingCount: number; onExpand: () => void }) => (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9998] bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-rose-400 animate-in slide-in-from-bottom-2">
-        <Siren size={24} className="shrink-0" />
-        <span className="font-bold">
-            {pendingCount === 1 ? '1 evento en cola — terminá este para continuar' : `${pendingCount} eventos en cola — Evento 1 de ${pendingCount} pendiente`}
-        </span>
-        <button type="button" onClick={onExpand} className="px-4 py-2 bg-white text-rose-700 rounded-xl font-black text-sm hover:bg-rose-50">
-            Abrir
-        </button>
-    </div>
-);
+// Panel de alertas NVR: listado con acciones rápidas (Visto / Falso +) y opción Detalle para abrir modal
+const NvrAlertsPanel = ({
+    eventGroups,
+    onResolve,
+    onOpenDetail,
+    formatTime,
+}: {
+    eventGroups: { alerts: any[] }[];
+    onResolve: (alerts: any[], resolutionType: string, notes: string) => Promise<void>;
+    onOpenDetail: (groupIndex: number) => void;
+    formatTime: (ts: any) => string;
+}) => {
+    const [loadingIdx, setLoadingIdx] = useState<number | null>(null);
+    const handleQuick = async (groupIndex: number, resolutionType: string) => {
+        const alerts = eventGroups[groupIndex]?.alerts ?? [];
+        if (alerts.length === 0) return;
+        setLoadingIdx(groupIndex);
+        try {
+            await onResolve(alerts, resolutionType, '');
+        } finally {
+            setLoadingIdx(null);
+        }
+    };
+    if (eventGroups.length === 0) return null;
+    return (
+        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50/80 overflow-hidden">
+            <div className="px-3 py-2 border-b border-rose-200 flex items-center justify-between bg-rose-100/80">
+                <span className="text-[10px] font-black uppercase text-rose-700 flex items-center gap-2">
+                    <Siren size={14} className="animate-pulse" /> Alertas NVR pendientes ({eventGroups.length})
+                </span>
+            </div>
+            <div className="max-h-44 overflow-y-auto p-2 space-y-2">
+                {eventGroups.map((grp, idx) => {
+                    const first = grp.alerts[0];
+                    const name = first?.source_camera_name || first?.camera_name || first?.route_key || first?.nvr_id || '—';
+                    const eventType = first?.event_type || 'Alerta';
+                    const ts = first?.timestamp;
+                    const loading = loadingIdx === idx;
+                    return (
+                        <div key={idx} className="flex flex-wrap items-center gap-2 p-2 bg-white rounded-lg border border-rose-100 shadow-sm">
+                            <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-slate-800 truncate">{name}</div>
+                                <div className="text-[10px] text-slate-500">{eventType} · {formatTime(ts)}</div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                                <button type="button" onClick={() => handleQuick(idx, 'acknowledged')} disabled={loading} className="px-2 py-1.5 bg-emerald-600 text-white text-[10px] font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50">Visto</button>
+                                <button type="button" onClick={() => handleQuick(idx, 'falso_positivo')} disabled={loading} className="px-2 py-1.5 bg-slate-600 text-white text-[10px] font-bold rounded-lg hover:bg-slate-700 disabled:opacity-50">Falso +</button>
+                                <button type="button" onClick={() => onOpenDetail(idx)} className="px-2 py-1.5 bg-rose-600 text-white text-[10px] font-bold rounded-lg hover:bg-rose-700 flex items-center gap-1">
+                                    <Video size={12} /> Detalle
+                                </button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
 
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated, onAudit }: any) => {
     if (!isOpen || !shift) return null;
@@ -400,18 +463,20 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         setLoading(true);
         try {
             const realId = await ensureRealShiftId();
+            // No marcar como resuelto: va a "Aún no llegó" con 30 min para dar presente; si no marca, vuelve a Prioridad (falla de programación, no ausencia).
             await updateDoc(doc(db, 'turnos', realId), {
                 employeeId: emp.id,
                 employeeName: emp.fullName || emp.employeeName,
                 isUnassigned: false,
                 status: 'PENDING',
                 assignmentType: type,
-                resolvedBy: 'OPERACIONES',
                 origin: 'OPERATIONS_COVERAGE',
+                coveragePendingArrival: true,
+                coverageAssignedAt: serverTimestamp(),
             });
             const typeLabel = type === 'RETENTION' ? 'Retención/Doble turno' : type === 'SWAP' ? 'Intercambio' : type === 'LIBRE' ? 'Libre/Volante' : type === 'VOLANTE' ? 'Volante' : type;
-            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
-            toast.success(`Asignado: ${emp.fullName || emp.employeeName}`);
+            if (onAudit) onAudit('Cobertura asignada', `${emp.fullName || emp.employeeName} en ${absenceShift.objectiveName} (${absenceShift.positionName}) - ${typeLabel}. Pendiente de llegada (30 min).`, { objectiveName: absenceShift.objectiveName, clientName: absenceShift.clientName });
+            toast.success(`${emp.fullName || emp.employeeName} asignado. Debe marcar presente en 30 min (Aún no llegó).`);
             onClose();
         } catch (e) {
             toast.error('Error al asignar');
@@ -806,7 +871,14 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
 export default function OperacionesPage() {
     const logic = useOperacionesMonitor();
     // Bitácora: solo acciones del operador (módulo OPERACIONES), sin planificación ni otros módulos
-    const bitacoraLogs = useMemo(() => (logic.recentLogs || []).filter((l: any) => String(l.module || '').toUpperCase() === 'OPERACIONES'), [logic.recentLogs]);
+    // Bitácora sin alertas NVR (esas van solo a Log resoluciones NVR para no saturar)
+    const bitacoraLogs = useMemo(() => {
+        const ops = (logic.recentLogs || []).filter((l: any) => String(l.module || '').toUpperCase() === 'OPERACIONES');
+        return ops.filter((l: any) => {
+            const action = String(l.action || '').toUpperCase();
+            return !action.includes('NVR') && action !== 'ALERTA NVR TRATADA';
+        });
+    }, [logic.recentLogs]);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [checkoutData, setCheckoutData] = useState({isOpen: false, shift: null} as any);
     const [attendanceData, setAttendanceData] = useState({isOpen: false, shift: null} as any);
@@ -823,6 +895,15 @@ export default function OperacionesPage() {
     const [nvrAlertsRaw, setNvrAlertsRaw] = useState<any[]>([]);
     const [cameraRoutesByKey, setCameraRoutesByKey] = useState<Record<string, { enabled?: boolean }>>({});
     const [nvrDevicesById, setNvrDevicesById] = useState<Record<string, { enabled?: boolean }>>({});
+    // Panel de control: secciones minimizables (UX). Alertas siempre prioritarias cuando hay pendientes.
+    const [panelAlertasOpen, setPanelAlertasOpen] = useState(true);
+    const [panelSolicitudesOpen, setPanelSolicitudesOpen] = useState(true);
+    const [panelBitacoraOpen, setPanelBitacoraOpen] = useState(false);
+    const [panelLogNvrOpen, setPanelLogNvrOpen] = useState(false);
+    // Sectores superiores: contraídos por defecto para no tapar mapa ni notificaciones COSP
+    const [sectorNvrOpen, setSectorNvrOpen] = useState(false);
+    const [sectorSolicitudesOpen, setSectorSolicitudesOpen] = useState(false);
+    const [sectorBitacoraOpen, setSectorBitacoraOpen] = useState(false);
     /** Eventos agrupados: mismo alert_group_id = un solo evento (array de alertas). Solo alertas cuya ruta y NVR estén activos. */
     const nvrAlerts = useMemo(() => {
         return nvrAlertsRaw.filter((a: any) => {
@@ -834,7 +915,14 @@ export default function OperacionesPage() {
         });
     }, [nvrAlertsRaw, cameraRoutesByKey, nvrDevicesById]);
     const nvrEventGroups = useMemo(() => {
-        const groupKey = (a: any) => (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+        const groupKey = (a: any) => {
+            if (a.event_type === 'AGENT_OFFLINE') {
+                const rk = (a.route_key || '').trim();
+                const nvrId = rk.includes('__') ? rk.split('__')[0] : rk || a.nvr_id || 'default';
+                return `agent_offline_${nvrId}`;
+            }
+            return (a.alert_group_id && String(a.alert_group_id).trim()) || `__single_${a.id}`;
+        };
         const groupMap = new Map<string, any[]>();
         nvrAlerts.forEach((a: any) => {
             const key = groupKey(a);
@@ -843,7 +931,23 @@ export default function OperacionesPage() {
         });
         return Array.from(groupMap.values()).map((alerts) => ({ alerts }));
     }, [nvrAlerts]);
-    const [nvrModalMinimized, setNvrModalMinimized] = useState(false);
+    // Alertas NVR se muestran en la franja superior (sector NVR)
+    const [nvrModalGroupIndex, setNvrModalGroupIndex] = useState<number | null>(null);
+    const [nvrResolutionLog, setNvrResolutionLog] = useState<any[]>([]);
+    useEffect(() => {
+        const q = query(collection(db, 'nvr_alert_resolution_log'), orderBy('timestamp', 'desc'), limit(30));
+        const unsub = onSnapshot(q, (snap) => {
+            setNvrResolutionLog(snap.docs.map((d) => ({ id: d.id, ...d.data(), time: d.data().timestamp })));
+        }, (err) => { console.error('nvr_alert_resolution_log', err); });
+        return () => unsub();
+    }, []);
+    const formatAlertTime = (ts: any) => {
+        if (!ts) return '—';
+        try {
+            const s = ts?.seconds ?? ts;
+            return new Date(typeof s === 'number' ? s * 1000 : s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch { return '—'; }
+    };
 
     const handleBitacoraResize = (colIndex: number, delta: number) => {
         setBitacoraColWidths(prev => {
@@ -883,6 +987,34 @@ export default function OperacionesPage() {
         });
         return () => unsub();
     }, []);
+
+    // Cabecera: título + marcadores en el espacio a la derecha de "Operaciones | COSP" (al clic expanden el sector correspondiente)
+    const setPageHeader = useSetPageHeader();
+    useEffect(() => {
+        setPageHeader({
+            title: 'Operaciones | COSP',
+            right: (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    <button type="button" onClick={() => setSectorNvrOpen(true)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${nvrEventGroups.length > 0 ? 'bg-rose-100 border-rose-300 text-rose-700 hover:bg-rose-200' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`} title="Ver alertas NVR">
+                        <Siren size={12} className={nvrEventGroups.length > 0 ? 'animate-pulse' : ''} />
+                        NVR <span className="min-w-[14px] text-center">{nvrEventGroups.length}</span>
+                    </button>
+                    <button type="button" onClick={() => setSectorSolicitudesOpen(true)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${solicitudes.length > 0 ? 'bg-amber-100 border-amber-300 text-amber-700 hover:bg-amber-200' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`} title="Ver solicitudes de presente">
+                        <UserCheck size={12} />
+                        Presente <span className="min-w-[14px] text-center">{solicitudes.length}</span>
+                    </button>
+                    <button type="button" onClick={() => setSectorBitacoraOpen(true)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 transition-all" title="Ver bitácora y log NVR">
+                        <ClipboardList size={12} />
+                        Bitácora <span className="min-w-[14px] text-center">{bitacoraLogs.length}</span>
+                    </button>
+                    <button type="button" onClick={() => setSectorBitacoraOpen(true)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-700 hover:bg-rose-100 transition-all" title="Ver log NVR (en Bitácora)">
+                        Log NVR <span className="min-w-[14px] text-center">{nvrResolutionLog.length}</span>
+                    </button>
+                </div>
+            ),
+        });
+        return () => setPageHeader({ title: null, right: null });
+    }, [setPageHeader, nvrEventGroups.length, solicitudes.length, bitacoraLogs.length, nvrResolutionLog.length]);
 
     // Rutas y NVRs: para filtrar alertas de cámaras/NVR desactivados
     useEffect(() => {
@@ -932,9 +1064,27 @@ export default function OperacionesPage() {
                     acknowledged_by: getAuth().currentUser?.uid ?? null,
                 });
             }
+            const first = toProcess[0];
+            const eventType = first?.event_type || 'Alerta';
+            const routeKey = (first?.route_key || '').trim();
+            const nvrId = routeKey.includes('__') ? routeKey.split('__')[0] : routeKey || first?.nvr_id || '';
+            const groupLabel = eventType === 'AGENT_OFFLINE' ? `${nvrId || 'NVR'} (AGENT_OFFLINE)` : (first?.camera_name || routeKey || first?.id || '');
             const detalle = resolutionType === 'falso_positivo' ? 'Falso positivo' : 'Visto / Atendido';
             const names = toProcess.map((a: any) => a.camera_name || a.route_key || a.id).join(', ');
-            await registrarBitacora('Alerta NVR tratada', `Operador: ${detalle}. ${names}${notes?.trim() ? '. Notas: ' + notes.trim() : ''}`, {});
+            // No escribir en bitácora: las alertas NVR solo van a nvr_alert_resolution_log para no saturar la barra lateral
+            await addDoc(collection(db, 'nvr_alert_resolution_log'), {
+                group_label: groupLabel,
+                event_type: eventType,
+                nvr_id: nvrId || null,
+                route_key: routeKey || null,
+                resolution_type: resolutionType,
+                notes: notes?.trim() || '',
+                count: toProcess.length,
+                alert_ids: toProcess.map((a: any) => a.id),
+                timestamp: serverTimestamp(),
+                operator_uid: getAuth().currentUser?.uid ?? null,
+                operator_name: getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador',
+            });
             toast.success(resolutionType === 'falso_positivo' ? 'Marcada como falso positivo' : 'Alerta marcada como tratada');
         } catch (e) {
             console.error(e);
@@ -969,7 +1119,9 @@ export default function OperacionesPage() {
                 checkInMethod: 'OPERATOR',
                 checkInOperator: getAuth().currentUser?.uid ?? null,
                 checkInCoords: data?.checkInRequestedCoords ?? null,
-                checkInRequestStatus: 'APPROVED'
+                checkInRequestStatus: 'APPROVED',
+                coveragePendingArrival: false,
+                resolvedBy: 'OPERACIONES'
             });
             await updateDoc(doc(db, 'novedades', e.id), {
                 status: 'RESUELTO',
@@ -1169,15 +1321,153 @@ export default function OperacionesPage() {
             <Head><title>COSP V184.0</title></Head>
             <style>{POPUP_STYLES}</style>
 
-            {/* Modal de tratamiento de alerta NVR: minimizable + resoluciones precargadas */}
-            {nvrModalMinimized && nvrEventGroups.length > 0 && (
-                <NvrAlertMinimizedBar pendingCount={nvrEventGroups.length} onExpand={() => setNvrModalMinimized(false)} />
-            )}
-            {firstPendingAlerts.length > 0 && !nvrModalMinimized && (
-                <NvrAlertTreatmentModal alertsGroup={firstPendingAlerts} pendingCount={nvrEventGroups.length} queueIndex={1} objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.name} clientName={logic.objectives?.find((o: any) => String(o?.id) === String(firstPendingAlerts[0]?.objective_id))?.clientName} onConfirm={handleNvrAlertTreatment} onMinimize={() => setNvrModalMinimized(true)} />
+            {nvrModalGroupIndex !== null && nvrEventGroups[nvrModalGroupIndex] && (
+                <NvrAlertTreatmentModal
+                    alertsGroup={nvrEventGroups[nvrModalGroupIndex].alerts}
+                    pendingCount={nvrEventGroups.length}
+                    queueIndex={nvrModalGroupIndex + 1}
+                    objectiveName={logic.objectives?.find((o: any) => String(o?.id) === String(nvrEventGroups[nvrModalGroupIndex].alerts[0]?.objective_id))?.name}
+                    clientName={logic.objectives?.find((o: any) => String(o?.id) === String(nvrEventGroups[nvrModalGroupIndex].alerts[0]?.objective_id))?.clientName}
+                    onConfirm={async (alertOrAlerts, resolutionType, notes) => {
+                        await handleNvrAlertTreatment(alertOrAlerts, resolutionType, notes);
+                        setNvrModalGroupIndex(null);
+                    }}
+                    onMinimize={() => setNvrModalGroupIndex(null)}
+                />
             )}
 
-            <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">
+            {/* Franja superior: 3 sectores contraídos por defecto, con marcadores de alerta; el usuario despliega al hacer clic */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2 -mt-2">
+                {/* Sector 1: Alertas NVR */}
+                <div className={`rounded-xl border overflow-hidden flex flex-col transition-all ${nvrEventGroups.length > 0 ? 'border-rose-300 bg-rose-50/90' : 'border-rose-200 bg-rose-50/60'}`} style={{ maxHeight: sectorNvrOpen ? 220 : 44 }}>
+                    <button type="button" onClick={() => setSectorNvrOpen(!sectorNvrOpen)} className="w-full px-3 py-2 flex items-center justify-between bg-rose-100/90 hover:bg-rose-100 text-left border-b border-rose-200/80">
+                        <span className="text-[10px] font-black uppercase text-rose-700 flex items-center gap-2">
+                            <Siren size={14} className={nvrEventGroups.length > 0 ? 'animate-pulse' : ''} /> Alertas NVR
+                        </span>
+                        <span className="flex items-center gap-2">
+                            <span className={`min-w-[22px] h-6 px-1.5 rounded-full text-[11px] font-black flex items-center justify-center ${nvrEventGroups.length > 0 ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{nvrEventGroups.length}</span>
+                            {sectorNvrOpen ? <ChevronUp size={16} className="text-rose-600"/> : <ChevronDown size={16} className="text-rose-600"/>}
+                        </span>
+                    </button>
+                    {sectorNvrOpen && (
+                        <div className="p-2 overflow-y-auto flex-1 min-h-0 custom-scrollbar" style={{ maxHeight: 176 }}>
+                            {nvrEventGroups.length > 0 ? (
+                                <NvrAlertsPanel eventGroups={nvrEventGroups} onResolve={handleNvrAlertTreatment} onOpenDetail={(idx) => setNvrModalGroupIndex(idx)} formatTime={formatAlertTime} />
+                            ) : (
+                                <p className="text-[10px] text-slate-500 italic">Sin alertas pendientes.</p>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {/* Sector 2: Solicitudes de Presente */}
+                <div className={`rounded-xl border overflow-hidden flex flex-col transition-all ${solicitudes.length > 0 ? 'border-amber-300 bg-amber-50/90' : 'border-amber-200 bg-amber-50/60'}`} style={{ maxHeight: sectorSolicitudesOpen ? 220 : 44 }}>
+                    <button type="button" onClick={() => setSectorSolicitudesOpen(!sectorSolicitudesOpen)} className="w-full px-3 py-2 flex items-center justify-between bg-amber-100/90 hover:bg-amber-100 text-left border-b border-amber-200/80">
+                        <span className="text-[10px] font-black uppercase text-amber-700">Solicitudes de Presente</span>
+                        <span className="flex items-center gap-2">
+                            <span className={`min-w-[22px] h-6 px-1.5 rounded-full text-[11px] font-black flex items-center justify-center ${solicitudes.length > 0 ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{solicitudes.length}</span>
+                            {sectorSolicitudesOpen ? <ChevronUp size={16} className="text-amber-600"/> : <ChevronDown size={16} className="text-amber-600"/>}
+                        </span>
+                    </button>
+                    {sectorSolicitudesOpen && (
+                        <div className="px-2 pb-2 pt-1 overflow-y-auto flex-1 min-h-0 custom-scrollbar" style={{ maxHeight: 176 }}>
+                            {solicitudes.length === 0 ? (
+                                <p className="text-[10px] text-slate-500 italic">Sin solicitudes pendientes.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {solicitudes.map((req: any) => {
+                                        const isAbsenceAlert = String(req.type || '').toUpperCase() === 'ABSENCE_ALERT';
+                                        return (
+                                            <div key={req.id} className="bg-white border rounded-lg p-2 flex items-center justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-2">
+                                                        {req.employeeName || 'Empleado'}
+                                                        {isAbsenceAlert && <span className="text-[9px] font-black text-rose-600">AUSENCIA &lt;4H</span>}
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 truncate">{req.objectiveName || 'Objetivo'} · {req.shiftId || '-'}</div>
+                                                    <div className="text-[10px] text-slate-400">Solicitud: {formatTimeSimple(req.createdAt)}</div>
+                                                </div>
+                                                <div className="flex gap-1 shrink-0">
+                                                    {isAbsenceAlert ? (
+                                                        <button onClick={() => handleAcknowledgeAbsence(req)} className="px-2 py-1 bg-slate-800 text-white text-[10px] font-black rounded">VISTO</button>
+                                                    ) : (
+                                                        <>
+                                                            <button onClick={() => handleApproveCheckIn(req)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] font-black rounded">APROBAR</button>
+                                                            <button onClick={() => handleRejectCheckIn(req)} className="px-2 py-1 bg-rose-600 text-white text-[10px] font-black rounded">RECHAZAR</button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {/* Sector 3: Bitácora + Log NVR */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden flex flex-col transition-all" style={{ maxHeight: sectorBitacoraOpen ? 220 : 44 }}>
+                    <button type="button" onClick={() => setSectorBitacoraOpen(!sectorBitacoraOpen)} className="w-full px-3 py-2 flex items-center justify-between bg-slate-100 hover:bg-slate-200 text-left border-b border-slate-200">
+                        <span className="text-[10px] font-black uppercase text-slate-700">Bitácora / Log NVR</span>
+                        <span className="flex items-center gap-2">
+                            <span className="min-w-[22px] h-6 px-1.5 rounded-full bg-slate-600 text-white text-[11px] font-black flex items-center justify-center" title="Bitácora">{bitacoraLogs.length}</span>
+                            <span className="min-w-[22px] h-6 px-1.5 rounded-full bg-rose-600 text-white text-[11px] font-black flex items-center justify-center" title="Log NVR">{nvrResolutionLog.length}</span>
+                            {sectorBitacoraOpen ? <ChevronUp size={16} className="text-slate-600"/> : <ChevronDown size={16} className="text-slate-600"/>}
+                        </span>
+                    </button>
+                    {sectorBitacoraOpen && (
+                        <div className="overflow-y-auto flex-1 min-h-0 p-1 custom-scrollbar flex gap-2" style={{ maxHeight: 176 }}>
+                            <div className="flex-1 min-w-0">
+                                <div className="text-[10px] text-slate-500 mb-1 font-bold uppercase">Bitácora ({bitacoraLogs.length})</div>
+                                <div className="overflow-x-auto" style={{ maxHeight: 72 }}>
+                                    {bitacoraLogs.length === 0 ? (
+                                        <p className="text-[10px] text-slate-400 italic">Sin movimientos recientes.</p>
+                                    ) : (
+                                        <table className="w-full text-[10px] text-left" style={{ tableLayout: 'fixed' }}>
+                                            <colgroup>{bitacoraColWidths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                                            <thead className="bg-slate-100 text-slate-400 uppercase font-bold"><tr>{['Hora', 'Evento', 'Actor', 'Objetivo', 'Detalle'].map((label, i) => <th key={i} className="px-1 py-0.5 truncate" style={{ width: bitacoraColWidths[i] }}>{label}</th>)}</tr></thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {bitacoraLogs.slice(0, 5).map((log: any) => (
+                                                    <tr key={log.id}>
+                                                        <td className="px-1 py-0.5 font-mono text-slate-400 truncate">{formatTimeSimple(log.time)}</td>
+                                                        <td className="px-1 py-0.5 font-bold truncate">{log.action}</td>
+                                                        <td className="px-1 py-0.5 truncate">{log.formattedActor}</td>
+                                                        <td className="px-1 py-0.5 text-slate-600 truncate" title={log.objectiveName || ''}>{log.objectiveName || '-'}</td>
+                                                        <td className="px-1 py-0.5 text-slate-500 truncate" title={log.fullDetail}>{log.fullDetail}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                                <button type="button" onClick={generateDailyReport} className="mt-1 p-1 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded text-[10px] font-bold flex items-center gap-1" title="Descargar PDF"><Printer size={12}/> PDF</button>
+                            </div>
+                            <div className="flex-1 min-w-0 border-l border-slate-200 pl-1">
+                                <div className="text-[10px] text-rose-700 font-bold uppercase">Log NVR ({nvrResolutionLog.length})</div>
+                                <div style={{ maxHeight: 72 }} className="overflow-y-auto">
+                                    {nvrResolutionLog.length === 0 ? (
+                                        <p className="text-[10px] text-slate-400 italic">Sin resoluciones.</p>
+                                    ) : (
+                                        <table className="w-full text-[10px] text-left">
+                                            <thead><tr className="text-slate-500 font-bold"><th className="px-1 py-0.5">Hora</th><th className="px-1 py-0.5">Grupo</th><th className="px-1 py-0.5">Resol.</th></tr></thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {nvrResolutionLog.slice(0, 4).map((entry: any) => (
+                                                    <tr key={entry.id} className="text-slate-600">
+                                                        <td className="px-1 py-0.5 font-mono whitespace-nowrap">{formatTimeSimple(entry.time)}</td>
+                                                        <td className="px-1 py-0.5 truncate max-w-[100px]" title={entry.group_label}>{entry.group_label || '-'}</td>
+                                                        <td className="px-1 py-0.5">{entry.resolution_type === 'falso_positivo' ? 'Falso+' : 'Visto'}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="h-[calc(100vh-200px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in">
                 {!isExternalMap && (
                     <div className="flex-1 lg:flex-[3] bg-slate-100 rounded-3xl border border-slate-200 overflow-hidden relative shadow-inner">
                         {/* Mapa filtra por solapa: objectivesForMap = objetivos con datos en la solapa activa; key fuerza actualización al cambiar tab */}
@@ -1204,47 +1494,13 @@ export default function OperacionesPage() {
                             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2"><Radio className="text-rose-600 animate-pulse" /> COSP V184.0</h2>
                             <div className="flex items-center gap-2">
                                 <button onClick={() => setIsGrouped(!isGrouped)} className={`px-3 py-1.5 font-bold text-xs rounded-lg border flex items-center gap-2 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700 shadow-md' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={14}/> {isGrouped ? 'AGRUPADO' : 'LISTA'}</button>
+                                <Link href="/admin/operaciones/vivo" className="px-3 py-1.5 font-bold text-xs rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center gap-2"><Video size={14}/> Vivo</Link>
                                 {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-3 py-1 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-lg border">Restaurar Mapa</button>}
                                 <button onClick={() => setShowHelp(true)} className="px-3 py-1.5 bg-slate-900 text-white font-bold text-xs rounded-lg">Ayuda</button>
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} className="p-2 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={16}/> : <Minimize2 size={16}/>}</button>
                             </div>
                         </div>
-                        <div className="mb-3 bg-amber-50 border border-amber-100 rounded-xl p-3">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] font-black uppercase text-amber-700">Solicitudes de Presente ({solicitudes.length})</span>
-                            </div>
-                            {solicitudes.length === 0 ? (
-                                <div className="text-[10px] text-slate-500">Sin solicitudes pendientes.</div>
-                            ) : (
-                                <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
-                                    {solicitudes.map((req: any) => {
-                                        const isAbsenceAlert = String(req.type || '').toUpperCase() === 'ABSENCE_ALERT';
-                                        return (
-                                            <div key={req.id} className="bg-white border rounded-lg p-2 flex items-center justify-between gap-2">
-                                                <div className="min-w-0">
-                                                    <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-2">
-                                                        {req.employeeName || 'Empleado'}
-                                                        {isAbsenceAlert && <span className="text-[9px] font-black text-rose-600">AUSENCIA &lt;4H</span>}
-                                                    </div>
-                                                    <div className="text-[10px] text-slate-500 truncate">{req.objectiveName || 'Objetivo'} · {req.shiftId || '-'}</div>
-                                                    <div className="text-[10px] text-slate-400">Solicitud: {formatTimeSimple(req.createdAt)}</div>
-                                                </div>
-                                                <div className="flex gap-1">
-                                                    {isAbsenceAlert ? (
-                                                        <button onClick={() => handleAcknowledgeAbsence(req)} className="px-2 py-1 bg-slate-800 text-white text-[10px] font-black rounded">VISTO</button>
-                                                    ) : (
-                                                        <>
-                                                            <button onClick={() => handleApproveCheckIn(req)} className="px-2 py-1 bg-emerald-600 text-white text-[10px] font-black rounded">APROBAR</button>
-                                                            <button onClick={() => handleRejectCheckIn(req)} className="px-2 py-1 bg-rose-600 text-white text-[10px] font-black rounded">RECHAZAR</button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
+                        {/* Barra lateral: solo filtros, solapas y lista (NVR, Solicitudes y Bitácora están arriba en la franja de sectores) */}
                         <div className="mb-3"><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="w-full p-2 text-xs font-bold border border-slate-300 rounded-lg bg-slate-50 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                         <div className="bg-slate-100 rounded-xl mb-3 p-2">
                             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
@@ -1272,42 +1528,11 @@ export default function OperacionesPage() {
                         }
                     </div>
 
-                    <div className="h-40 border-t border-slate-200 bg-white flex flex-col"><div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between"><div className="flex items-center gap-2"><ClipboardList size={14} className="text-slate-400"/><h3 className="text-[10px] font-black uppercase text-slate-500">Bitácora</h3></div><button onClick={generateDailyReport} className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg"><Printer size={12}/></button></div><div className="flex-1 overflow-y-auto p-0">
-                            <table className="w-full text-[10px] text-left" style={{ tableLayout: 'fixed' }}>
-                                <colgroup>
-                                    {bitacoraColWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
-                                </colgroup>
-                                <thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0">
-                                    <tr>
-                                        {['Hora', 'Evento', 'Actor', 'Objetivo', 'Detalle'].map((label, i) => (
-                                            <th key={i} className="px-2 py-1 relative select-none" style={{ width: bitacoraColWidths[i] }}>
-                                                {label}
-                                                {i < 4 && (
-                                                    <span
-                                                        className="absolute top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-200 right-0"
-                                                        onMouseDown={() => setBitacoraResizing(i)}
-                                                        title="Arrastrar para redimensionar"
-                                                    />
-                                                )}
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {bitacoraLogs.length === 0 ? (
-                                        <tr><td colSpan={5} className="px-4 py-3 text-center text-slate-400 text-[10px] italic">No hay movimientos de operaciones (últimos 2 días). Las acciones que hagas aquí se verán en la bitácora.</td></tr>
-                                    ) : bitacoraLogs.map((log: any) => (
-                                        <tr key={log.id}>
-                                            <td className="px-2 py-1 font-mono text-slate-400 truncate">{formatTimeSimple(log.time)}</td>
-                                            <td className="px-2 py-1 font-bold truncate">{log.action}</td>
-                                            <td className="px-2 py-1 truncate">{log.formattedActor}</td>
-                                            <td className="px-2 py-1 text-slate-600 truncate" title={log.objectiveName || ''}>{log.objectiveName || '-'}</td>
-                                            <td className="px-2 py-1 text-slate-500 truncate" title={log.fullDetail}>{log.fullDetail}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div></div>
+                    {/* Espacio reservado para notificaciones (alertas NVR, Solicitudes y Bitácora están en la franja superior) */}
+                    <div className="border-t border-slate-200 bg-slate-50/50 px-3 py-2 shrink-0">
+                        <p className="text-[10px] font-bold uppercase text-slate-400">Notificaciones</p>
+                        <p className="text-[10px] text-slate-400 italic mt-0.5">Más espacio para notificaciones operativas.</p>
+                    </div>
                 </div>
             </div>
             

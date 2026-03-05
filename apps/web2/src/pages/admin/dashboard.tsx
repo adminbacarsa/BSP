@@ -63,10 +63,6 @@ const KpiCard = ({ title, value, icon: Icon, color, subtext, trend }: any) => (
 function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('day');
-  const [userLabel, setUserLabel] = useState('');
-  const [userRole, setUserRole] = useState('');
-  const [loginAt, setLoginAt] = useState<Date | null>(null);
-  
   const [stats, setStats] = useState<IDashboardStats>({ 
     clientsCount: 0, objectivesCount: 0, servicesCount: 0,
     activeEmployees: 0, totalEmployees: 0,
@@ -80,35 +76,6 @@ function AdminDashboard() {
   const [employeeDistribution, setEmployeeDistribution] = useState<any[]>([]);
 
   const today = new Date();
-
-  useEffect(() => {
-    try {
-      const u = auth.currentUser;
-      if (!u) return;
-
-      setUserLabel(u.displayName || u.email || u.uid || '');
-
-      u.getIdTokenResult()
-        .then((res) => {
-          const claims: any = res?.claims || {};
-          const role = claims?.role || claims?.type || '';
-          setUserRole(String(role || ''));
-        })
-        .catch(() => {});
-
-      const stored = sessionStorage.getItem('admin_login_at');
-      if (stored) {
-        const d = new Date(stored);
-        if (!Number.isNaN(d.getTime())) setLoginAt(d);
-      } else {
-        const now = new Date();
-        sessionStorage.setItem('admin_login_at', now.toISOString());
-        setLoginAt(now);
-      }
-    } catch {
-      // noop
-    }
-  }, []);
 
   useEffect(() => {
     fetchData();
@@ -344,14 +311,6 @@ function AdminDashboard() {
             </div>
             
             <div className="flex flex-col items-end gap-2">
-              <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 shadow-sm">
-                <span className="font-bold text-slate-800 dark:text-white">{userLabel || 'Usuario'}</span>
-                {userRole ? <span className="text-slate-400"> · {userRole}</span> : null}
-                {loginAt ? (
-                  <span className="text-slate-400"> · {loginAt.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</span>
-                ) : null}
-              </div>
-
               <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
                 <button onClick={() => setTimeRange('day')} className={'px-4 py-2 rounded-lg text-xs font-bold transition-all ' + (timeRange === 'day' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50')}>Hoy</button>
                 <button onClick={() => setTimeRange('week')} className={'px-4 py-2 rounded-lg text-xs font-bold transition-all ' + (timeRange === 'week' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50')}>Semana</button>
