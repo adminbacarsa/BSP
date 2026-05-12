@@ -349,11 +349,20 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
           {/* Foto */}
           <div className="flex-1">
             <div
-              className="overflow-hidden rounded-xl relative"
-              style={{ height: 170, background: '#f1f5f9', border: `2px solid ${tema.header}` }}
+              className={`relative${fotoFinal ? '' : ' overflow-hidden rounded-xl'}`}
+              style={{
+                height: 170,
+                background: fotoFinal ? 'transparent' : '#f1f5f9',
+                border: fotoFinal ? 'none' : `2px solid ${tema.header}`,
+                borderRadius: fotoFinal ? 0 : undefined,
+              }}
             >
               {fotoMostrada ? (
-                <img src={fotoMostrada} alt="Foto" className="w-full h-full object-cover object-top"/>
+                <img
+                  src={fotoMostrada}
+                  alt="Foto"
+                  className="w-full h-full object-cover object-center"
+                />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-2">
                   <Camera size={28} className="text-gray-300"/>
