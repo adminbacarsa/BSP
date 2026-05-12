@@ -146,7 +146,7 @@ const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => 
 
 export default function EmployeeDashboard() {
   const { addToast } = useToast();
-  const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string; dni?: string; cuil?: string; category?: string; photoUrl?: string } | null>(null);
+  const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string; dni?: string; cuil?: string; category?: string; photoUrl?: string; empresaId?: string } | null>(null);
   const [empresaNombre, setEmpresaNombre] = useState<string>('');
   const [showCredencial, setShowCredencial] = useState(false);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -346,6 +346,7 @@ export default function EmployeeDashboard() {
           cuil: d.cuil,
           category: d.category || d.cargo,
           photoUrl: d.photoUrl || d.fotoUrl || undefined,
+          empresaId: d.empresaId || undefined,
         });
         if (d.empresaId) {
           getDoc(doc(db, 'empresas', d.empresaId))
