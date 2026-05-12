@@ -12,25 +12,21 @@ import QRCode from 'qrcode';
 interface Props {
   empDocId: string;
   empData: {
-    firstName?: string;
-    lastName?: string;
-    dni?: string;
-    cuil?: string;
-    fileNumber?: string;
-    category?: string;
-    photoUrl?: string;
-    empresaId?: string;
+    firstName?: string; lastName?: string;
+    dni?: string; cuil?: string;
+    fileNumber?: string; category?: string;
+    photoUrl?: string; empresaId?: string;
   };
   empresaNombre?: string;
 }
 
 const TEMAS = [
-  { id: 'navy',  label: 'Marino', header: '#0f2351', accent: '#c8a84b' },
-  { id: 'rojo',  label: 'Rojo',   header: '#991b1b', accent: '#fecaca' },
-  { id: 'verde', label: 'Verde',  header: '#14532d', accent: '#86efac' },
-  { id: 'negro', label: 'Negro',  header: '#171717', accent: '#e5e5e5' },
-  { id: 'acero', label: 'Acero',  header: '#1e3a5f', accent: '#7dd3fc' },
-  { id: 'royal', label: 'Royal',  header: '#4c1d95', accent: '#c084fc' },
+  { id: 'navy',  label: 'Marino', h1: '#0a1628', h2: '#1a3a6b', accent: '#c8a84b' },
+  { id: 'rojo',  label: 'Rojo',   h1: '#7f1d1d', h2: '#b91c1c', accent: '#fca5a5' },
+  { id: 'verde', label: 'Verde',  h1: '#052e16', h2: '#166534', accent: '#86efac' },
+  { id: 'negro', label: 'Negro',  h1: '#000000', h2: '#262626', accent: '#d4d4d4' },
+  { id: 'acero', label: 'Acero',  h1: '#0f2040', h2: '#2d4a7a', accent: '#93c5fd' },
+  { id: 'royal', label: 'Royal',  h1: '#1e0050', h2: '#5b21b6', accent: '#c084fc' },
 ];
 
 export default function CredencialDigital({ empDocId, empData, empresaNombre }: Props) {
@@ -47,17 +43,17 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
   const [credGuardada, setCredGuardada]   = useState(false);
   const [modoEdicion, setModoEdicion]     = useState(false);
   const [empresaLocal, setEmpresaLocal]   = useState(empresaNombre || '');
-  // offset 0-100 para object-position de la foto
-  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 30 });
-  const photoOffRef                       = useRef({ x: 50, y: 30 });
+  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 25 });
+  const photoOffRef                       = useRef({ x: 50, y: 25 });
 
-  const videoRef        = useRef<HTMLVideoElement>(null);
-  const canvasRef       = useRef<HTMLCanvasElement>(null);
-  const fileInputRef    = useRef<HTMLInputElement>(null);
-  const photoContRef    = useRef<HTMLDivElement>(null);
-  const dragRef         = useRef<{ startX: number; startY: number; offX: number; offY: number } | null>(null);
+  const videoRef     = useRef<HTMLVideoElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoContRef = useRef<HTMLDivElement>(null);
+  const dragRef      = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const tema           = TEMAS[temaIdx];
+  const headerBg       = `linear-gradient(160deg, ${tema.h1} 0%, ${tema.h2} 100%)`;
   const nombre         = [empData.firstName, empData.lastName].filter(Boolean).join(' ');
   const apellidoNombre = [empData.lastName?.toUpperCase(), empData.firstName].filter(Boolean).join(', ');
   const fotoMostrada   = fotoFinal || fotoSrc;
@@ -69,36 +65,30 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
     setPhotoOffState(v);
   }, []);
 
-  // ── QR → URL pública ────────────────────────────────────────────────────────
+  // QR
   useEffect(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://comtroldata.web.app';
     QRCode.toDataURL(`${origin}/credencial/?id=${empDocId}`, {
-      width: 200, margin: 1,
+      width: 180, margin: 1,
       color: { dark: '#000000', light: '#ffffff' },
     }).then(setQrDataUrl).catch(() => {});
   }, [empDocId]);
 
-  // ── Empresa: prop → credenciales_publicas → empresas directa ────────────────
+  // Empresa
   useEffect(() => {
     if (empresaNombre) { setEmpresaLocal(empresaNombre); return; }
-    const fetchEmpresa = async () => {
-      // 1. Ya vino por prop (arriba)
-      // 2. Intentar desde credenciales_publicas (lo hace el useEffect de carga)
-      // 3. Fetch directo desde 'empresas'
-      if (!empData.empresaId) return;
-      try {
-        const snap = await getDoc(doc(db, 'empresas', empData.empresaId));
+    if (!empData.empresaId) return;
+    getDoc(doc(db, 'empresas', empData.empresaId))
+      .then(snap => {
         if (snap.exists()) {
           const d = snap.data();
           const n = d.name || d.nombre || d.razonSocial || empData.empresaId;
           if (n) setEmpresaLocal(n);
         }
-      } catch { /* ignore */ }
-    };
-    fetchEmpresa();
+      }).catch(() => {});
   }, [empresaNombre, empData.empresaId]);
 
-  // ── Cargar credencial guardada o crear doc básico ────────────────────────────
+  // Cargar / crear credencial pública
   useEffect(() => {
     if (!empDocId) return;
     getDoc(doc(db, 'credenciales_publicas', empDocId))
@@ -107,319 +97,293 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
           setCredGuardada(true);
           const d = snap.data();
           if (d.photoUrl) setFotoSrc(d.photoUrl);
-          if (d.empresaNombre) setEmpresaLocal(d.empresaNombre);
+          if (d.empresaNombre) setEmpresaLocal(prev => prev || d.empresaNombre);
         } else {
-          // No existe → crear doc básico para que el QR funcione de inmediato
           setDoc(doc(db, 'credenciales_publicas', empDocId), {
-            firstName:    empData.firstName  || '',
-            lastName:     empData.lastName   || '',
-            dni:          empData.dni        || '',
-            fileNumber:   empData.fileNumber || '',
-            category:     empData.category   || '',
-            empresaNombre: empresaLocal,
-            updatedAt:    serverTimestamp(),
+            firstName: empData.firstName || '', lastName: empData.lastName || '',
+            dni: empData.dni || '', fileNumber: empData.fileNumber || '',
+            category: empData.category || '', empresaNombre: empresaLocal,
+            updatedAt: serverTimestamp(),
           }, { merge: true }).catch(() => {});
-          // Intentar foto guardada en Storage
           getDownloadURL(storageRef(storage, `credenciales/${empDocId}/foto_sb.png`))
             .then(url => { setFotoFinal(url); setFotoSrc(url); })
             .catch(() => getDownloadURL(storageRef(storage, `credenciales/${empDocId}/foto.png`))
               .then(setFotoSrc).catch(() => {}));
         }
-      })
-      .catch(() => {});
+      }).catch(() => {});
   }, [empDocId]); // eslint-disable-line
 
-  // Actualizar credencial pública cuando cambia empresaLocal
+  // Sync empresa a credencial pública
   useEffect(() => {
     if (!empDocId || !empresaLocal) return;
     setDoc(doc(db, 'credenciales_publicas', empDocId), { empresaNombre: empresaLocal }, { merge: true })
       .catch(() => {});
   }, [empresaLocal, empDocId]);
 
-  // ── Drag táctil para repositionar foto ──────────────────────────────────────
+  // Drag táctil para ajustar foto
   useEffect(() => {
     const el = photoContRef.current;
     if (!el || !showEditUI || !fotoMostrada || !!fotoFinal) return;
-
     const onStart = (e: TouchEvent) => {
       e.preventDefault();
-      dragRef.current = {
-        startX: e.touches[0].clientX,
-        startY: e.touches[0].clientY,
-        offX: photoOffRef.current.x,
-        offY: photoOffRef.current.y,
-      };
+      dragRef.current = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: photoOffRef.current.x, oy: photoOffRef.current.y };
     };
     const onMove = (e: TouchEvent) => {
       if (!dragRef.current) return;
       e.preventDefault();
       const rect = el.getBoundingClientRect();
-      const dx = e.touches[0].clientX - dragRef.current.startX;
-      const dy = e.touches[0].clientY - dragRef.current.startY;
-      // Sensitivity: arrastrar 1 contenedor = 100% de rango
-      const nx = Math.max(0, Math.min(100, dragRef.current.offX - (dx / rect.width) * 100));
-      const ny = Math.max(0, Math.min(100, dragRef.current.offY - (dy / rect.height) * 100));
-      setPhotoOff({ x: nx, y: ny });
+      const dx = e.touches[0].clientX - dragRef.current.sx;
+      const dy = e.touches[0].clientY - dragRef.current.sy;
+      setPhotoOff({
+        x: Math.max(0, Math.min(100, dragRef.current.ox - (dx / rect.width) * 100)),
+        y: Math.max(0, Math.min(100, dragRef.current.oy - (dy / rect.height) * 100)),
+      });
     };
     const onEnd = () => { dragRef.current = null; };
-
     el.addEventListener('touchstart', onStart, { passive: false });
-    el.addEventListener('touchmove',  onMove,  { passive: false });
-    el.addEventListener('touchend',   onEnd);
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
     return () => {
       el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove',  onMove);
-      el.removeEventListener('touchend',   onEnd);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
     };
   }, [showEditUI, fotoMostrada, fotoFinal, setPhotoOff]);
 
-  // ── Cámara ──────────────────────────────────────────────────────────────────
+  // Cámara
   const abrirCamara = async () => {
     try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1024 } },
-        audio: false,
-      });
-      setStream(s);
-      setShowCamera(true);
-      setTimeout(() => {
-        if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play(); }
-      }, 150);
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
+      setStream(s); setShowCamera(true);
+      setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play(); } }, 150);
     } catch { fileInputRef.current?.click(); }
   };
-
-  const cerrarCamara = () => {
-    stream?.getTracks().forEach(t => t.stop());
-    setStream(null);
-    setShowCamera(false);
-  };
-
+  const cerrarCamara = () => { stream?.getTracks().forEach(t => t.stop()); setStream(null); setShowCamera(false); };
   const capturarFoto = () => {
-    const video = videoRef.current, canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    const video = videoRef.current, canvas = canvasRef.current; if (!video || !canvas) return;
     const side = Math.min(video.videoWidth, video.videoHeight);
     canvas.width = side; canvas.height = side;
     const ctx = canvas.getContext('2d')!;
-    const ox = (video.videoWidth - side) / 2, oy = (video.videoHeight - side) / 2;
     ctx.save(); ctx.translate(side, 0); ctx.scale(-1, 1);
-    ctx.drawImage(video, ox, oy, side, side, 0, 0, side, side);
+    ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, side, side);
     ctx.restore();
     canvas.toBlob(blob => {
       if (!blob) return;
-      setCapturedBlob(blob);
-      setFotoSrc(canvas.toDataURL('image/png'));
-      setFotoFinal(null);
-      setPhotoOff({ x: 50, y: 30 });
-      cerrarCamara();
+      setCapturedBlob(blob); setFotoSrc(canvas.toDataURL('image/png')); setFotoFinal(null);
+      setPhotoOff({ x: 50, y: 25 }); cerrarCamara();
     }, 'image/png');
   };
-
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
       const src = ev.target?.result as string; if (!src) return;
-      setFotoSrc(src); setFotoFinal(null);
-      setPhotoOff({ x: 50, y: 30 });
+      setFotoSrc(src); setFotoFinal(null); setPhotoOff({ x: 50, y: 25 });
       fetch(src).then(r => r.blob()).then(setCapturedBlob);
     };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    reader.readAsDataURL(file); e.target.value = '';
   };
 
-  // ── Quitar fondo ─────────────────────────────────────────────────────────────
+  // Quitar fondo
   const quitarFondo = async () => {
     const blob = capturedBlob || (fotoSrc ? await fetch(fotoSrc).then(r => r.blob()) : null);
     if (!blob) return;
     setQuitandoFondo(true); setProgFondo(0);
     try {
       const { removeBackground } = await import('@imgly/background-removal');
-      const resultBlob = await removeBackground(blob, {
-        model: 'isnet_quint8',
-        output: { format: 'image/png' },
-        progress: (_k: string, cur: number, tot: number) => {
-          if (tot > 0) setProgFondo(Math.round((cur / tot) * 100));
-        },
+      const rb = await removeBackground(blob, {
+        model: 'isnet_quint8', output: { format: 'image/png' },
+        progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); },
       });
-      setFotoFinal(URL.createObjectURL(resultBlob));
-      setCapturedBlob(resultBlob);
+      setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb);
     } catch (e) { console.error(e); }
     finally { setQuitandoFondo(false); setProgFondo(0); }
   };
 
-  // ── Guardar: Storage (opcional) + siempre Firestore ──────────────────────────
+  // Guardar
   const guardarFoto = async () => {
     if (!empDocId) return;
     setGuardando(true);
     try {
       let photoUrl = '';
-
       if (capturedBlob) {
         try {
           const isSF = !!fotoFinal;
-          const path = isSF
-            ? `credenciales/${empDocId}/foto_sb.png`
-            : `credenciales/${empDocId}/foto.png`;
-          const r = storageRef(storage, path);
+          const r = storageRef(storage, `credenciales/${empDocId}/${isSF ? 'foto_sb' : 'foto'}.png`);
           await uploadBytes(r, capturedBlob, { contentType: 'image/png' });
           photoUrl = await getDownloadURL(r);
           if (isSF) setFotoFinal(photoUrl); else setFotoSrc(photoUrl);
-        } catch (storErr) {
-          console.warn('Storage no disponible, guardando sin URL permanente', storErr);
-        }
+        } catch { /* Storage opcional */ }
         setCapturedBlob(null);
       }
-
-      // Siempre escribir a credenciales_publicas
       const payload: Record<string, unknown> = {
-        firstName:    empData.firstName  || '',
-        lastName:     empData.lastName   || '',
-        dni:          empData.dni        || '',
-        fileNumber:   empData.fileNumber || '',
-        category:     empData.category   || '',
-        empresaNombre: empresaDisplay,
-        updatedAt:    serverTimestamp(),
+        firstName: empData.firstName || '', lastName: empData.lastName || '',
+        dni: empData.dni || '', fileNumber: empData.fileNumber || '',
+        category: empData.category || '', empresaNombre: empresaDisplay,
+        updatedAt: serverTimestamp(),
       };
-      // Solo guardar photoUrl si es una URL permanente (no blob: ni data:)
-      if (photoUrl && !photoUrl.startsWith('blob:') && !photoUrl.startsWith('data:')) {
-        payload.photoUrl = photoUrl;
-      } else if (fotoSrc && !fotoSrc.startsWith('blob:') && !fotoSrc.startsWith('data:')) {
-        payload.photoUrl = fotoSrc;
-      }
-
+      const url = photoUrl || (fotoSrc && !fotoSrc.startsWith('blob:') && !fotoSrc.startsWith('data:') ? fotoSrc : '');
+      if (url) payload.photoUrl = url;
       await setDoc(doc(db, 'credenciales_publicas', empDocId), payload);
-      setCredGuardada(true);
-      setModoEdicion(false);
-    } catch (err) {
-      console.error('Error guardando credencial:', err);
-    } finally {
-      setGuardando(false);
-    }
+      setCredGuardada(true); setModoEdicion(false);
+    } catch (err) { console.error(err); }
+    finally { setGuardando(false); }
   };
 
-  // ── Descargar PNG ─────────────────────────────────────────────────────────────
+  // Descargar
   const descargar = async () => {
-    const SC = 2; // retina
-    const W = 380, PAD = 20;
+    const SC = 2, W = 380, PAD = 22;
+    const HH = 100, ACC = 5;
+    const PH = 210, PW = 155; // foto portrait
+    const photoX = Math.round((W - PW) / 2);
+    const photoY = HH + ACC + 18;
+    let dataY = photoY + PH + 20;
+    const QR = 80;
 
-    // Calcular H dinámicamente según contenido
-    const HH = 110;         // header
-    const ACCENT = 4;
-    let dataH = 52;         // nombre + cargo
-    if (empData.dni)        dataH += 20;
-    if (empData.cuil)       dataH += 20;
-    if (empData.fileNumber) dataH += 20;
-    const PHOTO_W = 145, PHOTO_H = 185;
-    const QR_SIZE = 110;
-    const photoY = HH + ACCENT + dataH + 18;
-    const H = photoY + PHOTO_H + 28;
+    // Calcular altura total
+    let dataLines = 2; // nombre + cargo
+    if (empData.dni) dataLines++;
+    if (empData.cuil) dataLines++;
+    if (empData.fileNumber) dataLines++;
+    const H = dataY + (dataLines * 19) + 20 + QR + 20 + 10;
 
     const cv = document.createElement('canvas');
-    cv.width  = W * SC;
-    cv.height = H * SC;
+    cv.width = W * SC; cv.height = H * SC;
     const ctx = cv.getContext('2d')!;
     ctx.scale(SC, SC);
 
-    // ── Fondo blanco con bordes redondeados ──
+    // Fondo blanco redondeado
     ctx.fillStyle = '#ffffff';
-    roundRect(ctx, 0, 0, W, H, 14); ctx.fill();
+    roundRect(ctx, 0, 0, W, H, 16); ctx.fill();
 
-    // ── Header ──
-    ctx.fillStyle = tema.header;
+    // Header gradiente
+    const hg = ctx.createLinearGradient(0, 0, W, HH);
+    hg.addColorStop(0, tema.h1); hg.addColorStop(1, tema.h2);
+    ctx.fillStyle = hg;
     ctx.beginPath();
-    ctx.moveTo(14, 0); ctx.lineTo(W - 14, 0);
-    ctx.quadraticCurveTo(W, 0, W, 14);
-    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 14);
-    ctx.quadraticCurveTo(0, 0, 14, 0);
+    ctx.moveTo(16, 0); ctx.lineTo(W - 16, 0);
+    ctx.quadraticCurveTo(W, 0, W, 16);
+    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 16);
+    ctx.quadraticCurveTo(0, 0, 16, 0);
     ctx.closePath(); ctx.fill();
 
-    // Escudo en header
-    ctx.fillStyle = tema.accent;
-    ctx.font = 'bold 13px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText('⬡', PAD, 38); // placeholder shield
+    // Patrón diagonal sutil en header
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.lineTo(W - 16, 0);
+    ctx.quadraticCurveTo(W, 0, W, 16);
+    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 16);
+    ctx.quadraticCurveTo(0, 0, 16, 0);
+    ctx.closePath(); ctx.clip();
+    ctx.strokeStyle = `${tema.accent}15`;
+    ctx.lineWidth = 1;
+    for (let i = -HH; i < W + HH; i += 12) {
+      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + HH, HH); ctx.stroke();
+    }
+    ctx.restore();
 
-    // Nombre empresa
+    // Escudo (canvas shapes)
+    const sx = PAD + 2, sy = 18;
+    ctx.fillStyle = tema.accent;
+    ctx.beginPath();
+    ctx.moveTo(sx + 14, sy); ctx.lineTo(sx + 28, sy + 6);
+    ctx.lineTo(sx + 28, sy + 16); ctx.quadraticCurveTo(sx + 28, sy + 26, sx + 14, sy + 32);
+    ctx.quadraticCurveTo(sx, sy + 26, sx, sy + 16);
+    ctx.lineTo(sx, sy + 6); ctx.closePath(); ctx.fill();
+    // check en escudo
+    ctx.strokeStyle = tema.h1; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(sx + 8, sy + 17); ctx.lineTo(sx + 13, sy + 22); ctx.lineTo(sx + 22, sy + 13); ctx.stroke();
+
+    // Texto empresa
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 17px Arial';
-    ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD, 55);
-    ctx.fillStyle = tema.accent;
-    ctx.font = '9px Arial';
-    ctx.fillText('Credencial Digital de Identidad', PAD, 72);
-
-    // ── Línea de acento ──
-    ctx.fillStyle = tema.accent;
-    ctx.fillRect(0, HH, W, ACCENT);
-
-    // ── Nombre + cargo ──
-    let ty = HH + ACCENT + 22;
-    ctx.fillStyle = '#111827';
     ctx.font = 'bold 15px Arial';
     ctx.textAlign = 'left';
-    ctx.fillText(apellidoNombre || nombre || '—', PAD, ty);
-    ty += 16;
-    ctx.fillStyle = '#6b7280';
-    ctx.font = 'bold 9px Arial';
-    ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, ty);
-    ty += 16;
+    const empText = (empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase();
+    ctx.fillText(empText, PAD + 36, sy + 18);
+    ctx.fillStyle = tema.accent;
+    ctx.font = '8.5px Arial';
+    ctx.fillText('CREDENCIAL DIGITAL DE IDENTIDAD', PAD + 36, sy + 32);
 
-    // ── Filas de datos ──
-    const drawRow = (label: string, value: string) => {
-      ctx.fillStyle = '#9ca3af'; ctx.font = '8px Arial'; ctx.textAlign = 'left';
-      ctx.fillText(label, PAD, ty);
-      ctx.fillStyle = '#1f2937'; ctx.font = 'bold 10px Arial';
-      ctx.fillText(value, PAD + 52, ty);
-      ty += 20;
-    };
-    if (empData.dni)        drawRow('DNI',    empData.dni);
-    if (empData.cuil)       drawRow('CUIL',   empData.cuil);
-    if (empData.fileNumber) drawRow('Legajo', empData.fileNumber);
+    // Línea de acento
+    ctx.fillStyle = tema.accent;
+    ctx.fillRect(0, HH, W, ACC);
 
-    // ── Foto ──
-    const photoX = PAD;
-    const qrX = photoX + PHOTO_W + 15;
-    const qrY = photoY + Math.round((PHOTO_H - QR_SIZE) / 2);
-
+    // Foto
     if (fotoMostrada) {
       const img = new Image(); img.crossOrigin = 'anonymous';
       await new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); img.src = fotoMostrada; });
-
       if (fotoFinal) {
-        // Sin fondo: dibujar sin clip ni borde
-        const scale = Math.max(PHOTO_W / img.naturalWidth, PHOTO_H / img.naturalHeight);
-        const rW = img.naturalWidth * scale, rH = img.naturalHeight * scale;
-        const exX = rW - PHOTO_W, exY = rH - PHOTO_H;
-        const oX = (photoOff.x / 100) * exX, oY = (photoOff.y / 100) * exY;
+        // Sin fondo: sin clip
+        const sc = Math.max(PW / img.naturalWidth, PH / img.naturalHeight);
+        const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
+        const oX = ((photoOff.x / 100) * (rW - PW)) || 0;
+        const oY = ((photoOff.y / 100) * (rH - PH)) || 0;
         ctx.drawImage(img, photoX - oX, photoY - oY, rW, rH);
       } else {
-        // Con fondo: clip al rect redondeado
-        const scale = Math.max(PHOTO_W / img.naturalWidth, PHOTO_H / img.naturalHeight);
-        const rW = img.naturalWidth * scale, rH = img.naturalHeight * scale;
-        const exX = rW - PHOTO_W, exY = rH - PHOTO_H;
-        const oX = (photoOff.x / 100) * exX, oY = (photoOff.y / 100) * exY;
+        const sc = Math.max(PW / img.naturalWidth, PH / img.naturalHeight);
+        const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
+        const oX = ((photoOff.x / 100) * Math.max(0, rW - PW));
+        const oY = ((photoOff.y / 100) * Math.max(0, rH - PH));
         ctx.save();
-        roundRect(ctx, photoX, photoY, PHOTO_W, PHOTO_H, 8); ctx.clip();
+        roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.clip();
         ctx.drawImage(img, photoX - oX, photoY - oY, rW, rH);
         ctx.restore();
-        ctx.strokeStyle = tema.header; ctx.lineWidth = 2;
-        roundRect(ctx, photoX, photoY, PHOTO_W, PHOTO_H, 8); ctx.stroke();
+        // Borde foto
+        ctx.strokeStyle = tema.accent; ctx.lineWidth = 2.5;
+        roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.stroke();
       }
+    } else {
+      ctx.fillStyle = '#f3f4f6';
+      roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.fill();
     }
 
-    // ── QR ──
+    // Separador
+    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD, dataY - 8); ctx.lineTo(W - PAD, dataY - 8); ctx.stroke();
+
+    // Datos
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#111827'; ctx.font = 'bold 14px Arial';
+    ctx.fillText(apellidoNombre || nombre || '—', PAD, dataY + 2);
+    dataY += 16;
+    ctx.fillStyle = '#9ca3af'; ctx.font = 'bold 8.5px Arial';
+    ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, dataY);
+    dataY += 18;
+
+    // Grid de datos 2 columnas
+    const col2 = W / 2 + 5;
+    let col1Y = dataY, col2Y = dataY;
+    const drawField = (label: string, val: string, col: 'l' | 'r') => {
+      const x = col === 'l' ? PAD : col2;
+      const y = col === 'l' ? col1Y : col2Y;
+      ctx.fillStyle = '#9ca3af'; ctx.font = '7.5px Arial';
+      ctx.fillText(label, x, y);
+      ctx.fillStyle = '#1f2937'; ctx.font = 'bold 10px Arial';
+      ctx.fillText(val, x, y + 13);
+      if (col === 'l') col1Y += 30; else col2Y += 30;
+    };
+    if (empData.dni)        drawField('DNI',    empData.dni, 'l');
+    if (empData.cuil)       drawField('CUIL',   empData.cuil, 'r');
+    if (empData.fileNumber) drawField('Legajo', empData.fileNumber, 'l');
+
+    dataY = Math.max(col1Y, col2Y) + 5;
+
+    // QR centrado
     if (qrDataUrl) {
       const qr = new Image();
       await new Promise<void>(res => { qr.onload = () => res(); qr.onerror = () => res(); qr.src = qrDataUrl; });
-      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = tema.header; ctx.lineWidth = 2;
-      roundRect(ctx, qrX - 5, qrY - 5, QR_SIZE + 10, QR_SIZE + 10, 7);
-      ctx.fill(); ctx.stroke();
-      ctx.drawImage(qr, qrX, qrY, QR_SIZE, QR_SIZE);
+      const qrX = Math.round((W - QR) / 2), qrY = dataY + 5;
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = tema.accent; ctx.lineWidth = 1.5;
+      roundRect(ctx, qrX - 4, qrY - 4, QR + 8, QR + 8, 6); ctx.fill(); ctx.stroke();
+      ctx.drawImage(qr, qrX, qrY, QR, QR);
       ctx.fillStyle = '#9ca3af'; ctx.font = '7px Arial'; ctx.textAlign = 'center';
-      ctx.fillText('ESCANEAR PARA VERIFICAR', qrX + QR_SIZE / 2, qrY + QR_SIZE + 12);
+      ctx.fillText('ESCANEAR PARA VERIFICAR', W / 2, qrY + QR + 12);
     }
 
-    // ── Banda inferior ──
-    ctx.fillStyle = tema.header;
+    // Banda inferior
+    const hg2 = ctx.createLinearGradient(0, 0, W, 0);
+    hg2.addColorStop(0, tema.h1); hg2.addColorStop(1, tema.h2);
+    ctx.fillStyle = hg2;
     ctx.fillRect(0, H - 10, W, 10);
 
     const link = document.createElement('a');
@@ -428,166 +392,177 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
     link.click();
   };
 
-  // ── RENDER ──────────────────────────────────────────────────────────────────
+  // ── RENDER ───────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3">
 
-      {/* Tarjeta */}
-      <div className="relative rounded-2xl overflow-hidden shadow-2xl mx-auto w-full bg-white" style={{ maxWidth: 340 }}>
-
-        {/* Header */}
-        <div className="px-5 py-5 flex items-center gap-3" style={{ background: tema.header }}>
-          <ShieldCheck size={36} strokeWidth={1.5} style={{ color: tema.accent, flexShrink: 0 }}/>
-          <div>
-            <p className="text-white text-base font-black tracking-wide leading-tight">
-              {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
-            </p>
-            <p className="text-[10px] tracking-widest uppercase mt-0.5" style={{ color: tema.accent }}>
-              Credencial Digital
-            </p>
-          </div>
-        </div>
-        <div className="h-1" style={{ background: tema.accent }}/>
-
-        {/* Datos */}
-        <div className="px-5 pt-4 pb-3">
-          <p className="font-black text-gray-900 text-base leading-tight">
-            {apellidoNombre || nombre || '—'}
-          </p>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">
-            {empData.category || 'Vigilador'}
-          </p>
-          <div className="mt-2.5 space-y-1.5">
-            {empData.dni && (
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold text-gray-400 w-10">DNI</span>
-                <span className="text-sm font-mono font-bold text-gray-800">{empData.dni}</span>
-              </div>
-            )}
-            {empData.cuil && (
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold text-gray-400 w-10">CUIL</span>
-                <span className="text-sm font-mono font-bold text-gray-800">{empData.cuil}</span>
-              </div>
-            )}
-            {empData.fileNumber && (
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold text-gray-400 w-10">Legajo</span>
-                <span className="text-sm font-mono font-bold text-gray-800">{empData.fileNumber}</span>
-              </div>
-            )}
+      {/* ── Tarjeta ─────────────────────────────────────────────────────── */}
+      <div
+        className="relative rounded-3xl overflow-hidden shadow-2xl mx-auto w-full"
+        style={{ maxWidth: 340, background: '#ffffff' }}
+      >
+        {/* Header gradiente */}
+        <div
+          className="px-5 pt-5 pb-6 relative overflow-hidden"
+          style={{ background: headerBg }}
+        >
+          {/* Patrón diagonal sutil */}
+          <div className="absolute inset-0 pointer-events-none" style={{
+            backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}10 0px, ${tema.accent}10 1px, transparent 1px, transparent 12px)`,
+          }}/>
+          <div className="relative flex items-center gap-3">
+            <div className="relative flex-shrink-0">
+              <ShieldCheck size={38} strokeWidth={1.5} style={{ color: tema.accent }}/>
+            </div>
+            <div>
+              <p className="text-white font-black text-sm tracking-wide leading-tight">
+                {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
+              </p>
+              <p className="text-[9px] tracking-widest uppercase mt-0.5 font-bold" style={{ color: `${tema.accent}cc` }}>
+                Credencial Digital
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="mx-5 border-t border-gray-100"/>
+        {/* Línea acento */}
+        <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}, ${tema.h2})` }}/>
 
-        {/* Foto + QR */}
-        <div className="flex items-center gap-3 px-5 py-4">
+        {/* Foto grande centrada */}
+        <div className="relative flex flex-col items-center py-5"
+          style={{ background: `linear-gradient(180deg, ${tema.h1}06 0%, transparent 100%)` }}>
 
-          {/* Foto */}
-          <div className="flex-1 flex flex-col gap-1.5">
-            {/* Contenedor foto */}
-            <div
-              ref={photoContRef}
-              className={fotoFinal ? 'relative' : 'relative overflow-hidden rounded-xl'}
-              style={{
-                height: 170,
-                background: fotoFinal ? 'transparent' : '#f1f5f9',
-                border: fotoFinal ? 'none' : `2px solid ${tema.header}`,
-                cursor: showEditUI && fotoMostrada && !fotoFinal ? 'grab' : 'default',
-              }}
-            >
-              {fotoMostrada ? (
-                <img
-                  src={fotoMostrada}
-                  alt="Foto"
-                  className="w-full h-full object-cover select-none"
-                  style={{ objectPosition: `${photoOff.x}% ${photoOff.y}%`, userSelect: 'none', pointerEvents: 'none' }}
-                  draggable={false}
-                />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-2">
-                  <Camera size={28} className="text-gray-300"/>
-                  <p className="text-[9px] text-gray-400 font-bold uppercase">Sin foto</p>
-                </div>
+          <div
+            ref={photoContRef}
+            className={`relative shadow-lg ${fotoFinal ? '' : 'overflow-hidden rounded-2xl'}`}
+            style={{
+              width: 160, height: 210,
+              border: fotoFinal ? 'none' : `2.5px solid ${tema.accent}`,
+              borderRadius: fotoFinal ? 0 : 16,
+              background: fotoFinal ? 'transparent' : '#e2e8f0',
+              cursor: showEditUI && fotoMostrada && !fotoFinal ? 'grab' : 'default',
+            }}
+          >
+            {fotoMostrada ? (
+              <img
+                src={fotoMostrada}
+                alt="Foto"
+                className="w-full h-full object-cover select-none"
+                style={{ objectPosition: `${photoOff.x}% ${photoOff.y}%`, pointerEvents: 'none' }}
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-2 rounded-2xl">
+                <Camera size={32} className="text-slate-400"/>
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Sin foto</p>
+              </div>
+            )}
+
+            {showEditUI && fotoMostrada && !fotoFinal && (
+              <div className="absolute bottom-1.5 left-0 right-0 flex justify-center pointer-events-none">
+                <span className="text-[8px] font-bold bg-black/40 text-white px-2 py-0.5 rounded-full backdrop-blur-sm">
+                  ↕ Arrastrá para ajustar
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Botones en modo edición */}
+          {showEditUI && (
+            <div className="flex gap-1.5 mt-3 px-5 w-full">
+              <button
+                onClick={abrirCamara}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wide transition-all active:scale-95"
+                style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
+              >
+                <Camera size={10}/>{fotoMostrada ? 'Cambiar foto' : 'Sacar foto'}
+              </button>
+
+              {fotoSrc && !fotoFinal && (
+                <button
+                  onClick={quitarFondo}
+                  disabled={quitandoFondo}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wide disabled:opacity-60"
+                  style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
+                >
+                  {quitandoFondo
+                    ? <><RefreshCw size={9} className="animate-spin"/>{progFondo}%</>
+                    : <><Sparkles size={9}/>Sin fondo</>}
+                </button>
               )}
 
-              {/* Hint de drag */}
-              {showEditUI && fotoMostrada && !fotoFinal && (
-                <div className="absolute bottom-1 left-0 right-0 flex justify-center pointer-events-none">
-                  <span className="text-[8px] font-bold bg-black/30 text-white px-1.5 py-0.5 rounded-full">
-                    Arrastrá para ajustar
-                  </span>
+              {fotoMostrada && !fotoFinal && (
+                <div className="flex flex-col gap-0.5">
+                  <button
+                    onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.max(0, photoOffRef.current.y - 8) })}
+                    className="px-2 py-1 rounded-lg"
+                    style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
+                  ><ChevronUp size={10}/></button>
+                  <button
+                    onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.min(100, photoOffRef.current.y + 8) })}
+                    className="px-2 py-1 rounded-lg"
+                    style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
+                  ><ChevronDown size={10}/></button>
                 </div>
               )}
             </div>
+          )}
+        </div>
 
-            {/* Botones de foto + ajuste vertical */}
-            {showEditUI && (
-              <div className="flex gap-1">
-                <button
-                  onClick={abrirCamara}
-                  className="flex-1 text-[9px] font-bold py-1 rounded-lg text-center uppercase tracking-wide"
-                  style={{ color: tema.header, background: `${tema.header}12`, border: `1px solid ${tema.header}30` }}
-                >
-                  <Camera size={9} className="inline mr-0.5"/>
-                  {fotoMostrada ? 'Cambiar' : 'Foto'}
-                </button>
-                {fotoSrc && !fotoFinal && (
-                  <button
-                    onClick={quitarFondo}
-                    disabled={quitandoFondo}
-                    className="flex-1 text-[9px] font-bold py-1 rounded-lg text-center uppercase tracking-wide disabled:opacity-60"
-                    style={{ color: tema.header, background: `${tema.header}12`, border: `1px solid ${tema.header}30` }}
-                  >
-                    {quitandoFondo
-                      ? <><RefreshCw size={9} className="inline animate-spin mr-0.5"/>{progFondo}%</>
-                      : <><Sparkles size={9} className="inline mr-0.5"/>Sin fondo</>}
-                  </button>
-                )}
-                {/* Ajuste vertical con flechas */}
-                {fotoMostrada && !fotoFinal && (
-                  <div className="flex flex-col gap-0.5">
-                    <button
-                      onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.max(0, photoOffRef.current.y - 10) })}
-                      className="px-1.5 py-0.5 rounded text-[10px]"
-                      style={{ color: tema.header, background: `${tema.header}12`, border: `1px solid ${tema.header}30` }}
-                    >
-                      <ChevronUp size={10}/>
-                    </button>
-                    <button
-                      onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.min(100, photoOffRef.current.y + 10) })}
-                      className="px-1.5 py-0.5 rounded text-[10px]"
-                      style={{ color: tema.header, background: `${tema.header}12`, border: `1px solid ${tema.header}30` }}
-                    >
-                      <ChevronDown size={10}/>
-                    </button>
-                  </div>
-                )}
+        {/* Separador */}
+        <div className="mx-5 border-t border-gray-100"/>
+
+        {/* Datos */}
+        <div className="px-5 py-3">
+          <p className="font-black text-gray-900 text-[15px] leading-tight">
+            {apellidoNombre || nombre || '—'}
+          </p>
+          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-0.5">
+            {empData.category || 'Vigilador'}
+          </p>
+          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
+            {empData.dni && (
+              <div>
+                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">DNI</p>
+                <p className="text-sm font-black font-mono text-gray-800">{empData.dni}</p>
               </div>
             )}
-          </div>
-
-          {/* QR */}
-          <div className="flex flex-col items-center gap-1">
-            {qrDataUrl ? (
-              <div className="p-1.5 rounded-xl" style={{ border: `2px solid ${tema.header}` }}>
-                <img src={qrDataUrl} alt="QR" width={100} height={100}/>
-              </div>
-            ) : (
-              <div className="rounded-xl flex items-center justify-center bg-gray-50"
-                style={{ width: 108, height: 108, border: '2px solid #e5e7eb' }}>
-                <RefreshCw size={18} className="text-gray-300"/>
+            {empData.cuil && (
+              <div>
+                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">CUIL</p>
+                <p className="text-sm font-black font-mono text-gray-800">{empData.cuil}</p>
               </div>
             )}
-            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-400">Verificar</p>
+            {empData.fileNumber && (
+              <div>
+                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Legajo</p>
+                <p className="text-sm font-black font-mono text-gray-800">{empData.fileNumber}</p>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="h-2" style={{ background: tema.header }}/>
+        {/* QR centrado pequeño */}
+        <div className="flex flex-col items-center pb-4">
+          {qrDataUrl ? (
+            <div className="p-1.5 rounded-xl" style={{ border: `1.5px solid ${tema.accent}60` }}>
+              <img src={qrDataUrl} alt="QR" width={72} height={72}/>
+            </div>
+          ) : (
+            <div className="w-20 h-20 rounded-xl bg-gray-50 flex items-center justify-center border border-gray-200">
+              <RefreshCw size={16} className="text-gray-300"/>
+            </div>
+          )}
+          <p className="text-[7px] font-bold uppercase tracking-widest text-gray-300 mt-1">
+            Escanear para verificar
+          </p>
+        </div>
+
+        {/* Banda inferior */}
+        <div className="h-2" style={{ background: `linear-gradient(90deg, ${tema.h1}, ${tema.h2})` }}/>
       </div>
 
-      {/* Selector tema */}
+      {/* ── Selector de tema ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-2">
         <button onClick={() => setTemaIdx(i => (i - 1 + TEMAS.length) % TEMAS.length)}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
@@ -598,9 +573,9 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
             <button key={t.id} onClick={() => setTemaIdx(i)}
               className="w-6 h-6 rounded-full border-2 transition-all"
               style={{
-                background: t.header,
+                background: `linear-gradient(135deg, ${t.h1}, ${t.h2})`,
                 borderColor: i === temaIdx ? t.accent : 'transparent',
-                transform: i === temaIdx ? 'scale(1.25)' : 'scale(1)',
+                transform: i === temaIdx ? 'scale(1.3)' : 'scale(1)',
               }}
               title={t.label}
             />
@@ -615,7 +590,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
         {TEMAS[temaIdx].label}
       </p>
 
-      {/* Acciones */}
+      {/* ── Acciones ────────────────────────────────────────────────────── */}
       <div className="flex gap-2">
         {credGuardada && !modoEdicion && (
           <button onClick={() => setModoEdicion(true)}
@@ -626,9 +601,9 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
         {showEditUI && (capturedBlob || !credGuardada) && (
           <button onClick={guardarFoto} disabled={guardando}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black disabled:opacity-50 transition-all active:scale-95 text-white"
-            style={{ background: tema.header }}>
+            style={{ background: `linear-gradient(135deg, ${tema.h1}, ${tema.h2})` }}>
             {guardando ? <RefreshCw size={14} className="animate-spin"/> : <ShieldCheck size={14}/>}
-            {credGuardada ? 'Guardar cambios' : 'Activar credencial'}
+            {credGuardada ? 'Guardar' : 'Activar QR'}
           </button>
         )}
         <button onClick={descargar}
@@ -637,37 +612,32 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
         </button>
       </div>
 
-      {/* Canvas oculto */}
       <canvas ref={canvasRef} className="hidden"/>
       <input ref={fileInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={onFileSelect}/>
 
       {/* Modal cámara */}
       {showCamera && (
         <div className="fixed inset-0 z-50 bg-black flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 bg-black/90">
+          <div className="flex items-center justify-between px-4 py-3" style={{ background: tema.h1 }}>
             <p className="text-white font-black text-sm">Foto carnet</p>
             <button onClick={cerrarCamara} className="text-slate-400 hover:text-white p-1"><X size={22}/></button>
           </div>
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
-            <video ref={videoRef} playsInline muted
-              className="h-full w-full object-cover"
-              style={{ transform: 'scaleX(-1)' }}/>
+            <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
             <div className="absolute border-[3px] pointer-events-none" style={{
-              width: '62vw', maxWidth: 260,
-              height: '80vw', maxHeight: 340,
-              borderRadius: '50%',
-              borderColor: tema.accent,
-              boxShadow: `0 0 0 9999px rgba(0,0,0,0.6), inset 0 0 0 2px ${tema.accent}40`,
+              width: '60vw', maxWidth: 240, height: '78vw', maxHeight: 320,
+              borderRadius: 16, borderColor: tema.accent,
+              boxShadow: `0 0 0 9999px rgba(0,0,0,0.65)`,
             }}/>
-            <div className="absolute bottom-28 px-4 py-1.5 rounded-full bg-black/50">
-              <p className="text-white text-xs font-bold text-center">Centrá tu rostro en el óvalo</p>
+            <div className="absolute bottom-28 px-4 py-1.5 rounded-full" style={{ background: `${tema.h1}cc` }}>
+              <p className="text-white text-xs font-bold text-center">Centrá tu rostro · Buena iluminación</p>
             </div>
           </div>
-          <div className="pb-12 pt-4 bg-black/90 flex justify-center">
+          <div className="pb-12 pt-5 flex justify-center" style={{ background: tema.h1 }}>
             <button onClick={capturarFoto} style={{
-              width: 72, height: 72, background: '#fff',
+              width: 76, height: 76, background: '#ffffff',
               border: `4px solid ${tema.accent}`,
-              boxShadow: `0 0 0 6px ${tema.accent}30`,
+              boxShadow: `0 0 0 8px ${tema.accent}30`,
               borderRadius: '50%',
             }} className="active:scale-90 transition-transform"/>
           </div>
@@ -679,13 +649,9 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
-  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
 }
