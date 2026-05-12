@@ -11,17 +11,22 @@ import {
   ShieldCheck, LogOut, Mic, MicOff, Camera, Image as ImageIcon,
   AlertTriangle, ArrowRightCircle, ArrowLeftCircle, Navigation,
   Users, Siren, Bell, Send, X, Clock, CheckCircle2, Loader2,
-  ChevronLeft, ChevronRight, Search, Building2, MapPin, Plus, Activity
+  ChevronLeft, ChevronRight, Search, Building2, MapPin, Plus,
+  Activity, Lock, Mail, Eye, EyeOff, AlertCircle, Tag, Zap
 } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 type EntryType = 'novedad' | 'ingreso' | 'egreso' | 'ronda' | 'visita' | 'sos';
+type Gravedad  = 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA';
 
 interface LibroEntry {
   id: string;
   type: EntryType;
+  etiqueta?: string;
+  gravedad?: Gravedad;
   text?: string;
+  accionTomada?: string;
   imageUrl?: string;
   audioUrl?: string;
   transcription?: string;
@@ -72,36 +77,61 @@ const fmtTime = (val: any) => {
 
 const fmtEntryTime = (val: any) => {
   const d = toDate(val);
-  if (!d) return '';
-  return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  return d ? d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 };
 
 const fmtEntryDate = (val: any) => {
   const d = toDate(val);
-  if (!d) return '';
-  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+  return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : '';
 };
 
-// ─── Config de tipos ──────────────────────────────────────────────────────────
+// ─── Config tipos de entrada ──────────────────────────────────────────────────
 
-const ENTRY_TYPES: { id: EntryType; label: string; icon: any; color: string; light: string; border: string }[] = [
-  { id: 'novedad', label: 'Novedad',  icon: Bell,             color: 'text-amber-600',  light: 'bg-amber-50',  border: 'border-amber-200' },
-  { id: 'ingreso', label: 'Ingreso',  icon: ArrowRightCircle, color: 'text-emerald-600', light: 'bg-emerald-50', border: 'border-emerald-200' },
-  { id: 'egreso',  label: 'Egreso',   icon: ArrowLeftCircle,  color: 'text-blue-600',   light: 'bg-blue-50',   border: 'border-blue-200' },
-  { id: 'ronda',   label: 'Ronda',    icon: Navigation,        color: 'text-violet-600', light: 'bg-violet-50', border: 'border-violet-200' },
-  { id: 'visita',  label: 'Visita',   icon: Users,             color: 'text-sky-600',    light: 'bg-sky-50',    border: 'border-sky-200' },
-  { id: 'sos',     label: 'SOS',      icon: Siren,             color: 'text-red-600',    light: 'bg-red-50',    border: 'border-red-200' },
+const ENTRY_TYPES: { id: EntryType; label: string; icon: any; color: string; light: string; border: string; defaultEtiqueta: string; defaultGravedad: Gravedad }[] = [
+  { id: 'novedad', label: 'Novedad',  icon: Bell,             color: 'text-amber-600',   light: 'bg-amber-50',   border: 'border-amber-200',   defaultEtiqueta: 'SEGURIDAD', defaultGravedad: 'MEDIA'   },
+  { id: 'ingreso', label: 'Ingreso',  icon: ArrowRightCircle, color: 'text-emerald-600', light: 'bg-emerald-50', border: 'border-emerald-200', defaultEtiqueta: 'ACCESO',    defaultGravedad: 'BAJA'    },
+  { id: 'egreso',  label: 'Egreso',   icon: ArrowLeftCircle,  color: 'text-blue-600',    light: 'bg-blue-50',    border: 'border-blue-200',    defaultEtiqueta: 'ACCESO',    defaultGravedad: 'BAJA'    },
+  { id: 'ronda',   label: 'Ronda',    icon: Navigation,        color: 'text-violet-600',  light: 'bg-violet-50',  border: 'border-violet-200',  defaultEtiqueta: 'RONDA',     defaultGravedad: 'BAJA'    },
+  { id: 'visita',  label: 'Visita',   icon: Users,             color: 'text-sky-600',     light: 'bg-sky-50',     border: 'border-sky-200',     defaultEtiqueta: 'VISITA',    defaultGravedad: 'BAJA'    },
+  { id: 'sos',     label: 'SOS',      icon: Siren,             color: 'text-red-600',     light: 'bg-red-50',     border: 'border-red-200',     defaultEtiqueta: 'EMERGENCIA',defaultGravedad: 'CRITICA' },
 ];
 
 const typeConfig = (t: EntryType) => ENTRY_TYPES.find(x => x.id === t) || ENTRY_TYPES[0];
 
-// ─── Login ────────────────────────────────────────────────────────────────────
+// ─── Etiquetas ────────────────────────────────────────────────────────────────
+
+const ETIQUETAS = [
+  { id: 'SEGURIDAD',     label: 'Seguridad',     cls: 'text-red-700 bg-red-50 border-red-200'         },
+  { id: 'ACCESO',        label: 'Acceso',        cls: 'text-blue-700 bg-blue-50 border-blue-200'       },
+  { id: 'EMERGENCIA',    label: 'Emergencia',    cls: 'text-rose-700 bg-rose-50 border-rose-200'       },
+  { id: 'MANTENIMIENTO', label: 'Mantenimiento', cls: 'text-orange-700 bg-orange-50 border-orange-200' },
+  { id: 'PERSONAL',      label: 'Personal',      cls: 'text-violet-700 bg-violet-50 border-violet-200' },
+  { id: 'RONDA',         label: 'Ronda',         cls: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+  { id: 'VISITA',        label: 'Visita',        cls: 'text-teal-700 bg-teal-50 border-teal-200'       },
+  { id: 'ADMINISTRATIVO',label: 'Admin',         cls: 'text-slate-700 bg-slate-100 border-slate-200'   },
+];
+
+const etiquetaCfg = (id: string) => ETIQUETAS.find(e => e.id === id);
+
+// ─── Gravedad ─────────────────────────────────────────────────────────────────
+
+const GRAVEDADES: { id: Gravedad; label: string; dot: string; cls: string }[] = [
+  { id: 'BAJA',    label: 'Baja',    dot: 'bg-emerald-500', cls: 'text-emerald-700 bg-emerald-50 border-emerald-200'  },
+  { id: 'MEDIA',   label: 'Media',   dot: 'bg-amber-400',   cls: 'text-amber-700 bg-amber-50 border-amber-200'        },
+  { id: 'ALTA',    label: 'Alta',    dot: 'bg-orange-500',  cls: 'text-orange-700 bg-orange-50 border-orange-200'     },
+  { id: 'CRITICA', label: 'Crítica', dot: 'bg-red-600',     cls: 'text-red-700 bg-red-50 border-red-300 font-black'   },
+];
+
+const gravedadCfg = (id?: Gravedad) => GRAVEDADES.find(g => g.id === id) || GRAVEDADES[0];
+
+// ─── Login — mismo estilo que /login ─────────────────────────────────────────
 
 function LoginScreen({ onLogin }: { onLogin: (u: User) => void }) {
-  const [email, setEmail] = useState('');
-  const [pass,  setPass]  = useState('');
-  const [err,   setErr]   = useState('');
-  const [busy,  setBusy]  = useState(false);
+  const [email,   setEmail]   = useState('');
+  const [pass,    setPass]    = useState('');
+  const [showPass,setShowPass]= useState(false);
+  const [err,     setErr]     = useState('');
+  const [busy,    setBusy]    = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,52 +140,98 @@ function LoginScreen({ onLogin }: { onLogin: (u: User) => void }) {
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
       onLogin(cred.user);
-    } catch {
-      setErr('Credenciales incorrectas.');
+    } catch (err: any) {
+      if (['auth/invalid-credential','auth/user-not-found','auth/wrong-password'].includes(err.code)) {
+        setErr('Correo o contraseña incorrectos.');
+      } else {
+        setErr('Error de conexión. Intentá nuevamente.');
+      }
     } finally { setBusy(false); }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center mb-4 shadow-lg">
-            <ShieldCheck size={32} className="text-white" strokeWidth={1.5} />
-          </div>
-          <h1 className="text-xl font-black text-slate-800 tracking-tight">Libro de Guardia</h1>
-          <p className="text-slate-400 text-sm mt-1">COSP V1.0 · Portal de Objetivo</p>
+    <div className="min-h-screen bg-slate-50 flex">
+      {/* Panel izquierdo — branding (solo desktop) */}
+      <div className="hidden lg:flex w-[45%] bg-indigo-600 flex-col justify-between p-12 relative overflow-hidden">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute -top-24 -left-24 w-96 h-96 bg-white/5 rounded-full" />
+          <div className="absolute bottom-0 right-0 w-80 h-80 bg-indigo-500/40 rounded-full translate-x-1/3 translate-y-1/3" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-500/20 rounded-full" />
         </div>
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-10 h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center">
+            <ShieldCheck size={22} className="text-white" />
+          </div>
+          <div>
+            <span className="text-white font-black text-lg tracking-tight">COSP V 1.0</span>
+            <p className="text-indigo-200 text-[11px] font-medium">Seguridad Privada</p>
+            <p className="text-indigo-300 text-[10px] font-medium">Grupo Bacar</p>
+          </div>
+        </div>
+        <div className="relative z-10">
+          <h2 className="text-white text-4xl font-black leading-tight tracking-tight mb-4">
+            Libro de<br />Guardia<br />Digital
+          </h2>
+          <p className="text-indigo-200 text-sm font-medium leading-relaxed max-w-xs">
+            Registro operativo de novedades, ingresos y eventos por objetivo de seguridad.
+          </p>
+        </div>
+        <div className="relative z-10">
+          <p className="text-indigo-300 text-[11px] font-medium">
+            © {new Date().getFullYear()} Grupo Bacar · Todos los derechos reservados
+          </p>
+        </div>
+      </div>
 
-        {/* Card */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
-              <input
-                type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="usuario@empresa.com.ar"
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                autoCapitalize="none" autoCorrect="off"
-              />
+      {/* Panel derecho — formulario */}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          {/* Logo mobile */}
+          <div className="flex lg:hidden flex-col items-center mb-10">
+            <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-3">
+              <ShieldCheck size={26} className="text-white" />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Contraseña</label>
-              <input
-                type="password" value={pass} onChange={e => setPass(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-              />
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">Libro de Guardia</h1>
+            <p className="text-[11px] text-slate-500 font-medium">COSP V1.0 · Grupo Bacar</p>
+          </div>
+
+          <div className="mb-8">
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bienvenido</h2>
+            <p className="text-sm text-slate-500 font-medium mt-1">Ingresá con tu cuenta de acceso</p>
+          </div>
+
+          {err && (
+            <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertCircle size={16} className="shrink-0" /> {err}
             </div>
-            {err && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl">
-                <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
-                <p className="text-red-600 text-xs font-medium">{err}</p>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-3 text-slate-400" size={16} />
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+                  placeholder="correo@empresa.com" required autoCapitalize="none" autoCorrect="off" />
               </div>
-            )}
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Contraseña</label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-3 text-slate-400" size={16} />
+                <input type={showPass ? 'text' : 'password'} value={pass} onChange={e => setPass(e.target.value)}
+                  className="w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+                  placeholder="••••••••" required />
+                <button type="button" onClick={() => setShowPass(p => !p)}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 transition-colors">
+                  {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
             <button type="submit" disabled={busy}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
-              {busy ? <Loader2 size={16} className="animate-spin" /> : 'Ingresar'}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-black py-3.5 rounded-xl shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 text-sm tracking-wide mt-2">
+              {busy ? <Loader2 size={18} className="animate-spin" /> : 'INGRESAR'}
             </button>
           </form>
         </div>
@@ -173,23 +249,19 @@ function SinTurno({ nombre, onLogout }: { nombre: string; onLogout: () => void }
         <AlertTriangle size={28} className="text-amber-500" />
       </div>
       <h2 className="text-slate-800 font-black text-lg">Hola, {nombre}</h2>
-      <p className="text-slate-500 text-sm mt-2 max-w-xs">
-        No tenés ningún turno activo asignado para hoy.
-      </p>
+      <p className="text-slate-500 text-sm mt-2 max-w-xs">No tenés ningún turno activo asignado para hoy.</p>
       <p className="text-slate-400 text-xs mt-1">Contactá con operaciones si crees que es un error.</p>
       <button onClick={onLogout}
-        className="mt-6 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
+        className="mt-6 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
         <LogOut size={15} /> Cerrar sesión
       </button>
     </div>
   );
 }
 
-// ─── Selector de objetivo — dos niveles ───────────────────────────────────────
+// ─── Selector — dos niveles ────────────────────────────────────────────────────
 
-function SelectorObjetivo({
-  clientes, onSelect, onLogout, nombre,
-}: {
+function SelectorObjetivo({ clientes, onSelect, onLogout, nombre }: {
   clientes: ClienteConObjetivos[];
   onSelect: (obj: ObjetivoInfo) => void;
   onLogout: () => void;
@@ -198,41 +270,31 @@ function SelectorObjetivo({
   const [search,        setSearch]        = useState('');
   const [clienteActivo, setClienteActivo] = useState<ClienteConObjetivos | null>(null);
 
-  // ── Nivel 1: clientes ──────────────────────────────────────────────────────
   if (!clienteActivo) {
-    const filtered = clientes.filter(c =>
-      !search || c.name.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = clientes.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()));
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
-        {/* Header */}
-        <div className="bg-white border-b border-slate-200 px-4 pt-5 pb-4 flex-shrink-0">
+        <div className="bg-white border-b border-slate-200 px-4 pt-5 pb-4 shadow-sm flex-shrink-0">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
               <ShieldCheck size={18} className="text-indigo-600" strokeWidth={1.5} />
               <span className="text-indigo-600 text-xs font-black uppercase tracking-widest">Libro de Guardia</span>
             </div>
-            <button onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
+            <button onClick={onLogout} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
               <LogOut size={12} /> Salir
             </button>
           </div>
           <h1 className="text-slate-800 font-black text-lg mt-2">Clientes</h1>
           <p className="text-slate-400 text-xs">Admin · {nombre}</p>
         </div>
-
-        {/* Search */}
-        <div className="px-4 py-3 flex-shrink-0 bg-white border-b border-slate-100">
+        <div className="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
             <Search size={14} className="text-slate-400 flex-shrink-0" />
-            <input type="text" placeholder="Buscar cliente..." value={search}
-              onChange={e => setSearch(e.target.value)}
+            <input type="text" placeholder="Buscar cliente..." value={search} onChange={e => setSearch(e.target.value)}
               className="flex-1 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none" />
             {search && <button onClick={() => setSearch('')}><X size={13} className="text-slate-400" /></button>}
           </div>
         </div>
-
-        {/* Lista */}
         <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -240,17 +302,14 @@ function SelectorObjetivo({
               <p className="text-slate-400 text-sm">Sin clientes</p>
             </div>
           ) : filtered.map(cliente => (
-            <button key={cliente.id}
-              onClick={() => { setSearch(''); setClienteActivo(cliente); }}
+            <button key={cliente.id} onClick={() => { setSearch(''); setClienteActivo(cliente); }}
               className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3.5 flex items-center gap-3 hover:border-indigo-300 hover:bg-indigo-50/30 transition-all shadow-sm">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center flex-shrink-0">
                 <Building2 size={18} className="text-indigo-500" strokeWidth={1.5} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-slate-800 text-sm font-bold truncate">{cliente.name}</p>
-                <p className="text-slate-400 text-xs mt-0.5">
-                  {cliente.objetivos.length} objetivo{cliente.objetivos.length !== 1 ? 's' : ''}
-                </p>
+                <p className="text-slate-400 text-xs mt-0.5">{cliente.objetivos.length} objetivo{cliente.objetivos.length !== 1 ? 's' : ''}</p>
               </div>
               <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
             </button>
@@ -260,22 +319,15 @@ function SelectorObjetivo({
     );
   }
 
-  // ── Nivel 2: objetivos del cliente ─────────────────────────────────────────
-  const objFiltered = clienteActivo.objetivos.filter(o =>
-    !search || o.name.toLowerCase().includes(search.toLowerCase())
-  );
-
+  const objFiltered = clienteActivo.objetivos.filter(o => !search || o.name.toLowerCase().includes(search.toLowerCase()));
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-4 pt-4 pb-4 flex-shrink-0">
+      <div className="bg-white border-b border-slate-200 px-4 pt-4 pb-4 shadow-sm flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <button onClick={() => { setClienteActivo(null); setSearch(''); }}
-            className="flex items-center gap-1.5 text-indigo-600 text-sm font-bold">
+          <button onClick={() => { setClienteActivo(null); setSearch(''); }} className="flex items-center gap-1.5 text-indigo-600 text-sm font-bold">
             <ChevronLeft size={16} /> Clientes
           </button>
-          <button onClick={onLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
+          <button onClick={onLogout} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
             <LogOut size={12} /> Salir
           </button>
         </div>
@@ -285,25 +337,18 @@ function SelectorObjetivo({
           </div>
           <div>
             <h1 className="text-slate-800 font-black text-base leading-tight">{clienteActivo.name}</h1>
-            <p className="text-slate-400 text-xs">
-              {clienteActivo.objetivos.length} objetivo{clienteActivo.objetivos.length !== 1 ? 's' : ''}
-            </p>
+            <p className="text-slate-400 text-xs">{clienteActivo.objetivos.length} objetivo{clienteActivo.objetivos.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
       </div>
-
-      {/* Search */}
-      <div className="px-4 py-3 flex-shrink-0 bg-white border-b border-slate-100">
+      <div className="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0">
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
           <Search size={14} className="text-slate-400 flex-shrink-0" />
-          <input type="text" placeholder="Buscar objetivo..." value={search}
-            onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder="Buscar objetivo..." value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 bg-transparent text-sm text-slate-700 placeholder-slate-400 outline-none" />
           {search && <button onClick={() => setSearch('')}><X size={13} className="text-slate-400" /></button>}
         </div>
       </div>
-
-      {/* Lista */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2">
         {objFiltered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -328,28 +373,25 @@ function SelectorObjetivo({
   );
 }
 
-// ─── Panel nueva entrada ───────────────────────────────────────────────────────
+// ─── Panel nueva entrada con taxonomía ────────────────────────────────────────
 
-function NuevaEntradaPanel({
-  onSave, onClose, empleadoNombre, objectiveId, turno, objetivo,
-}: {
-  onSave: () => void;
-  onClose: () => void;
-  empleadoNombre: string;
-  objectiveId: string;
-  turno: TurnoActivo | null;
-  objetivo: ObjetivoInfo;
+function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno, objetivo }: {
+  onSave: () => void; onClose: () => void; empleadoNombre: string;
+  objectiveId: string; turno: TurnoActivo | null; objetivo: ObjetivoInfo;
 }) {
-  const [tipo,          setTipo]          = useState<EntryType>('novedad');
-  const [texto,         setTexto]         = useState('');
-  const [imageFile,     setImageFile]     = useState<File | null>(null);
-  const [imagePreview,  setImagePreview]  = useState<string | null>(null);
-  const [recording,     setRecording]     = useState(false);
-  const [audioBlob,     setAudioBlob]     = useState<Blob | null>(null);
-  const [audioUrl,      setAudioUrl]      = useState<string | null>(null);
-  const [transcription, setTranscription] = useState('');
-  const [saving,        setSaving]        = useState(false);
-  const [audioSeconds,  setAudioSeconds]  = useState(0);
+  const [tipo,         setTipo]         = useState<EntryType>('novedad');
+  const [etiqueta,     setEtiqueta]     = useState('SEGURIDAD');
+  const [gravedad,     setGravedad]     = useState<Gravedad>('MEDIA');
+  const [texto,        setTexto]        = useState('');
+  const [accion,       setAccion]       = useState('');
+  const [imageFile,    setImageFile]    = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [recording,    setRecording]    = useState(false);
+  const [audioBlob,    setAudioBlob]    = useState<Blob | null>(null);
+  const [audioUrl,     setAudioUrl]     = useState<string | null>(null);
+  const [transcription,setTranscription]= useState('');
+  const [saving,       setSaving]       = useState(false);
+  const [audioSeconds, setAudioSeconds] = useState(0);
 
   const mediaRecRef  = useRef<MediaRecorder | null>(null);
   const chunksRef    = useRef<Blob[]>([]);
@@ -357,9 +399,15 @@ function NuevaEntradaPanel({
   const timerRef     = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Al cambiar tipo → defaults de etiqueta y gravedad
+  useEffect(() => {
+    const cfg = typeConfig(tipo);
+    setEtiqueta(cfg.defaultEtiqueta);
+    setGravedad(cfg.defaultGravedad);
+  }, [tipo]);
+
   const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const f = e.target.files?.[0]; if (!f) return;
     setImageFile(f);
     const reader = new FileReader();
     reader.onload = ev => setImagePreview(ev.target?.result as string);
@@ -369,27 +417,22 @@ function NuevaEntradaPanel({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      chunksRef.current = [];
-      setAudioSeconds(0);
+      chunksRef.current = []; setAudioSeconds(0);
       timerRef.current = setInterval(() => setAudioSeconds(s => s + 1), 1000);
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
       const rec = new MediaRecorder(stream, { mimeType });
       mediaRecRef.current = rec;
       rec.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       rec.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-        clearInterval(timerRef.current);
+        stream.getTracks().forEach(t => t.stop()); clearInterval(timerRef.current);
         const blob = new Blob(chunksRef.current, { type: mimeType });
         setAudioBlob(blob); setAudioUrl(URL.createObjectURL(blob));
       };
       rec.start(); setRecording(true);
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SR) {
-        const recog = new SR();
-        recog.lang = 'es-AR'; recog.continuous = true; recog.interimResults = false;
-        recog.onresult = (ev: any) => {
-          setTranscription(Array.from(ev.results).map((r: any) => r[0].transcript).join(' '));
-        };
+        const recog = new SR(); recog.lang = 'es-AR'; recog.continuous = true; recog.interimResults = false;
+        recog.onresult = (ev: any) => setTranscription(Array.from(ev.results).map((r: any) => r[0].transcript).join(' '));
         recog.start(); speechRef.current = recog;
       }
     } catch { alert('No se pudo acceder al micrófono.'); }
@@ -398,26 +441,16 @@ function NuevaEntradaPanel({
   const stopRecording = () => { mediaRecRef.current?.stop(); speechRef.current?.stop(); setRecording(false); };
 
   const handleSave = async () => {
-    if (!texto.trim() && !imageFile && !audioBlob && !transcription.trim()) {
-      alert('Agregá texto, foto o audio.'); return;
-    }
+    if (!texto.trim() && !imageFile && !audioBlob && !transcription.trim()) { alert('Agregá descripción, foto o audio.'); return; }
     setSaving(true);
     try {
       const ts = Date.now();
-      let imgUrl: string | undefined;
-      let audUrl: string | undefined;
+      let imgUrl: string | undefined; let audUrl: string | undefined;
       if (imageFile) {
-        try {
-          const r = ref(storage, `libro_guardia/${objectiveId}/${ts}_img`);
-          await uploadBytes(r, imageFile); imgUrl = await getDownloadURL(r);
-        } catch { /* Storage opcional */ }
+        try { const r = ref(storage, `libro_guardia/${objectiveId}/${ts}_img`); await uploadBytes(r, imageFile); imgUrl = await getDownloadURL(r); } catch { /* opcional */ }
       }
       if (audioBlob) {
-        try {
-          const ext = audioBlob.type.includes('mp4') ? 'm4a' : 'webm';
-          const r = ref(storage, `libro_guardia/${objectiveId}/${ts}_audio.${ext}`);
-          await uploadBytes(r, audioBlob); audUrl = await getDownloadURL(r);
-        } catch { /* Storage opcional */ }
+        try { const ext = audioBlob.type.includes('mp4') ? 'm4a' : 'webm'; const r = ref(storage, `libro_guardia/${objectiveId}/${ts}_audio.${ext}`); await uploadBytes(r, audioBlob); audUrl = await getDownloadURL(r); } catch { /* opcional */ }
       }
       await addDoc(collection(db, 'libro_guardia'), {
         objectiveId,
@@ -426,27 +459,25 @@ function NuevaEntradaPanel({
         clientName:     objetivo.clientName || turno?.clientName  || '',
         shiftId:        turno?.id          || '',
         employeeId:     auth.currentUser?.uid || '',
-        empleadoNombre,
-        type:           tipo,
+        empleadoNombre, type: tipo, etiqueta, gravedad,
         text:           texto.trim() || transcription.trim() || '',
-        ...(imgUrl        && { imageUrl: imgUrl }),
-        ...(audUrl        && { audioUrl: audUrl }),
-        ...(transcription && { transcription }),
+        ...(accion.trim()   && { accionTomada: accion.trim() }),
+        ...(imgUrl          && { imageUrl: imgUrl }),
+        ...(audUrl          && { audioUrl: audUrl }),
+        ...(transcription   && { transcription }),
         createdAt: serverTimestamp(),
       });
       onSave(); onClose();
-    } catch (e: any) {
-      alert('Error al guardar: ' + (e?.message || e));
-    } finally { setSaving(false); }
+    } catch (e: any) { alert('Error al guardar: ' + (e?.message || e)); } finally { setSaving(false); }
   };
 
   const cfg = typeConfig(tipo);
+  const gcfg = gravedadCfg(gravedad);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-t-2xl border-t border-slate-200 shadow-2xl flex flex-col max-h-[92dvh]">
-        {/* Handle */}
+      <div className="bg-white rounded-t-2xl border-t border-slate-200 shadow-2xl flex flex-col max-h-[94dvh]">
         <div className="flex justify-center pt-3 pb-1 cursor-pointer" onClick={onClose}>
           <div className="w-10 h-1 rounded-full bg-slate-200" />
         </div>
@@ -457,100 +488,134 @@ function NuevaEntradaPanel({
           </button>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-5 py-4 flex flex-col gap-4">
+        <div className="overflow-y-auto flex-1 px-5 py-4 flex flex-col gap-5">
+
           {/* Tipo */}
-          <div className="grid grid-cols-3 gap-2">
-            {ENTRY_TYPES.map(t => {
-              const Icon = t.icon;
-              const active = tipo === t.id;
-              return (
-                <button key={t.id} onClick={() => setTipo(t.id)}
-                  className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border text-xs font-bold transition-all ${
-                    active
-                      ? `${t.light} ${t.border} ${t.color}`
-                      : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'
-                  }`}>
-                  <Icon size={18} strokeWidth={active ? 2 : 1.5} />
-                  {t.label}
-                </button>
-              );
-            })}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Tipo de registro</label>
+            <div className="grid grid-cols-3 gap-2">
+              {ENTRY_TYPES.map(t => {
+                const Icon = t.icon; const active = tipo === t.id;
+                return (
+                  <button key={t.id} onClick={() => setTipo(t.id)}
+                    className={`flex flex-col items-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${active ? `${t.light} ${t.border} ${t.color}` : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                    <Icon size={17} strokeWidth={active ? 2 : 1.5} />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Texto */}
-          <textarea
-            placeholder={tipo === 'sos' ? '¡Describí la emergencia!' : `Descripción de ${cfg.label.toLowerCase()}...`}
-            value={texto} onChange={e => setTexto(e.target.value)} rows={3}
-            className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-          />
+          {/* Etiqueta */}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Tag size={11} /> Categoría
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {ETIQUETAS.map(e => (
+                <button key={e.id} onClick={() => setEtiqueta(e.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${etiqueta === e.id ? e.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                  [{e.id}]
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Gravedad */}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Zap size={11} /> Gravedad
+            </label>
+            <div className="grid grid-cols-4 gap-2">
+              {GRAVEDADES.map(g => (
+                <button key={g.id} onClick={() => setGravedad(g.id)}
+                  className={`flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-bold transition-all ${gravedad === g.id ? g.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                  <div className={`w-2.5 h-2.5 rounded-full ${gravedad === g.id ? g.dot : 'bg-slate-200'}`} />
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Descripción */}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Descripción</label>
+            <textarea
+              placeholder={tipo === 'sos' ? '¡Describí la emergencia con detalle!' : `Descripción de la ${cfg.label.toLowerCase()}...`}
+              value={texto} onChange={e => setTexto(e.target.value)} rows={3}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+            />
+          </div>
+
+          {/* Acción tomada */}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Acción tomada <span className="font-medium normal-case text-slate-400">(opcional)</span></label>
+            <textarea
+              placeholder="Ej: Se notificó a supervisor, se solicitó refuerzo, se tomó registro fotográfico..."
+              value={accion} onChange={e => setAccion(e.target.value)} rows={2}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+            />
+          </div>
 
           {/* Foto */}
-          <div className="flex gap-2">
-            <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
-              className="hidden" onChange={handleImage} />
-            <button onClick={() => fileInputRef.current?.click()}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors">
-              <Camera size={16} className="text-slate-400" /> Cámara
-            </button>
-            <button onClick={() => {
-              const inp = document.createElement('input');
-              inp.type = 'file'; inp.accept = 'image/*';
-              inp.onchange = (e: any) => handleImage(e); inp.click();
-            }}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors">
-              <ImageIcon size={16} className="text-slate-400" /> Galería
-            </button>
-          </div>
-
-          {imagePreview && (
-            <div className="relative">
-              <img src={imagePreview} alt="preview" className="w-full rounded-xl object-cover max-h-48 border border-slate-200" />
-              <button onClick={() => { setImageFile(null); setImagePreview(null); }}
-                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center">
-                <X size={13} className="text-slate-500" />
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Evidencia fotográfica</label>
+            <div className="flex gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImage} />
+              <button onClick={() => fileInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors shadow-sm">
+                <Camera size={15} className="text-slate-400" /> Cámara
+              </button>
+              <button onClick={() => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = (e: any) => handleImage(e); inp.click(); }}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors shadow-sm">
+                <ImageIcon size={15} className="text-slate-400" /> Galería
               </button>
             </div>
-          )}
-
-          {/* Audio */}
-          {!audioUrl ? (
-            <button onClick={recording ? stopRecording : startRecording}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-medium text-sm transition-all ${
-                recording
-                  ? 'bg-red-50 border-red-200 text-red-600'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}>
-              {recording
-                ? <><MicOff size={16} className="animate-pulse" /> Detener ({audioSeconds}s)</>
-                : <><Mic size={16} className="text-slate-400" /> Grabar audio</>}
-            </button>
-          ) : (
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">Audio grabado ({audioSeconds}s)</span>
-                <button onClick={() => { setAudioBlob(null); setAudioUrl(null); setTranscription(''); setAudioSeconds(0); }}
-                  className="p-1 rounded hover:bg-slate-200 transition-colors">
-                  <X size={14} className="text-slate-400" />
+            {imagePreview && (
+              <div className="relative mt-2">
+                <img src={imagePreview} alt="preview" className="w-full rounded-xl object-cover max-h-48 border border-slate-200" />
+                <button onClick={() => { setImageFile(null); setImagePreview(null); }}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center">
+                  <X size={13} className="text-slate-500" />
                 </button>
               </div>
-              <audio src={audioUrl} controls className="w-full h-8" />
-              {transcription && (
-                <div className="px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg">
-                  <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wider mb-0.5">Transcripción</p>
-                  <p className="text-xs text-slate-600">{transcription}</p>
+            )}
+          </div>
+
+          {/* Audio */}
+          <div>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Audio / Dictado</label>
+            {!audioUrl ? (
+              <button onClick={recording ? stopRecording : startRecording}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-medium text-sm transition-all shadow-sm ${recording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                {recording ? <><MicOff size={15} className="animate-pulse" /> Detener ({audioSeconds}s)</> : <><Mic size={15} className="text-slate-400" /> Grabar nota de voz</>}
+              </button>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">Audio grabado ({audioSeconds}s)</span>
+                  <button onClick={() => { setAudioBlob(null); setAudioUrl(null); setTranscription(''); setAudioSeconds(0); }} className="p-1 rounded hover:bg-slate-200 transition-colors">
+                    <X size={13} className="text-slate-400" />
+                  </button>
                 </div>
-              )}
-            </div>
-          )}
+                <audio src={audioUrl} controls className="w-full h-8" />
+                {transcription && (
+                  <div className="px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg">
+                    <p className="text-[10px] font-black text-violet-600 uppercase tracking-wider mb-0.5">Transcripción automática</p>
+                    <p className="text-xs text-slate-600">{transcription}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Guardar */}
-        <div className="px-5 pb-6 pt-3 border-t border-slate-100">
+        <div className="px-5 pb-6 pt-3 border-t border-slate-100 flex-shrink-0">
           <button onClick={handleSave} disabled={saving}
-            className={`w-full py-3 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-60 ${
-              tipo === 'sos' ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'
-            }`}>
-            {saving ? <Loader2 size={18} className="animate-spin" /> : <><Send size={16} /> Registrar {cfg.label}</>}
+            className={`w-full py-3.5 rounded-xl font-black text-white text-sm flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-60 ${tipo === 'sos' ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'}`}>
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <><Send size={16} /> REGISTRAR {cfg.label.toUpperCase()}</>}
           </button>
         </div>
       </div>
@@ -561,52 +626,59 @@ function NuevaEntradaPanel({
 // ─── Tarjeta de entrada ────────────────────────────────────────────────────────
 
 function EntradaCard({ entry }: { entry: LibroEntry }) {
-  const cfg = typeConfig(entry.type);
+  const cfg  = typeConfig(entry.type);
   const Icon = cfg.icon;
+  const ecfg = entry.etiqueta ? etiquetaCfg(entry.etiqueta) : null;
+  const gcfg = gravedadCfg(entry.gravedad);
   const [imgExpanded, setImgExpanded] = useState(false);
 
   return (
-    <div className={`bg-white border rounded-xl shadow-sm overflow-hidden border-l-4 ${cfg.border}`}>
-      {/* Header entrada */}
-      <div className="px-4 py-3 flex items-center gap-2">
+    <div className={`bg-white border border-l-4 rounded-xl shadow-sm overflow-hidden ${cfg.border} border-slate-200`}>
+      {/* Header */}
+      <div className="px-4 py-3 flex items-center gap-2 flex-wrap">
         <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${cfg.light}`}>
           <Icon size={14} className={cfg.color} />
         </div>
         <span className={`text-xs font-black uppercase tracking-wider ${cfg.color}`}>{cfg.label}</span>
-        <span className="text-xs text-slate-400 ml-auto">{fmtEntryTime(entry.createdAt)}</span>
-        {fmtEntryDate(entry.createdAt) && (
-          <span className="text-[10px] text-slate-300 font-medium">{fmtEntryDate(entry.createdAt)}</span>
+        {ecfg && (
+          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${ecfg.cls}`}>{entry.etiqueta}</span>
         )}
+        {entry.gravedad && entry.gravedad !== 'BAJA' && (
+          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border flex items-center gap-1 ${gcfg.cls}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${gcfg.dot}`} />{gcfg.label}
+          </span>
+        )}
+        <span className="text-xs text-slate-400 ml-auto font-medium">{fmtEntryTime(entry.createdAt)}</span>
+        <span className="text-[10px] text-slate-300">{fmtEntryDate(entry.createdAt)}</span>
       </div>
 
       {/* Contenido */}
-      {(entry.text || entry.transcription || entry.imageUrl || entry.audioUrl) && (
-        <div className="px-4 pb-3 flex flex-col gap-2">
-          {entry.text && <p className="text-sm text-slate-700 leading-relaxed">{entry.text}</p>}
-          {entry.transcription && !entry.text && (
-            <p className="text-sm text-slate-600 italic">"{entry.transcription}"</p>
-          )}
-          {entry.imageUrl && (
-            <img src={entry.imageUrl} alt="" onClick={() => setImgExpanded(true)}
-              className="w-full rounded-lg object-cover max-h-52 border border-slate-100 cursor-pointer" />
-          )}
-          {entry.audioUrl && (
-            <div className="flex flex-col gap-1">
-              <audio src={entry.audioUrl} controls className="w-full h-8" />
-              {entry.transcription && (
-                <p className="text-[11px] text-slate-400 italic">"{entry.transcription}"</p>
-              )}
-            </div>
-          )}
-          {entry.empleadoNombre && (
-            <p className="text-[11px] text-slate-300 pt-1 border-t border-slate-50">{entry.empleadoNombre}</p>
-          )}
-        </div>
-      )}
+      <div className="px-4 pb-3 flex flex-col gap-2.5">
+        {entry.text && <p className="text-sm text-slate-700 leading-relaxed">{entry.text}</p>}
+        {entry.transcription && !entry.text && <p className="text-sm text-slate-600 italic">"{entry.transcription}"</p>}
+        {entry.accionTomada && (
+          <div className="px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider mb-0.5">Acción tomada</p>
+            <p className="text-xs text-slate-700">{entry.accionTomada}</p>
+          </div>
+        )}
+        {entry.imageUrl && (
+          <img src={entry.imageUrl} alt="" onClick={() => setImgExpanded(true)}
+            className="w-full rounded-lg object-cover max-h-52 border border-slate-100 cursor-pointer" />
+        )}
+        {entry.audioUrl && (
+          <div className="flex flex-col gap-1">
+            <audio src={entry.audioUrl} controls className="w-full h-8" />
+            {entry.transcription && <p className="text-[11px] text-slate-400 italic">"{entry.transcription}"</p>}
+          </div>
+        )}
+        {entry.empleadoNombre && (
+          <p className="text-[11px] text-slate-300 pt-1 border-t border-slate-50">{entry.empleadoNombre}</p>
+        )}
+      </div>
 
       {imgExpanded && entry.imageUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90"
-          onClick={() => setImgExpanded(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90" onClick={() => setImgExpanded(false)}>
           <img src={entry.imageUrl} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
         </div>
       )}
@@ -614,19 +686,11 @@ function EntradaCard({ entry }: { entry: LibroEntry }) {
   );
 }
 
-// ─── Vista Libro de Guardia ────────────────────────────────────────────────────
+// ─── Libro de Guardia ─────────────────────────────────────────────────────────
 
-function LibroGuardia({
-  objetivo, turno, entries, totalHoy, empNombre, isAdmin, onBack, onLogout,
-}: {
-  objetivo: ObjetivoInfo;
-  turno: TurnoActivo | null;
-  entries: LibroEntry[];
-  totalHoy: number;
-  empNombre: string;
-  isAdmin: boolean;
-  onBack?: () => void;
-  onLogout: () => void;
+function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, onBack, onLogout }: {
+  objetivo: ObjetivoInfo; turno: TurnoActivo | null; entries: LibroEntry[];
+  totalHoy: number; empNombre: string; isAdmin: boolean; onBack?: () => void; onLogout: () => void;
 }) {
   const [showNueva, setShowNueva] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
@@ -636,36 +700,23 @@ function LibroGuardia({
       {/* Topbar */}
       <div className="bg-white border-b border-slate-200 px-4 pt-4 pb-3 flex-shrink-0 shadow-sm">
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            {isAdmin && onBack ? (
-              <button onClick={onBack} className="flex items-center gap-1 text-indigo-600 text-sm font-bold">
-                <ChevronLeft size={16} /> Clientes
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={16} className="text-indigo-600" strokeWidth={1.5} />
-                <span className="text-indigo-600 text-xs font-black uppercase tracking-widest">Libro de Guardia</span>
-              </div>
-            )}
-          </div>
-          <button onClick={onLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
+          {isAdmin && onBack ? (
+            <button onClick={onBack} className="flex items-center gap-1 text-indigo-600 text-sm font-bold">
+              <ChevronLeft size={16} /> Clientes
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={16} className="text-indigo-600" strokeWidth={1.5} />
+              <span className="text-indigo-600 text-xs font-black uppercase tracking-widest">Libro de Guardia</span>
+            </div>
+          )}
+          <button onClick={onLogout} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 font-medium bg-white hover:bg-slate-50 transition-colors">
             <LogOut size={12} /> Salir
           </button>
         </div>
-
-        {/* Info objetivo */}
         <h1 className="text-slate-800 font-black text-lg leading-tight">{objetivo.name}</h1>
-        {objetivo.clientName && (
-          <p className="text-slate-500 text-xs mt-0.5">{objetivo.clientName}</p>
-        )}
-        {objetivo.address && (
-          <p className="text-slate-400 text-[11px] mt-0.5 flex items-center gap-1">
-            <MapPin size={10} /> {objetivo.address}
-          </p>
-        )}
-
-        {/* Badges */}
+        {objetivo.clientName && <p className="text-slate-500 text-xs mt-0.5">{objetivo.clientName}</p>}
+        {objetivo.address && <p className="text-slate-400 text-[11px] mt-0.5 flex items-center gap-1"><MapPin size={10} />{objetivo.address}</p>}
         <div className="flex items-center gap-2 mt-2.5 flex-wrap">
           {turno ? (
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
@@ -682,9 +733,7 @@ function LibroGuardia({
             </span>
           )}
         </div>
-
-        {/* Guardia */}
-        <div className="mt-2.5 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-[11px] font-black text-indigo-600">
             {empNombre.charAt(0).toUpperCase()}
           </div>
@@ -702,29 +751,22 @@ function LibroGuardia({
             <p className="text-slate-400 text-sm font-medium">Sin entradas hoy</p>
             <p className="text-slate-300 text-xs mt-1">Registrá la primera novedad del turno</p>
           </div>
-        ) : (
-          entries.map(e => <EntradaCard key={e.id} entry={e} />)
-        )}
+        ) : entries.map(e => <EntradaCard key={e.id} entry={e} />)}
         <div ref={listEndRef} />
       </div>
 
       {/* FAB */}
       <div className="fixed bottom-6 inset-x-0 flex justify-center z-40 pointer-events-none">
         <button onClick={() => setShowNueva(true)}
-          className="pointer-events-auto flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-lg shadow-indigo-200 transition-all active:scale-95">
+          className="pointer-events-auto flex items-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all active:scale-95">
           <Plus size={18} /> Nueva entrada
         </button>
       </div>
 
       {showNueva && (
-        <NuevaEntradaPanel
-          onClose={() => setShowNueva(false)}
+        <NuevaEntradaPanel onClose={() => setShowNueva(false)}
           onSave={() => { setShowNueva(false); setTimeout(() => listEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100); }}
-          empleadoNombre={empNombre}
-          objectiveId={objetivo.id}
-          turno={turno}
-          objetivo={objetivo}
-        />
+          empleadoNombre={empNombre} objectiveId={objetivo.id} turno={turno} objetivo={objetivo} />
       )}
     </div>
   );
@@ -749,24 +791,13 @@ export default function ObjetivoPortal() {
     return () => unsub();
   }, []);
 
-  useEffect(() => {
-    if (!fireUser) return;
-    init(fireUser.uid);
-  }, [fireUser]);
+  useEffect(() => { if (!fireUser) return; init(fireUser.uid); }, [fireUser]);
 
   useEffect(() => {
     if (!objetivo) return;
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-    const q = query(
-      collection(db, 'libro_guardia'),
-      where('objectiveId', '==', objetivo.id),
-      where('createdAt', '>=', Timestamp.fromDate(hoy)),
-      orderBy('createdAt', 'desc'),
-    );
-    const unsub = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as LibroEntry));
-      setEntries(docs); setTotalHoy(docs.length);
-    });
+    const q = query(collection(db, 'libro_guardia'), where('objectiveId', '==', objetivo.id), where('createdAt', '>=', Timestamp.fromDate(hoy)), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, snap => { const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as LibroEntry)); setEntries(docs); setTotalHoy(docs.length); });
     return () => unsub();
   }, [objetivo?.id]);
 
@@ -774,37 +805,15 @@ export default function ObjetivoPortal() {
     setLoadingInit(true);
     try {
       let inSystemUsers = false; let adminName = '';
-      try {
-        const sysSnap = await getDoc(doc(db, 'system_users', uid));
-        if (sysSnap.exists()) {
-          inSystemUsers = true;
-          const d = sysSnap.data();
-          adminName = [d.firstName, d.lastName].filter(Boolean).join(' ') || d.displayName || d.email || '';
-        }
-      } catch { /* ignorar */ }
-
+      try { const s = await getDoc(doc(db, 'system_users', uid)); if (s.exists()) { inSystemUsers = true; const d = s.data(); adminName = [d.firstName, d.lastName].filter(Boolean).join(' ') || d.displayName || d.email || ''; } } catch { /* ignorar */ }
       let inEmpleados = false; let empName = '';
-      const empQ = query(collection(db, 'empleados'), where('uid', '==', uid));
-      const empSnap = await getDocs(empQ);
-      if (!empSnap.empty) {
-        inEmpleados = true;
-        const d = empSnap.docs[0].data();
-        empName = [d.firstName, d.lastName].filter(Boolean).join(' ');
-      }
-
+      const empSnap = await getDocs(query(collection(db, 'empleados'), where('uid', '==', uid)));
+      if (!empSnap.empty) { inEmpleados = true; const d = empSnap.docs[0].data(); empName = [d.firstName, d.lastName].filter(Boolean).join(' '); }
       const admin = inSystemUsers || !inEmpleados;
       setIsAdmin(admin);
-
-      if (admin) {
-        setEmpNombre(adminName || auth.currentUser?.email || 'Admin');
-        await loadAllObjetivos();
-      } else {
-        setEmpNombre(empName || fireUser?.email || 'Guardia');
-        await loadTurnoActivo(uid);
-      }
-    } catch (e) {
-      console.error('Error init:', e);
-    } finally { setLoadingInit(false); }
+      if (admin) { setEmpNombre(adminName || auth.currentUser?.email || 'Admin'); await loadAllObjetivos(); }
+      else { setEmpNombre(empName || fireUser?.email || 'Guardia'); await loadTurnoActivo(uid); }
+    } catch (e) { console.error('Error init:', e); } finally { setLoadingInit(false); }
   };
 
   const loadAllObjetivos = async () => {
@@ -812,31 +821,19 @@ export default function ObjetivoPortal() {
     const lista: ClienteConObjetivos[] = [];
     for (const d of snap.docs) {
       const data = d.data();
-      const obs: ObjetivoInfo[] = (data.objetivos || [])
-        .map((o: any) => ({ id: o.id, name: o.name || o.nombre || '', address: o.address || o.direccion || '', clientName: data.name || data.nombre || '', clientId: d.id }))
-        .filter((o: ObjetivoInfo) => o.id && o.name);
+      const obs: ObjetivoInfo[] = (data.objetivos || []).map((o: any) => ({ id: o.id, name: o.name || o.nombre || '', address: o.address || o.direccion || '', clientName: data.name || data.nombre || '', clientId: d.id })).filter((o: ObjetivoInfo) => o.id && o.name);
       if (obs.length > 0) lista.push({ id: d.id, name: data.name || data.nombre || d.id, objetivos: obs });
     }
-    lista.sort((a, b) => a.name.localeCompare(b.name));
-    setClientes(lista);
+    lista.sort((a, b) => a.name.localeCompare(b.name)); setClientes(lista);
   };
 
   const loadTurnoActivo = async (uid: string) => {
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
-    const q = query(
-      collection(db, 'turnos'),
-      where('employeeId', '==', uid),
-      where('startTime', '>=', Timestamp.fromDate(hoy)),
-      where('startTime', '<',  Timestamp.fromDate(manana)),
-    );
-    const snap = await getDocs(q);
-    const turnos = snap.docs
-      .map(d => ({ id: d.id, ...d.data() } as TurnoActivo))
-      .filter(t => !t['isAbsent'] && !t['isFranco'] && !t['draft']);
+    const snap = await getDocs(query(collection(db, 'turnos'), where('employeeId', '==', uid), where('startTime', '>=', Timestamp.fromDate(hoy)), where('startTime', '<', Timestamp.fromDate(manana))));
+    const turnos = snap.docs.map(d => ({ id: d.id, ...d.data() } as TurnoActivo)).filter(t => !t['isAbsent'] && !t['isFranco'] && !t['draft']);
     if (turnos.length === 0) return;
-    const t = turnos[0];
-    setTurno(t);
+    const t = turnos[0]; setTurno(t);
     if (t.objectiveId) await resolveObjetivo(t);
   };
 
@@ -847,10 +844,7 @@ export default function ObjetivoPortal() {
       for (const clientDoc of snap.docs) {
         const data = clientDoc.data();
         const found = (data.objetivos || []).find((o: any) => o.id === t.objectiveId);
-        if (found) {
-          setObjetivo({ id: t.objectiveId!, name: found.name || t.objectiveName || 'Objetivo', address: found.address || found.direccion || '', clientName: data.name || data.nombre || t.clientName || '', clientId: clientDoc.id });
-          return;
-        }
+        if (found) { setObjetivo({ id: t.objectiveId!, name: found.name || t.objectiveName || 'Objetivo', address: found.address || found.direccion || '', clientName: data.name || data.nombre || t.clientName || '', clientId: clientDoc.id }); return; }
       }
     } catch { /* ignorar */ }
     setObjetivo({ id: t.objectiveId!, name: t.objectiveName || 'Objetivo', address: '', clientName: t.clientName || '', clientId: t.clientId || '' });
@@ -858,39 +852,19 @@ export default function ObjetivoPortal() {
 
   const handleLogout = () => { signOut(auth); setObjetivo(null); setTurno(null); setIsAdmin(false); };
 
-  // Render
-  if (authLoading || loadingInit) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center">
-          <ShieldCheck size={24} className="text-white" strokeWidth={1.5} />
-        </div>
-        <Loader2 size={20} className="text-indigo-500 animate-spin" />
-        {loadingInit && <p className="text-slate-400 text-sm">Cargando...</p>}
+  if (authLoading || loadingInit) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
+      <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <ShieldCheck size={24} className="text-white" strokeWidth={1.5} />
       </div>
-    );
-  }
-
-  if (!fireUser) return (
-    <><Head><title>Libro de Guardia · COSP</title></Head><LoginScreen onLogin={u => setFireUser(u)} /></>
+      <Loader2 size={20} className="text-indigo-500 animate-spin" />
+    </div>
   );
 
-  if (isAdmin && !objetivo) return (
-    <><Head><title>Libro de Guardia · COSP</title></Head>
-    <SelectorObjetivo clientes={clientes} onSelect={obj => setObjetivo(obj)} onLogout={handleLogout} nombre={empNombre} /></>
-  );
-
-  if (!isAdmin && !turno) return (
-    <><Head><title>Libro de Guardia · COSP</title></Head><SinTurno nombre={empNombre} onLogout={handleLogout} /></>
-  );
-
+  if (!fireUser) return <><Head><title>Libro de Guardia · COSP</title></Head><LoginScreen onLogin={u => setFireUser(u)} /></>;
+  if (isAdmin && !objetivo) return <><Head><title>Libro de Guardia · COSP</title></Head><SelectorObjetivo clientes={clientes} onSelect={obj => setObjetivo(obj)} onLogout={handleLogout} nombre={empNombre} /></>;
+  if (!isAdmin && !turno) return <><Head><title>Libro de Guardia · COSP</title></Head><SinTurno nombre={empNombre} onLogout={handleLogout} /></>;
   if (!objetivo) return null;
 
-  return (
-    <><Head><title>{objetivo.name} · Libro de Guardia</title></Head>
-    <LibroGuardia objetivo={objetivo} turno={turno} entries={entries} totalHoy={totalHoy}
-      empNombre={empNombre} isAdmin={isAdmin}
-      onBack={isAdmin ? () => setObjetivo(null) : undefined}
-      onLogout={handleLogout} /></>
-  );
+  return <><Head><title>{objetivo.name} · Libro de Guardia</title></Head><LibroGuardia objetivo={objetivo} turno={turno} entries={entries} totalHoy={totalHoy} empNombre={empNombre} isAdmin={isAdmin} onBack={isAdmin ? () => setObjetivo(null) : undefined} onLogout={handleLogout} /></>;
 }
