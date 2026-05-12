@@ -59,7 +59,12 @@ const nextConfig = {
   experimental: {
     esmExternals: 'loose'
   },
-  staticPageGenerationTimeout: 300
+  staticPageGenerationTimeout: 300,
+  webpack: (config) => {
+    // Soporte WASM para @imgly/background-removal
+    config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
+    return config;
+  }
 };
 
 module.exports = nextConfig;

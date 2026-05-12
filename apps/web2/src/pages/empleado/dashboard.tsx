@@ -2,7 +2,8 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import AuthGuard from '@/components/auth/AuthGuard';
-import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X } from 'lucide-react';
+import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard } from 'lucide-react';
+import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { app, db, functions, storage, auth } from '@/lib/firebase';
 import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -145,7 +146,9 @@ const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => 
 
 export default function EmployeeDashboard() {
   const { addToast } = useToast();
-  const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string } | null>(null);
+  const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string; dni?: string; cuil?: string; category?: string; photoUrl?: string } | null>(null);
+  const [empresaNombre, setEmpresaNombre] = useState<string>('');
+  const [showCredencial, setShowCredencial] = useState(false);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [objectivesMap, setObjectivesMap] = useState<Record<string, ObjectiveLocation>>({});
@@ -335,7 +338,20 @@ export default function EmployeeDashboard() {
       const empDoc = await getDoc(doc(db, 'empleados', empDocId));
       if (empDoc.exists()) {
         const d = empDoc.data();
-        setEmpProfile({ firstName: d.firstName, lastName: d.lastName, fileNumber: d.fileNumber });
+        setEmpProfile({
+          firstName: d.firstName || d.nombre,
+          lastName: d.lastName || d.apellido,
+          fileNumber: d.fileNumber || d.legajo,
+          dni: d.dni || d.document,
+          cuil: d.cuil,
+          category: d.category || d.cargo,
+          photoUrl: d.photoUrl || d.fotoUrl || undefined,
+        });
+        if (d.empresaId) {
+          getDoc(doc(db, 'empresas', d.empresaId))
+            .then(eDoc => { if (eDoc.exists()) setEmpresaNombre(eDoc.data().name || eDoc.data().nombre || ''); })
+            .catch(() => {});
+        }
       }
     } catch (_) {}
 
@@ -1603,6 +1619,13 @@ export default function EmployeeDashboard() {
                 <BellRing size={12}/> Notif.
               </button>
             )}
+            <button
+              onClick={() => setShowCredencial(v => !v)}
+              className="relative p-2 text-slate-400 hover:text-yellow-400 transition-colors"
+              title="Mi Credencial"
+            >
+              <CreditCard size={20}/>
+            </button>
             <button onClick={() => setShowNotifications(true)} className="relative p-2 text-slate-400 hover:text-white transition-colors">
               <Bell size={20}/>
               {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full animate-pulse"/>}
@@ -2267,6 +2290,26 @@ export default function EmployeeDashboard() {
             </div>
           </div>
         )}
+
+          {/* ===== CREDENCIAL DIGITAL ===== */}
+          {showCredencial && empDocIdRef.current && (
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard size={16} className="text-yellow-400"/>
+                  <p className="text-sm font-black text-white">Mi Credencial Digital</p>
+                </div>
+                <button onClick={() => setShowCredencial(false)} className="text-slate-500 hover:text-slate-300">
+                  <X size={16}/>
+                </button>
+              </div>
+              <CredencialDigital
+                empDocId={empDocIdRef.current}
+                empData={empProfile || {}}
+                empresaNombre={empresaNombre}
+              />
+            </div>
+          )}
 
       </div>
     </AuthGuard>
