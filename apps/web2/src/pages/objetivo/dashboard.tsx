@@ -88,30 +88,71 @@ const fmtEntryDate = (val: any) => {
 // ─── Config tipos de entrada ──────────────────────────────────────────────────
 
 const ENTRY_TYPES: { id: EntryType; label: string; icon: any; color: string; light: string; border: string; defaultEtiqueta: string; defaultGravedad: Gravedad }[] = [
-  { id: 'novedad', label: 'Novedad',  icon: Bell,             color: 'text-amber-600',   light: 'bg-amber-50',   border: 'border-amber-200',   defaultEtiqueta: 'SEGURIDAD', defaultGravedad: 'MEDIA'   },
+  { id: 'novedad', label: 'Novedad',  icon: Bell,             color: 'text-amber-600',   light: 'bg-amber-50',   border: 'border-amber-200',   defaultEtiqueta: 'INCIDENTE', defaultGravedad: 'ALTA'    },
   { id: 'ingreso', label: 'Ingreso',  icon: ArrowRightCircle, color: 'text-emerald-600', light: 'bg-emerald-50', border: 'border-emerald-200', defaultEtiqueta: 'ACCESO',    defaultGravedad: 'BAJA'    },
   { id: 'egreso',  label: 'Egreso',   icon: ArrowLeftCircle,  color: 'text-blue-600',    light: 'bg-blue-50',    border: 'border-blue-200',    defaultEtiqueta: 'ACCESO',    defaultGravedad: 'BAJA'    },
   { id: 'ronda',   label: 'Ronda',    icon: Navigation,        color: 'text-violet-600',  light: 'bg-violet-50',  border: 'border-violet-200',  defaultEtiqueta: 'RONDA',     defaultGravedad: 'BAJA'    },
   { id: 'visita',  label: 'Visita',   icon: Users,             color: 'text-sky-600',     light: 'bg-sky-50',     border: 'border-sky-200',     defaultEtiqueta: 'VISITA',    defaultGravedad: 'BAJA'    },
-  { id: 'sos',     label: 'SOS',      icon: Siren,             color: 'text-red-600',     light: 'bg-red-50',     border: 'border-red-200',     defaultEtiqueta: 'EMERGENCIA',defaultGravedad: 'CRITICA' },
+  { id: 'sos',     label: 'SOS',      icon: Siren,             color: 'text-red-600',     light: 'bg-red-50',     border: 'border-red-200',     defaultEtiqueta: 'SINIESTRO', defaultGravedad: 'CRITICA' },
 ];
 
 const typeConfig = (t: EntryType) => ENTRY_TYPES.find(x => x.id === t) || ENTRY_TYPES[0];
 
-// ─── Etiquetas ────────────────────────────────────────────────────────────────
+// ─── Etiquetas agrupadas ──────────────────────────────────────────────────────
 
-const ETIQUETAS = [
-  { id: 'SEGURIDAD',     label: 'Seguridad',     cls: 'text-red-700 bg-red-50 border-red-200'         },
-  { id: 'ACCESO',        label: 'Acceso',        cls: 'text-blue-700 bg-blue-50 border-blue-200'       },
-  { id: 'EMERGENCIA',    label: 'Emergencia',    cls: 'text-rose-700 bg-rose-50 border-rose-200'       },
-  { id: 'MANTENIMIENTO', label: 'Mantenimiento', cls: 'text-orange-700 bg-orange-50 border-orange-200' },
-  { id: 'PERSONAL',      label: 'Personal',      cls: 'text-violet-700 bg-violet-50 border-violet-200' },
-  { id: 'RONDA',         label: 'Ronda',         cls: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
-  { id: 'VISITA',        label: 'Visita',        cls: 'text-teal-700 bg-teal-50 border-teal-200'       },
-  { id: 'ADMINISTRATIVO',label: 'Admin',         cls: 'text-slate-700 bg-slate-100 border-slate-200'   },
+interface EtiquetaDef { id: string; label: string; cls: string; defaultGravedad: Gravedad }
+interface EtiquetaGrupo { grupo: string; etiquetas: EtiquetaDef[] }
+
+const ETIQUETA_GRUPOS: EtiquetaGrupo[] = [
+  {
+    grupo: 'Seguridad',
+    etiquetas: [
+      { id: 'INCIDENTE',  label: 'Incidente',   cls: 'text-red-700 bg-red-50 border-red-200',           defaultGravedad: 'ALTA'    },
+      { id: 'SINIESTRO',  label: 'Siniestro',   cls: 'text-red-800 bg-red-100 border-red-300',           defaultGravedad: 'CRITICA' },
+      { id: 'INTRUSIÓN',  label: 'Intrusión',   cls: 'text-rose-700 bg-rose-50 border-rose-200',         defaultGravedad: 'ALTA'    },
+      { id: 'ROBO_HURTO', label: 'Robo / Hurto',cls: 'text-red-700 bg-red-50 border-red-200',            defaultGravedad: 'ALTA'    },
+      { id: 'ALARMA',     label: 'Alarma',      cls: 'text-orange-700 bg-orange-50 border-orange-200',   defaultGravedad: 'MEDIA'   },
+      { id: 'HALLAZGO',   label: 'Hallazgo',    cls: 'text-amber-700 bg-amber-50 border-amber-200',      defaultGravedad: 'MEDIA'   },
+    ],
+  },
+  {
+    grupo: 'Operación',
+    etiquetas: [
+      { id: 'RELEVO',   label: 'Relevo',   cls: 'text-slate-700 bg-slate-100 border-slate-300',   defaultGravedad: 'BAJA'  },
+      { id: 'ACCESO',   label: 'Acceso',   cls: 'text-blue-700 bg-blue-50 border-blue-200',       defaultGravedad: 'BAJA'  },
+      { id: 'RONDA',    label: 'Ronda',    cls: 'text-indigo-700 bg-indigo-50 border-indigo-200', defaultGravedad: 'BAJA'  },
+      { id: 'CONSIGNA', label: 'Consigna', cls: 'text-violet-700 bg-violet-50 border-violet-200', defaultGravedad: 'BAJA'  },
+      { id: 'VEDA',     label: 'Veda',     cls: 'text-amber-700 bg-amber-50 border-amber-200',    defaultGravedad: 'MEDIA' },
+    ],
+  },
+  {
+    grupo: 'Mantenimiento',
+    etiquetas: [
+      { id: 'FALLA', label: 'Falla', cls: 'text-orange-700 bg-orange-50 border-orange-200', defaultGravedad: 'MEDIA' },
+      { id: 'CORTE', label: 'Corte', cls: 'text-orange-800 bg-orange-100 border-orange-300', defaultGravedad: 'MEDIA' },
+      { id: 'OBRA',  label: 'Obra',  cls: 'text-yellow-700 bg-yellow-50 border-yellow-200', defaultGravedad: 'BAJA'  },
+    ],
+  },
+  {
+    grupo: 'Emergencia Médica',
+    etiquetas: [
+      { id: 'AUXILIO',  label: 'Auxilio',  cls: 'text-rose-700 bg-rose-50 border-rose-200',   defaultGravedad: 'ALTA' },
+      { id: 'TRASLADO', label: 'Traslado', cls: 'text-rose-800 bg-rose-100 border-rose-300',  defaultGravedad: 'ALTA' },
+    ],
+  },
+  {
+    grupo: 'Administrativo',
+    etiquetas: [
+      { id: 'SN',     label: 'S/N',   cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', defaultGravedad: 'BAJA' },
+      { id: 'VISITA', label: 'Visita', cls: 'text-teal-700 bg-teal-50 border-teal-200',          defaultGravedad: 'BAJA' },
+    ],
+  },
 ];
 
-const etiquetaCfg = (id: string) => ETIQUETAS.find(e => e.id === id);
+// Lookup plano para EntradaCard y guardado
+const ETIQUETAS_FLAT: EtiquetaDef[] = ETIQUETA_GRUPOS.flatMap(g => g.etiquetas);
+
+const etiquetaCfg = (id: string) => ETIQUETAS_FLAT.find(e => e.id === id);
 
 // ─── Gravedad ─────────────────────────────────────────────────────────────────
 
@@ -516,12 +557,20 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
             <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Tag size={11} /> Categoría
             </label>
-            <div className="flex flex-wrap gap-2">
-              {ETIQUETAS.map(e => (
-                <button key={e.id} onClick={() => setEtiqueta(e.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${etiqueta === e.id ? e.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
-                  [{e.id}]
-                </button>
+            <div className="flex flex-col gap-3">
+              {ETIQUETA_GRUPOS.map(g => (
+                <div key={g.grupo}>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">{g.grupo}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {g.etiquetas.map(e => (
+                      <button key={e.id}
+                        onClick={() => { setEtiqueta(e.id); setGravedad(e.defaultGravedad); }}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-black border transition-all ${etiqueta === e.id ? e.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                        {e.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -639,7 +688,7 @@ function EntradaCard({ entry }: { entry: LibroEntry }) {
         </div>
         <span className={`text-xs font-black uppercase tracking-wider ${cfg.color}`}>{cfg.label}</span>
         {ecfg && (
-          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${ecfg.cls}`}>{entry.etiqueta}</span>
+          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${ecfg.cls}`}>{ecfg.label}</span>
         )}
         {entry.gravedad && entry.gravedad !== 'BAJA' && (
           <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border flex items-center gap-1 ${gcfg.cls}`}>
