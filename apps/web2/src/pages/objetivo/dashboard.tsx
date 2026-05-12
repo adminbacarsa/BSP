@@ -12,7 +12,8 @@ import {
   AlertTriangle, ArrowRightCircle, ArrowLeftCircle, Navigation,
   Users, Siren, Bell, Send, X, Clock, CheckCircle2, Loader2,
   ChevronLeft, ChevronRight, Search, Building2, MapPin, Plus,
-  Activity, Lock, Mail, Eye, EyeOff, AlertCircle, Tag, Zap
+  Activity, Lock, Mail, Eye, EyeOff, AlertCircle, Tag, Zap,
+  UserCheck, Car, UserX
 } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -32,6 +33,23 @@ interface LibroEntry {
   transcription?: string;
   empleadoNombre?: string;
   createdAt: any;
+  // Control de acceso
+  identificador?: string;
+  identificadorTipo?: 'legajo' | 'dni' | 'nombre' | 'patente';
+  personaNombre?: string;
+  personaId?: string;
+  personaTipo?: 'empleado' | 'visitante' | 'vehiculo';
+  autorizado?: boolean;
+}
+
+interface PersonaEncontrada {
+  docId?: string;
+  nombre: string;
+  identificador: string;
+  identificadorTipo: 'legajo' | 'dni' | 'nombre' | 'patente';
+  tipo: 'empleado' | 'visitante' | 'vehiculo';
+  autorizado: boolean;
+  extra?: string;
 }
 
 interface TurnoActivo {
@@ -706,6 +724,299 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
   );
 }
 
+// ─── Control de Acceso ────────────────────────────────────────────────────────
+
+function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entries, empleadoNombre }: {
+  onSave: () => void; onClose: () => void; objectiveId: string;
+  turno: TurnoActivo | null; objetivo: ObjetivoInfo;
+  entries: LibroEntry[]; empleadoNombre: string;
+}) {
+  const [modo,          setModo]          = useState<'persona' | 'vehiculo'>('persona');
+  const [busqueda,      setBusqueda]      = useState('');
+  const [buscando,      setBuscando]      = useState(false);
+  const [encontrado,    setEncontrado]    = useState<PersonaEncontrada | null>(null);
+  const [sinResultados, setSinResultados] = useState(false);
+  const [nombreManual,  setNombreManual]  = useState('');
+  const [saving,        setSaving]        = useState(false);
+  const [exito,         setExito]         = useState<'ingreso' | 'egreso' | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const accesosDehoy = entries
+    .filter(e => e.type === 'ingreso' || e.type === 'egreso')
+    .slice()
+    .sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
+
+  // Determina si alguien está adentro según el último movimiento del día
+  const getEstado = (identificador: string): 'ADENTRO' | 'AFUERA' => {
+    const propios = accesosDehoy.filter(e => e.identificador === identificador);
+    if (!propios.length) return 'AFUERA';
+    return propios[0].type === 'ingreso' ? 'ADENTRO' : 'AFUERA';
+  };
+
+  const resetBusqueda = () => { setEncontrado(null); setSinResultados(false); setNombreManual(''); };
+
+  const cambiarModo = (m: 'persona' | 'vehiculo') => { setModo(m); setBusqueda(''); resetBusqueda(); };
+
+  const buscar = async () => {
+    const txt = busqueda.trim();
+    if (!txt) return;
+
+    if (modo === 'vehiculo') {
+      const patente = txt.toUpperCase();
+      setEncontrado({ nombre: patente, identificador: patente, identificadorTipo: 'patente', tipo: 'vehiculo', autorizado: true });
+      setSinResultados(false);
+      return;
+    }
+
+    setBuscando(true); resetBusqueda();
+    try {
+      const snap = await getDocs(collection(db, 'empleados'));
+      const q = txt.toLowerCase();
+      let found: PersonaEncontrada | null = null;
+
+      for (const d of snap.docs) {
+        const data = d.data();
+        const nombre = [data.firstName, data.lastName].filter(Boolean).join(' ');
+        const legajo = String(data.legajo || data.employeeNumber || '');
+        const dni    = String(data.dni    || data.document       || '');
+
+        if (legajo === q || dni === q || nombre.toLowerCase() === q || nombre.toLowerCase().includes(q)) {
+          const idTipo: PersonaEncontrada['identificadorTipo'] =
+            legajo === q ? 'legajo' : dni === q ? 'dni' : 'nombre';
+          found = {
+            docId: d.id, nombre: nombre || 'Empleado',
+            identificador: legajo || dni || txt, identificadorTipo: idTipo,
+            tipo: 'empleado', autorizado: true,
+            extra: data.cargo || data.position || data.sector || '',
+          };
+          break;
+        }
+      }
+      if (found) setEncontrado(found);
+      else { setSinResultados(true); setNombreManual(txt); }
+    } catch { setSinResultados(true); }
+    finally { setBuscando(false); }
+  };
+
+  const registrar = async () => {
+    const nombre      = encontrado?.nombre || nombreManual.trim();
+    const identificador = encontrado?.identificador || busqueda.trim();
+    if (!nombre) return;
+
+    const accion: 'ingreso' | 'egreso' = encontrado
+      ? (getEstado(encontrado.identificador) === 'ADENTRO' ? 'egreso' : 'ingreso')
+      : 'ingreso';
+
+    setSaving(true);
+    try {
+      await addDoc(collection(db, 'libro_guardia'), {
+        objectiveId,
+        clientId:       turno?.clientId     || objetivo.clientId    || '',
+        objetivoNombre: objetivo.name       || '',
+        clientName:     objetivo.clientName || '',
+        shiftId:        turno?.id           || '',
+        employeeId:     auth.currentUser?.uid || '',
+        empleadoNombre,
+        type:           accion,
+        etiqueta:       'ACCESO',
+        gravedad:       (sinResultados && !encontrado) ? 'MEDIA' : 'BAJA',
+        text:           `${accion === 'ingreso' ? 'Ingreso' : 'Egreso'} · ${nombre}`,
+        identificador,
+        identificadorTipo: encontrado?.identificadorTipo || 'nombre',
+        personaNombre:  nombre,
+        personaId:      encontrado?.docId || '',
+        personaTipo:    encontrado?.tipo || 'visitante',
+        autorizado:     encontrado?.autorizado ?? false,
+        createdAt:      serverTimestamp(),
+      });
+      setExito(accion);
+      setTimeout(() => { onSave(); onClose(); }, 1600);
+    } catch (e: any) { alert('Error: ' + e.message); setSaving(false); }
+  };
+
+  const estado     = encontrado ? getEstado(encontrado.identificador) : null;
+  const accionBtn  = estado === 'ADENTRO' ? 'egreso' : 'ingreso';
+
+  // Pantalla de éxito
+  if (exito) return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className={`flex flex-col items-center gap-4 px-10 py-10 rounded-3xl shadow-2xl ${exito === 'ingreso' ? 'bg-emerald-600' : 'bg-blue-600'}`}>
+        <CheckCircle2 size={60} className="text-white" strokeWidth={1.5} />
+        <p className="text-white font-black text-xl tracking-wide">{exito === 'ingreso' ? 'INGRESO' : 'EGRESO'} REGISTRADO</p>
+      </div>
+    </div>
+  );
+
+  // Cálculo de quién está adentro ahora
+  const adentroAhora: LibroEntry[] = [];
+  const seen = new Set<string>();
+  for (const e of [...accesosDehoy].reverse()) {
+    if (!e.identificador || seen.has(e.identificador)) continue;
+    seen.add(e.identificador);
+    if (e.type === 'ingreso') adentroAhora.push(e);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm"
+      onClick={ev => { if (ev.target === ev.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-t-2xl shadow-2xl flex flex-col max-h-[94dvh]">
+
+        <div className="flex justify-center pt-3 cursor-pointer" onClick={onClose}>
+          <div className="w-10 h-1 rounded-full bg-slate-200" />
+        </div>
+
+        <div className="px-5 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-slate-900 font-black text-base">Control de Acceso</h3>
+            <p className="text-slate-400 text-[11px] mt-0.5">{objetivo.name}</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+            <X size={17} className="text-slate-500" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 pb-8 flex flex-col gap-5">
+
+          {/* Toggle Persona / Vehículo */}
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-100 rounded-2xl p-1.5">
+            {([['persona', UserCheck, 'Persona'], ['vehiculo', Car, 'Vehículo']] as const).map(([m, Icon, lbl]) => (
+              <button key={m} onClick={() => cambiarModo(m)}
+                className={`flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black transition-all ${modo === m ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Icon size={17} /> {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* Input de búsqueda */}
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              {modo === 'persona' ? 'DNI, Legajo o Nombre' : 'Patente del vehículo'}
+            </p>
+            <div className="flex gap-2">
+              <input ref={inputRef}
+                value={busqueda}
+                onChange={e => { setBusqueda(modo === 'vehiculo' ? e.target.value.toUpperCase() : e.target.value); resetBusqueda(); }}
+                onKeyDown={e => e.key === 'Enter' && buscar()}
+                placeholder={modo === 'persona' ? 'Ej: 35123456  ·  García Juan  ·  Leg.42' : 'Ej: AB 123 CD'}
+                inputMode={modo === 'persona' ? 'text' : 'text'}
+                autoCapitalize={modo === 'vehiculo' ? 'characters' : 'words'}
+                autoComplete="off"
+                className="flex-1 px-4 py-4 rounded-2xl border-2 border-slate-200 text-base font-bold text-slate-900 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all"
+              />
+              <button onClick={buscar} disabled={buscando || !busqueda.trim()}
+                className="w-14 rounded-2xl bg-indigo-600 text-white font-black disabled:opacity-40 active:scale-95 transition-all flex items-center justify-center">
+                {buscando ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Resultado encontrado */}
+          {encontrado && (
+            <div className={`rounded-2xl border-2 p-4 ${
+              encontrado.tipo === 'vehiculo'   ? 'bg-sky-50 border-sky-200' :
+              encontrado.autorizado            ? 'bg-emerald-50 border-emerald-200' :
+                                               'bg-amber-50 border-amber-200'}`}>
+              <div className="flex items-center gap-4">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black ${
+                  encontrado.tipo === 'vehiculo' ? 'bg-sky-100 text-sky-600' :
+                  encontrado.autorizado          ? 'bg-emerald-100 text-emerald-600' :
+                                                 'bg-amber-100 text-amber-600'}`}>
+                  {encontrado.tipo === 'vehiculo' ? <Car size={26} /> : <UserCheck size={26} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-slate-900 text-lg leading-tight">{encontrado.nombre}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {encontrado.tipo === 'empleado' ? `Empleado · ${encontrado.identificadorTipo.toUpperCase()}: ${encontrado.identificador}` :
+                     encontrado.tipo === 'vehiculo' ? 'Vehículo' : 'Visitante'}
+                    {encontrado.extra && ` · ${encontrado.extra}`}
+                  </p>
+                  <div className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
+                    estado === 'ADENTRO'
+                      ? 'bg-red-50 border border-red-200 text-red-700'
+                      : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
+                    <span className={`w-2 h-2 rounded-full ${estado === 'ADENTRO' ? 'bg-red-500' : 'bg-emerald-500'}`} />
+                    {estado === 'ADENTRO' ? 'ADENTRO · registrar egreso' : 'AFUERA · puede ingresar'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* No encontrado — registrar como visitante */}
+          {sinResultados && (
+            <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <UserX size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-black text-amber-900 text-sm">No encontrado en el sistema</p>
+                  <p className="text-xs text-amber-600">Registrar como visitante externo</p>
+                </div>
+              </div>
+              <input type="text" value={nombreManual} onChange={e => setNombreManual(e.target.value)}
+                placeholder="Nombre completo del visitante..."
+                className="w-full px-4 py-3 rounded-xl border-2 border-amber-200 bg-white text-sm font-medium text-slate-800 placeholder-slate-300 outline-none focus:border-amber-400 transition-all"
+              />
+            </div>
+          )}
+
+          {/* Botón principal de acción */}
+          {(encontrado || (sinResultados && nombreManual.trim())) && (
+            <button onClick={registrar} disabled={saving}
+              className={`w-full py-5 rounded-2xl font-black text-white text-base flex items-center justify-center gap-3 shadow-lg active:scale-[0.98] transition-all disabled:opacity-60 ${
+                (sinResultados || accionBtn === 'ingreso') ? 'bg-emerald-600 shadow-emerald-500/25' : 'bg-blue-600 shadow-blue-500/25'}`}>
+              {saving ? <Loader2 size={22} className="animate-spin" /> : (
+                <>
+                  {(sinResultados || accionBtn === 'ingreso') ? <ArrowRightCircle size={24} /> : <ArrowLeftCircle size={24} />}
+                  REGISTRAR {sinResultados ? 'INGRESO' : accionBtn.toUpperCase()}
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Quién está adentro ahora */}
+          {adentroAhora.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Adentro ahora ({adentroAhora.length})</p>
+              <div className="flex flex-col gap-1.5">
+                {adentroAhora.map(e => (
+                  <div key={e.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                    <p className="text-sm font-bold text-slate-700 flex-1 truncate">{e.personaNombre || e.text}</p>
+                    <span className="text-[11px] text-slate-400 flex-shrink-0">{fmtEntryTime(e.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Log cronológico de hoy */}
+          {accesosDehoy.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Movimientos de hoy</p>
+              <div className="flex flex-col gap-1.5">
+                {accesosDehoy.map(e => (
+                  <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${e.type === 'ingreso' ? 'bg-slate-50 border-slate-100' : 'bg-slate-50 border-slate-100'}`}>
+                    {e.type === 'ingreso'
+                      ? <ArrowRightCircle size={14} className="text-emerald-500 flex-shrink-0" />
+                      : <ArrowLeftCircle  size={14} className="text-blue-500 flex-shrink-0"    />}
+                    <p className="text-xs font-medium text-slate-600 flex-1 truncate">{e.personaNombre || e.text}</p>
+                    <span className={`text-[10px] font-black ${e.type === 'ingreso' ? 'text-emerald-600' : 'text-blue-600'}`}>
+                      {e.type === 'ingreso' ? 'ENT' : 'SAL'} {fmtEntryTime(e.createdAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tarjeta de entrada ────────────────────────────────────────────────────────
 
 function EntradaCard({ entry }: { entry: LibroEntry }) {
@@ -775,7 +1086,8 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
   objetivo: ObjetivoInfo; turno: TurnoActivo | null; entries: LibroEntry[];
   totalHoy: number; empNombre: string; isAdmin: boolean; onBack?: () => void; onLogout: () => void;
 }) {
-  const [showNueva, setShowNueva] = useState(false);
+  const [showNueva,  setShowNueva]  = useState(false);
+  const [showAcceso, setShowAcceso] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -838,18 +1150,29 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
         <div ref={listEndRef} />
       </div>
 
-      {/* FAB */}
+      {/* FABs */}
       <div className="fixed bottom-6 inset-x-0 flex justify-center z-40 pointer-events-none">
-        <button onClick={() => setShowNueva(true)}
-          className="pointer-events-auto flex items-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all active:scale-95">
-          <Plus size={18} /> Nueva entrada
-        </button>
+        <div className="flex items-center gap-3 pointer-events-auto">
+          <button onClick={() => setShowAcceso(true)}
+            className="flex items-center gap-2 px-5 py-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-black text-sm shadow-lg shadow-slate-200/60 transition-all active:scale-95 hover:bg-slate-50">
+            <UserCheck size={17} className="text-indigo-500" /> Acceso
+          </button>
+          <button onClick={() => setShowNueva(true)}
+            className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all active:scale-95">
+            <Plus size={18} /> Nueva entrada
+          </button>
+        </div>
       </div>
 
       {showNueva && (
         <NuevaEntradaPanel onClose={() => setShowNueva(false)}
           onSave={() => { setShowNueva(false); setTimeout(() => listEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100); }}
           empleadoNombre={empNombre} objectiveId={objetivo.id} turno={turno} objetivo={objetivo} />
+      )}
+      {showAcceso && (
+        <AccesoRapidoPanel onClose={() => setShowAcceso(false)}
+          onSave={() => setShowAcceso(false)}
+          empleadoNombre={empNombre} objectiveId={objetivo.id} turno={turno} objetivo={objetivo} entries={entries} />
       )}
     </div>
   );
