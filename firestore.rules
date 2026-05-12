@@ -158,5 +158,12 @@ service cloud.firestore {
       allow read: if true;
       allow write: if request.auth != null;
     }
+
+    // 12. Libro de guardia — empleados leen/crean entradas de sus objetivos
+    match /libro_guardia/{entryId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
   }
 }
