@@ -1,0 +1,214 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply transition-colors duration-200;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-black tracking-tighter;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CSS VARIABLES POR TEMA — fuente única de verdad
+   Controlan sidebar, topbar y superficie principal.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CLARO (default) ─────────────────────────────────────────── */
+:root {
+  --sb-bg:          #ffffff;
+  --sb-border:      #e2e8f0;
+  --sb-text:        #334155;
+  --sb-muted:       #94a3b8;
+  --sb-section:     #cbd5e1;
+  --sb-active-bg:   #6366f1;
+  --sb-active-text: #ffffff;
+  --sb-hover-bg:    #f1f5f9;
+  --sb-hover-text:  #0f172a;
+  --sb-logo:        #6366f1;
+  --sb-logo-sub:    #94a3b8;
+  --sb-logout:      #f43f5e;
+  --sb-special-bg:  rgba(239,68,68,0.08);
+  --sb-special-text:#f87171;
+  --sb-special-border:rgba(239,68,68,0.2);
+
+  --app-bg:         #f8fafc;
+  --topbar-bg:      #ffffff;
+  --topbar-border:  #e2e8f0;
+  --topbar-text:    #0f172a;
+}
+
+/* ── OSCURO ──────────────────────────────────────────────────── */
+.dark:not(.theme-blue):not(.theme-contrast) {
+  --sb-bg:          #0f172a;
+  --sb-border:      #1e293b;
+  --sb-text:        #cbd5e1;
+  --sb-muted:       #475569;
+  --sb-section:     #334155;
+  --sb-active-bg:   #6366f1;
+  --sb-active-text: #ffffff;
+  --sb-hover-bg:    #1e293b;
+  --sb-hover-text:  #f1f5f9;
+  --sb-logo:        #818cf8;
+  --sb-logo-sub:    #475569;
+  --sb-logout:      #fb7185;
+  --sb-special-bg:  rgba(239,68,68,0.12);
+  --sb-special-text:#fca5a5;
+  --sb-special-border:rgba(239,68,68,0.3);
+
+  --app-bg:         #0f172a;
+  --topbar-bg:      #1e293b;
+  --topbar-border:  #334155;
+  --topbar-text:    #f1f5f9;
+}
+
+/* ── AZUL PRO ────────────────────────────────────────────────── */
+.theme-blue {
+  --sb-bg:          #0f1f4a;
+  --sb-border:      #1e3a8a;
+  --sb-text:        #bfdbfe;
+  --sb-muted:       #6366f1;
+  --sb-section:     #2563eb;
+  --sb-active-bg:   #4f46e5;
+  --sb-active-text: #ffffff;
+  --sb-hover-bg:    #1e3a8a;
+  --sb-hover-text:  #ffffff;
+  --sb-logo:        #93c5fd;
+  --sb-logo-sub:    #6366f1;
+  --sb-logout:      #fca5a5;
+  --sb-special-bg:  rgba(239,68,68,0.15);
+  --sb-special-text:#fca5a5;
+  --sb-special-border:rgba(239,68,68,0.35);
+
+  --app-bg:         #0f172a;
+  --topbar-bg:      #0f1f4a;
+  --topbar-border:  #1e3a8a;
+  --topbar-text:    #e0e7ff;
+}
+
+/* ── ALTO CONTRASTE ──────────────────────────────────────────── */
+.theme-contrast {
+  --sb-bg:          #000000;
+  --sb-border:      #FFD700;
+  --sb-text:        #FFD700;
+  --sb-muted:       #ffffff;
+  --sb-section:     #665500;
+  --sb-active-bg:   #FFD700;
+  --sb-active-text: #000000;
+  --sb-hover-bg:    #1a1400;
+  --sb-hover-text:  #FFD700;
+  --sb-logo:        #FFD700;
+  --sb-logo-sub:    #aaaaaa;
+  --sb-logout:      #ff6666;
+  --sb-special-bg:  rgba(255,215,0,0.1);
+  --sb-special-text:#FFD700;
+  --sb-special-border:rgba(255,215,0,0.5);
+
+  --app-bg:         #000000;
+  --topbar-bg:      #000000;
+  --topbar-border:  #FFD700;
+  --topbar-text:    #FFD700;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CORRECCIONES GLOBALES MODO OSCURO
+   Cubre componentes que no tienen dark: Tailwind variant
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Forzar fondos oscuros en elementos sin dark: variant */
+.dark body                { background-color: #0f172a !important; color: #f1f5f9 !important; }
+.dark .bg-white           { background-color: #1e293b !important; }
+.dark .bg-slate-50        { background-color: #0f172a !important; }
+.dark .bg-slate-100       { background-color: #1e293b !important; }
+.dark .bg-gray-50         { background-color: #0f172a !important; }
+.dark .bg-gray-100        { background-color: #1e293b !important; }
+
+/* Borders en oscuro */
+.dark .border-slate-200   { border-color: #334155 !important; }
+.dark .border-slate-100   { border-color: #1e293b !important; }
+.dark .border-gray-200    { border-color: #334155 !important; }
+
+/* Textos en oscuro */
+.dark .text-slate-900     { color: #f1f5f9 !important; }
+.dark .text-slate-800     { color: #e2e8f0 !important; }
+.dark .text-slate-700     { color: #cbd5e1 !important; }
+.dark .text-slate-600     { color: #94a3b8 !important; }
+.dark .text-gray-900      { color: #f1f5f9 !important; }
+.dark .text-gray-800      { color: #e2e8f0 !important; }
+
+/* Inputs en oscuro */
+.dark input, .dark select, .dark textarea {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Mejora legibilidad en tema claro */
+body:not(.dark) .text-slate-500 { color: #475569; }
+body:not(.dark) .text-slate-400 { color: #64748b; }
+
+/* Contraste: textos y fondos */
+.theme-contrast .bg-white,
+.theme-contrast .bg-slate-50,
+.theme-contrast .bg-slate-100,
+.theme-contrast .bg-indigo-50 {
+  background-color: #000000 !important;
+  border-color: #FFD700 !important;
+  color: #FFD700 !important;
+}
+.theme-contrast .text-slate-500,
+.theme-contrast .text-slate-600,
+.theme-contrast .text-slate-800,
+.theme-contrast .text-indigo-600,
+.theme-contrast .text-indigo-700 { color: #ffffff !important; }
+.theme-contrast button { border: 2px solid #FFD700 !important; }
+
+/* Azul Pro: tarjetas */
+.theme-blue .bg-white,
+.theme-blue .bg-slate-50,
+.theme-blue .bg-indigo-50 {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+}
+.theme-blue .text-slate-800,
+.theme-blue .text-slate-700 { color: #e0e7ff !important; }
+.theme-blue .text-slate-500,
+.theme-blue .text-slate-600 { color: #94a3b8 !important; }
+.theme-blue .text-indigo-600,
+.theme-blue .text-indigo-700 { color: #60a5fa !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   FIX CHROME DARK MODE — evita que el browser fuerce sus colores
+   ═══════════════════════════════════════════════════════════════ */
+/* Deshabilitar color-scheme automático del browser */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
+/* Evitar que Chrome oscurezca inputs/selects con su propio dark mode */
+input, select, textarea, button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLLBAR
+   ═══════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar          { width: 6px; height: 6px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: #cbd5e1; border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; }
+
+/* ═══════════════════════════════════════════════════════════════
+   IMPRESIÓN
+   ═══════════════════════════════════════════════════════════════ */
+@media print {
+  @page { margin: 0; size: auto; }
+  body  { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: white !important; }
+  aside, nav, header, .no-print { display: none !important; }
+  main, #root, #__next { width: 100% !important; margin: 0 !important; padding: 0 !important; display: block !important; }
+  .break-inside-avoid { break-inside: avoid; }
+  * { overflow: visible !important; }
+}

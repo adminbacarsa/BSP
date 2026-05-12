@@ -1,0 +1,269 @@
+import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
+import { collection, addDoc, getDocs, doc, deleteDoc, query, where, Timestamp, orderBy } from 'firebase/firestore';
+
+export const AGREEMENT_RULES: any = {
+  'SUVICO': { 
+    name: 'CCT SUVICO',
+    weeklyLimit: 48, dailyLimit: 8, dailyMax: 12, restHours: 12, saturdayCutoff: 13
+  },
+  'DEFAULT': { 
+    name: 'Estándar', weeklyLimit: 48, dailyLimit: 9, dailyMax: 12, restHours: 12, saturdayCutoff: 13
+  }
+};
+
+
+// --- FUNCIÓN DE AUDITORÍA INTERNA ---
+const logOperation = async (action: string, details: any, module: string = 'PLANIFICACION') => {
+  try {
+    const auth = getAuth();
+    const user = auth.currentUser;
+    const actorName = user ? (user.email || user.uid) : 'Usuario Web';
+    
+    await addDoc(collection(db, 'historial_operaciones'), {
+      action,
+      module,
+      details,
+      actorName,
+      timestamp: Timestamp.now(),
+      fecha: new Date().toISOString(), // Respaldo string
+      createdAt: new Date().toISOString()
+    });
+    console.log('✅ Auditoría registrada:', action);
+  } catch (e) {
+    console.error('❌ Error guardando log:', e);
+  }
+};
+// ------------------------------------
+
+export const planningService = {
+  getActiveServices: async () => {
+    try {
+      const q = query(collection(db, 'servicios_sla'));
+      const s = await getDocs(q);
+      return s.docs.map(d => {
+          const data = d.data();
+          return { 
+              id: d.id, 
+              ...data,
+              startDate: data.startDate?.toDate ? data.startDate.toDate() : (data.startDate ? new Date(data.startDate) : null),
+              endDate: data.endDate?.toDate ? data.endDate.toDate() : (data.endDate ? new Date(data.endDate) : null)
+          };
+      });
+    } catch (e) { return []; }
+  },
+
+  getActiveEmployees: async () => {
+    try {
+      const q = query(collection(db, 'empleados'), orderBy('name'));
+      let s = await getDocs(q);
+      if (s.empty) s = await getDocs(collection(db, 'employees'));
+      
+      return s.docs.map(d => {
+        const data = d.data();
+        const firstName = data.firstName || data.nombre || '';
+        const lastName = data.lastName || data.apellido || '';
+        let fullName = data.name || `${lastName}, ${firstName}`;
+        
+        return { 
+          id: d.id, 
+          name: fullName.trim() || 'Sin Nombre', 
+          laborAgreement: (data.laborAgreement || data.convenio || 'DEFAULT').toUpperCase(),
+          status: 'active',
+          preferredClientId: data.preferredClientId,
+          preferredObjectiveId: data.preferredObjectiveId
+        };
+      }).filter(e => e.status !== 'inactive' && e.status !== 'baja');
+    } catch (e) { return []; }
+  },
+
+  getShiftsByRange: async (start: Date, end: Date) => {
+      try {
+        const q = query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(start)), where('startTime', '<=', Timestamp.fromDate(end)));
+        const s = await getDocs(q);
+        return s.docs.map(d => {
+            const data = d.data();
+            return { id: d.id, ...data, startTime: data.startTime.toDate(), endTime: data.endTime.toDate() };
+        });
+      } catch (e) { return []; }
+  },
+  
+  
+  getAbsencesByRange: async (start: Date, end: Date) => {
+      try {
+          const q = query(collection(db, 'ausencias')); // O 'novedades' si cambiaste el nombre
+          const s = await getDocs(q);
+          
+          return s.docs.map(d => {
+              const data = d.data();
+              
+              // HELPER INTERNO: Convierte lo que venga a Objeto Date JS
+              const toDateObj = (val: any) => {
+                  if (!val) return new Date();
+                  if (typeof val === 'string') {
+                      // Si es "2026-01-02", le agregamos hora para que no reste zona horaria al convertir
+                      return new Date(val + 'T12:00:00'); 
+                  }
+                  if (val.toDate) return val.toDate(); // Es Timestamp
+                  return new Date(val); // Es Date o número
+              };
+
+              const fechaInicio = toDateObj(data.startDate);
+              const fechaFin = toDateObj(data.endDate);
+
+              return {
+                  id: d.id, 
+                  employeeId: data.employeeId, 
+                  startDate: data.startDate, // Guardamos el original (string) para comparar texto vs texto
+                  endDate: data.endDate,     // Guardamos el original
+                  start: fechaInicio,        // Objeto Date para filtros matemáticos
+                  end: fechaFin,             // Objeto Date para filtros matemáticos
+                  type: data.type || 'Licencia'
+              };
+          }).filter(a => a.end >= start && a.start <= end);
+      } catch (e) { 
+          console.error('Error fetching absences:', e);
+          return []; 
+      }
+  },
+
+  checkCompliance: async (employeeId: string, agreementType: string, newStart: Date, newHours: number) => {
+    const rules = AGREEMENT_RULES[agreementType] || AGREEMENT_RULES['DEFAULT'];
+    const current = new Date(newStart);
+    const day = current.getDay();
+    const diff = current.getDate() - day + (day == 0 ? -6 : 1); 
+    const monday = new Date(current.setDate(diff)); monday.setHours(0,0,0,0);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6); sunday.setHours(23,59,59,999);
+
+    const q = query(collection(db, 'turnos'), where('employeeId', '==', employeeId), where('startTime', '>=', Timestamp.fromDate(monday)), where('startTime', '<=', Timestamp.fromDate(sunday)));
+    const s = await getDocs(q);
+    
+    let currentTotal = 0;
+    let shifts: any[] = [];
+    let hasExternalFranco = false;
+
+    // Verificar conflictos con otros turnos en el mismo día exacto
+    const checkStart = newStart.getTime();
+    const checkEnd = newStart.getTime() + (newHours * 3600000);
+
+    for (const doc of s.docs) {
+        const d = doc.data();
+        if (d.status === 'Canceled') continue;
+
+        const sTime = d.startTime.toDate();
+        const eTime = d.endTime.toDate();
+        
+        // Detección de coincidencia de día
+        if (sTime.getDate() === newStart.getDate() && sTime.getMonth() === newStart.getMonth()) {
+             if (d.isFranco) {
+                 hasExternalFranco = true;
+             } else {
+                 // Si ya tiene turno laboral ese día (y no es el que estamos editando)
+                 return { status: 'BLOCKED', msg: `⛔ OCUPADO: Ya tiene turno asignado en ${d.objectiveName || 'otro objetivo'}` };
+             }
+        }
+
+        if (!d.isFranco) { 
+            const duration = (eTime.getTime() - sTime.getTime()) / (1000 * 60 * 60);
+            currentTotal += duration;
+            shifts.push({ start: sTime, end: eTime });
+        }
+    }
+
+    if (newHours > rules.dailyMax) return { status: 'BLOCKED', msg: `⛔ JORNADA ILEGAL: Supera ${rules.dailyMax}hs` };
+
+    // Validar descanso 12hs
+    const newEnd = new Date(checkEnd);
+    for (let shift of shifts) {
+        if (shift.end <= newStart) {
+            const rest = (newStart.getTime() - shift.end.getTime()) / 36e5;
+            if (rest < rules.restHours) return { status: 'BLOCKED', msg: `⛔ SIN DESCANSO: Solo ${rest.toFixed(1)}hs libres` };
+        }
+        if (shift.start >= newEnd) {
+             const rest = (shift.start.getTime() - newEnd.getTime()) / 36e5;
+             if (rest < rules.restHours) return { status: 'BLOCKED', msg: `⛔ SIN DESCANSO: Solo ${rest.toFixed(1)}hs libres` };
+        }
+    }
+
+    const projected = currentTotal + newHours;
+    
+    // Prioridad de Alertas: Primero Bloqueos Legales, luego Advertencias de Costo
+    if (projected > rules.weeklyLimit) return { status: 'WARNING', msg: `⚠️ EXTRAS 50%: Supera 48hs semanales (${projected}hs)`, projectedTotal: projected };
+    
+    if (hasExternalFranco) return { status: 'WARNING', msg: '⚠️ COSTO 100%: Asignando sobre Franco de otro objetivo.' };
+
+    return { status: 'OK', msg: 'OK', projectedTotal: projected };
+  },
+
+  assignShift: async (data: any) => {
+    // --- AUDITORÍA INTELIGENTE ---
+    try {
+        const start = new Date(data.startTime);
+        const end = new Date(data.endTime);
+        const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60); // Horas
+        const isSunday = start.getDay() === 0;
+        
+        let actionType = 'ASIGNACION_TURNO';
+        let warnings = [];
+
+        if (duration > 9) {
+            actionType = 'ALERTA_EXCESO_HORAS';
+            warnings.push(`Jornada de ${duration.toFixed(1)}hs (Max 9hs)`);
+        }
+        
+        if (isSunday) {
+            actionType = 'ALERTA_DOMINGO'; // Posible 100%
+            warnings.push('Turno asignado en Domingo');
+        }
+
+        if (data.isFranco) {
+            actionType = 'ASIGNACION_FRANCO';
+        }
+
+        logOperation(actionType, { 
+            empleado: data.employeeId, 
+            horario: `${start.getHours()}:${start.getMinutes()} - ${end.getHours()}:${end.getMinutes()}`,
+            duracion: `${duration.toFixed(1)} hs`,
+            esDomingo: isSunday ? 'SI' : 'NO',
+            alertas: warnings.length > 0 ? warnings.join(', ') : 'Ninguna'
+        }, 'PLANIFICACION');
+
+    } catch (e) { console.error('Error calculando auditoria', e); }
+    // ----------------------------
+    const payload = { ...data, startTime: Timestamp.fromDate(data.startTime), endTime: Timestamp.fromDate(data.endTime), updatedAt: Timestamp.now(), source: 'WEB_ROSTER' };
+    return addDoc(collection(db, 'turnos'), payload);
+  },
+  deleteShift: async (id: string) => {
+    try {
+        // 1. Leer antes de borrar para saber qué estamos matando
+        const docRef = doc(db, 'turnos', id);
+        const snap = await getDoc(docRef);
+        
+        if (snap.exists()) {
+            const data = snap.data();
+            const start = data.startTime ? new Date(data.startTime.seconds * 1000) : null;
+            const end = data.endTime ? new Date(data.endTime.seconds * 1000) : null;
+            
+            const horarioStr = start && end 
+                ? `${start.getHours()}:${start.getMinutes()} - ${end.getHours()}:${end.getMinutes()}` 
+                : 'Horario desconocido';
+
+            const fechaStr = start ? start.toLocaleDateString() : 'Fecha desconocida';
+
+            logOperation('ELIMINACION_TURNO', { 
+                turnoId: id,
+                empleado: data.employeeName || data.employeeId || 'Desconocido',
+                objetivo: data.objectiveName || 'Sin Sede',
+                fecha: fechaStr,
+                horario: horarioStr,
+                tipo: 'BORRADO_MANUAL'
+            });
+        } else {
+             logOperation('ELIMINACION_TURNO', { turnoId: id, nota: 'Turno no encontrado al intentar borrar' });
+        }
+    } catch (e) {
+        console.error('Error logueando borrado:', e);
+    }
+    return deleteDoc(doc(db, 'turnos', id));
+  }
+};

@@ -1,0 +1,114 @@
+import React, { useEffect, useState } from 'react';
+import { planningService, Shift, Absence } from '../../services/planning.service';
+import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { AlertCircle, CheckCircle, ShieldAlert } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+interface Props {
+  objectiveId?: string; // Opcional: si es null muestra todo
+}
+
+export default function SmartRoster({ objectiveId }: Props) {
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Rango de fechas (Semana actual por defecto)
+  const [currentStart, setCurrentStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
+  
+  useEffect(() => {
+    const end = addDays(currentStart, 7); // Ver 7 días
+    
+    const unsubscribe = planningService.subscribeToRoster(
+      objectiveId || null, 
+      currentStart, 
+      end, 
+      ({ shifts, absences }) => {
+        setShifts(shifts);
+        setAbsences(absences);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [objectiveId, currentStart]);
+
+  // Generar días para el header
+  const days = Array.from({ length: 7 }, (_, i) => addDays(currentStart, i));
+
+  // --- RENDERIZADO DE CELDA ---
+  const renderCell = (day: Date, employeeId: string) => {
+    // 1. Buscar Ausencias (Prioridad Visual)
+    const absence = absences.find(a => 
+      a.employeeId === employeeId && 
+      day >= a.startDate && day <= a.endDate
+    );
+
+    if (absence) {
+      return (
+        <div className="bg-red-100 text-red-700 text-xs p-2 rounded border border-red-200 flex items-center gap-1">
+          <ShieldAlert size={12} />
+          <span className="font-bold truncate">{absence.type === 'SICK_LEAVE' ? 'MEDICA' : 'AUSENTE'}</span>
+        </div>
+      );
+    }
+
+    // 2. Buscar Turnos
+    const shift = shifts.find(s => 
+      s.employeeId === employeeId && 
+      isSameDay(s.startTime, day)
+    );
+
+    if (shift) {
+      return (
+        <div className="bg-indigo-100 text-indigo-700 text-xs p-2 rounded border border-indigo-200 cursor-pointer hover:bg-indigo-200 transition">
+          <div className="font-bold">{format(shift.startTime, 'HH:mm')} - {format(shift.endTime, 'HH:mm')}</div>
+          <div className="text-[10px] opacity-75">{shift.objectiveId.slice(0,4)}...</div>
+        </div>
+      );
+    }
+
+    return <div className="h-full min-h-[40px] hover:bg-slate-50 rounded cursor-pointer" title="Haga clic para asignar" />;
+  };
+
+  if (loading) return <div className="p-10 text-center text-slate-400">Cargando Planificación Inteligente...</div>;
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* Header Fechas */}
+      <div className="grid grid-cols-8 bg-slate-50 border-b border-slate-200">
+        <div className="p-3 font-bold text-slate-500 text-xs uppercase">Empleado</div>
+        {days.map(d => (
+          <div key={d.toString()} className="p-3 text-center border-l border-slate-200">
+            <div className="text-xs font-bold text-slate-700 uppercase">{format(d, 'EEE', { locale: es })}</div>
+            <div className="text-sm font-black text-slate-900">{format(d, 'dd')}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Cuerpo (Demo: Muestra lista de empleados únicos que tienen turnos o ausencias) */}
+      <div className="divide-y divide-slate-100">
+        {/* En un caso real, aquí iterarías sobre tu lista completa de empleados activos */}
+        {Array.from(new Set([...shifts.map(s => s.employeeId), ...absences.map(a => a.employeeId)])).map(empId => (
+          <div key={empId} className="grid grid-cols-8 hover:bg-slate-50/50 transition">
+            <div className="p-3 text-xs font-bold text-slate-700 flex items-center border-r border-slate-100">
+              {shifts.find(s => s.employeeId === empId)?.employeeName || absences.find(a => a.employeeId === empId)?.employeeName || 'Empleado'}
+            </div>
+            {days.map(d => (
+              <div key={d.toString()} className="p-1 border-r border-slate-100 last:border-0 relative">
+                {renderCell(d, empId)}
+              </div>
+            ))}
+          </div>
+        ))}
+        
+        {shifts.length === 0 && absences.length === 0 && (
+          <div className="p-8 text-center text-slate-400 text-sm">
+            No hay datos para mostrar en esta semana.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

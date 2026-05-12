@@ -1,0 +1,219 @@
+/**
+ * Descansos entre turnos (SUVICO y convenios con campos opcionales).
+ * - Mínimo entre turnos laborales: 12 h (configurable).
+ * - Tras ≥48 h trabajadas en racha consecutiva: 35 h desde el fin del último turno
+ *   hasta el inicio del siguiente (el franco F y días no laborales cuentan en el calendario).
+ */
+import { getDateKey } from './utils';
+
+const DEFAULT_MIN_REST = 12;
+const DEFAULT_STREAK_THRESHOLD = 48;
+const DEFAULT_LONG_REST = 35;
+
+/** Rompen la racha de trabajo consecutivo (no suman a las 48 h). RET no suma pero tampoco cierra racha legal → lo tratamos como corte de racha. */
+const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
+
+const HOURS_BY_CODE: Record<string, number> = {
+    M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, EN: 8, P: 8,
+};
+
+const END_DEF: Record<string, number> = { M: 15, T: 23, N: 7, D12: 19, N12: 7 };
+const START_DEF: Record<string, number> = { M: 7, T: 15, N: 23, D12: 7, N12: 19 };
+
+const parseHour = (t: any): number | null => {
+    if (t == null || t === '' || t === '00:00') return null;
+    if (typeof t === 'string') {
+        const parts = t.split(':').map(Number);
+        const h = parts[0], m = parts[1] ?? 0;
+        if (Number.isNaN(h)) return null;
+        return h + (m || 0) / 60;
+    }
+    return null;
+};
+
+const shiftHours = (sh: any): number => {
+    const code = String(sh?.code || sh?.type || '').toUpperCase();
+    const n = Number(sh?.hours);
+    if (n > 0) return n;
+    return HOURS_BY_CODE[code] ?? 8;
+};
+
+const isWorkShift = (sh: any | null | undefined): boolean => {
+    if (!sh || sh.isDeleted) return false;
+    const code = String(sh.code || sh.type || '').toUpperCase();
+    if (!code) return false;
+    if (STREAK_BREAK_CODES.has(code)) return false;
+    return shiftHours(sh) > 0;
+};
+
+const addDaysStr = (dateStr: string, delta: number): string => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d + delta);
+    return getDateKey(dt);
+};
+
+const localDateTime = (dateStr: string, hourFloat: number): Date => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const h = Math.floor(hourFloat);
+    const min = Math.round((hourFloat - h) * 60);
+    return new Date(y, m - 1, d, h, min, 0, 0);
+};
+
+/** Inicio y fin absolutos (Date) del turno; el fin puede caer el día calendario siguiente (N, N12). */
+export const getShiftStartEndAbs = (dateStr: string, sh: any): { start: Date; end: Date } | null => {
+    if (!isWorkShift(sh)) return null;
+    const code = String(sh.code || sh.type || '').toUpperCase();
+    let startH = parseHour(sh.startTime);
+    if (startH === null) startH = START_DEF[code] ?? 7;
+    let endH = parseHour(sh.endTime);
+    const hrs = shiftHours(sh);
+    if (endH === null && hrs > 0) endH = (startH + hrs) % 24;
+    if (endH === null) endH = END_DEF[code] ?? 15;
+    const start = localDateTime(dateStr, startH);
+    const overnight = endH < startH - 1e-6;
+    const endDateStr = overnight ? addDaysStr(dateStr, 1) : dateStr;
+    const end = localDateTime(endDateStr, endH);
+    return { start, end };
+};
+
+const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) / 3600000;
+
+/** Suma horas de trabajo en días consecutivos hacia atrás desde `fromDateStr` (inclusive). Corta en primer día sin turno laboral o streak-break. */
+export const workStreakHoursBackward = (
+    empId: string,
+    fromDateStr: string,
+    getShift: (eid: string, ds: string) => any | null
+): number => {
+    let sum = 0;
+    let d = fromDateStr;
+    for (let i = 0; i < 40; i++) {
+        const sh = getShift(empId, d);
+        if (!sh || sh.isDeleted) break;
+        const code = String(sh.code || '').toUpperCase();
+        if (STREAK_BREAK_CODES.has(code)) break;
+        if (!isWorkShift(sh)) break;
+        sum += shiftHours(sh);
+        d = addDaysStr(d, -1);
+    }
+    return sum;
+};
+
+const findPrevWorkBoundary = (
+    empId: string,
+    beforeDateStr: string,
+    getShift: (eid: string, ds: string) => any | null
+): { dateStr: string; shift: any; end: Date } | null => {
+    let d = addDaysStr(beforeDateStr, -1);
+    for (let i = 0; i < 120; i++) {
+        const sh = getShift(empId, d);
+        if (isWorkShift(sh)) {
+            const se = getShiftStartEndAbs(d, sh!);
+            if (!se) return null;
+            return { dateStr: d, shift: sh, end: se.end };
+        }
+        d = addDaysStr(d, -1);
+    }
+    return null;
+};
+
+const findNextWorkBoundary = (
+    empId: string,
+    afterDateStr: string,
+    getShift: (eid: string, ds: string) => any | null
+): { dateStr: string; shift: any; start: Date } | null => {
+    let d = addDaysStr(afterDateStr, 1);
+    for (let i = 0; i < 120; i++) {
+        const sh = getShift(empId, d);
+        if (isWorkShift(sh)) {
+            const se = getShiftStartEndAbs(d, sh!);
+            if (!se) return null;
+            return { dateStr: d, shift: sh, start: se.start };
+        }
+        d = addDaysStr(d, 1);
+    }
+    return null;
+};
+
+export type AgreementRestConfig = {
+    minRestBetweenShiftsHours?: number;
+    longRestAfterWorkedHours?: number;
+    minLongRestHours?: number;
+};
+
+export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRestConfig | null => {
+    const name = String(emp?.laborAgreement || '').toLowerCase();
+    const rule =
+        agreements.find((a: any) => a.name === emp?.laborAgreement) ||
+        agreements.find((a: any) => String(a?.name || '').toLowerCase() === 'general');
+    const r: any = rule || {};
+    const num = (v: any) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+    };
+    const custom: AgreementRestConfig = {};
+    const a = num(r.minRestBetweenShiftsHours);
+    const b = num(r.longRestAfterWorkedHours);
+    const c = num(r.minLongRestHours);
+    if (a !== undefined) custom.minRestBetweenShiftsHours = a;
+    if (b !== undefined) custom.longRestAfterWorkedHours = b;
+    if (c !== undefined) custom.minLongRestHours = c;
+    if (Object.keys(custom).length > 0) return custom;
+    if (name.includes('suvico') || String(r?.name || '').toLowerCase().includes('suvico') || r.suvicoRestRules) {
+        return {
+            minRestBetweenShiftsHours: DEFAULT_MIN_REST,
+            longRestAfterWorkedHours: DEFAULT_STREAK_THRESHOLD,
+            minLongRestHours: DEFAULT_LONG_REST,
+        };
+    }
+    return null;
+};
+
+export type RestCheckParams = {
+    empId: string;
+    targetDateStr: string;
+    proposed: { code: string; startTime?: string; endTime?: string; hours?: number };
+    /** Estado fusionado: debe reflejar pending + shiftsMap, y el turno propuesto en targetDateStr. */
+    getShift: (eid: string, ds: string) => any | null;
+    cfg: AgreementRestConfig;
+};
+
+/**
+ * Devuelve mensaje de advertencia o null si cumple.
+ */
+export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
+    const minRest = Number.isFinite(p.cfg.minRestBetweenShiftsHours!) ? p.cfg.minRestBetweenShiftsHours! : DEFAULT_MIN_REST;
+    const thr = Number.isFinite(p.cfg.longRestAfterWorkedHours!) ? p.cfg.longRestAfterWorkedHours! : DEFAULT_STREAK_THRESHOLD;
+    const longRest = Number.isFinite(p.cfg.minLongRestHours!) ? p.cfg.minLongRestHours! : DEFAULT_LONG_REST;
+
+    const proposedShift = {
+        code: p.proposed.code,
+        startTime: p.proposed.startTime,
+        endTime: p.proposed.endTime,
+        hours: p.proposed.hours,
+    };
+    const seNew = getShiftStartEndAbs(p.targetDateStr, proposedShift);
+    if (!seNew) return null;
+
+    const prev = findPrevWorkBoundary(p.empId, p.targetDateStr, p.getShift);
+    if (prev) {
+        const streakBeforePrev = workStreakHoursBackward(p.empId, prev.dateStr, p.getShift);
+        const need = streakBeforePrev >= thr ? longRest : minRest;
+        const gap = hoursBetween(prev.end, seNew.start);
+        if (gap + 1e-6 < need) {
+            return `Convenio: descanso insuficiente respecto al turno anterior (${gap.toFixed(1)}h < ${need}h; racha previa ~${streakBeforePrev}h).`;
+        }
+    }
+
+    const next = findNextWorkBoundary(p.empId, p.targetDateStr, p.getShift);
+    if (next) {
+        // Racha de trabajo que termina al cerrar el turno propuesto (incluye propuesto + días laborales consecutivos hacia atrás).
+        const streakEndingAtProposed = workStreakHoursBackward(p.empId, p.targetDateStr, p.getShift);
+        const needAfter = streakEndingAtProposed >= thr ? longRest : minRest;
+        const gap2 = hoursBetween(seNew.end, next.start);
+        if (gap2 + 1e-6 < needAfter) {
+            return `Convenio: descanso insuficiente respecto al turno siguiente (${gap2.toFixed(1)}h < ${needAfter}h; racha que termina este día ~${streakEndingAtProposed}h).`;
+        }
+    }
+
+    return null;
+};

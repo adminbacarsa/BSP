@@ -1,0 +1,47 @@
+D:\APP\cronoapp\apps\web2\
+│
+├── service-account.json       <-- 🛑 ¡AQUÍ FALTA TU ARCHIVO! (Clave Maestra)
+├── init_wfm_db.js             <-- El script que intentaste correr
+├── package.json
+├── tailwind.config.js
+├── tsconfig.json
+│
+└── src/
+    ├── lib/
+    │   └── firebase.ts        <-- Conexión única (Singleton) con Firebase Web
+    │
+    ├── types/                 <-- 🧠 CEREBRO DEL TIPO DE DATOS (TypeScript)
+    │   ├── wfm.ts             <-- Define: Client, Objective, Service, Shift
+    │   └── user.ts            <-- Define: Employee, UserRole
+    │
+    ├── services/              <-- 🔌 ENCHUFES (Conectan con Backend)
+    │   ├── authService.ts     <-- Login/Logout
+    │   ├── clientService.ts   <-- ABM de Clientes y Objetivos
+    │   └── rosterService.ts   <-- Lógica del Planificador
+    │
+    ├── components/            <-- 🧱 LADRILLOS VISUALES
+    │   ├── layout/
+    │   │   ├── Sidebar.tsx
+    │   │   └── DashboardLayout.tsx
+    │   ├── ui/                <-- Botones, Inputs, Cards genéricos
+    │   └── wfm/               <-- Componentes específicos del negocio
+    │       ├── SchedulerGrid.tsx  <-- La grilla de turnos compleja
+    │       ├── ShiftCard.tsx      <-- La tarjetita de turno (verde/roja)
+    │       └── ObjectiveSelector.tsx
+    │
+    └── pages/                 <-- 🌐 RUTAS DEL NAVEGADOR
+        ├── _app.tsx
+        ├── index.tsx          <-- Login
+        │
+        └── admin/             <-- Área protegida
+            ├── dashboard/     <-- Resumen general
+            │
+            ├── clientes/      <-- Gestión Comercial (Fase 2)
+            │   ├── index.tsx  <-- Listado de Clientes
+            │   └── [id].tsx   <-- Detalle/Edición de Cliente
+            │
+            ├── objetivos/     <-- Gestión de Lugares (Fase 2)
+            │   └── index.tsx
+            │
+            └── planificacion/ <-- El Corazón (Fase 3)
+                └── index.tsx  <-- El Planificador Operativo

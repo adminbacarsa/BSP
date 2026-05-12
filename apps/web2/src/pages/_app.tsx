@@ -1,0 +1,40 @@
+
+import '@/styles/globals.css';
+import type { AppProps } from 'next/app';
+import { useEffect } from 'react';
+import { ToastProvider } from '@/context/ToastContext';
+import { AuthProvider } from '@/context/AuthContext';
+import { EmpresaProvider } from '@/context/EmpresaContext';
+import Head from 'next/head';
+import { initTheme } from '@/lib/themeManager';
+
+export default function App({ Component, pageProps }: AppProps) {
+  useEffect(() => {
+    initTheme();
+    // El SDK de Firestore puede lanzar "INTERNAL ASSERTION FAILED" de forma asíncrona
+    // cuando el watch stream se reconecta. No afecta datos — solo previene que Next.js
+    // muestre el overlay de error en desarrollo.
+    const handler = (e: PromiseRejectionEvent) => {
+      if (e.reason?.message?.includes('INTERNAL ASSERTION FAILED')) {
+        e.preventDefault();
+        console.warn('[Firestore] Internal assertion — ignorado (stream reconnect):', e.reason?.message);
+      }
+    };
+    window.addEventListener('unhandledrejection', handler);
+    return () => window.removeEventListener('unhandledrejection', handler);
+  }, []);
+
+  return (
+    <AuthProvider>
+      <EmpresaProvider>
+      <ToastProvider>
+        <Head>
+          <title>COSP V1.0 | Grupo Bacar</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+        </Head>
+        <Component {...pageProps} />
+      </ToastProvider>
+      </EmpresaProvider>
+    </AuthProvider>
+  );
+}

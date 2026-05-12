@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c 'dir \"B:\\\\cronoapp\\\\apps\\\\web2\\\\.next\" /A')",
+      "Bash(node -e \"require\\('fs'\\).mkdirSync\\('C:/tmp/next-build/.next', {recursive:true}\\); require\\('fs'\\).writeFileSync\\('C:/tmp/next-build/.next/trace', ''\\); console.log\\('ok'\\)\")",
+      "Bash(echo \"exit $?\")",
+      "Bash(node -e \"const fs=require\\('fs'\\); try{const s=fs.statSync\\('B:/cronoapp/apps/web2/.next/trace'\\);console.log\\('exists',s.size\\)}catch\\(e\\){console.log\\('not found',e.code\\)}\")",
+      "Bash(node -e ':*)",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Select-Object -Last 10\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Select-Object -Last 20\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Select-Object -Last 25\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output'\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Measure-Object -Line\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Select-Object -Last 30\")",
+      "Bash(powershell -Command \"\\(Get-Content 'C:\\\\Users\\\\Mauro\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--APP-cronoapp\\\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\\\tasks\\\\bn8l5vk0e.output' | Measure-Object -Line\\).Lines\")",
+      "Bash(node -e \"try{require\\('fs'\\).unlinkSync\\('.next/trace'\\)}catch\\(e\\){}\")",
+      "Bash(npx firebase:*)",
+      "Bash(cmd /c \"dir /s /b \\\\\"B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\\" | findstr reportes\")",
+      "Bash(cmd /c \"dir \\\\\"B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\\" /B\")",
+      "Bash(cmd /c \"dir /B \\\\\"B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\\"\")",
+      "Bash(powershell -Command \"Get-ChildItem 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin' -Name\")",
+      "Bash(powershell -Command \"Get-ChildItem 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\reportes' -Name\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\reportes\\\\index.tsx' -TotalCount 500\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\reportes\\\\index.tsx' | Select-Object -Skip 480\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\admin\\\\reportes\\\\index.tsx' -Encoding UTF8 | Select-Object -First 5\")",
+      "Bash(powershell -File -)",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' -TotalCount 300\")",
+      "Bash(powershell -Command ':*)",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 700 -First 200\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 1000 -First 150\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 1200 -First 250\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 1500 -First 200\")",
+      "Bash(powershell -Command \"Get-Content 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 1700 -First 200\")",
+      "Bash(powershell -Command \"Get-ChildItem 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado' -Name\")",
+      "Bash(net use:*)",
+      "Bash(powershell -Command \"Test-Path 'B:\\\\cronoapp'\")",
+      "Bash(cmd /c \"net use b: /delete /yes 2>&1 & net use b: \\\\\\\\\\\\\\\\192.168.0.8\\\\\\\\app 2>&1 & powershell -Command \\\\\"Test-Path 'B:\\\\cronoapp'\\\\\"\")",
+      "Bash(powershell -Command \"Test-Path 'B:\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx'\")",
+      "Bash(powershell -Command \"Test-Path 'C:\\\\APP\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx'\")",
+      "Bash(powershell -Command \"\\(Get-Content 'C:\\\\APP\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx'\\).Count\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\APP\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 1700 -First 300\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\APP\\\\cronoapp\\\\apps\\\\web2\\\\src\\\\pages\\\\empleado\\\\dashboard.tsx' | Select-Object -Skip 2000 -First 240\")"
+    ],
+    "additionalDirectories": [
+      "C:\\tmp",
+      "C:\\Users\\Mauro\\.claude\\projects\\c--APP-cronoapp\\863bdf96-feeb-48da-8328-e6d01bc7d8f3\\tool-results"
+    ]
+  }
+}

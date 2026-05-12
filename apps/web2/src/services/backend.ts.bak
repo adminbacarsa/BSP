@@ -1,0 +1,51 @@
+
+import { callManageEmployees, callManageShifts, callScheduleShift, callManageData } from '@/lib/firebase';
+
+export const backendService = {
+  
+  // OBTENER EMPLEADOS (Usa tu endpoint 'manageEmployees')
+  getEmployees: async () => {
+    try {
+      // Tu backend espera: { action: 'GET_ALL_EMPLOYEES', payload: {} }
+      const result: any = await callManageEmployees({ 
+        action: 'GET_ALL_EMPLOYEES', 
+        payload: {} 
+      });
+      
+      // Tu backend devuelve: { success: true, data: [...] }
+      if (result.data.success) {
+        return result.data.data;
+      }
+      return [];
+    } catch (error) {
+      console.error("Error obteniendo empleados:", error);
+      return [];
+    }
+  },
+
+  // OBTENER OBJETIVOS (Usa tu endpoint 'manageData')
+  getObjectives: async () => {
+    try {
+      const result: any = await callManageData({
+        action: 'GET_ALL_OBJECTIVES',
+        payload: {}
+      });
+      return result.data.success ? result.data.data : [];
+    } catch (error) {
+      console.error("Error obteniendo objetivos:", error);
+      return [];
+    }
+  },
+
+  // CREAR UN TURNO (Usa tu endpoint 'scheduleShift')
+  createShift: async (shiftData: any) => {
+    try {
+      // Tu backend 'scheduleShift' espera el objeto directo en data
+      const result: any = await callScheduleShift(shiftData);
+      return result.data;
+    } catch (error) {
+      console.error("Error creando turno:", error);
+      throw error;
+    }
+  }
+};

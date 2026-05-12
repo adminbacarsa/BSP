@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>COSP V 1.0 — Maqueta Interactiva</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+:root{--sb-bg:#fff;--sb-border:#e2e8f0;--sb-text:#334155;--sb-muted:#94a3b8;--sb-section:#cbd5e1;--sb-active-bg:#6366f1;--sb-active-text:#fff;--sb-hover-bg:#f1f5f9;--sb-logo:#6366f1;--sb-logo-sub:#94a3b8;--sb-logout:#f43f5e;--sb-special-bg:rgba(239,68,68,.08);--sb-special-text:#f87171;--sb-special-border:rgba(239,68,68,.2);--app-bg:#f8fafc;--topbar-bg:#fff;--topbar-border:#e2e8f0;--topbar-text:#0f172a}
+body{background:var(--app-bg);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,sans-serif;margin:0}
+#sidebar{position:fixed;top:0;left:0;z-index:40;height:100vh;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--sb-border);background:var(--sb-bg);width:64px;transition:width 300ms ease-in-out}
+#sidebar.expanded{width:256px}
+.sb-label{display:none;white-space:nowrap;overflow:hidden}
+#sidebar.expanded .sb-label{display:inline}
+.sb-section{display:none}
+#sidebar.expanded .sb-section{display:block}
+.logo-icon{display:flex}
+#sidebar.expanded .logo-icon{display:none}
+.logo-full{display:none}
+#sidebar.expanded .logo-full{display:flex}
+.sb-link{display:flex;align-items:center;gap:12px;padding:10px 8px;border-radius:12px;transition:all .15s;font-size:.875rem;font-weight:500;cursor:pointer;text-decoration:none;justify-content:center;color:var(--sb-text)}
+#sidebar.expanded .sb-link{justify-content:flex-start;padding:10px 16px}
+.sb-link:hover{background:var(--sb-hover-bg)}
+.sb-link.active{background:var(--sb-active-bg) !important;color:var(--sb-active-text) !important}
+.sb-link.special{background:var(--sb-special-bg);color:var(--sb-special-text);border:1px solid var(--sb-special-border)}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
+@keyframes toastIn{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes toastOut{from{transform:translateX(0);opacity:1}to{transform:translateX(110%);opacity:0}}
+.toast-in{animation:toastIn .3s ease}
+.toast-out{animation:toastOut .3s ease forwards}
+.page{display:none}
+.page.active{display:block}
+.tab-btn{padding:6px 14px;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer;border:1px solid transparent;transition:all .15s;white-space:nowrap}
+.tab-btn.active{background:#6366f1;color:#fff;border-color:#4f46e5}
+.tab-btn:not(.active){background:#fff;color:#64748b;border-color:#e2e8f0}
+.tab-btn:not(.active):hover{background:#f1f5f9}
+.kpi-card{background:#fff;padding:14px 16px;border-radius:12px;border:1px solid #f1f5f9;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;gap:12px;transition:box-shadow .15s}
+.kpi-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.kpi-icon{padding:8px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.shift-badge{display:inline-flex;align-items:center;justify-content:center;padding:1px 5px;border-radius:4px;border:1px solid;font-size:11px;font-weight:700;min-width:30px;cursor:pointer;transition:all .1s;user-select:none}
+.shift-badge:hover{filter:brightness(.9);transform:scale(1.08)}
+.guard-card{position:relative;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;transition:all .15s}
+.guard-accent{height:4px;width:100%}
+.modal-overlay{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.8);display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-box{background:#fff;width:100%;max-width:480px;border-radius:16px;box-shadow:0 25px 50px rgba(0,0,0,.25);overflow:hidden}
+.modal-header{padding:16px;display:flex;justify-content:space-between;align-items:center;color:#fff}
+.modal-body{padding:24px}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;font-size:.625rem;font-weight:700;cursor:pointer;border:none;transition:all .15s;white-space:nowrap}
+.btn-emerald{background:#059669;color:#fff}.btn-emerald:hover{background:#047857}
+.btn-rose{background:#e11d48;color:#fff}.btn-rose:hover{background:#be123c}
+.btn-indigo{background:#4f46e5;color:#fff}.btn-indigo:hover{background:#4338ca}
+.btn-slate{background:#1e293b;color:#fff}.btn-slate:hover{background:#0f172a}
+.btn-ghost{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.btn-ghost:hover{background:#e2e8f0}
+.btn-wa{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0}.btn-wa:hover{background:#bbf7d0}
+.btn-purple{background:#7c3aed;color:#fff}.btn-purple:hover{background:#6d28d9}
+.shift-menu-popup{position:fixed;z-index:8000;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.15);padding:4px;min-width:175px}
+.shift-menu-item{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer;transition:background .1s}
+.shift-menu-item:hover{background:#f1f5f9}
+.section-label{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.acc-card{height:96px;padding:20px;background:#fff;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:all .15s;text-align:left;width:100%}
+.acc-card:hover{box-shadow:0 8px 24px rgba(0,0,0,.12);transform:translateY(-1px)}
+</style>
+</head>
+<body>
+
+<!-- TUTORIAL BANNER -->
+<div id="tutorial-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f59e0b;color:#78350f;font-size:11px;font-weight:700;text-align:center;padding:4px 40px;display:flex;align-items:center;justify-content:center;gap:8px">
+  ⚠ MAQUETA INTERACTIVA — Shopping Del Sol S.A. / Acceso Principal / Ana · Carlos · Roberto · María · Todo es editable
+  <button onclick="document.getElementById('tutorial-banner').style.display='none'" style="position:absolute;right:12px;background:rgba(0,0,0,.12);border:none;cursor:pointer;border-radius:4px;padding:0 6px;font-weight:900;color:#78350f;font-size:13px">✕</button>
+</div>
+
+<!-- APP SHELL -->
+<div style="display:flex;min-height:100vh;padding-top:28px">
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside id="sidebar" onmouseenter="expandSidebar()" onmouseleave="collapseSidebar()">
+  <div style="border-bottom:1px solid var(--sb-border);flex-shrink:0;display:flex;align-items:center;overflow:hidden">
+    <div class="logo-icon" style="padding:16px;justify-content:center;width:64px;flex-shrink:0;align-items:center">
+      <i data-lucide="shield-check" style="color:var(--sb-logo);width:20px;height:20px"></i>
+    </div>
+    <div class="logo-full" style="flex-direction:column;padding:20px 20px 20px 4px;min-width:0">
+      <span style="font-size:1.125rem;font-weight:900;letter-spacing:-.05em;white-space:nowrap;color:var(--sb-logo)">COSP V 1.0</span>
+      <span style="font-size:11px;font-weight:600;white-space:nowrap;color:var(--sb-logo-sub)">Seguridad Privada</span>
+      <span style="font-size:10px;white-space:nowrap;opacity:.6;color:var(--sb-logo-sub)">Grupo Bacar</span>
+    </div>
+  </div>
+  <nav style="padding:8px;flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:16px">
+    <div class="sb-section" style="padding:8px 12px 4px;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:var(--sb-section)">Operativa</div>
+    <a class="sb-link active" id="nav-dashboard" onclick="showPage('dashboard')">
+      <i data-lucide="layout-dashboard" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">Dashboard</span>
+    </a>
+    <a class="sb-link special" id="nav-operaciones" onclick="showPage('operaciones')">
+      <i data-lucide="radio" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">Centro Control</span>
+    </a>
+    <a class="sb-link" id="nav-planificacion" onclick="showPage('planificacion')">
+      <i data-lucide="calendar" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">Planificador</span>
+    </a>
+    <div class="sb-section" style="padding:8px 12px 4px;margin-top:10px;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:var(--sb-section)">Gestión</div>
+    <a class="sb-link" id="nav-crm" onclick="showPage('crm')">
+      <i data-lucide="briefcase" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">CRM Clientes</span>
+    </a>
+    <a class="sb-link" id="nav-servicios" onclick="showPage('servicios')">
+      <i data-lucide="shield" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">Servicios</span>
+    </a>
+    <a class="sb-link" id="nav-rrhh" onclick="showPage('rrhh')">
+      <i data-lucide="users" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">RRHH</span>
+    </a>
+    <div class="sb-section" style="padding:8px 12px 4px;margin-top:10px;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:var(--sb-section)">Sistema</div>
+    <a class="sb-link" id="nav-config" onclick="showPage('config')">
+      <i data-lucide="settings" style="width:18px;height:18px;flex-shrink:0"></i>
+      <span class="sb-label">Configuración</span>
+    </a>
+  </nav>
+  <div style="padding:8px;border-top:1px solid var(--sb-border);flex-shrink:0">
+    <button class="sb-link" style="width:100%;border:none;background:none" onclick="showToast('success','Sesión cerrada','Redirigiendo a login...')">
+      <i data-lucide="log-out" style="width:18px;height:18px;color:var(--sb-logout);flex-shrink:0"></i>
+      <span class="sb-label" style="color:var(--sb-logout)">Salir</span>
+    </button>
+  </div>
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<div style="flex:1;margin-left:64px;display:flex;flex-direction:column;min-height:100vh">
+  <!-- TOPBAR -->
+  <div style="background:var(--topbar-bg);border-bottom:1px solid var(--topbar-border);box-shadow:0 1px 3px rgba(0,0,0,.06);position:sticky;top:0;z-index:30">
+    <div style="padding:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <button onclick="expandSidebar()" style="padding:8px;border-radius:8px;border:none;background:none;cursor:pointer;color:var(--topbar-text)" onmouseover="this.style.background='rgba(0,0,0,.05)'" onmouseout="this.style.background='none'">
+        <i data-lucide="menu" style="width:22px;height:22px"></i>
+      </button>
+      <span id="topbar-title" style="font-weight:900;text-transform:uppercase;letter-spacing:-.025em;font-size:.875rem;color:var(--topbar-text);flex-shrink:0">Dashboard</span>
+      <div style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;background:#4f46e5;border:1px solid #4338ca;font-size:11px;font-weight:900;color:#fff;flex-shrink:0">
+        <i data-lucide="building-2" style="width:12px;height:12px"></i>
+        <span>Shopping Del Sol S.A.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+        <span style="font-size:.75rem;color:var(--topbar-text);opacity:.7">Operador: <b style="opacity:1">Admin Demo</b></span>
+        <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:4px 8px;border-radius:9999px;border:1px solid #bbf7d0">
+          <i data-lucide="activity" style="width:11px;height:11px"></i> ONLINE
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGES -->
+  <main style="padding:32px;flex:1">
+
+    <!-- ══════════════ DASHBOARD ══════════════ -->
+    <div id="page-dashboard" class="page active">
+      <div class="section-label">
+        <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:#94a3b8">Estructura Operativa</span>
+        <div style="flex:1;height:1px;background:#e2e8f0"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;margin-bottom:24px">
+        <div class="kpi-card"><div class="kpi-icon" style="background:#6366f118"><i data-lucide="briefcase" style="width:16px;height:16px;color:#6366f1;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Clientes</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">1</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">Shopping Del Sol S.A.</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#10b98118"><i data-lucide="map-pin" style="width:16px;height:16px;color:#10b981;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Objetivos</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">2</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">Acceso Principal + Estacionam.</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#8b5cf618"><i data-lucide="shield-check" style="width:16px;height:16px;color:#8b5cf6;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Servicios Activos</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">1</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">Contrato vigente</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#06b6d418"><i data-lucide="users" style="width:16px;height:16px;color:#06b6d4;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Personal Total</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">4</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">Vigiladores activos</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#f59e0b18"><i data-lucide="clock" style="width:16px;height:16px;color:#f59e0b;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">SLA Hs / Sem</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">168</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">24/7 cobertura completa</p></div></div>
+      </div>
+
+      <div class="section-label">
+        <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:#94a3b8">Estado del Día — Jue 30/04/2026</span>
+        <div style="flex:1;height:1px;background:#e2e8f0"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;margin-bottom:24px">
+        <div class="kpi-card"><div class="kpi-icon" style="background:#10b98118"><i data-lucide="user-check" style="width:16px;height:16px;color:#10b981;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Presentes</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">1</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">Ana García — T. Mañana</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#6366f118"><i data-lucide="calendar" style="width:16px;height:16px;color:#6366f1;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">En Plan Hoy</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">3</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">M + T + N planificados</p></div></div>
+        <div class="kpi-card" style="border-color:#fca5a5;box-shadow:0 0 0 2px #fee2e2"><div class="kpi-icon" style="background:#ef444418"><i data-lucide="user-x" style="width:16px;height:16px;color:#ef4444;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Ausentes</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">1</h3><p style="font-size:10px;color:#ef4444;font-weight:500;line-height:1.2">⚠ María López</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#10b98118"><i data-lucide="trending-up" style="width:16px;height:16px;color:#10b981;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em;line-height:1.2">Cobertura</p><h3 style="font-size:1.25rem;font-weight:900;line-height:1.2;color:#1e293b">75%</h3><p style="font-size:10px;color:#64748b;font-weight:500;line-height:1.2">3 de 4 puestos cubiertos</p></div></div>
+      </div>
+
+      <div class="section-label">
+        <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:#94a3b8">Distribución Horas SLA</span>
+        <div style="flex:1;height:1px;background:#e2e8f0"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;margin-bottom:32px">
+        <div class="kpi-card"><div class="kpi-icon" style="background:#f59e0b18"><i data-lucide="sun" style="width:16px;height:16px;color:#f59e0b;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em">SLA Diurno</p><h3 style="font-size:1.25rem;font-weight:900;color:#1e293b">112 hs</h3><p style="font-size:10px;color:#64748b;font-weight:500">Mañana + Tarde / sem</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#6366f118"><i data-lucide="moon" style="width:16px;height:16px;color:#6366f1;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em">SLA Nocturno</p><h3 style="font-size:1.25rem;font-weight:900;color:#1e293b">56 hs</h3><p style="font-size:10px;color:#64748b;font-weight:500">Noche / sem</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#ec489918"><i data-lucide="star" style="width:16px;height:16px;color:#ec4899;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em">SLA Feriados</p><h3 style="font-size:1.25rem;font-weight:900;color:#1e293b">0 hs</h3><p style="font-size:10px;color:#64748b;font-weight:500">Sin feriados esta semana</p></div></div>
+        <div class="kpi-card"><div class="kpi-icon" style="background:#10b98118"><i data-lucide="bar-chart-3" style="width:16px;height:16px;color:#10b981;stroke-width:2.5"></i></div><div style="flex:1;min-width:0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em">Hs / Vigilador</p><h3 style="font-size:1.25rem;font-weight:900;color:#1e293b">42 hs</h3><p style="font-size:10px;color:#64748b;font-weight:500">Promedio mensual</p></div></div>
+      </div>
+
+      <div class="section-label">
+        <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.2em;color:#94a3b8">Accesos Rápidos</span>
+        <div style="flex:1;height:1px;background:#e2e8f0"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px">
+        <button class="acc-card" onclick="showPage('operaciones')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="radio" style="width:20px;height:20px;color:#ef4444"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">Centro Control</span></div><span style="font-size:10px;color:#64748b">Monitorear turnos ahora</span></button>
+        <button class="acc-card" onclick="showPage('planificacion')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="calendar" style="width:20px;height:20px;color:#6366f1"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">Planificador</span></div><span style="font-size:10px;color:#64748b">Editar grilla semanal</span></button>
+        <button class="acc-card" onclick="showPage('crm')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="briefcase" style="width:20px;height:20px;color:#10b981"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">CRM Clientes</span></div><span style="font-size:10px;color:#64748b">Ver Shopping Del Sol</span></button>
+        <button class="acc-card" onclick="showPage('rrhh')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="users" style="width:20px;height:20px;color:#06b6d4"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">RRHH</span></div><span style="font-size:10px;color:#64748b">Gestionar personal</span></button>
+        <button class="acc-card" onclick="showPage('servicios')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="shield" style="width:20px;height:20px;color:#8b5cf6"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">Servicios</span></div><span style="font-size:10px;color:#64748b">Contratos activos</span></button>
+        <button class="acc-card" onclick="openModal('modal-novedad')"><div style="display:flex;align-items:center;gap:8px"><i data-lucide="bell-ring" style="width:20px;height:20px;color:#f59e0b"></i><span style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#1e293b">Nueva Novedad</span></div><span style="font-size:10px;color:#64748b">Registrar incidencia</span></button>
+      </div>
+    </div>
+
+    <!-- ══════════════ OPERACIONES ══════════════ -->
+    <div id="page-operaciones" class="page">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;padding:12px 16px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0"><i data-lucide="user-check" style="width:13px;height:13px;color:#059669"></i><span style="font-size:11px;font-weight:900;color:#059669">1 ACTIVO</span></div>
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:#eef2ff;border:1px solid #c7d2fe"><i data-lucide="clock" style="width:13px;height:13px;color:#6366f1"></i><span style="font-size:11px;font-weight:900;color:#6366f1">2 EN PLAN</span></div>
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:#fff1f2;border:1px solid #fecdd3"><i data-lucide="user-x" style="width:13px;height:13px;color:#e11d48"></i><span style="font-size:11px;font-weight:900;color:#e11d48">1 AUSENTE</span></div>
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0"><i data-lucide="alert-triangle" style="width:13px;height:13px;color:#94a3b8"></i><span style="font-size:11px;font-weight:900;color:#94a3b8">0 VACANTES</span></div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="toggleCompact()"><i data-lucide="layers" style="width:11px;height:11px"></i> <span id="compact-label">Vista Compacta</span></button>
+          <button class="btn btn-indigo" onclick="openModal('modal-novedad')"><i data-lucide="bell-ring" style="width:11px;height:11px"></i> Novedad</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="tab-btn active" id="tab-plan" onclick="setOpsTab('PLAN')">PLAN (3)</button>
+        <button class="tab-btn" id="tab-activos" onclick="setOpsTab('ACTIVOS')">ACTIVOS (1)</button>
+        <button class="tab-btn" id="tab-vacantes" onclick="setOpsTab('VACANTES')">VACANTES (0)</button>
+        <button class="tab-btn" id="tab-ausentes" onclick="setOpsTab('AUSENTES')">AUSENTES (1)</button>
+        <button class="tab-btn" id="tab-retenidos" onclick="setOpsTab('RETENIDOS')">RETENIDOS (0)</button>
+      </div>
+      <div id="ops-cards"></div>
+    </div>
+
+    <!-- ══════════════ PLANIFICACIÓN ══════════════ -->
+    <div id="page-planificacion" class="page">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+        <button onclick="showToast('info','Planificador','← Semana anterior')" style="padding:6px 10px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;display:flex;align-items:center"><i data-lucide="chevron-left" style="width:16px;height:16px;color:#64748b"></i></button>
+        <span style="font-size:.875rem;font-weight:700;color:#1e293b">Semana 27 Abr – 3 May 2026</span>
+        <button onclick="showToast('info','Planificador','→ Semana siguiente')" style="padding:6px 10px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;display:flex;align-items:center"><i data-lucide="chevron-right" style="width:16px;height:16px;color:#64748b"></i></button>
+        <div style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;background:#4f46e5;color:#fff;font-size:11px;font-weight:900"><i data-lucide="building-2" style="width:12px;height:12px"></i> Shopping Del Sol S.A.</div>
+        <div style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:11px;font-weight:700;color:#15803d"><i data-lucide="map-pin" style="width:12px;height:12px"></i> Acceso Principal</div>
+        <button class="btn btn-ghost" onclick="showToast('info','Exportar','Generando PDF...')"><i data-lucide="printer" style="width:11px;height:11px"></i> Exportar</button>
+      </div>
+
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;background:#fff;border-radius:10px;border:1px solid #e2e8f0;align-items:center">
+        <span style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin-right:4px">Leyenda:</span>
+        <span class="shift-badge bg-blue-100 text-blue-700 border-blue-200" style="pointer-events:none;cursor:default">M</span><span style="font-size:10px;color:#64748b;margin-right:6px">07-15</span>
+        <span class="shift-badge bg-orange-100 text-orange-700 border-orange-200" style="pointer-events:none;cursor:default">T</span><span style="font-size:10px;color:#64748b;margin-right:6px">15-23</span>
+        <span class="shift-badge bg-indigo-100 text-indigo-700 border-indigo-200" style="pointer-events:none;cursor:default">N</span><span style="font-size:10px;color:#64748b;margin-right:6px">23-07</span>
+        <span class="shift-badge bg-emerald-100 text-emerald-700 border-emerald-200" style="pointer-events:none;cursor:default">F</span><span style="font-size:10px;color:#64748b;margin-right:6px">Franco</span>
+        <span class="shift-badge bg-red-100 text-red-700 border-red-300 font-black" style="pointer-events:none;cursor:default">A</span><span style="font-size:10px;color:#64748b;margin-right:6px">ART</span>
+        <span class="shift-badge bg-violet-600 text-white border-violet-700 font-black" style="pointer-events:none;cursor:default">FT</span><span style="font-size:10px;color:#64748b;margin-right:6px">Franco Trab.</span>
+        <span class="shift-badge bg-teal-600 text-white border-teal-700 font-black" style="pointer-events:none;cursor:default">V</span><span style="font-size:10px;color:#64748b">Vacaciones</span>
+      </div>
+
+      <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:auto;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+        <table style="border-collapse:collapse;min-width:100%">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0">
+              <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;min-width:185px;position:sticky;left:0;background:#fff;z-index:2;border-right:1px solid #f1f5f9">Empleado</th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#f8fafc"><div style="font-size:9px">L</div><div style="color:#1e293b;font-size:13px;font-weight:900">27</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#f8fafc"><div style="font-size:9px">M</div><div style="color:#1e293b;font-size:13px;font-weight:900">28</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#f8fafc"><div style="font-size:9px">X</div><div style="color:#1e293b;font-size:13px;font-weight:900">29</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;min-width:54px;background:#eef2ff;border-left:2px solid #c7d2fe;border-right:2px solid #c7d2fe"><div style="font-size:9px;color:#6366f1">J HOY</div><div style="color:#6366f1;font-size:13px;font-weight:900">30</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#fff"><div style="font-size:9px">V</div><div style="color:#1e293b;font-size:13px;font-weight:900">01</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#fff"><div style="font-size:9px">S</div><div style="color:#1e293b;font-size:13px;font-weight:900">02</div></th>
+              <th style="padding:10px 6px;text-align:center;font-size:10px;font-weight:900;color:#94a3b8;min-width:54px;background:#fff"><div style="font-size:9px">D</div><div style="color:#1e293b;font-size:13px;font-weight:900">03</div></th>
+              <th style="padding:10px 16px;text-align:right;font-size:10px;font-weight:900;color:#94a3b8;min-width:65px;background:#fff">Total</th>
+            </tr>
+          </thead>
+          <tbody id="plan-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══════════════ CRM ══════════════ -->
+    <div id="page-crm" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <h2 style="font-size:1.125rem;font-weight:900;color:#1e293b;letter-spacing:-.025em;margin:0">CRM Clientes</h2>
+        <button class="btn btn-indigo" onclick="showToast('info','CRM','Formulario de nuevo cliente')"><i data-lucide="plus" style="width:11px;height:11px"></i> Nuevo Cliente</button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <input type="text" placeholder="Buscar cliente..." style="padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.8125rem;color:#1e293b;outline:none;width:180px" />
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden">
+        <div style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-bottom:1px solid #f1f5f9" onclick="toggleCrmClient()">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;border-radius:10px;background:#eef2ff;display:flex;align-items:center;justify-content:center"><i data-lucide="building-2" style="width:20px;height:20px;color:#6366f1"></i></div>
+            <div>
+              <h3 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0">Shopping Del Sol S.A.</h3>
+              <p style="font-size:11px;color:#64748b;margin:2px 0 0">CUIT: 30-70123456-7 · Lic. Fernando Ruiz · 351-555-0198</p>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:3px 8px;border-radius:9999px;border:1px solid #bbf7d0">ACTIVO</span>
+            <span style="font-size:10px;font-weight:700;color:#6366f1;background:#eef2ff;padding:3px 8px;border-radius:9999px;border:1px solid #c7d2fe">2 Objetivos</span>
+            <i data-lucide="chevron-down" id="crm-chevron" style="width:16px;height:16px;color:#94a3b8;transition:transform .2s"></i>
+          </div>
+        </div>
+        <div id="crm-detail" style="display:none;padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Razón Social</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">Shopping Del Sol S.A.</p></div>
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Contacto</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">Lic. Fernando Ruiz</p></div>
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Teléfono</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">351-555-0198</p></div>
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Email</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">fruiz@shoppingdelsol.com.ar</p></div>
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Dirección</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">Av. Vélez Sársfield 3650, Córdoba</p></div>
+            <div><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Desde</p><p style="font-size:.875rem;font-weight:600;color:#1e293b;margin:0">01/01/2026</p></div>
+          </div>
+          <div style="margin-bottom:10px"><span style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em">Objetivos</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="padding:12px 16px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div style="display:flex;align-items:center;gap:10px"><div style="width:8px;height:8px;border-radius:9999px;background:#10b981;flex-shrink:0"></div><div><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">Acceso Principal</p><p style="font-size:11px;color:#64748b;margin:2px 0 0">Portero · Supervisor · M+T+N (3 turnos/día)</p></div></div>
+              <div style="display:flex;gap:6px"><button class="btn btn-ghost" onclick="showPage('operaciones')"><i data-lucide="radio" style="width:10px;height:10px"></i> Monitor</button><button class="btn btn-ghost" onclick="showPage('planificacion')"><i data-lucide="calendar" style="width:10px;height:10px"></i> Plan</button></div>
+            </div>
+            <div style="padding:12px 16px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div style="display:flex;align-items:center;gap:10px"><div style="width:8px;height:8px;border-radius:9999px;background:#10b981;flex-shrink:0"></div><div><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">Estacionamiento</p><p style="font-size:11px;color:#64748b;margin:2px 0 0">Guardia · M+T+N (3 turnos/día)</p></div></div>
+              <div style="display:flex;gap:6px"><button class="btn btn-ghost" onclick="showPage('operaciones')"><i data-lucide="radio" style="width:10px;height:10px"></i> Monitor</button><button class="btn btn-ghost" onclick="showPage('planificacion')"><i data-lucide="calendar" style="width:10px;height:10px"></i> Plan</button></div>
+            </div>
+            <button class="btn btn-ghost" style="align-self:flex-start;margin-top:4px" onclick="showToast('info','CRM','Formulario nuevo objetivo')"><i data-lucide="plus" style="width:11px;height:11px"></i> Agregar Objetivo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ SERVICIOS ══════════════ -->
+    <div id="page-servicios" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <h2 style="font-size:1.125rem;font-weight:900;color:#1e293b;letter-spacing:-.025em;margin:0">Servicios</h2>
+        <button class="btn btn-indigo" onclick="showToast('info','Servicios','Nuevo contrato')"><i data-lucide="plus" style="width:11px;height:11px"></i> Nuevo Servicio</button>
+      </div>
+      <div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+        <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;border-radius:10px;background:#ecfdf5;display:flex;align-items:center;justify-content:center"><i data-lucide="shield-check" style="width:20px;height:20px;color:#059669"></i></div>
+            <div><h3 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0">Shopping Del Sol S.A. — Contrato SLA 24/7</h3><p style="font-size:11px;color:#64748b;margin:2px 0 0">Vigente desde 01/01/2026 · Renovación ene-2027</p></div>
+          </div>
+          <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:4px 10px;border-radius:9999px;border:1px solid #bbf7d0">ACTIVO</span>
+        </div>
+        <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px">
+          <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Objetivo Principal</p><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">Acceso Principal</p></div>
+          <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Cobertura</p><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">24/7 — 168 hs/sem</p></div>
+          <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Personal Mín.</p><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">1 guardia / turno</p></div>
+          <div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0"><p style="font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px">Modalidad</p><p style="font-size:.875rem;font-weight:700;color:#1e293b;margin:0">M · T · N (8 hs)</p></div>
+        </div>
+        <div style="padding:0 20px 20px;display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="showToast('info','Servicios','Abriendo contrato...')"><i data-lucide="file-text" style="width:11px;height:11px"></i> Ver Contrato</button>
+          <button class="btn btn-ghost" onclick="showToast('info','Servicios','Editando servicio...')"><i data-lucide="edit-3" style="width:11px;height:11px"></i> Editar</button>
+          <button class="btn btn-ghost" onclick="showPage('planificacion')"><i data-lucide="calendar" style="width:11px;height:11px"></i> Ver Planificación</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ RRHH ══════════════ -->
+    <div id="page-rrhh" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <h2 style="font-size:1.125rem;font-weight:900;color:#1e293b;letter-spacing:-.025em;margin:0">RRHH — Personal</h2>
+        <button class="btn btn-indigo" onclick="showToast('info','RRHH','Formulario de alta')"><i data-lucide="user-plus" style="width:11px;height:11px"></i> Nuevo Empleado</button>
+        <div style="margin-left:auto"><input type="text" placeholder="Buscar empleado..." style="padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.8125rem;color:#1e293b;outline:none;width:180px" /></div>
+      </div>
+      <div id="rrhh-cards" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
+    <!-- ══════════════ CONFIG ══════════════ -->
+    <div id="page-config" class="page">
+      <h2 style="font-size:1.125rem;font-weight:900;color:#1e293b;letter-spacing:-.025em;margin:0 0 24px">Configuración del Sistema</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Gestión de usuarios y roles')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="users" style="width:24px;height:24px;color:#6366f1;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Usuarios y Roles</h4><p style="font-size:11px;color:#64748b;margin:0">Administrar accesos al sistema</p></div>
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Configuración de empresa')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="building-2" style="width:24px;height:24px;color:#10b981;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Empresa</h4><p style="font-size:11px;color:#64748b;margin:0">Datos y configuración general</p></div>
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Parámetros de turnos y SLA')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="clock" style="width:24px;height:24px;color:#f59e0b;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Turnos y SLA</h4><p style="font-size:11px;color:#64748b;margin:0">Horarios, límites y feriados</p></div>
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Backup y restore')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="database" style="width:24px;height:24px;color:#8b5cf6;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Backup</h4><p style="font-size:11px;color:#64748b;margin:0">Respaldo y restauración de datos</p></div>
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Tipos de novedad canónicos')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="bell-ring" style="width:24px;height:24px;color:#ef4444;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Tipos de Novedad</h4><p style="font-size:11px;color:#64748b;margin:0">Configurar categorías</p></div>
+        <div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:20px;cursor:pointer;transition:box-shadow .15s" onclick="showToast('info','Config','Integración WhatsApp')" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'"><i data-lucide="message-circle" style="width:24px;height:24px;color:#06b6d4;margin-bottom:10px"></i><h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0 0 4px">Integraciones</h4><p style="font-size:11px;color:#64748b;margin:0">WhatsApp, notificaciones, API</p></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</div>
+
+<!-- ═══ MODAL NOVEDAD ═══ -->
+<div id="modal-novedad" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-header" style="background:#6366f1">
+      <h3 style="font-weight:900;text-transform:uppercase;font-size:.875rem;display:flex;align-items:center;gap:8px;margin:0"><i data-lucide="bell-ring" style="width:18px;height:18px"></i> Nueva Novedad</h3>
+      <button onclick="closeModal('modal-novedad')" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px"><i data-lucide="x" style="width:18px;height:18px"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px"><label style="font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:4px">Tipo de Novedad</label><select style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.875rem;color:#1e293b"><option>Ausencia Justificada</option><option>Llegada Tarde</option><option>Baja Anticipada</option><option>Incidente en Objetivo</option><option>Problema de Acceso</option><option>Cambio de Turno</option></select></div>
+      <div style="margin-bottom:12px"><label style="font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:4px">Empleado</label><select style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.875rem;color:#1e293b"><option>Ana García</option><option>Carlos Rodríguez</option><option>Roberto Díaz</option><option>María López</option></select></div>
+      <div style="margin-bottom:12px"><label style="font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:4px">Objetivo</label><select style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.875rem;color:#1e293b"><option>Acceso Principal</option><option>Estacionamiento</option></select></div>
+      <div style="margin-bottom:16px"><label style="font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:4px">Descripción</label><textarea style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.875rem;color:#1e293b;height:80px;resize:none;box-sizing:border-box;font-family:inherit" placeholder="Detalle de la novedad..."></textarea></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-indigo" style="flex:1;justify-content:center" onclick="closeModal('modal-novedad');showToast('success','Novedad registrada','Se notificó a planificación automáticamente')"><i data-lucide="send" style="width:11px;height:11px"></i> REGISTRAR NOVEDAD</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-novedad')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL HANDOVER (DAR PRESENTE) ═══ -->
+<div id="modal-handover" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-header" style="background:#059669">
+      <h3 style="font-weight:900;text-transform:uppercase;font-size:.875rem;display:flex;align-items:center;gap:8px;margin:0"><i data-lucide="user-check" style="width:18px;height:18px"></i> Ingreso A Tiempo</h3>
+      <button onclick="closeModal('modal-handover')" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px"><i data-lucide="x" style="width:18px;height:18px"></i></button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.875rem;color:#475569;margin-bottom:16px">El guardia <b id="handover-name">Ana García</b> está listo para ingresar al objetivo <b>Acceso Principal</b>.</p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:16px"><p style="font-size:12px;color:#15803d;font-weight:600;margin:0">✅ Turno Mañana · 07:00 – 15:00 · Portero</p></div>
+      <div style="margin-bottom:16px">
+        <p style="font-size:10px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin:0 0 8px">¿Quién releva?</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc">
+          <div><span style="font-size:.875rem;font-weight:700;color:#1e293b;display:block">Turno Nocturno anterior</span><span style="font-size:10px;color:#94a3b8">Salida planificada: 07:00</span></div>
+          <button class="btn btn-emerald" onclick="confirmHandover()">RELEVAR</button>
+        </div>
+      </div>
+      <button class="btn btn-slate" style="width:100%;justify-content:center;padding:12px" onclick="confirmHandover()">INGRESAR SIN RELEVAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL COBERTURA ═══ -->
+<div id="modal-cobertura" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header" style="background:#e11d48">
+      <h3 style="font-weight:900;text-transform:uppercase;font-size:.875rem;display:flex;align-items:center;gap:8px;margin:0"><i data-lucide="siren" style="width:18px;height:18px"></i> Cobertura de Vacante</h3>
+      <button onclick="closeModal('modal-cobertura')" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px"><i data-lucide="x" style="width:18px;height:18px"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:12px;margin-bottom:16px;font-size:12px;color:#be123c;font-weight:600">Puesto descubierto: <b id="cobertura-info">Acceso Principal — Turno M</b></div>
+      <div style="margin-bottom:16px">
+        <h4 style="font-size:11px;font-weight:900;color:#6366f1;text-transform:uppercase;margin:0 0 8px">1. Retención (Doble Turno)</h4>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px">
+          <span style="font-size:.875rem;font-weight:700;color:#1e293b">Ana García</span>
+          <div style="display:flex;gap:6px"><button class="btn btn-wa" onclick="showToast('info','WhatsApp','Abriendo chat con Ana García...')"><i data-lucide="message-circle" style="width:11px;height:11px"></i></button><button class="btn btn-indigo" onclick="assignCoverage('Ana García','RETENTION')">DOBLAR</button></div>
+        </div>
+      </div>
+      <div>
+        <h4 style="font-size:11px;font-weight:900;color:#64748b;text-transform:uppercase;margin:0 0 8px">2. Volantes (Por Cercanía)</h4>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc"><div><span style="font-size:.875rem;font-weight:700;color:#1e293b;display:block">Carlos Rodríguez</span><span style="font-size:10px;color:#94a3b8">0.8 km · ~2 min</span></div><div style="display:flex;gap:6px"><button class="btn btn-wa" onclick="showToast('info','WhatsApp','Abriendo chat con Carlos...')"><i data-lucide="message-circle" style="width:11px;height:11px"></i></button><button class="btn btn-slate" onclick="assignCoverage('Carlos Rodríguez','VOLANTE')">ASIGNAR</button></div></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc"><div><span style="font-size:.875rem;font-weight:700;color:#1e293b;display:block">Roberto Díaz</span><span style="font-size:10px;color:#94a3b8">1.4 km · ~3 min</span></div><div style="display:flex;gap:6px"><button class="btn btn-wa" onclick="showToast('info','WhatsApp','Abriendo chat con Roberto...')"><i data-lucide="message-circle" style="width:11px;height:11px"></i></button><button class="btn btn-slate" onclick="assignCoverage('Roberto Díaz','VOLANTE')">ASIGNAR</button></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL SALIDA ═══ -->
+<div id="modal-checkout" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:360px">
+    <div class="modal-header" style="background:#7c3aed">
+      <h3 style="font-weight:900;text-transform:uppercase;font-size:.875rem;display:flex;align-items:center;gap:8px;margin:0"><i data-lucide="log-out" style="width:18px;height:18px"></i> Salida: <span id="checkout-name">Ana García</span></h3>
+      <button onclick="closeModal('modal-checkout')" style="background:none;border:none;color:#fff;cursor:pointer;padding:4px"><i data-lucide="x" style="width:18px;height:18px"></i></button>
+    </div>
+    <div class="modal-body">
+      <button class="btn btn-emerald" style="width:100%;justify-content:center;margin-bottom:10px;padding:12px;font-size:.8125rem" onclick="closeModal('modal-checkout');showToast('success','Salida registrada','Turno completado correctamente · Horas: 8:00')"><i data-lucide="check-circle" style="width:13px;height:13px"></i> SALIDA NORMAL</button>
+      <textarea style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.875rem;color:#1e293b;height:64px;resize:none;box-sizing:border-box;margin-bottom:8px;font-family:inherit" placeholder="Novedad (opcional)..."></textarea>
+      <button class="btn btn-ghost" style="width:100%;justify-content:center" onclick="closeModal('modal-checkout');showToast('info','Salida con novedad','Registrada en bitácora de operaciones')">REPORTAR Y SALIR</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SHIFT MENU POPUP ═══ -->
+<div id="shift-menu" class="shift-menu-popup" style="display:none">
+  <div style="padding:8px 12px 5px;font-size:9px;font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em" id="shift-menu-title">Turno: Ana García</div>
+  <hr style="border:none;border-top:1px solid #f1f5f9;margin:3px 0">
+  <div class="shift-menu-item" onclick="setShift('M')"><span class="shift-badge bg-blue-100 text-blue-700 border-blue-200" style="cursor:default;pointer-events:none">M</span> Mañana (07:00–15:00)</div>
+  <div class="shift-menu-item" onclick="setShift('T')"><span class="shift-badge bg-orange-100 text-orange-700 border-orange-200" style="cursor:default;pointer-events:none">T</span> Tarde (15:00–23:00)</div>
+  <div class="shift-menu-item" onclick="setShift('N')"><span class="shift-badge bg-indigo-100 text-indigo-700 border-indigo-200" style="cursor:default;pointer-events:none">N</span> Noche (23:00–07:00)</div>
+  <div class="shift-menu-item" onclick="setShift('F')"><span class="shift-badge bg-emerald-100 text-emerald-700 border-emerald-200" style="cursor:default;pointer-events:none">F</span> Franco</div>
+  <div class="shift-menu-item" onclick="setShift('FT')"><span class="shift-badge bg-violet-600 text-white border-violet-700 font-black" style="cursor:default;pointer-events:none">FT</span> Franco Trabajado</div>
+  <div class="shift-menu-item" onclick="setShift('FF')"><span class="shift-badge bg-cyan-600 text-white border-cyan-700 font-black" style="cursor:default;pointer-events:none">FF</span> Franco x Franco</div>
+  <div class="shift-menu-item" onclick="setShift('V')"><span class="shift-badge bg-teal-600 text-white border-teal-700 font-black" style="cursor:default;pointer-events:none">V</span> Vacaciones</div>
+  <div class="shift-menu-item" onclick="setShift('A')"><span class="shift-badge bg-red-100 text-red-700 border-red-300 font-black" style="cursor:default;pointer-events:none">A</span> ART</div>
+  <div class="shift-menu-item" onclick="setShift('E')"><span class="shift-badge bg-rose-100 text-rose-700 border-rose-300 font-black" style="cursor:default;pointer-events:none">E</span> Enfermedad</div>
+  <hr style="border:none;border-top:1px solid #f1f5f9;margin:3px 0">
+  <div class="shift-menu-item" style="color:#ef4444" onclick="setShift('')"><i data-lucide="trash-2" style="width:13px;height:13px"></i> Eliminar turno</div>
+  <div class="shift-menu-item" onclick="closeShiftMenu()"><i data-lucide="x" style="width:13px;height:13px"></i> Cancelar</div>
+</div>
+
+<!-- ═══ TOAST CONTAINER ═══ -->
+<div id="toast-container" style="position:fixed;top:60px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none"></div>
+
+<script>
+/* ── DATA ─────────────────────────────────────────────────────────────────── */
+const EMPLOYEES = [
+  { id:'e1', name:'Ana García',       ini:'AG', dni:'28.456.789', phone:'351-555-0101', turno:'M', puesto:'Portero',  objetivo:'Acceso Principal', estado:'PRESENTE' },
+  { id:'e2', name:'Carlos Rodríguez', ini:'CR', dni:'25.789.012', phone:'351-555-0102', turno:'T', puesto:'Portero',  objetivo:'Acceso Principal', estado:'PLAN' },
+  { id:'e3', name:'Roberto Díaz',     ini:'RD', dni:'31.234.567', phone:'351-555-0103', turno:'N', puesto:'Guardia',  objetivo:'Acceso Principal', estado:'PLAN' },
+  { id:'e4', name:'María López',      ini:'ML', dni:'29.678.901', phone:'351-555-0104', turno:'M', puesto:'Guardia',  objetivo:'Estacionamiento',  estado:'AUSENTE' },
+];
+
+let planData = {
+  e1: ['M','M','M','M','M','F','F'],
+  e2: ['T','T','T','T','T','F','F'],
+  e3: ['N','N','N','N','N','F','F'],
+  e4: ['A','A','A','A','M','F','F'],
+};
+
+const SHIFT_STYLES = {
+  M:'bg-blue-100 text-blue-700 border-blue-200',
+  T:'bg-orange-100 text-orange-700 border-orange-200',
+  N:'bg-indigo-100 text-indigo-700 border-indigo-200',
+  F:'bg-emerald-100 text-emerald-700 border-emerald-200',
+  A:'bg-red-100 text-red-700 border-red-300 font-black',
+  V:'bg-teal-600 text-white border-teal-700 font-black',
+  FT:'bg-violet-600 text-white border-violet-700 font-black',
+  FF:'bg-cyan-600 text-white border-cyan-700 font-black',
+  L:'bg-purple-100 text-purple-700 border-purple-300 font-black',
+  E:'bg-rose-100 text-rose-700 border-rose-300 font-black',
+  PU:'bg-pink-100 text-pink-700 border-pink-200',
+  RET:'bg-amber-200 text-amber-900 border-amber-500 font-black',
+};
+const SHIFT_HOURS = { M:8,T:8,N:8,F:0,A:0,V:0,FT:8,FF:0,L:0,E:0,PU:12 };
+const SHIFT_RANGE = { M:'07:00–15:00', T:'15:00–23:00', N:'23:00–07:00' };
+
+const PAGE_TITLES = {
+  dashboard:'Dashboard', operaciones:'Operaciones | COSP', planificacion:'Planificador',
+  crm:'CRM Clientes', servicios:'Servicios', rrhh:'RRHH', config:'Configuración'
+};
+
+let currentOpsTab = 'PLAN';
+let compactView = false;
+let currentShiftCell = null;
+
+/* ── SIDEBAR ─────────────────────────────────────────────────────────────── */
+function expandSidebar() {
+  document.getElementById('sidebar').classList.add('expanded');
+  lucide.createIcons();
+}
+function collapseSidebar() {
+  document.getElementById('sidebar').classList.remove('expanded');
+}
+
+/* ── NAVIGATION ─────────────────────────────────────────────────────────── */
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.sb-link[id^="nav-"]').forEach(l => l.classList.remove('active'));
+  const nav = document.getElementById('nav-' + name);
+  if (nav) nav.classList.add('active');
+  document.getElementById('topbar-title').textContent = PAGE_TITLES[name] || name;
+  collapseSidebar();
+  closeShiftMenu();
+  if (name === 'planificacion') renderPlan();
+  if (name === 'operaciones') renderOps();
+  if (name === 'rrhh') renderRrhh();
+  lucide.createIcons();
+}
+
+/* ── TOAST ───────────────────────────────────────────────────────────────── */
+function showToast(type, title, msg) {
+  const c = document.getElementById('toast-container');
+  const colors   = { success:'#059669', error:'#e11d48', info:'#6366f1', warning:'#d97706' };
+  const bgs      = { success:'#ecfdf5', error:'#fff1f2', info:'#eef2ff', warning:'#fffbeb' };
+  const borders  = { success:'#bbf7d0', error:'#fecdd3', info:'#c7d2fe', warning:'#fde68a' };
+  const icons    = { success:'check-circle', error:'x-circle', info:'info', warning:'alert-triangle' };
+  const t = document.createElement('div');
+  t.style.cssText = `background:${bgs[type]||'#fff'};border:1px solid ${borders[type]||'#e2e8f0'};border-radius:12px;padding:12px 16px;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.12);pointer-events:auto;display:flex;align-items:flex-start;gap:10px`;
+  t.className = 'toast-in';
+  t.innerHTML = `<i data-lucide="${icons[type]||'info'}" style="width:16px;height:16px;color:${colors[type]};flex-shrink:0;margin-top:1px"></i><div><p style="font-size:.8125rem;font-weight:700;color:#1e293b;margin:0">${title}</p>${msg ? `<p style="font-size:.75rem;color:#64748b;margin:2px 0 0">${msg}</p>` : ''}</div><button onclick="this.closest('[style]').remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:#94a3b8;flex-shrink:0;font-size:14px;padding:0 0 0 8px">✕</button>`;
+  c.appendChild(t);
+  lucide.createIcons();
+  setTimeout(() => {
+    if (t.parentNode) { t.className = 'toast-out'; setTimeout(() => t.parentNode && t.remove(), 300); }
+  }, 4000);
+}
+
+/* ── MODALS ──────────────────────────────────────────────────────────────── */
+function openModal(id) {
+  document.getElementById(id).style.display = 'flex';
+  lucide.createIcons();
+}
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  ['modal-novedad','modal-handover','modal-cobertura','modal-checkout'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && e.target === el) closeModal(id);
+  });
+  if (!e.target.closest('#shift-menu') && !e.target.classList.contains('shift-badge')) {
+    closeShiftMenu();
+  }
+});
+
+/* ── OPERACIONES ─────────────────────────────────────────────────────────── */
+function setOpsTab(tab) {
+  currentOpsTab = tab;
+  document.querySelectorAll('[id^="tab-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab.toLowerCase()).classList.add('active');
+  renderOps();
+}
+
+function toggleCompact() {
+  compactView = !compactView;
+  document.getElementById('compact-label').textContent = compactView ? 'Vista Expandida' : 'Vista Compacta';
+  renderOps();
+}
+
+function filterByTab(tab) {
+  if (tab === 'PLAN')     return EMPLOYEES.filter(e => ['PLAN','PRESENTE'].includes(e.estado));
+  if (tab === 'ACTIVOS')  return EMPLOYEES.filter(e => e.estado === 'PRESENTE');
+  if (tab === 'AUSENTES') return EMPLOYEES.filter(e => e.estado === 'AUSENTE');
+  return [];
+}
+
+function renderOps() {
+  const container = document.getElementById('ops-cards');
+  if (!container) return;
+  const shifts = filterByTab(currentOpsTab);
+  if (shifts.length === 0) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:#94a3b8;font-size:.875rem">No hay turnos en esta categoría.</div>`;
+    return;
+  }
+  const groups = {};
+  shifts.forEach(s => { if (!groups[s.objetivo]) groups[s.objetivo] = []; groups[s.objetivo].push(s); });
+  let html = '';
+  for (const [obj, items] of Object.entries(groups)) {
+    html += `<div style="background:#fff;border-radius:12px;border:1px solid #cbd5e1;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:12px">`;
+    html += `<div style="padding:9px 12px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;cursor:pointer">
+      <div style="background:#334155;color:#fff;width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900">${items.length}</div>
+      <h4 style="font-weight:700;font-size:.75rem;color:#475569;text-transform:uppercase;letter-spacing:.025em;margin:0">${obj}</h4>
+      <span style="font-size:9px;color:#94a3b8;font-weight:600">· Shopping Del Sol S.A.</span>
+    </div>`;
+    html += `<div style="padding:8px">`;
+    items.forEach(s => { html += compactView ? buildCompactCard(s) : buildExpandedCard(s); });
+    html += `</div></div>`;
+  }
+  container.innerHTML = html;
+  lucide.createIcons();
+}
+
+function accentBg(s) {
+  if (s.estado === 'PRESENTE') return '#10b981';
+  if (s.estado === 'AUSENTE')  return '#334155';
+  return '#94a3b8';
+}
+function rowBackground(s) {
+  if (s.estado === 'PRESENTE') return 'rgba(209,250,229,.2)';
+  if (s.estado === 'AUSENTE')  return '#f1f5f9';
+  return '#fff';
+}
+function statusBadge(s) {
+  if (s.estado === 'PRESENTE') return `<span style="font-size:8px;font-weight:900;padding:2px 6px;border-radius:4px;background:#059669;color:#fff;flex-shrink:0">ACTIVO</span>`;
+  if (s.estado === 'AUSENTE')  return `<span style="font-size:8px;font-weight:900;padding:2px 6px;border-radius:4px;background:#334155;color:#fff;flex-shrink:0">AUSENTE</span>`;
+  return '';
+}
+
+function buildExpandedCard(s) {
+  let btns = '';
+  if (currentOpsTab === 'PLAN') {
+    btns = `<button class="btn btn-indigo" onclick="openHandoverModal('${s.id}')"><i data-lucide="play-circle" style="width:11px;height:11px"></i> DAR PRESENTE</button>
+            <button class="btn btn-ghost" onclick="openModal('modal-novedad')"><i data-lucide="bell-ring" style="width:11px;height:11px"></i> NOVEDAD</button>`;
+  } else if (currentOpsTab === 'ACTIVOS') {
+    btns = `<button class="btn btn-purple" onclick="openCheckoutModal('${s.id}')"><i data-lucide="log-out" style="width:11px;height:11px"></i> SALIDA</button>
+            <button class="btn btn-ghost" style="color:#be123c;border-color:#fecdd3" onclick="openCoberturaModal('${s.name}','${s.objetivo}')"><i data-lucide="siren" style="width:11px;height:11px"></i> BAJA</button>`;
+  } else if (currentOpsTab === 'AUSENTES') {
+    btns = `<button class="btn btn-rose" onclick="openCoberturaModal('${s.name}','${s.objetivo}')"><i data-lucide="siren" style="width:11px;height:11px"></i> COBERTURA</button>`;
+  }
+  return `<div class="guard-card" style="background:${rowBackground(s)}">
+    <div class="guard-accent" style="background:${accentBg(s)}"></div>
+    <div style="padding:10px 12px 8px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          <div style="width:32px;height:32px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0;background:#e2e8f0;color:#475569">${s.name[0]}</div>
+          <div style="min-width:0">
+            <span style="font-size:13px;font-weight:900;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1e293b">${s.name}</span>
+            <span style="font-size:10px;color:#94a3b8">Shopping Del Sol S.A.</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">${statusBadge(s)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#64748b;margin-bottom:6px;padding-left:40px">
+        <i data-lucide="map-pin" style="width:10px;height:10px;color:#818cf8;flex-shrink:0"></i>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500">${s.objetivo}</span>
+        <span style="color:#cbd5e1">·</span>
+        <span style="color:#6366f1;font-weight:700">${s.puesto}</span>
+        <span style="margin-left:auto;font-family:monospace;color:#475569;flex-shrink:0">${SHIFT_RANGE[s.turno]||'--:--'}</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;padding-left:40px">
+        <button class="btn btn-wa" onclick="showToast('info','WhatsApp','Abriendo chat con ${s.name}...')"><i data-lucide="message-circle" style="width:11px;height:11px"></i> WA</button>
+        ${btns}
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildCompactCard(s) {
+  let btnRight = '';
+  if (currentOpsTab === 'PLAN')     btnRight = `<button class="btn btn-indigo" style="padding:5px" onclick="openHandoverModal('${s.id}')"><i data-lucide="play-circle" style="width:12px;height:12px"></i></button>`;
+  if (currentOpsTab === 'ACTIVOS')  btnRight = `<button class="btn btn-purple" style="padding:5px" onclick="openCheckoutModal('${s.id}')"><i data-lucide="log-out" style="width:12px;height:12px"></i></button>`;
+  if (currentOpsTab === 'AUSENTES') btnRight = `<button class="btn btn-rose" style="padding:5px" onclick="openCoberturaModal('${s.name}','${s.objetivo}')"><i data-lucide="siren" style="width:12px;height:12px"></i></button>`;
+  return `<div style="position:relative;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:8px;border:1px solid rgba(226,232,240,.8);margin-bottom:4px;background:${rowBackground(s)}">
+    <div style="position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:4px 0 0 4px;background:${accentBg(s)}"></div>
+    <div style="width:26px;height:26px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;flex-shrink:0;margin-left:4px;background:#e2e8f0;color:#475569">${s.name[0]}</div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:5px;line-height:1.2">
+        <span style="font-size:11px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1e293b">${s.name}</span>
+        ${statusBadge(s)}
+      </div>
+      <div style="font-size:9px;color:#94a3b8;line-height:1.2;margin-top:1px">
+        ${s.objetivo} · <span style="color:#6366f1">${s.puesto}</span> · <span style="font-family:monospace">${SHIFT_RANGE[s.turno]||'--'}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;flex-shrink:0">
+      <button class="btn btn-wa" style="padding:5px" onclick="showToast('info','WhatsApp','Chat con ${s.name}...')"><i data-lucide="message-circle" style="width:12px;height:12px"></i></button>
+      ${btnRight}
+    </div>
+  </div>`;
+}
+
+function openHandoverModal(empId) {
+  const emp = EMPLOYEES.find(e => e.id === empId);
+  if (!emp) return;
+  document.getElementById('handover-name').textContent = emp.name;
+  openModal('modal-handover');
+}
+function confirmHandover() {
+  closeModal('modal-handover');
+  showToast('success','Ingreso registrado','Ana García — Acceso Principal · 07:00');
+  const emp = EMPLOYEES.find(e => e.id === 'e1');
+  if (emp) { emp.estado = 'PRESENTE'; renderOps(); }
+}
+function openCheckoutModal(empId) {
+  const emp = EMPLOYEES.find(e => e.id === empId);
+  if (!emp) return;
+  document.getElementById('checkout-name').textContent = emp.name;
+  openModal('modal-checkout');
+}
+function openCoberturaModal(name, obj) {
+  document.getElementById('cobertura-info').textContent = `${obj} — Turno M (07:00–15:00)`;
+  openModal('modal-cobertura');
+}
+function assignCoverage(name, type) {
+  closeModal('modal-cobertura');
+  showToast('success','Cobertura asignada',`${name} cubrirá el puesto (${type})`);
+}
+
+/* ── PLANIFICADOR ────────────────────────────────────────────────────────── */
+function renderPlan() {
+  const tbody = document.getElementById('plan-tbody');
+  if (!tbody) return;
+  let html = '';
+  EMPLOYEES.forEach(emp => {
+    const days = planData[emp.id] || ['','','','','','',''];
+    const total = days.reduce((a, c) => a + (SHIFT_HOURS[c] || 0), 0);
+    html += `<tr style="border-bottom:1px solid #f1f5f9">`;
+    html += `<td style="padding:8px 16px;position:sticky;left:0;background:#fff;z-index:1;border-right:1px solid #f1f5f9">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:28px;height:28px;border-radius:9999px;background:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:#475569;flex-shrink:0">${emp.name[0]}</div>
+        <div><p style="font-size:.8125rem;font-weight:700;color:#1e293b;white-space:nowrap;margin:0">${emp.name}</p><p style="font-size:10px;color:#94a3b8;margin:0">${emp.puesto}</p></div>
+      </div>
+    </td>`;
+    days.forEach((code, i) => {
+      const isPast = i < 3;
+      const isToday = i === 3;
+      const tdBg = isToday ? 'background:#eef2ff;border-left:2px solid #c7d2fe;border-right:2px solid #c7d2fe;' : '';
+      const cls = SHIFT_STYLES[code] || '';
+      const opacity = isPast ? 'opacity:.5;' : '';
+      html += `<td style="padding:6px 4px;text-align:center;${tdBg}">`;
+      if (code) {
+        html += `<span class="shift-badge ${cls}" style="${opacity}" onclick="openShiftMenu(event,'${emp.id}',${i},'${emp.name}')">${code}</span>`;
+      } else {
+        html += `<span class="shift-badge" style="background:transparent;border-style:dashed;border-color:#cbd5e1;color:#cbd5e1;${opacity}" onclick="openShiftMenu(event,'${emp.id}',${i},'${emp.name}')">+</span>`;
+      }
+      html += `</td>`;
+    });
+    html += `<td style="padding:8px 16px;text-align:right"><span style="font-size:.8125rem;font-weight:900;color:#1e293b">${total}<span style="font-size:10px;font-weight:500;color:#94a3b8"> hs</span></span></td>`;
+    html += `</tr>`;
+  });
+  tbody.innerHTML = html;
+  lucide.createIcons();
+}
+
+function openShiftMenu(e, empId, dayIdx, empName) {
+  e.stopPropagation();
+  currentShiftCell = { empId, dayIdx };
+  const menu = document.getElementById('shift-menu');
+  const days = ['Lun 27/04','Mar 28/04','Mié 29/04','Jue 30/04','Vie 01/05','Sáb 02/05','Dom 03/05'];
+  document.getElementById('shift-menu-title').textContent = `${empName} — ${days[dayIdx]}`;
+  menu.style.display = 'block';
+  const r = e.target.getBoundingClientRect();
+  const menuW = 185;
+  const left = Math.min(r.left, window.innerWidth - menuW - 8);
+  menu.style.left = Math.max(8, left) + 'px';
+  menu.style.top = (r.bottom + 6) + 'px';
+  lucide.createIcons();
+}
+function closeShiftMenu() {
+  document.getElementById('shift-menu').style.display = 'none';
+  currentShiftCell = null;
+}
+function setShift(code) {
+  if (!currentShiftCell) return;
+  const { empId, dayIdx } = currentShiftCell;
+  planData[empId][dayIdx] = code;
+  closeShiftMenu();
+  renderPlan();
+  const emp = EMPLOYEES.find(e => e.id === empId);
+  const days = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  if (code) showToast('success','Turno actualizado',`${emp?.name} — ${days[dayIdx]} → ${code}`);
+  else showToast('info','Turno eliminado','Celda vaciada correctamente');
+}
+
+/* ── CRM ─────────────────────────────────────────────────────────────────── */
+let crmOpen = false;
+function toggleCrmClient() {
+  crmOpen = !crmOpen;
+  document.getElementById('crm-detail').style.display = crmOpen ? 'block' : 'none';
+  document.getElementById('crm-chevron').style.transform = crmOpen ? 'rotate(180deg)' : 'rotate(0)';
+}
+
+/* ── RRHH ────────────────────────────────────────────────────────────────── */
+function renderRrhh() {
+  const c = document.getElementById('rrhh-cards');
+  if (!c) return;
+  const cfg = {
+    PRESENTE: { bg:'#ecfdf5', color:'#059669', border:'#bbf7d0' },
+    PLAN:     { bg:'#eef2ff', color:'#6366f1', border:'#c7d2fe' },
+    AUSENTE:  { bg:'#fff1f2', color:'#e11d48', border:'#fecdd3' },
+  };
+  let html = '';
+  EMPLOYEES.forEach(emp => {
+    const s = cfg[emp.estado] || cfg.PLAN;
+    html += `<div style="background:#fff;border-radius:12px;border:1px solid #e2e8f0;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;box-shadow:0 1px 3px rgba(0,0,0,.04)">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <div style="width:40px;height:40px;border-radius:9999px;background:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#475569;flex-shrink:0">${emp.name[0]}</div>
+        <div style="min-width:0">
+          <h4 style="font-size:.875rem;font-weight:900;color:#1e293b;margin:0;white-space:nowrap">${emp.name}</h4>
+          <p style="font-size:11px;color:#64748b;margin:1px 0 0">DNI ${emp.dni} · ${emp.phone}</p>
+          <p style="font-size:11px;color:#94a3b8;margin:1px 0 0">${emp.puesto} — ${emp.objetivo}</p>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <span style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:9999px;background:${s.bg};color:${s.color};border:1px solid ${s.border}">${emp.estado}</span>
+        <button class="btn btn-ghost" onclick="openModal('modal-novedad')"><i data-lucide="bell-ring" style="width:10px;height:10px"></i> Novedad</button>
+        <button class="btn btn-ghost" onclick="showToast('info','RRHH','Perfil de ${emp.name}')"><i data-lucide="user" style="width:10px;height:10px"></i> Ver</button>
+        <button class="btn btn-ghost" onclick="showPage('planificacion')"><i data-lucide="calendar" style="width:10px;height:10px"></i> Plan</button>
+      </div>
+    </div>`;
+  });
+  c.innerHTML = html;
+  lucide.createIcons();
+}
+
+/* ── INIT ────────────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  lucide.createIcons();
+  renderOps();
+});
+</script>
+</body>
+</html>

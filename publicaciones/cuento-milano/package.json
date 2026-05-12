@@ -1,0 +1,11 @@
+{
+  "name": "cuento-milano-pdf",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pdf": "node generate-pdf.mjs"
+  },
+  "dependencies": {
+    "pdfkit": "^0.15.2"
+  }
+}

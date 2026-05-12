@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>COSP V1.0 — Presentación</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,800;1,9..40,600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #64748b;
+      --brand: #4f46e5;
+      --line: #e2e8f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "DM Sans", system-ui, sans-serif; background: #0b1220; color: var(--ink); }
+    .hint {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+      padding: 8px 16px; background: #1e293b; color: #94a3b8; font-size: 12px; text-align: center;
+    }
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 0;
+      }
+      html, body {
+        width: 297mm;
+        height: 210mm;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+      }
+      .hint { display: none !important; }
+      .slide {
+        width: 297mm !important;
+        height: 210mm !important;
+        min-height: 210mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        page-break-after: always;
+        break-after: page;
+        display: block !important;
+      }
+      .sheet {
+        width: 297mm !important;
+        height: 210mm !important;
+        max-width: 297mm !important;
+        max-height: 210mm !important;
+        border-radius: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+      }
+      .left {
+        max-height: none !important;
+      }
+    }
+    .slide {
+      width: 100%; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 40px 16px 56px; page-break-after: always; break-after: page;
+    }
+    .sheet {
+      width: 100%; max-width: 1280px; min-height: 540px;
+      aspect-ratio: 16/9; max-height: 92vh;
+      background: #fff; border-radius: 18px; border: 1px solid var(--line);
+      box-shadow: 0 25px 80px rgba(0,0,0,0.35);
+      display: grid; grid-template-columns: 1.05fr 0.95fr; overflow: hidden;
+    }
+    @media (max-width: 960px) {
+      .sheet { grid-template-columns: 1fr; aspect-ratio: auto; max-height: none; }
+    }
+    .left {
+      padding: 28px 28px 28px 36px; display: flex; flex-direction: column; gap: 10px;
+      justify-content: flex-start; overflow-y: auto; max-height: 92vh;
+    }
+    .right {
+      background: linear-gradient(160deg, #f8fafc 0%, #eef2ff 45%, #fdf2f8 100%);
+      display: flex; align-items: center; justify-content: center; padding: 16px 20px;
+      min-height: 220px;
+    }
+    .kicker { font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--brand); }
+    h1 { font-size: clamp(1.25rem, 2vw, 1.65rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.02em; color: #0f172a; }
+    .lede { font-size: 12.5px; line-height: 1.45; color: #475569; margin-top: 2px; }
+    .route {
+      font-size: 10px; font-family: ui-monospace, Consolas, monospace; color: #64748b;
+      background: #f1f5f9; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 5px; display: inline-block; margin-top: 4px;
+    }
+    .dual-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 6px;
+      font-size: 11.5px; line-height: 1.38; color: #334155;
+    }
+    @media (max-width: 960px) { .dual-grid { grid-template-columns: 1fr; } }
+    .dual-grid ul { margin: 0; padding-left: 1rem; }
+    .dual-grid li { margin: 0.15rem 0; }
+    .dual-grid strong { color: #0f172a; font-weight: 700; }
+    .col-title { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; color: #94a3b8; margin-bottom: 4px; }
+    .foot { margin-top: auto; font-size: 10px; color: var(--muted); padding-top: 8px; }
+    .cover .left { background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 55%, #312e81 100%); color: #f8fafc; }
+    .cover h1, .cover p, .cover .lede { color: #e2e8f0; }
+    .cover .kicker { color: #a5b4fc; }
+    .cover .right { background: #0f172a; }
+    .cover-vertical .sheet {
+      grid-template-columns: 1fr;
+      grid-template-rows: 56% 44%;
+      background: #0f172a;
+    }
+    .cover-vertical .right { grid-row: 1; }
+    .cover-vertical .left { grid-row: 2; }
+    .cover-vertical .right {
+      background: #0f172a;
+      padding: 10px 18px 0;
+      align-items: flex-start;
+    }
+    .cover-vertical .left {
+      background: #0f172a;
+      padding: 16px 28px 22px;
+      gap: 8px;
+      max-height: none;
+    }
+    .cover-vertical .shot-shell {
+      min-height: 100%;
+      border-radius: 14px 14px 0 0;
+      border-color: #334155;
+      background: #020617;
+      box-shadow: none;
+    }
+    .cover-vertical .shot-img {
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      object-fit: cover;
+      object-position: center top;
+    }
+    .cover-vertical .left h1,
+    .cover-vertical .left .lede,
+    .cover-vertical .left li,
+    .cover-vertical .left .col-title,
+    .cover-vertical .left .foot,
+    .cover-vertical .left .route {
+      color: #e2e8f0;
+    }
+    .cover-vertical .left .route {
+      background: rgba(148, 163, 184, 0.18);
+      border-color: #475569;
+    }
+    .cover-vertical .left strong { color: #ffffff; }
+    @media (max-width: 960px) {
+      .cover-vertical .sheet {
+        grid-template-rows: auto auto;
+      }
+      .cover-vertical .right {
+        min-height: 320px;
+      }
+    }
+    .hero-title { font-size: clamp(1.75rem, 3vw, 2.35rem); }
+    .logo-row { display: flex; align-items: center; gap: 10px; }
+    .logo-mark { width: 40px; height: 40px; border-radius: 10px; background: #0f172a; display: grid; place-items: center; border: 1px solid #334155; }
+    .shot-shell {
+      width: 100%; height: 100%; min-height: 280px; max-height: 100%;
+      border-radius: 12px; border: 1px solid #e2e8f0; background: #fff;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      position: relative; box-shadow: 0 4px 24px rgba(15,23,42,0.08);
+    }
+    .shot-img {
+      width: 100%; height: 100%; object-fit: contain; object-position: center top;
+      display: block; max-height: min(420px, 48vh);
+    }
+    .shot-fallback {
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 20px; font-size: 12px; color: #64748b; line-height: 1.5;
+      position: absolute; inset: 0; background: linear-gradient(180deg, #f8fafc, #e2e8f0);
+    }
+    .shot-fallback code { font-size: 10px; background: #fff; padding: 4px 8px; border-radius: 4px; border: 1px dashed #94a3b8; margin-top: 8px; word-break: break-all; }
+    .phone-strip {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 10px;
+      align-items: center;
+    }
+    .phone-card {
+      height: 100%;
+      min-height: 210px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      background: #020617;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .phone-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+      display: block;
+    }
+    @media (max-width: 960px) {
+      .phone-strip { grid-template-columns: 1fr; }
+      .phone-card { min-height: 240px; }
+    }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip { font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: #fff; border: 1px solid var(--line); color: #475569; }
+    .svg-wrap { width: 100%; max-width: 320px; }
+    .svg-wrap svg { width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <div class="hint">PDF: <strong>Imprimir → Guardar como PDF</strong> · horizontal. Capturas en <code style="color:#cbd5e1">docs/presentacion-cosp-capturas/</code> (origen: <code style="color:#cbd5e1">comtroldata.web.app</code>). Regenerar: <code style="color:#cbd5e1">pwsh -File docs/capture-cosp-screenshots.ps1</code></div>
+
+  <!-- 1 Portada -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="right">
+        <div class="shot-shell" style="max-width:100%;margin:auto">
+          <img class="shot-img" src="presentacion-cosp-capturas/portada.png" alt="COSP — vista principal"
+            onerror="this.style.display='none'; var f=this.nextElementSibling; if(f) f.style.display='flex';" />
+          <div class="shot-fallback">Opcional: <strong>portada.png</strong> (login o dashboard).<code>docs/presentacion-cosp-capturas/portada.png</code></div>
+        </div>
+      </div>
+      <div class="left">
+        <div class="kicker">Grupo Bacar</div>
+        <div class="logo-row">
+          <div class="logo-mark" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="#a5b4fc" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="#f472b6" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div>
+            <h1 class="hero-title" style="color:#fff">COSP V1.0</h1>
+            <p class="lede" style="color:#c7d2fe">Control Operativo de Seguridad Privada</p>
+          </div>
+        </div>
+        <p class="lede" style="margin-top:8px">PWA Next.js: planificación de turnos, centro de control en vivo, CRM y servicios con SLA, reportes y análisis operativo, talento (empleados + RRHH) y portal del colaborador. Datos en <strong>Firebase / Firestore</strong> con roles por módulo.</p>
+        <div class="chip-row">
+          <span class="chip">Auth + roles</span><span class="chip">Firestore</span><span class="chip">Mapas Leaflet</span><span class="chip">Recharts</span><span class="chip">Cloud Functions</span>
+        </div>
+        <p class="foot" style="color:#64748b">Deck alineado al código de <code style="color:#94a3b8">apps/web2</code> · actualizar capturas en <code style="color:#94a3b8">presentacion-cosp-capturas/</code></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 Dashboard -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="right">
+        <div class="shot-shell" style="max-width:100%;margin:auto">
+          <img class="shot-img" src="presentacion-cosp-capturas/dashboard.png" alt="Dashboard"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback">Captura de pantalla:<br><code>docs/presentacion-cosp-capturas/dashboard.png</code></div>
+        </div>
+      </div>
+      <div class="left">
+        <div class="kicker">Operativa</div>
+        <h1 class="hero-title" style="color:#fff">Dashboard</h1>
+        <p class="lede"><span class="route">/admin/dashboard</span></p>
+        <p class="lede" style="margin-top:6px">Panel ejecutivo en vivo con estado de operación: clientes y servicios activos, dotación del día, cumplimiento, horas SLA (diurnas/nocturnas/feriados), puestos vacantes y widgets de licencias/motivos.</p>
+        <div class="chip-row">
+          <span class="chip">KPIs operativos</span><span class="chip">Cobertura diaria</span><span class="chip">SLA mensual</span><span class="chip">Refresh manual</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 Centro Control -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Operativa</div>
+        <h1>Centro Control</h1>
+        <span class="route">/admin/operaciones</span>
+        <p class="lede">Consola de monitoreo del día: mapa Leaflet, turnos por objetivo/puesto, estados de fichada y acciones operativas (relevos, coberturas, interrupciones).</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Vista y datos en vivo</div>
+            <ul>
+              <li>Lista / tarjetas de guardia con badges: <strong>ACTIVO, AUSENTE, TARDE, SIN CUBRIR, RECARGO</strong>, etc.</li>
+              <li>Mapa con objetivos y posiciones; integración con hooks de monitoreo</li>
+              <li>Modo compacto y sesión de operador (registro de actividad)</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Acciones implementadas</div>
+            <ul>
+              <li><strong>Relevo / ingreso</strong> (a tiempo o tarde) y checkout con novedad opcional</li>
+              <li><strong>Baja anticipada</strong>: cubierto vs protocolo de vacante</li>
+              <li><strong>Cobertura de vacante</strong>: retención doble turno, intercambio vecinos &lt;2 km, volantes por GPS</li>
+              <li>WhatsApp / llamada rápida; exportación PDF de listados</li>
+              <li>Registro de <strong>novedades</strong> en Firestore (p. ej. baja cubierta)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/operaciones.png" alt="Centro de operaciones"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/operaciones.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 Planificador -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Operativa</div>
+        <h1>Planificador</h1>
+        <span class="route">/admin/planificacion</span>
+        <p class="lede">Grilla calendario por empleado y código de turno; leyenda de tipos (M/T/N/D12/N12, francos, licencias, vacaciones, ausencias, swaps, etc.) con horarios CCT-referenciados.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Planificación</div>
+            <ul>
+              <li>Códigos de turno con franjas (ej. M 07–15, N12 19–07) y <strong>PU</strong> personalizado</li>
+              <li>Estados bloqueados / pasados; turnos consolidados (<strong>C</strong>) por fichada</li>
+              <li>Intercambios <strong>SWAP</strong> y pendientes de autorización</li>
+              <li>Límites semanales/mensuales configurables (horas)</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Herramientas en pantalla</div>
+            <ul>
+              <li>Búsqueda, filtros, asignación masiva, historial y deshacer donde aplica</li>
+              <li>Impresión / descarga; validaciones y toasts de guardado</li>
+              <li>Layout dedicado: barra superior del planificador con cliente (modo compacto en shell)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/planificacion.png" alt="Planificador"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/planificacion.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 CRM -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Gestión comercial</div>
+        <h1>CRM clientes</h1>
+        <span class="route">/admin/crm</span>
+        <p class="lede">Alta y mantenimiento de clientes, sedes/objetivos georreferenciados, tarifas y composición de turnos alineada a marco normativo (referencias CCT en motor de cálculo).</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Maestro comercial</div>
+            <ul>
+              <li>Clientes con múltiples <strong>objetivos</strong> y ubicación en mapa</li>
+              <li>Búsqueda, vistas lista/grilla, duplicar y eliminar con confirmación</li>
+              <li>Exportar / imprimir donde la UI lo habilita</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Precios y SLA comercial</div>
+            <ul>
+              <li>Cálculo de <strong>horas mensuales SLA</strong> por posición y cobertura</li>
+              <li>Formateo monetario ARS; análisis de composición de turno para cotización</li>
+              <li>Encadenamiento natural hacia módulo <strong>Servicios SLA</strong></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/crm.png" alt="CRM"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/crm.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 Servicios SLA -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Contrato operativo</div>
+        <h1>Servicios (SLA)</h1>
+        <span class="route">/admin/servicios</span>
+        <p class="lede">Define el servicio contratado por cliente/objetivo: vigencia, puestos, tipo de cobertura (24 h, 12 h diurno/nocturno, custom), cantidades y variantes de turno estándar SUVICO/CCT.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Modelo</div>
+            <ul>
+              <li>Lista de servicios y formulario alta/edición con <strong>presets M/T/N/D12/N12</strong></li>
+              <li>Posiciones con días activos y turnos custom por día de semana</li>
+              <li>Cálculo de <strong>horas mensuales totales</strong> del servicio</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Operación</div>
+            <ul>
+              <li>Sincronización en tiempo real con Firestore; detección de cambios externos mientras editás</li>
+              <li>Estado del servicio (activo, etc.) para filtrar objetivos en empleados</li>
+              <li>Iconografía de sol/luna/actividad para lectura rápida de cobertura</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/servicios.png" alt="Servicios SLA"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/servicios.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 Reportes -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Cierre y auditoría</div>
+        <h1>Reportes</h1>
+        <span class="route">/admin/reportes</span>
+        <p class="lede">Pestañas por tipo de informe con filtros de fechas; impresión optimizada (CSS @media print landscape) y descargas.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Pestañas principales</div>
+            <ul>
+              <li><strong>Empleado</strong> — consolidado por persona en rango</li>
+              <li><strong>Objetivo</strong> — dotación y horas por puesto/cliente</li>
+              <li><strong>Auditoría</strong> — log de acciones (fichadas, asignaciones, altas/bajas, excepciones…)</li>
+              <li><strong>Turnos</strong> — grilla filtrable por horario, objetivo y estado</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Detalle y exportación</div>
+            <ul>
+              <li>Panel de detalle con filtros adicionales por empleado/objetivo/estado</li>
+              <li>Diccionario de tipos de evento legible (CHECKIN, CAMBIO_DOTACION, etc.)</li>
+              <li>Cálculo de horas nocturnas para visualización; CSV desde el hook/reporte</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/reportes.png" alt="Reportes"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/reportes.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 Análisis -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Analítica</div>
+        <h1>Análisis operativo</h1>
+        <span class="route">/admin/analisis</span>
+        <p class="lede">Capa de BI operativa: cruza servicios SLA, turnos efectivos y plantilla para mostrar brechas, surplus de horas y visualizaciones avanzadas (barras, líneas, radial, treemap).</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Qué analiza</div>
+            <ul>
+              <li>Horas requeridas por servicio/mes vs <strong>dotación equivalente</strong> (ceil horas/192 h)</li>
+              <li>Clasificación de códigos operativos (M,T,N,D12…) para comparar plan vs real</li>
+              <li>Filtros por periodo, cliente y métricas exportables</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Visual</div>
+            <ul>
+              <li>Gráficos Recharts responsivos con tooltips personalizados</li>
+              <li>Navegación mensual y estados de carga</li>
+              <li>Pensado para dirección de operaciones y planificación fina</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/analisis.png" alt="Análisis"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/analisis.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 Empleados -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Talento</div>
+        <h1>Empleados (legajo)</h1>
+        <span class="route">/admin/empleados</span>
+        <p class="lede">ABM de vigiladores: datos personales, categoría, convenio laboral, cliente/objetivo preferido y estado. Invitaciones al portal vía Cloud Function + reset de contraseña.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Ficha</div>
+            <ul>
+              <li>Campos: nombre, apellido, DNI, legajo, teléfono, email, categoría, estado</li>
+              <li><strong>Convenio</strong> (p. ej. SUVICO) y vínculo a cliente/objetivo desde servicios activos</li>
+              <li>Búsqueda en listado; vista lista / formulario</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Acceso al portal</div>
+            <ul>
+              <li>Selección múltiple y envío de invitaciones (<strong>createPortalAccess</strong>)</li>
+              <li>Reenvío de mail de acceso / reset de contraseña Firebase</li>
+              <li>Integración con auditoría donde corresponde</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/empleados.png" alt="Empleados"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/empleados.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 RRHH -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Talento</div>
+        <h1>RRHH</h1>
+        <span class="route">/admin/rrhh</span>
+        <p class="lede">Procesos de ausencias, licencias, feriados, convenios y cargas masivas; gráficos de distribución y paneles de seguimiento. Parser CSV para importación de datos de empleados.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Dominios</div>
+            <ul>
+              <li><strong>Ausencias</strong> y licencias con calendario Argentina</li>
+              <li><strong>Feriados</strong> y acuerdos (<strong>agreementService</strong>)</li>
+              <li>Alta/edición masiva vía CSV (delimitador ; o ,)</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Soporte a operación</div>
+            <ul>
+              <li>Vistas con tabs y exportaciones donde la pantalla lo permite</li>
+              <li>Coherencia con empleados y planificación (misma base Firestore)</li>
+              <li>Cloud Functions para operaciones sensibles (según flujo desplegado)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/rrhh.png" alt="RRHH"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/rrhh.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 Configuración -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Sistema</div>
+        <h1>Configuración</h1>
+        <span class="route">/admin/configuracion</span>
+        <p class="lede">Solo rol con permiso <strong>CONFIG</strong>. Parámetros globales, usuarios administrativos, roles con módulos de lectura y multi-empresa.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Pestañas</div>
+            <ul>
+              <li><strong>Sistema</strong> — parámetros generales y base técnica</li>
+              <li><strong>Usuarios Admin</strong> — cuentas de backoffice</li>
+              <li><strong>Roles y permisos</strong> — matriz por módulo (DASHBOARD, PLANNING…)</li>
+              <li><strong>Empresas</strong> — contexto multi-tenant / marca</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Seguridad</div>
+            <ul>
+              <li>Redirección automática si el usuario no tiene CONFIG</li>
+              <li>Alineado con <code>canReadModule</code> del resto de la app</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/configuracion.png" alt="Configuración"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/configuracion.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13 Guía -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Adopción</div>
+        <h1>Guía interactiva</h1>
+        <span class="route">/admin/guia</span>
+        <p class="lede">Onboarding paso a paso con persistencia en <code>localStorage</code> (<strong>cosp_guia_paso</strong>): recorrido del flujo “cliente → objetivo → servicio → nómina → planificación → operaciones → reportes”.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Contenido</div>
+            <ul>
+              <li>Pasos con título, subtítulo y cuerpo explicativo</li>
+              <li>Botón “Abrir módulo” cuando el rol tiene permiso (CLIENTS, PLANNING, etc.)</li>
+              <li>Navegación por índice y avance/retroceso</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Objetivo</div>
+            <ul>
+              <li>Reducir errores de configuración en implementación</li>
+              <li>Homogeneizar el orden recomendado de carga de datos</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell">
+          <img class="shot-img" src="presentacion-cosp-capturas/guia.png" alt="Guía interactiva"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/guia.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14 Empleado -->
+  <section class="slide cover cover-vertical">
+    <div class="sheet">
+      <div class="left">
+        <div class="kicker">Colaborador</div>
+        <h1>Portal empleado (PWA)</h1>
+        <span class="route">/empleado/dashboard</span>
+        <p class="lede">Vista mobile-first del propio turno: fichadas, solicitudes de check-in, intercambios, mapa al objetivo, notificaciones y adjuntos vía Storage según reglas de negocio en pantalla.</p>
+        <div class="dual-grid">
+          <div>
+            <div class="col-title">Tiempo y asistencia</div>
+            <ul>
+              <li>Reglas de visualización de hora de entrada/salida con tolerancia ±5 min</li>
+              <li>Estados de turno finalizado, ausente, completado</li>
+              <li>Geolocalización y distancia al objetivo cuando aplica</li>
+            </ul>
+          </div>
+          <div>
+            <div class="col-title">Experiencia</div>
+            <ul>
+              <li>Flujos de swap y check-in pendiente cacheados localmente</li>
+              <li>Integración Firebase (Auth, Firestore, Functions, Storage)</li>
+              <li>Misma identidad visual COSP; alcance reducido vs admin</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="shot-shell" style="padding:0">
+          <div class="phone-strip">
+            <div class="phone-card">
+              <img src="presentacion-cosp-capturas/empleado-main.png" alt="Portal empleado - pantalla principal"
+                onerror="this.style.display='none'; this.parentElement.style.display='none';" />
+            </div>
+            <div class="phone-card">
+              <img src="presentacion-cosp-capturas/empleado-turnos.png" alt="Portal empleado - turnos realizados"
+                onerror="this.style.display='none'; this.parentElement.style.display='none';" />
+            </div>
+            <div class="phone-card">
+              <img src="presentacion-cosp-capturas/empleado-notificaciones.png" alt="Portal empleado - notificaciones"
+                onerror="this.style.display='none'; this.parentElement.style.display='none';" />
+            </div>
+          </div>
+          <div class="shot-fallback"><code>docs/presentacion-cosp-capturas/empleado-main.png</code><code>docs/presentacion-cosp-capturas/empleado-turnos.png</code><code>docs/presentacion-cosp-capturas/empleado-notificaciones.png</code></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 Cierre -->
+  <section class="slide cover">
+    <div class="sheet" style="grid-template-columns: 1fr;">
+      <div class="left">
+        <div class="kicker" style="color:#a5b4fc">Resumen</div>
+        <h1 class="hero-title" style="color:#fff">Un producto, varios actores</h1>
+        <p class="lede" style="margin-top:10px"><strong>Centro Control</strong> y <strong>Planificador</strong> amarran la operación del día; <strong>CRM + Servicios SLA</strong> definen el contrato; <strong>Reportes + Análisis</strong> cierran el ciclo con números auditables; <strong>Empleados + RRHH</strong> alimentan la nómina; <strong>Config + Guía</strong> gobiernan el despliegue; el <strong>portal empleado</strong> lleva la experiencia al puesto.</p>
+        <p class="lede" style="color:#cbd5e1;margin-top:12px">Completá las capturas en <code style="color:#94a3b8">docs/presentacion-cosp-capturas/</code> y volvé a abrir este HTML o exportá a PDF.</p>
+        <p class="foot" style="color:#64748b">COSP V 1.0 · Grupo Bacar</p>
+      </div>
+    </div>
+  </section>
+
+  <p style="text-align:center;color:#64748b;font-size:11px;padding:20px">Texto funcional derivado del código en <code>apps/web2/src/pages</code> · Abril 2026</p>
+</body>
+</html>

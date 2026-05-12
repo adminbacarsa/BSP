@@ -1,0 +1,32 @@
+
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { LoginPage } from '../pages/auth/LoginPage';
+import { AdminLayout } from '../layouts/AdminLayout';
+import { DashboardPage } from '../pages/admin/dashboard/DashboardPage';
+import { PlanningPage } from '../pages/admin/planning/PlanningPage'; // Aseguramos que esto cargue
+import { useAuth } from '../context/AuthContext';
+
+export const AppRouter = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div className="h-screen flex items-center justify-center">Cargando...</div>;
+  }
+
+  return (
+    <Routes>
+      {/* Si no estás logueado, vas al Login */}
+      <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/admin" />} />
+
+      {/* Rutas de Admin Protegidas */}
+      <Route path="/admin" element={user ? <AdminLayout /> : <Navigate to="/login" />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="planning" element={<PlanningPage />} />
+      </Route>
+
+      {/* Default */}
+      <Route path="*" element={<Navigate to={user ? "/admin" : "/login"} />} />
+    </Routes>
+  );
+};

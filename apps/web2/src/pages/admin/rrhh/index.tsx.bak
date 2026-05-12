@@ -1,0 +1,668 @@
+import React, { useState, useEffect } from 'react';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import { employeeService, Employee } from '@/services/employeeService';
+import { absenceService, Absence } from '@/services/absenceService';
+import { holidayService, Holiday } from '@/services/holidayService';
+import { agreementService, Agreement } from '@/services/agreementService';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { useToast } from '@/context/ToastContext';
+import { 
+  Users, Search, Plus, Edit2, Trash2, Phone, Mail, 
+  FileText, UserCheck, UserX, X, MapPin, Briefcase, 
+  Calendar, Clock, AlertTriangle, CheckCircle, ChevronRight, ChevronLeft,
+  Moon, Sun, DollarSign, Activity, BarChart2, Book, Save, Download, Coffee, AlertOctagon, FileCheck,
+  FileSpreadsheet, Shirt, Smartphone, Info, UploadCloud, RefreshCw, FileDown, CalendarDays
+} from 'lucide-react';
+
+// --- UTILIDADES CSV ---
+const parseCSV = (text: string) => {
+    const cleanText = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = cleanText.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return [];
+    
+    const firstLine = lines[0];
+    const delimiter = firstLine.includes(';') ? ';' : ',';
+    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/^"|"$/g, '')); 
+    const result = [];
+    
+    for(let i=1; i<lines.length; i++){
+        const rowLine = lines[i];
+        if (!rowLine.trim()) continue;
+        const row = rowLine.split(delimiter);
+        if(row.length < 2) continue;
+        const obj: any = {};
+        headers.forEach((h, idx) => {
+            let val = row[idx]?.trim() || '';
+            if (val.startsWith('"') && val.endsWith('"')) val = val.substring(1, val.length - 1);
+            obj[h] = val;
+        });
+        result.push(obj);
+    }
+    return result;
+};
+
+// --- UTILIDAD PARA FECHAS (DD/MM/YYYY -> YYYY-MM-DD) ---
+const parseDateString = (dateStr: string) => {
+    if (!dateStr) return '';
+    // Si ya viene en formato ISO (YYYY-MM-DD), devolver tal cual
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return dateStr;
+    
+    // Si viene como DD/MM/YYYY o DD-MM-YYYY
+    const parts = dateStr.split(/[/-]/);
+    if (parts.length === 3) {
+        // Asumimos dia, mes, año
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        const year = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+        return `${year}-${month}-${day}`;
+    }
+    return '';
+};
+
+// --- HELPER DE ESTRUCTURA ---
+const createEmployeeObject = (data: any) => {
+    return {
+        firstName: data.firstName || '',
+        lastName: data.lastName || '',
+        name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        dni: data.dni || '',
+        cuil: data.cuil || '',
+        cuit: data.cuil || '', // Redundancia para planificador
+        fileNumber: data.fileNumber || '',
+        legajo: data.fileNumber || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        address: data.address || '',
+        category: data.category || 'Vigilador',
+        cct: data.cct || 'Seguridad Privada (CCT 422/05)',
+        laborAgreement: data.laborAgreement || data.cct || 'SUVICO',
+        status: data.status || 'activo',
+        role: 'employee',
+        isAvailable: true,
+        contractType: data.contractType || 'FullTime',
+        periodType: data.periodType || 'Mensual',
+        
+        // Fechas y Ciclos
+        startDate: data.startDate || '',
+        cycleStartDay: parseInt(data.cycleStartDay || '26'),
+        payrollCycleStartDay: parseInt(data.cycleStartDay || '26'),
+        payrollCycleEndDay: parseInt(data.cycleStartDay || '26') - 1,
+        maxHours: parseInt(data.maxHours || '200'),
+        maxHoursPerMonth: parseInt(data.maxHours || '200'),
+        
+        // Asignaciones
+        preferredClientId: data.preferredClientId || '',
+        clientId: data.preferredClientId || '',
+        preferredObjectiveId: data.preferredObjectiveId || '',
+        
+        createdAt: new Date().toISOString(),
+        sizes: data.sizes || {}
+    };
+};
+
+export default function EmployeesPage() {
+  const { addToast } = useToast();
+  
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [activeTab, setActiveTab] = useState<'legajos' | 'ausencias' | 'feriados' | 'convenios'>('legajos');
+  const [view, setView] = useState<'list' | 'form'>('list');
+  const [selectedEmp, setSelectedEmp] = useState<Employee | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [filteredEmployees, setFilteredEmployees] = useState<Employee[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  const [empStats, setEmpStats] = useState<any>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+
+  const [clients, setClients] = useState<any[]>([]);
+  const [allObjectives, setAllObjectives] = useState<any[]>([]);
+  const [filteredObjectives, setFilteredObjectives] = useState<any[]>([]);
+  const [agreements, setAgreements] = useState<Agreement[]>([]);
+
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  const [filteredAbsences, setFilteredAbsences] = useState<Absence[]>([]);
+  const [absenceSearchTerm, setAbsenceSearchTerm] = useState('');
+  
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+
+  const [showAbsenceModal, setShowAbsenceModal] = useState(false);
+  const initialAbsenceForm: Absence = { 
+      employeeId: '', employeeName: '', type: 'Enfermedad', 
+      startDate: new Date().toISOString().split('T')[0], 
+      endDate: new Date().toISOString().split('T')[0],
+      status: 'Pendiente', hasCertificate: false, reason: '', comments: ''
+  };
+  const [absenceForm, setAbsenceForm] = useState<Absence>(initialAbsenceForm);
+  const [isEditingAbsence, setIsEditingAbsence] = useState(false);
+
+  const [holidayForm, setHolidayForm] = useState<any>({ date: '', name: '', type: 'Nacional' });
+  const [syncYear, setSyncYear] = useState(new Date().getFullYear());
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const initialAgreement: Agreement = { name: '', code: '', maxHoursWeekly: 48, maxHoursMonthly: 200, saturdayCutoffHour: 13, saturdayRate: 0, nightShiftStart: 21, nightShiftEnd: 6, paysDoubleOnFranco: true, categories: [] };
+  const [agreementForm, setAgreementForm] = useState<Agreement>(initialAgreement);
+  const [newCategory, setNewCategory] = useState('');
+  const [isEditingAgreement, setIsEditingAgreement] = useState(false);
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [csvContent, setCsvContent] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'DOCS'>('PERSONAL');
+
+  const initialForm: any = { 
+      firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', 
+      category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', sizes: {}, cuil: '', address: '',
+      contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200
+  };
+  const [form, setForm] = useState<any>(initialForm);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const inputClass = "w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all";
+  const selectClass = "w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none";
+  const labelClass = "text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1 block ml-1";
+
+  useEffect(() => { loadData(); loadClientsAndObjectives(); loadAbsences(); loadHolidays(); loadAgreements(); }, []);
+  
+  useEffect(() => {
+    const term = searchTerm.toLowerCase();
+    setFilteredEmployees(employees.filter(e => (e.lastName || '').toLowerCase().includes(term) || (e.firstName || '').toLowerCase().includes(term) || (e.fileNumber || '').includes(term)));
+  }, [searchTerm, employees]);
+
+  useEffect(() => {
+      const term = absenceSearchTerm.toLowerCase();
+      setFilteredAbsences(absences.filter(a => {
+          const name = a.employeeName || '';
+          const type = a.type || '';
+          const status = a.status || '';
+          let searchableName = name;
+          if (!name && a.employeeId) {
+              const emp = employees.find(e => e.id === a.employeeId);
+              if (emp) searchableName = `${emp.lastName} ${emp.firstName}`;
+          }
+          return searchableName.toLowerCase().includes(term) || type.toLowerCase().includes(term) || status.toLowerCase().includes(term);
+      }));
+  }, [absenceSearchTerm, absences, employees]);
+
+  useEffect(() => { 
+      if (form.preferredClientId) { 
+          const objs = allObjectives.filter(o => o.clientId === form.preferredClientId); 
+          setFilteredObjectives(objs); 
+      } else { 
+          setFilteredObjectives(allObjectives); 
+      } 
+  }, [form.preferredClientId, allObjectives]);
+
+  useEffect(() => { if (form.laborAgreement) { const selectedAgreement = agreements.find(a => a.name === form.laborAgreement); setAvailableCategories(selectedAgreement?.categories?.length ? selectedAgreement.categories : ['General']); } else { setAvailableCategories([]); } }, [form.laborAgreement, agreements]);
+  useEffect(() => { if (selectedEmp) { calculateStats(selectedEmp.id!, selectedEmp.laborAgreement || ''); } }, [currentDate]);
+
+  const loadData = async () => { const data = await employeeService.getAll(); setEmployees(data); };
+  const loadAbsences = async () => { const data = await absenceService.getAll(); setAbsences(data); };
+  const loadHolidays = async () => { const data = await holidayService.getAll(); setHolidays(data); };
+  const loadAgreements = async () => { const data = await agreementService.getAll(); setAgreements(data.map(a => ({...a, categories: Array.isArray(a.categories) ? a.categories : []}))); };
+  
+  const loadClientsAndObjectives = async () => { try { const cSnap = await getDocs(collection(db, 'clients')); setClients(cSnap.docs.map(d => ({ id: d.id, ...d.data() }))); const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active'))); setAllObjectives(sSnap.docs.map(d => ({ id: d.id, name: d.data().objectiveName || d.data().name, clientId: d.data().clientId }))); } catch (e) {} };
+
+  const calculateStats = async (empId: string, empAgreementName: string) => {
+      setLoadingStats(true);
+      try {
+          const rule = agreements.find(a => a.name === empAgreementName) || initialAgreement;
+          const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+          const lastDay = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0); lastDay.setHours(23, 59, 59, 999);
+          const monthAbsencesCount = absences.filter(a => { if (a.employeeId !== empId) return false; const absDate = new Date(a.startDate + 'T00:00:00'); return absDate >= firstDay && absDate <= lastDay; }).length;
+          const monthHolidays: {[key: string]: boolean} = {}; holidays.forEach(h => { const hDate = new Date(h.date + 'T00:00:00'); if (hDate >= firstDay && hDate <= lastDay) { monthHolidays[hDate.toDateString()] = true; } });
+          const q = query(collection(db, 'turnos'), where('employeeId', '==', empId), where('startTime', '>=', Timestamp.fromDate(firstDay)), where('startTime', '<=', Timestamp.fromDate(lastDay)));
+          const snapshot = await getDocs(q);
+          const sortedDocs = snapshot.docs.map(d => d.data()).sort((a, b) => a.startTime.seconds - b.startTime.seconds);
+          let totalPlanificado = 0, totalRealizado = 0, totalNocturnas = 0, totalExtra50 = 0, totalExtra100 = 0, totalFrancos = 0;
+          let objectivesMap = new Map();
+          let cycleHours = 0, monthlyAccumulated = 0, francoDaysRef: {[key: string]: boolean} = {};
+          sortedDocs.forEach(d => { if (d.isFranco) { francoDaysRef[d.startTime.toDate().toDateString()] = true; totalFrancos++; } });
+          sortedDocs.forEach(d => {
+              if (d.status === 'Canceled') return;
+              const start = d.startTime.toDate();
+              const end = d.endTime.toDate();
+              const duration = (end.getTime() - start.getTime()) / 3600000;
+              const dateKey = start.toDateString();
+              if (d.isFranco) { cycleHours = 0; return; }
+              totalPlanificado += duration;
+              if (end <= new Date()) totalRealizado += duration;
+              objectivesMap.set(d.objectiveName || 'Sin asignar', (objectivesMap.get(d.objectiveName || 'Sin asignar') || 0) + duration);
+              let isSpecial100 = false;
+              if (monthHolidays[dateKey] || (francoDaysRef[dateKey] && rule.paysDoubleOnFranco)) isSpecial100 = true;
+              if (isSpecial100) { totalExtra100 += duration; } else {
+                  let durationNormal = duration, durationExtra = 0;
+                  const previousCycleHours = cycleHours; cycleHours += duration;
+                  if (previousCycleHours >= rule.maxHoursWeekly) { durationNormal = 0; durationExtra = duration; }
+                  else if (cycleHours > rule.maxHoursWeekly) { durationNormal = rule.maxHoursWeekly - previousCycleHours; durationExtra = cycleHours - rule.maxHoursWeekly; }
+                  if (durationNormal > 0) {
+                      const previousMonthly = monthlyAccumulated; monthlyAccumulated += durationNormal;
+                      if (previousMonthly >= rule.maxHoursMonthly) { durationExtra += durationNormal; durationNormal = 0; }
+                      else if (monthlyAccumulated > rule.maxHoursMonthly) { const avail = rule.maxHoursMonthly - previousMonthly; const over = monthlyAccumulated - rule.maxHoursMonthly; durationExtra += over; durationNormal = avail; }
+                  }
+                  totalExtra50 += durationExtra;
+                  let tempTime = new Date(start);
+                  while (tempTime < end) { const h = tempTime.getHours(); if (h >= rule.nightShiftStart || h < rule.nightShiftEnd) totalNocturnas += 1; tempTime.setHours(tempTime.getHours() + 1); }
+              }
+          });
+          const simpleHours = totalPlanificado - totalExtra100 - totalExtra50;
+          setEmpStats({ totalPlanificado: Math.round(totalPlanificado), totalRealizado: Math.round(totalRealizado), progress: totalPlanificado > 0 ? Math.round((totalRealizado / totalPlanificado) * 100) : 0, nightHours: Math.round(totalNocturnas), dayHours: Math.round(simpleHours), extra100: Math.round(totalExtra100), extra50: Math.round(totalExtra50), francosCount: totalFrancos, absencesCount: monthAbsencesCount, objectives: Array.from(objectivesMap.entries()).map(([name, hours]) => ({ name, hours })), shiftsCount: snapshot.size, monthlyLimit: rule.maxHoursMonthly, isOverLimit: totalPlanificado > rule.maxHoursMonthly });
+      } catch (e) { console.error(e); } finally { setLoadingStats(false); }
+  };
+  
+  const changeMonth = (delta: number) => { const newDate = new Date(currentDate); newDate.setMonth(newDate.getMonth() + delta); setCurrentDate(newDate); };
+
+  const handleRowClick = (emp: Employee) => { setSelectedEmp(emp); if (emp.id) calculateStats(emp.id, emp.laborAgreement || ''); };
+
+  const handleSave = async () => { 
+      if (!form.lastName) return addToast('El apellido es obligatorio', 'error'); 
+      try { 
+          const dataToSave = createEmployeeObject(form);
+          if (isEditing && form.id) {
+              await employeeService.update(form.id, dataToSave); 
+          } else {
+              if (employees.some(e => e.dni === form.dni)) return addToast('Ya existe un empleado con este DNI', 'error');
+              await employeeService.add(dataToSave); 
+          }
+          loadData(); 
+          setView('list'); 
+      } catch (e) { console.error(e); addToast('Error al guardar', 'error'); } 
+  };
+
+  const handleDelete = async (id: string) => { if(confirm('?')) { await employeeService.delete(id); loadData(); setSelectedEmp(null); }};
+  
+  const handleDeleteAll = async () => {
+      const count = employees.length;
+      if (count === 0) return alert('No hay empleados para borrar.');
+      const confirm1 = confirm(`⚠️ ATENCIÓN ⚠️\n\nEstás a punto de ELIMINAR PERMANENTEMENTE a los ${count} empleados.\nEsta acción no se puede deshacer.\n\n¿Estás seguro?`);
+      if (!confirm1) return;
+      const confirm2 = confirm("¿Realmente seguro? Confirma nuevamente.");
+      if (!confirm2) return;
+      setIsDeletingAll(true);
+      try {
+          for (const emp of employees) { if (emp.id) await deleteDoc(doc(db, 'empleados', emp.id)); }
+          addToast(`Se eliminaron ${count} legajos correctamente.`, 'success');
+          loadData();
+      } catch (e) { console.error(e); addToast('Error al intentar borrar masivamente.', 'error'); } finally { setIsDeletingAll(false); }
+  };
+
+  const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
+  const openEditFromDetail = () => { if (!selectedEmp) return; setForm(selectedEmp); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
+  
+  const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
+  const handleDeleteHoliday = async (id: string) => { await holidayService.delete(id); loadHolidays(); };
+  const handleSyncHolidays = async () => { setIsSyncing(true); try { const count = await holidayService.syncWithGovApi(syncYear); addToast(`Sync ${count}`, 'success'); loadHolidays(); } catch (e) {} finally { setIsSyncing(false); } };
+  const handleAddCategory = () => { if (newCategory.trim()) { setAgreementForm({ ...agreementForm, categories: [...agreementForm.categories, newCategory.trim()] }); setNewCategory(''); }};
+  const removeCategory = (idx: number) => { const newCats = [...agreementForm.categories]; newCats.splice(idx, 1); setAgreementForm({ ...agreementForm, categories: newCats }); };
+  const handleSaveAgreement = async () => { if (!agreementForm.name) return; if (isEditingAgreement && agreementForm.id) { await agreementService.update(agreementForm.id, agreementForm); } else { await agreementService.add(agreementForm); } setAgreementForm(initialAgreement); setIsEditingAgreement(false); loadAgreements(); };
+  const handleEditAgreement = (a: Agreement) => { setAgreementForm(a); setIsEditingAgreement(true); };
+  const handleDeleteAgreement = async (id: string) => { if(confirm('?')) { await agreementService.delete(id); loadAgreements(); }};
+  const handleOpenAbsenceModal = (absence?: Absence) => { if (absence) { setAbsenceForm(absence); setIsEditingAbsence(true); } else { setAbsenceForm(initialAbsenceForm); setIsEditingAbsence(false); } setShowAbsenceModal(true); };
+  const handleSaveAbsence = async () => { if (!absenceForm.employeeId) return addToast('Seleccione un empleado', 'error'); const emp = employees.find(x => x.id === absenceForm.employeeId); const dataToSave = { ...absenceForm, employeeName: emp ? `${emp.lastName} ${emp.firstName}` : 'Desconocido' }; if (isEditingAbsence && absenceForm.id) { await absenceService.update(absenceForm.id, dataToSave); addToast('Actualizado', 'success'); } else { await absenceService.add(dataToSave); addToast('Registrado', 'success'); } setShowAbsenceModal(false); loadAbsences(); };
+  const handleDeleteAbsence = async (id: string) => { if(confirm('¿Eliminar?')) { await absenceService.delete(id); loadAbsences(); } };
+  const getAbsenceEmployeeName = (a: Absence) => { if (a.employeeName) return a.employeeName; const emp = employees.find(e => e.id === a.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : 'Desconocido'; };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setFileName(file.name);
+      const reader = new FileReader();
+      reader.onload = (evt) => { if (evt.target?.result) { setCsvContent(evt.target.result as string); } };
+      reader.readAsText(file, 'ISO-8859-1'); 
+  };
+
+  // --- PLANTILLA COMPLETA ACTUALIZADA (V11) ---
+  const handleDownloadTemplate = () => {
+      const headers = [
+          "Legajo", "Apellido, Nombre", "CUIL", "Email", "Telefono", "Direccion", 
+          "Categoria", "Convenio", "Estado", "Fecha Ingreso", "Periodo", 
+          "Inicio Ciclo", "Objetivo"
+      ];
+      const example = [
+          "1020", "PEREZ, Juan", "20-12345678-9", "juan@email.com", "3511234567", "Av Colon 1234", 
+          "VIGILADOR", "422/05", "activo", "01/01/2024", "Mensual", 
+          "26", "Planta Industrial"
+      ];
+      
+      const csvString = headers.join(';') + '\n' + example.join(';');
+      const blob = new Blob(["\uFEFF" + csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "Plantilla_Nomina_CronoApp.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleProcessCSV = () => {
+      try {
+          const parsed = parseCSV(csvContent);
+          if (parsed.length === 0) { alert('Archivo vacío o formato desconocido.'); return; }
+
+          const mapped = parsed.map(row => {
+              const keys = Object.keys(row);
+              
+              // --- MAPEO DE COLUMNAS MEJORADO ---
+              const keyName = keys.find(k => k.includes('apellido') && k.includes('nombre')) || keys.find(k => k.includes('apenom')) || keys.find(k => k.includes('nombre'));
+              const keyLegajo = keys.find(k => k.includes('legajo')) || 'legajo';
+              const keyCuil = keys.find(k => k.includes('cuil')) || keys.find(k => k.includes('cuit')) || 'cuil';
+              const keyCat = keys.find(k => k.includes('cat')) || 'categoria';
+              const keyCct = keys.find(k => k.includes('convenio')) || 'convenio';
+              
+              const keyEmail = keys.find(k => k.includes('mail')) || 'email';
+              const keyPhone = keys.find(k => k.includes('tel') || k.includes('cel')) || 'telefono';
+              const keyAddr = keys.find(k => k.includes('dir') || k.includes('calle')) || 'direccion';
+              const keyStatus = keys.find(k => k.includes('estado')) || 'estado';
+              
+              // Nuevas Keys Detectadas
+              const keyStartDate = keys.find(k => k.includes('ingreso') || k.includes('fecha')) || 'fecha_ingreso';
+              const keyCycle = keys.find(k => k.includes('ciclo') || k.includes('inicio') || k.includes('cierre')) || 'inicio_ciclo';
+              const keyPeriod = keys.find(k => k.includes('periodo') || k.includes('tipo')) || 'periodo';
+              const keyObjective = keys.find(k => k.includes('objetivo')) || 'objetivo';
+
+              let fname = 'Sin Nombre';
+              let lname = 'Sin Apellido';
+              
+              if (keyName && row[keyName]) {
+                  const rawName = row[keyName];
+                  if (rawName.includes(',')) {
+                      const parts = rawName.split(',');
+                      lname = parts[0].trim();
+                      fname = parts.length > 1 ? parts[1].trim() : '-';
+                  } else {
+                      lname = rawName.trim();
+                      fname = '-';
+                  }
+              }
+
+              let dni = '';
+              let cuilRaw = '';
+              
+              // Extracción robusta de CUIL/DNI
+              const possibleCuil = row[keyCuil] || row['dni'] || row['documento'];
+              if (possibleCuil) {
+                  cuilRaw = possibleCuil.trim(); // Guardar CUIL exacto
+                  const clean = possibleCuil.replace(/[^0-9]/g, '');
+                  if (clean.length === 11) dni = clean.substring(2, 10);
+                  else if (clean.length >= 7) dni = clean;
+              }
+              
+              // Buscamos Objetivo ID por nombre si existe en el sistema
+              const foundObj = allObjectives.find(o => o.name.toLowerCase() === (row[keyObjective]||'').toLowerCase());
+
+              const rawData = { 
+                  firstName: fname, 
+                  lastName: lname, 
+                  dni: dni, 
+                  cuil: cuilRaw, // Guardar el valor directo del CSV
+                  fileNumber: row[keyLegajo] || '', 
+                  category: row[keyCat] || '', 
+                  cct: row[keyCct] || '', 
+                  email: row[keyEmail] || '',
+                  phone: row[keyPhone] || '',
+                  address: row[keyAddr] || '',
+                  status: (row[keyStatus] && row[keyStatus].toLowerCase().includes('inact')) ? 'inactivo' : 'activo', 
+                  laborAgreement: row[keyCct] || '',
+                  
+                  // --- CAMPOS NUEVOS ---
+                  startDate: parseDateString(row[keyStartDate]),
+                  periodType: row[keyPeriod] || 'Mensual',
+                  cycleStartDay: row[keyCycle] || '26',
+                  preferredObjectiveId: foundObj ? foundObj.id : ''
+              };
+              
+              return createEmployeeObject(rawData);
+
+          }).filter(x => x.dni && x.dni.length > 5);
+          
+          if (mapped.length === 0) { alert('No se encontraron registros válidos (DNI/CUIL).'); }
+          else { setImportPreview(mapped); }
+      } catch(e: any) { console.error(e); alert('Error: ' + e.message); }
+  };
+
+  const confirmImport = async () => {
+      setIsImporting(true);
+      try {
+          let count = 0;
+          for (const emp of importPreview) {
+              const existing = employees.find(e => e.dni === emp.dni || (emp.fileNumber && e.fileNumber === emp.fileNumber));
+              if (existing && existing.id) { await updateDoc(doc(db, 'empleados', existing.id), emp); } 
+              else { await addDoc(collection(db, 'empleados'), emp); }
+              count++;
+          }
+          alert(`Se procesaron ${count} registros correctamente.`);
+          setShowImportModal(false); setImportPreview([]); setCsvContent(''); setFileName(''); loadData();
+      } catch(e) { console.error(e); alert('Error importando'); } finally { setIsImporting(false); }
+  };
+
+  return (
+    <DashboardLayout>
+      <div className="max-w-full mx-auto space-y-6 animate-in fade-in h-[calc(100vh-100px)] flex flex-col">
+        <header className="flex flex-col gap-4 shrink-0 p-1">
+          <div className="flex justify-between items-end">
+            <div><h1 className="text-3xl font-black text-slate-900 dark:text-white uppercase">Gestión RRHH</h1><p className="text-slate-500 text-sm font-medium">Personal, Novedades y Reglas.</p></div>
+            <div className="flex gap-2">
+                {activeTab === 'legajos' && view === 'list' && (
+                    <>
+                        <button onClick={() => setShowImportModal(true)} className="bg-slate-800 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-lg flex gap-2 hover:bg-slate-700 transition-colors"><FileSpreadsheet size={16}/> Importar / Actualizar</button>
+                        <button onClick={openNew} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-lg flex gap-2 hover:bg-indigo-700 transition-colors"><Plus size={16}/> Nuevo Legajo</button>
+                    </>
+                )}
+                {activeTab === 'ausencias' && <button onClick={() => handleOpenAbsenceModal()} className="bg-rose-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-lg flex gap-2"><Plus size={16}/> Nueva Novedad</button>}
+            </div>
+          </div>
+          <div className="flex gap-2 border-b dark:border-slate-700">
+              {['legajos', 'ausencias', 'feriados', 'convenios'].map(tab => (
+                  <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-3 font-black text-xs uppercase border-b-4 transition-all ${activeTab === tab ? (tab === 'legajos' ? 'border-indigo-600 text-indigo-600' : tab === 'ausencias' ? 'border-rose-500 text-rose-500' : tab === 'feriados' ? 'border-emerald-500 text-emerald-500' : 'border-amber-500 text-amber-500') : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{tab}</button>
+              ))}
+          </div>
+        </header>
+
+        {activeTab === 'legajos' && view === 'list' && (
+            <div className="flex-1 flex gap-6 overflow-hidden relative">
+                <div className="flex-1 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-4 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+                        <div className="flex gap-4 items-center flex-1">
+                            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 max-w-md"><Search size={16} className="text-slate-400"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/></div>
+                            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 px-2 py-1 rounded-xl border dark:border-slate-700"><button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronLeft size={16}/></button><span className="text-xs font-black uppercase w-24 text-center">{currentDate.toLocaleString('es-ES', { month: 'long', year: 'numeric' })}</span><button onClick={() => changeMonth(1)} className="p-2 hover:bg-slate-100 rounded-lg"><ChevronRight size={16}/></button></div>
+                        </div>
+                        {employees.length > 0 && (
+                            <button onClick={handleDeleteAll} disabled={isDeletingAll} className="flex items-center gap-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors">
+                                {isDeletingAll ? <RefreshCw className="animate-spin" size={16}/> : <Trash2 size={16}/>}
+                                {isDeletingAll ? 'Borrando...' : 'Borrar Nómina'}
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex-1 overflow-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10 shadow-sm"><tr><th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Datos</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Objetivo</th><th className="p-4 text-right"></th></tr></thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {filteredEmployees.map(emp => (
+                                    <tr key={emp.id} onClick={() => handleRowClick(emp)} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer group">
+                                        <td className="p-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-black text-slate-500 text-xs">{emp.lastName?.[0]}</div><div><p className="font-bold text-sm uppercase text-slate-900 dark:text-white">{emp.lastName}, {emp.firstName}</p><p className="text-[10px] text-indigo-500 font-bold">{emp.category}</p></div></div></td>
+                                        <td className="p-4 text-xs font-mono text-slate-500">LEG: {emp.fileNumber}</td>
+                                        <td className="p-4 text-xs font-bold text-slate-500 uppercase">{(allObjectives.find(o => o.id === emp.preferredObjectiveId)?.name) || 'Rotativo'}</td>
+                                        <td className="p-4 text-right"><ChevronRight size={16} className="text-slate-300"/></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {selectedEmp && (
+                    <div className="w-[450px] bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right-10 shrink-0 relative overflow-hidden">
+                        <div className="p-6 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-t-[2rem] relative">
+                            <button onClick={() => setSelectedEmp(null)} className="absolute top-4 right-4 p-2 hover:bg-slate-200 rounded-full"><X size={20}/></button>
+                            <div className="flex flex-col items-center"><div className="w-20 h-20 rounded-3xl bg-indigo-600 flex items-center justify-center text-3xl font-black text-white mb-3 shadow-lg shadow-indigo-500/30">{selectedEmp.lastName?.[0]}</div><h2 className="text-xl font-black uppercase text-slate-900 dark:text-white">{selectedEmp.lastName}, {selectedEmp.firstName}</h2><p className="text-xs font-bold text-slate-500 uppercase mt-1">{selectedEmp.laborAgreement}</p></div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+                            {empStats ? (
+                                <div className="space-y-4">
+                                    <div className={`bg-slate-900 text-white p-5 rounded-3xl shadow-lg relative overflow-hidden ${empStats.isOverLimit ? 'ring-4 ring-rose-500' : ''}`}>
+                                        {empStats.isOverLimit && <div className="absolute top-0 left-0 w-full bg-rose-600 text-white text-[10px] font-black uppercase text-center py-1 animate-pulse">¡Límite Mensual Excedido!</div>}
+                                        <div className="absolute top-0 right-0 p-4 opacity-10"><BarChart2 size={48}/></div>
+                                        <p className="text-[10px] font-black uppercase text-indigo-200 mt-2">Total Planificado</p>
+                                        <div className="flex items-baseline gap-2"><span className="text-4xl font-black">{empStats.totalPlanificado}h</span><span className="text-sm font-medium text-slate-400">/ {empStats.monthlyLimit}h</span></div>
+                                        <div className="w-full h-2 bg-slate-800 rounded-full mt-3"><div className={`h-full rounded-full ${empStats.isOverLimit ? 'bg-rose-500' : 'bg-emerald-400'}`} style={{ width: `${Math.min(empStats.progress, 100)}%` }}/></div>
+                                        <p className="text-[10px] mt-2 opacity-60">Realizado: {empStats.totalRealizado}h</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3"><div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800"><div className="flex items-center gap-2 mb-2 text-emerald-600"><Coffee size={16}/><span className="text-[10px] font-black uppercase">Francos</span></div><p className="text-2xl font-black text-slate-800 dark:text-white">{empStats.francosCount}<span className="text-sm text-slate-400 font-bold ml-1">días</span></p></div><div className="bg-rose-50 dark:bg-rose-900/20 p-4 rounded-2xl border border-rose-100 dark:border-rose-800"><div className="flex items-center gap-2 mb-2 text-rose-600"><AlertOctagon size={16}/><span className="text-[10px] font-black uppercase">Inasistencias</span></div><p className="text-2xl font-black text-slate-800 dark:text-white">{empStats.absencesCount}<span className="text-sm text-slate-400 font-bold ml-1">días</span></p></div></div>
+                                    <div className="grid grid-cols-2 gap-3"><div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700"><div className="flex items-center gap-2 mb-2 text-slate-600 dark:text-slate-400"><Sun size={16}/><span className="text-[10px] font-black uppercase">Normales</span></div><p className="text-2xl font-black text-slate-800 dark:text-white">{empStats.dayHours}h</p></div><div className="bg-indigo-50 dark:bg-indigo-900/30 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800"><div className="flex items-center gap-2 mb-2 text-indigo-600"><Moon size={16}/><span className="text-[10px] font-black uppercase">Nocturnas</span></div><p className="text-2xl font-black text-slate-800 dark:text-white">{empStats.nightHours}h</p></div></div>
+                                    <div className="grid grid-cols-2 gap-3"><div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-800"><div className="flex items-center gap-2 mb-2 text-emerald-600"><DollarSign size={16}/><span className="text-[10px] font-black uppercase">Extras 50%</span></div><p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">{empStats.extra50}h</p></div><div className="bg-rose-50 dark:bg-rose-900/20 p-4 rounded-2xl border border-rose-100 dark:border-rose-800"><div className="flex items-center gap-2 mb-2 text-rose-600"><DollarSign size={16}/><span className="text-[10px] font-black uppercase">Extras 100%</span></div><p className="text-2xl font-black text-rose-700 dark:text-rose-400">{empStats.extra100}h</p></div></div>
+                                    <div className="bg-slate-50 dark:bg-slate-900 rounded-2xl border dark:border-slate-700 overflow-hidden"><div className="px-4 py-2 bg-slate-100 dark:bg-slate-950 border-b dark:border-slate-700 text-[10px] font-black uppercase text-slate-400">Desglose Operativo</div>{empStats.objectives.map((o:any,i:number)=><div key={i} className="flex justify-between items-center p-3 border-b dark:border-slate-700/50 last:border-0"><span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase truncate w-32">{o.name}</span><span className="text-xs font-black text-slate-900 dark:text-white">{Math.round(o.hours)}h</span></div>)}</div>
+                                </div>
+                            ) : <div className="text-center py-10 opacity-50">Calculando...</div>}
+                        </div>
+                        <div className="p-6 border-t dark:border-slate-700 flex gap-3">
+                            <button onClick={() => handleDelete(selectedEmp.id!)} className="p-3 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100"><Trash2 size={20}/></button>
+                            <button onClick={openEditFromDetail} className="flex-1 py-3 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-xl font-black uppercase text-xs">Editar Legajo</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        )}
+
+        {/* --- MODAL FICHA DE EMPLEADO MEJORADO CON TABS (PERSONAL / LABORAL / TALLES) --- */}
+        {view === 'form' && (
+            <div className="fixed inset-0 bg-white dark:bg-slate-900 z-50 overflow-hidden flex flex-col">
+                <div className="max-w-4xl mx-auto w-full h-full flex flex-col">
+                    <div className="flex justify-between items-center py-6 px-4 border-b dark:border-slate-800">
+                        <h2 className="text-2xl font-black uppercase dark:text-white">{isEditing ? 'Editar' : 'Nuevo'} Legajo</h2>
+                        <button onClick={() => setView('list')} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"><X size={24} className="text-slate-400"/></button>
+                    </div>
+                    
+                    <div className="flex border-b dark:border-slate-800 px-4">
+                        {['PERSONAL', 'LABORAL', 'TALLES', 'DOCS'].map(tab => (
+                            <button key={tab} onClick={() => setActiveFormTab(tab as any)} className={`py-4 px-6 text-xs font-bold border-b-2 transition-colors ${activeFormTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{tab}</button>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                        {activeFormTab === 'PERSONAL' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
+                                <div><label className={labelClass}>Nombre</label><input className={inputClass} value={form.firstName} onChange={e=>setForm({...form, firstName:e.target.value})}/></div>
+                                <div><label className={labelClass}>Apellido</label><input className={inputClass} value={form.lastName} onChange={e=>setForm({...form, lastName:e.target.value})}/></div>
+                                <div><label className={labelClass}>DNI</label><input className={inputClass} value={form.dni} onChange={e=>setForm({...form, dni:e.target.value})}/></div>
+                                <div><label className={labelClass}>CUIL</label><input className={inputClass} value={form.cuil} onChange={e=>setForm({...form, cuil:e.target.value})}/></div>
+                                <div><label className={labelClass}>Email</label><input className={inputClass} value={form.email} onChange={e=>setForm({...form, email:e.target.value})}/></div>
+                                <div><label className={labelClass}>Teléfono</label><input className={inputClass} value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})}/></div>
+                                <div className="md:col-span-2"><label className={labelClass}>Dirección</label><input className={inputClass} value={form.address} onChange={e=>setForm({...form, address:e.target.value})}/></div>
+                            </div>
+                        )}
+                        {activeFormTab === 'LABORAL' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in">
+                                <div><label className={labelClass}>Legajo</label><input className={inputClass} value={form.fileNumber} onChange={e=>setForm({...form, fileNumber:e.target.value})}/></div>
+                                <div><label className={labelClass}>Fecha Ingreso</label><input type="date" className={inputClass} value={form.startDate} onChange={e=>setForm({...form, startDate:e.target.value})}/></div>
+                                <div><label className={labelClass}>Estado</label><select className={selectClass} value={form.status} onChange={e=>setForm({...form, status:e.target.value})}><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></div>
+                                <div className="md:col-span-2 bg-indigo-50 dark:bg-indigo-900/20 p-6 rounded-2xl border border-indigo-100 dark:border-indigo-800">
+                                    <h3 className="font-black uppercase text-indigo-600 mb-4 text-xs">Asignación Contractual</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div><label className={labelClass}>Convenio</label><select className={selectClass} value={form.laborAgreement} onChange={e=>setForm({...form, laborAgreement:e.target.value})}><option value="">Seleccionar...</option>{agreements.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>
+                                        <div><label className={labelClass}>Categoría</label><input className={inputClass} value={form.category} onChange={e=>setForm({...form, category:e.target.value})} placeholder="Ej: VIGILADOR"/></div>
+                                        <div><label className={labelClass}>Periodo Liquidación</label><select className={selectClass} value={form.periodType} onChange={e=>setForm({...form, periodType:e.target.value})}><option value="Mensual">Mensual</option><option value="Quincenal">Quincenal</option><option value="Jornal">Jornal</option></select></div>
+                                        <div><label className={labelClass}>Tipo Contrato</label><select className={selectClass} value={form.contractType} onChange={e=>setForm({...form, contractType:e.target.value})}><option value="FullTime">Full Time</option><option value="PartTime">Part Time</option><option value="Eventual">Eventual</option></select></div>
+                                        <div className="md:col-span-2 mt-2 pt-2 border-t border-indigo-200 dark:border-indigo-700">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div><label className={labelClass}>Inicio Ciclo Nómina (Día)</label><input type="number" className={inputClass} value={form.cycleStartDay} onChange={e=>setForm({...form, cycleStartDay:e.target.value})}/></div>
+                                                <div><label className={labelClass}>Objetivo Preferido</label><select className={selectClass} value={form.preferredObjectiveId} onChange={e=>setForm({...form, preferredObjectiveId:e.target.value})}><option value="">-</option>{filteredObjectives.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {activeFormTab === 'TALLES' && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in">
+                                <div className="md:col-span-3 mb-4"><h3 className="font-black text-sm text-slate-600 flex items-center gap-2"><Shirt size={16}/> Uniformes</h3></div>
+                                <div><label className={labelClass}>Camisa</label><input className={inputClass} placeholder="Ej: L" value={form.sizes?.shirt||''} onChange={e=>setForm({...form, sizes: {...form.sizes, shirt: e.target.value}})} /></div>
+                                <div><label className={labelClass}>Pantalón</label><input className={inputClass} placeholder="Ej: 44" value={form.sizes?.pants||''} onChange={e=>setForm({...form, sizes: {...form.sizes, pants: e.target.value}})} /></div>
+                                <div><label className={labelClass}>Calzado</label><input className={inputClass} placeholder="Ej: 42" value={form.sizes?.shoes||''} onChange={e=>setForm({...form, sizes: {...form.sizes, shoes: e.target.value}})} /></div>
+                            </div>
+                        )}
+                        {activeFormTab === 'DOCS' && (
+                            <div className="text-center py-20 animate-in fade-in text-slate-400">
+                                <FileText size={48} className="mx-auto mb-4 opacity-50"/>
+                                <p>Gestión Documental Próximamente</p>
+                            </div>
+                        )}
+                    </div>
+                    <div className="p-6 border-t dark:border-slate-800 flex justify-end gap-4 bg-slate-50 dark:bg-slate-950">
+                        <button onClick={() => setView('list')} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-200">Cancelar</button>
+                        <button onClick={handleSave} className="px-6 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl">Guardar Cambios</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* --- MODAL IMPORTACIÓN MASIVA (NUEVO UPLOAD) --- */}
+        {showImportModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                    <div className="p-6 border-b dark:border-slate-800 flex justify-between">
+                        <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2"><FileSpreadsheet className="text-emerald-600"/> Importación de Nómina</h3>
+                        <button onClick={() => setShowImportModal(false)}><X/></button>
+                    </div>
+                    
+                    <div className="p-6 overflow-y-auto flex-1">
+                        {!importPreview.length ? (
+                            <div className="space-y-4">
+                                <div className="p-4 bg-indigo-50 text-indigo-800 rounded-xl text-xs border border-indigo-100 flex items-start gap-3">
+                                    <Info className="shrink-0 mt-0.5" size={16}/>
+                                    <div>
+                                        <strong>Instrucciones:</strong>
+                                        <br/>1. Descarga la plantilla para ver el formato correcto.
+                                        <br/>2. Sube tu archivo CSV o Excel guardado como CSV.
+                                    </div>
+                                </div>
+                                <button onClick={handleDownloadTemplate} className="w-full flex items-center justify-center gap-2 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl hover:bg-slate-200 transition-colors text-xs uppercase mb-4">
+                                    <FileDown size={16}/> Descargar Plantilla Oficial
+                                </button>
+                                
+                                <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:border-indigo-500 transition-colors relative">
+                                    <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer"/>
+                                    <UploadCloud size={48} className="text-slate-400 mb-4"/>
+                                    <p className="text-sm font-bold text-slate-700 dark:text-white">Haz clic o arrastra tu archivo CSV aquí</p>
+                                    <p className="text-xs text-slate-400 mt-2">{fileName || 'Ningún archivo seleccionado'}</p>
+                                </div>
+
+                                <button onClick={handleProcessCSV} disabled={!csvContent} className={`w-full py-3 rounded-xl font-bold transition-colors ${csvContent ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>Procesar Datos</button>
+                            </div>
+                        ) : (
+                            <div>
+                                <h4 className="font-bold mb-4 flex items-center gap-2"><CheckCircle className="text-emerald-500"/> Registros Listos ({importPreview.length})</h4>
+                                <div className="max-h-60 overflow-auto border rounded-xl mb-4 bg-slate-50 dark:bg-slate-800">
+                                    <table className="w-full text-xs text-left">
+                                        <thead className="bg-slate-200 dark:bg-slate-900 font-bold sticky top-0"><tr><th className="p-2">Legajo</th><th className="p-2">Apellido, Nombre</th><th className="p-2">DNI / CUIL</th><th className="p-2">Cat.</th></tr></thead>
+                                        <tbody>
+                                            {importPreview.map((r, i) => (
+                                                <tr key={i} className="border-b dark:border-slate-700"><td className="p-2 font-mono">{r.fileNumber}</td><td className="p-2"><b>{r.lastName}</b>, {r.firstName}</td><td className="p-2">{r.dni}<br/><span className="text-[9px] text-slate-400">{r.cuil}</span></td><td className="p-2">{r.category}</td></tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => {setImportPreview([]); setCsvContent(''); setFileName('');}} className="flex-1 py-3 border rounded-xl font-bold">Volver</button>
+                                    <button onClick={confirmImport} disabled={isImporting} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700">{isImporting ? 'Importando...' : 'Confirmar e Importar'}</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* TABS ANTIGUOS (Se mantienen intactos) */}
+        {activeTab === 'feriados' && (<div className="flex-1 flex gap-6 overflow-hidden"><div className="w-1/3 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-6"><h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-4">Gestión Feriados</h3><div className="bg-indigo-50 dark:bg-indigo-900/30 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800 mb-6"><label className="text-[10px] font-black uppercase text-indigo-600 mb-2 block">Importar Oficiales</label><div className="flex gap-2"><select className={selectClass} value={syncYear} onChange={e => setSyncYear(parseInt(e.target.value))}><option value={2024}>2024</option><option value={2025}>2025</option><option value={2026}>2026</option></select><button onClick={handleSyncHolidays} disabled={isSyncing} className="flex-1 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors">{isSyncing ? '...' : <><Download size={14}/> Sincronizar</>}</button></div></div><div className="space-y-4 pt-4 border-t dark:border-slate-700"><p className="text-[10px] font-black uppercase text-slate-400">Carga Manual</p><input className={inputClass} value={holidayForm.name} onChange={e => setHolidayForm({...holidayForm, name: e.target.value})} placeholder="Nombre del Feriado"/><input type="date" className={inputClass} value={holidayForm.date} onChange={e => setHolidayForm({...holidayForm, date: e.target.value})}/><button onClick={handleSaveHoliday} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-xs">Guardar Manual</button></div></div><div className="flex-1 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-6 overflow-auto custom-scrollbar"><div className="grid grid-cols-1 gap-3">{holidays.map(h => (<div key={h.id} className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border dark:border-slate-700"><div className="flex items-center gap-4"><Calendar size={20} className="text-indigo-500"/><div><p className="font-black dark:text-white uppercase">{h.name}</p><p className="text-xs font-mono text-slate-500">{new Date(h.date + 'T00:00:00').toLocaleDateString()}</p></div></div><button onClick={() => handleDeleteHoliday(h.id!)} className="text-slate-400 hover:text-rose-500"><X size={20}/></button></div>))}</div></div></div>)}
+        {activeTab === 'convenios' && (<div className="flex-1 flex gap-6 overflow-hidden"><div className="w-1/3 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-6 overflow-y-auto"><h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-4 flex items-center gap-2">{isEditingAgreement ? <Edit2 size={18}/> : <Book size={18}/>} {isEditingAgreement ? 'Editar' : 'Nuevo'} Convenio</h3><div className="space-y-4"><div><label className={labelClass}>Nombre</label><input className={inputClass} value={agreementForm.name} onChange={e => setAgreementForm({...agreementForm, name: e.target.value})}/></div><div className="grid grid-cols-2 gap-4"><div><label className={labelClass}>Semanal (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursWeekly} onChange={e => setAgreementForm({...agreementForm, maxHoursWeekly: parseInt(e.target.value)})}/></div><div><label className={labelClass}>Mensual (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursMonthly} onChange={e => setAgreementForm({...agreementForm, maxHoursMonthly: parseInt(e.target.value)})}/></div></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Sábados > 13hs</label><div className="flex gap-2"><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 0})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 0 ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>NORMAL</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 50})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 50 ? 'bg-emerald-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>50%</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 100})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 100 ? 'bg-rose-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>100%</button></div></div><div className="flex items-center gap-2 py-2"><input type="checkbox" checked={agreementForm.paysDoubleOnFranco} onChange={e => setAgreementForm({...agreementForm, paysDoubleOnFranco: e.target.checked})}/><span className="text-xs font-bold dark:text-white">Paga Franco Trabajado 100%</span></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Categorías</label><div className="flex gap-2 mb-2"><input className="flex-1 p-2 bg-white dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Ej: Vigilador"/><button onClick={handleAddCategory} className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Plus size={14}/></button></div><div className="flex flex-wrap gap-2">{agreementForm.categories.map((c, idx) => (<span key={idx} className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg text-[10px] font-bold border dark:border-slate-600 flex items-center gap-1">{c} <button onClick={() => removeCategory(idx)} className="text-rose-500"><X size={10}/></button></span>))}</div></div><div className="flex gap-2">{isEditingAgreement && <button onClick={() => { setIsEditingAgreement(false); setAgreementForm(initialAgreement); }} className="px-4 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase">Cancelar</button>}<button onClick={handleSaveAgreement} className="flex-1 bg-amber-500 text-white py-3 rounded-xl font-black uppercase text-xs">Guardar</button></div></div></div><div className="flex-1 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-6 overflow-auto custom-scrollbar"><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{agreements.map(a => (<div key={a.id} className="p-5 bg-slate-50 dark:bg-slate-900 rounded-[2rem] border dark:border-slate-700 relative group"><div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEditAgreement(a)} className="text-slate-300 hover:text-indigo-500"><Edit2 size={18}/></button><button onClick={() => handleDeleteAgreement(a.id!)} className="text-slate-300 hover:text-rose-500"><Trash2 size={18}/></button></div><h3 className="font-black text-slate-800 dark:text-white uppercase mb-2">{a.name}</h3><div className="space-y-1 text-xs text-slate-500"><p>Semanal: {a.maxHoursWeekly}hs | Mensual: {a.maxHoursMonthly}hs</p><p>Sábado > 13hs: <span className="font-bold text-indigo-500">{a.saturdayRate === 0 ? 'Normal' : a.saturdayRate + '%'}</span></p></div><div className="flex flex-wrap gap-1 mt-3">{a.categories.map(c => <span key={c} className="px-2 py-1 bg-slate-200 dark:bg-slate-800 rounded text-[9px]">{c}</span>)}</div></div>))}</div></div></div>)}
+        {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-[2rem] border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex justify-between items-center mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 max-w-md w-full"><Search size={16} className="text-slate-400"/><input placeholder="Buscar novedad..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div></div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr><th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30"><td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{new Date(a.startDate).toLocaleDateString()} - {new Date(a.endDate).toLocaleDateString()}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span></td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-right flex justify-end gap-2"><button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
+        {showAbsenceModal && (<div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"><div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] w-full max-w-2xl animate-in zoom-in-95 shadow-2xl"><h3 className="text-xl font-black uppercase mb-6 dark:text-white flex items-center gap-2"><AlertOctagon size={24} className="text-rose-500"/> {isEditingAbsence ? 'Editar Novedad' : 'Registrar Novedad'}</h3><div className="grid grid-cols-2 gap-6"><div className="space-y-4"><div><label className={labelClass}>Empleado</label><select className={selectClass} value={absenceForm.employeeId} onChange={e => setAbsenceForm({...absenceForm, employeeId: e.target.value})} disabled={isEditingAbsence}><option value="">Seleccionar...</option>{employees.map(e => <option key={e.id} value={e.id}>{e.lastName}, {e.firstName}</option>)}</select></div><div><label className={labelClass}>Tipo de Novedad</label><select className={selectClass} value={absenceForm.type} onChange={e => setAbsenceForm({...absenceForm, type: e.target.value})}><option value="Enfermedad">Enfermedad</option><option value="Vacaciones">Vacaciones</option><option value="Accidente">Accidente</option><option value="Ausencia con Aviso">Ausencia con Aviso</option><option value="Ausencia sin Aviso">Ausencia sin Aviso</option><option value="Sanción / Suspensión">Sanción / Suspensión</option><option value="Llegada Tarde">Llegada Tarde</option><option value="Licencia Gremial">Licencia Gremial</option><option value="Licencia por Estudio">Licencia por Estudio</option></select></div><div className="grid grid-cols-2 gap-2"><div><label className={labelClass}>Desde</label><input type="date" className={inputClass} value={absenceForm.startDate} onChange={e => setAbsenceForm({...absenceForm, startDate: e.target.value})}/></div><div><label className={labelClass}>Hasta</label><input type="date" className={inputClass} value={absenceForm.endDate} onChange={e => setAbsenceForm({...absenceForm, endDate: e.target.value})}/></div></div></div><div className="space-y-4"><div><label className={labelClass}>Detalle / Diagnóstico</label><input className={inputClass} value={absenceForm.reason} onChange={e => setAbsenceForm({...absenceForm, reason: e.target.value})} placeholder="Ej: Gripe A, Trámite personal..."/></div><div><label className={labelClass}>Estado de Justificación</label><select className={selectClass} value={absenceForm.status} onChange={e => setAbsenceForm({...absenceForm, status: e.target.value as any})}><option value="Pendiente">Pendiente de revisión</option><option value="Justificada">Justificada (Aprobada)</option><option value="Injustificada">Injustificada (Descuento)</option></select></div><div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border dark:border-slate-700"><input type="checkbox" className="w-5 h-5 rounded text-indigo-600" checked={absenceForm.hasCertificate} onChange={e => setAbsenceForm({...absenceForm, hasCertificate: e.target.checked})}/><label className="text-xs font-bold dark:text-white">Presentó Certificado / Comprobante</label></div><div><label className={labelClass}>Observaciones Internas</label><textarea className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white resize-none h-20 outline-none focus:ring-2" value={absenceForm.comments} onChange={e => setAbsenceForm({...absenceForm, comments: e.target.value})} placeholder="Notas para RRHH..."/></div></div></div><div className="flex gap-3 mt-8 border-t dark:border-slate-700 pt-6"><button onClick={() => setShowAbsenceModal(false)} className="flex-1 py-4 text-slate-400 font-bold uppercase text-xs hover:bg-slate-50 rounded-xl">Cancelar</button><button onClick={handleSaveAbsence} className="flex-1 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-xl font-black uppercase text-xs shadow-xl hover:scale-105 transition-transform">Guardar Novedad</button></div></div></div>)}
+      </div>
+    </DashboardLayout>
+  );
+}

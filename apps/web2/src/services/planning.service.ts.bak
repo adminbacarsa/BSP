@@ -1,0 +1,122 @@
+import { db } from './firebase.config';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  Timestamp, 
+  getFunctions, 
+  httpsCallable 
+} from 'firebase/firestore';
+import { getFunctions as getCloudFunctions } from 'firebase/functions';
+
+// Definición de Tipos
+export interface Shift {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  objectiveId: string;
+  startTime: Date;
+  endTime: Date;
+  status: 'Assigned' | 'Confirmed' | 'Completed' | 'Canceled';
+  type?: 'TURNO' | 'GUARDIA';
+}
+
+export interface Absence {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: 'VACATION' | 'SICK_LEAVE' | 'OTHER';
+  startDate: Date;
+  endDate: Date;
+  status: 'APPROVED' | 'PENDING';
+}
+
+class PlanningService {
+  private functions = getCloudFunctions();
+
+  /**
+   * 📡 ESCUCHA EN VIVO: Turnos + Ausencias combinados
+   */
+  subscribeToRoster(
+    objectiveId: string | null, 
+    startDate: Date, 
+    endDate: Date, 
+    onData: (data: { shifts: Shift[], absences: Absence[] }) => void
+  ) {
+    // 1. Query Turnos
+    let qShifts = query(
+      collection(db, 'turnos'),
+      where('startTime', '>=', Timestamp.fromDate(startDate)),
+      where('startTime', '<=', Timestamp.fromDate(endDate))
+    );
+
+    if (objectiveId) {
+      qShifts = query(qShifts, where('objectiveId', '==', objectiveId));
+    }
+
+    // 2. Query Ausencias (Traemos las activas en el rango)
+    // Nota: Simplificado para traer las del mes. En prod se puede optimizar.
+    const qAbsences = query(
+      collection(db, 'ausencias'),
+      where('endDate', '>=', Timestamp.fromDate(startDate)),
+      where('status', 'in', ['APPROVED', 'PENDING'])
+    );
+
+    // Suscripción Doble
+    const unsubShifts = onSnapshot(qShifts, (snapShifts) => {
+      const shifts = snapShifts.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ...d,
+          startTime: d.startTime?.toDate(),
+          endTime: d.endTime?.toDate()
+        } as Shift;
+      });
+
+      // Al recibir turnos, actualizamos ausencias también (snapshot simple)
+      onSnapshot(qAbsences, (snapAbs) => {
+        const absences = snapAbs.docs.map(doc => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            ...d,
+            startDate: d.startDate?.toDate(),
+            endDate: d.endDate?.toDate()
+          } as Absence;
+        });
+
+        // 🔥 ENTREGAMOS LA DATA MEZCLADA
+        onData({ shifts, absences });
+      });
+    });
+
+    return unsubShifts; // Para cancelar suscripción
+  }
+
+  /**
+   * 🧠 CEREBRO: Asignar turno validando reglas en Backend
+   */
+  async assignShift(shiftData: any) {
+    const scheduleShiftParams = {
+      employeeId: shiftData.employeeId,
+      objectiveId: shiftData.objectiveId,
+      startTime: shiftData.startTime, // Date
+      endTime: shiftData.endTime,     // Date
+      authorizeOvertime: shiftData.authorizeOvertime || false // Para saltar regla 48hs si el usuario quiere
+    };
+
+    try {
+      const call = httpsCallable(this.functions, 'scheduleShift');
+      const result = await call(scheduleShiftParams);
+      return result.data;
+    } catch (error: any) {
+      console.error("Error asignando turno:", error);
+      // Retornamos el error estructurado para que el UI muestre la alerta
+      throw error;
+    }
+  }
+}
+
+export const planningService = new PlanningService();

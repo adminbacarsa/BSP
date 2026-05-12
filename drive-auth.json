@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "cronoapp-sync",
+  "private_key_id": "083b1b2d14fa21c46ccc2cb5780e547a59cc2313",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC0BZeZIzSXs0U3\ncw434rH6yqqob00NGV76vzdGrouggXvha8dKBF7yE8EZ5r5RIePIbGwBo4rUud45\nZZn7WAK/XbtU6isxmZ//qSwPUrXRe6B2PB3lPG2YAarL1uZPu+Tn7j2LMaYQdaiz\nI14f0gUz15JDkCeTatCoQutInddBwtFnLBH9p7fxRIxrmKgPzwuPksd0537GDmua\nHFb7hC/PMSBvjrmdYaX8sAi9F0mdOfaOZC4mMX9FUEndLk6fD/MynO1OO4Rejl6O\nl2O661mYqTa8ubTy9nNiSXIsPVlsmObvKDcJ4PcO44xQPeQFHnMS4kXuqZhHH3iI\nZLIcM+PTAgMBAAECggEAGmZzi/6wuMqOjQovfJyfM0NDcb4Y06Hz3tvp9FCmo1w5\n2Z4ftMgdUGz7NZw0LtvEduEHmdntAzNa1poC0exfQscxMMvCl9yKrUiW8IxVo6n4\npz47uCF7hP5BmPEkB29rq2Ox3NbkHqfSnKrEI/B92NN1XLkoRKM2hGaD8LtNFRSI\nRawp9PeWU4hq90ybQl8z41LSZ+v2JqAAJm/cMioN7WWesxzI5J2dOdYpn+krUnJ4\nX5E50+lUYl/1fSMJTAFc2rymC1JmJgXLa6Cz/Pg7RSVVsy/fUyMhwbdUb5zj1nKO\nj0Eq2Xo9Ef5wqVJv9JA2xiWeFv73PcCmHGR3y/yEsQKBgQD544KxUEEobVVJuavs\nsuKiupbbTbWg7jQMNAdvJDMA1obGqW3m1bUwQNC+29dALpkm3bbZn5KsgjmvO8y+\nL7OOVgFYRgddsOF8aMODB391Fro/cS6qtU+I+4bND7XZdd7occgbqaDw/e0Xfx1A\nSJzrWgB/nlkkq7mIE6l0q6FaKQKBgQC4bKm72XE73+qBiYdyRiMjzb8sMXdwMXP2\ncNDVWt3LEuMwjF4/BMNzfAPZBUSIOvx4lsVRnm3ODiqchN3PbapO9tS49wnJfnNx\nrb+k/ciiHscRtEmwGpYw4nuhAtEVYjFgitxO+sppF9/gx4//eKHv92nFw8D7pTQG\n2xr3G7OFmwKBgQCUUNbXSx0BU7NVaOCEQsCFeV3kmED/XaKCw7bN3pxvGOUxsIpM\ngfdixnWfcnhV3dKE4P+QN0glH74BJeslzsYx6xYtQJNKppuO7ddtQ9wAsRamZRUf\nuTGVykR+HZ7/jRhaun3c/VdK8kvwsD+6Ud7hSbAWDvQ18b7S52iimOPR0QKBgA9H\nwZB05bLmTJHLCVPoh8TRqUNKHfFHx6nlkwf6bWIEAJrnJm/mPyN0ZQU4MINxD7YW\nF+c5TzPBbLpnL9Gd7nx4awugPElblskWckiDVnpIPooy++ABc+w8961RhG1XI2wy\nVSqeEONAPSZsonuyTQiK4VKnc3fmKjdfNA7BVtB9AoGBAMotrZHADpYQRuVCw3RM\nOHjnYF4DRdWnetzC5LJxwcKMFzBaGFsR7ltM9h6oiM0N/a5WVs2gbYQNRVMl0Tt4\nqPNL508Q0vnFmY04YoRO8ZjFIu4iumLutI2HaCROitBaWwopHWSvJcAPBitb6Qri\nvyLpBA90Nvfrvegxjhd+ZjKD\n-----END PRIVATE KEY-----\n",
+  "client_email": "gemini-sync@cronoapp-sync.iam.gserviceaccount.com",
+  "client_id": "112712153854224359746",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/gemini-sync%40cronoapp-sync.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

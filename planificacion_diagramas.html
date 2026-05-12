@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CronoApp - Planificador V3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'loose' });
+        window.mermaid = mermaid;
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    
+    <style>
+        .editor-box {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            background-color: #1e293b;
+            color: #a5b4fc;
+        }
+        .diagram-wrapper {
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            height: 650px;
+            overflow: hidden;
+            position: relative;
+            cursor: grab;
+        }
+        .diagram-wrapper:active {
+            cursor: grabbing;
+        }
+        .tab-btn.active {
+            background-color: #4f46e5; /* Indigo 600 */
+            color: white;
+            border-color: #4f46e5;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 z-10 shadow-sm">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-black text-slate-800 tracking-tight">CRONOAPP <span class="text-indigo-600">PLANIFICADOR</span></h1>
+            
+            <div class="flex bg-slate-100 p-1 rounded-lg ml-8">
+                <button onclick="switchTab('flow')" id="btn-flow" class="tab-btn active px-4 py-1.5 rounded-md text-sm font-bold text-slate-600 hover:text-indigo-600 transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-diagram-project"></i> Diagrama de Flujo
+                </button>
+                <button onclick="switchTab('mind')" id="btn-mind" class="tab-btn px-4 py-1.5 rounded-md text-sm font-bold text-slate-600 hover:text-indigo-600 transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-brain"></i> Mapa Mental
+                </button>
+            </div>
+        </div>
+
+        <button onclick="renderCurrent()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow transition text-sm flex items-center gap-2">
+            <i class="fa-solid fa-rotate"></i> Actualizar Gráfico
+        </button>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <div class="w-1/3 flex flex-col border-r border-slate-200 bg-slate-900">
+            <div class="bg-slate-800 text-slate-400 px-4 py-2 text-xs font-bold uppercase tracking-wider flex justify-between">
+                <span>Editor de Código</span>
+                <span class="text-indigo-400">Mermaid Syntax</span>
+            </div>
+            
+            <textarea id="code-flow" class="editor-box w-full flex-1 p-4 resize-none outline-none" spellcheck="false">
+flowchart TD
+    %% Estilos
+    classDef state fill:#e0f2fe,stroke:#3b82f6,color:black;
+    classDef logic fill:#fef3c7,stroke:#d97706,color:black;
+    classDef db fill:#dcfce7,stroke:#10b981,color:black;
+    classDef alert fill:#fee2e2,stroke:#ef4444,color:black;
+    classDef action fill:#f3e8ff,stroke:#7e22ce,color:black;
+
+    Start((Inicio)) --> Load["Cargar Data Firebase<br/>(Turnos + SLA + Ausencias)"]
+    Load --> Idle{"Esperando Acción"}
+
+    %% INTERACCIÓN USUARIO
+    Idle -- "Clic en Celda" --> CheckLock{"¿Celda Bloqueada o<br/>Consolidada?"}
+    
+    CheckLock -- Sí --> ShowReadOnly[Mostrar Modal Solo Lectura]
+    
+    CheckLock -- No --> DetectConflict{"¿Hay Conflicto?<br/>(Turno + Ausencia)"}
+    
+    %% RAMA CONFLICTOS
+    DetectConflict -- Sí --> ModalConflict[🔴 ABRIR MODAL CONFLICTO]
+    ModalConflict --> Resolve{Resolver}
+    Resolve -- "Split" --> ApplySplit["Modificar Turnos Vecinos<br/>(Extender Salida / Adelantar Entrada)"]
+    Resolve -- "Suplente" --> ApplyCover[Asignar Franco Trabajado]
+    
+    %% RAMA NORMAL
+    DetectConflict -- No --> CheckFranco{"¿Es Franco?"}
+    
+    %% RAMA FRANCOS
+    CheckFranco -- Sí --> ModalFranco[MODAL FRANCO]
+    ModalFranco --> OptFranco{Opción}
+    OptFranco -- "FT" --> MarkFT[Marcar como Franco Trabajado]
+    OptFranco -- "Enroque (FF)" --> SwapWizard[Iniciar Wizard Intercambio]
+    SwapWizard --> SelectTarget[Seleccionar Compañero] --> SelectDate[Seleccionar Fecha Devolución] --> ApplySwap[Generar 4 Movimientos]
+    
+    %% RAMA ASIGNACIÓN ESTÁNDAR
+    CheckFranco -- No --> ModalStd[MODAL ASIGNACIÓN]
+    ModalStd --> SelectSLA["Seleccionar Servicio (SLA)"]
+    SelectSLA --> ValidateRules{checkLaborRules}
+    
+    ValidateRules -- "Error Crítico" --> Block["❌ Bloquear (Toast Error)"]
+    ValidateRules -- "Warning" --> ConfirmWarn["⚠️ Modal Confirmación"]
+    ConfirmWarn -- Confirmar --> AddPending
+    ValidateRules -- "OK" --> AddPending
+    
+    %% GUARDADO
+    ApplySplit & ApplyCover & MarkFT & ApplySwap & AddPending --> UpdatePending[Actualizar pendingChanges]
+    UpdatePending --> Idle
+    
+    Idle -- "Clic Guardar Todo" --> SaveBatch{¿Confirmar?}
+    SaveBatch -- Sí --> FirebaseBatch["🔥 WriteBatch Firebase<br/>+ Audit Logs<br/>+ Historial Snapshot"]
+    FirebaseBatch --> ClearPending[Limpiar Pendientes] --> Idle
+
+    class Start,Load,FirebaseBatch db;
+    class CheckLock,DetectConflict,CheckFranco,ValidateRules logic;
+    class ModalConflict,Block,ConfirmWarn alert;
+    class ModalFranco,ModalStd,SwapWizard,ShowReadOnly state;
+    class ApplySplit,ApplyCover,MarkFT,ApplySwap,AddPending action;
+            </textarea>
+
+            <textarea id="code-mind" class="editor-box w-full flex-1 p-4 resize-none outline-none hidden" spellcheck="false">
+mindmap
+  root((Planificador<br/>v7.0 Core))
+    Estructura de Datos
+      Firebase Realtime
+        Turnos "shiftsMap"
+        Ausencias "absencesMap"
+        Empleados "employees"
+        Convenios "agreements"
+      Estado Local "Memoria"
+        pendingChanges "Ediciones sin guardar"
+        historyVersions "Snapshots"
+        selection "Rango de celdas"
+    Interfaz Principal
+      Header Contextual
+        Selectores "Cliente/Objetivo"
+        Alertas "Notificaciones"
+        Navegación Mes
+      Grid Interactivo
+        Filas "Empleados Filtrados"
+        Celdas "Componente con Estilos"
+        Indicadores Visuales "Conflictos, Candados"
+    Motores Lógicos
+      checkLaborRules
+        Valida 48hs Semanales
+        Valida 200hs Mensuales
+      findNeighbors
+        Detecta turnos adyacentes
+      Modo Comparación
+        Overlay de Snapshot histórico
+    Sistema de Modales
+      Modal Célula "General"
+        Asignación por SLA
+        Modificadores "Extend, Early, Novedad"
+      Modal Conflictos "Siren"
+        Split "Extender/Adelantar"
+        Full Coverage "Suplente"
+      Wizard de Enroque "Swap"
+        Búsqueda de compañero
+        Selección de Franco destino
+      Gestor de Vacantes
+        Relleno masivo de suplencia
+            </textarea>
+        </div>
+
+        <div class="w-2/3 bg-slate-50 relative flex flex-col">
+            <div id="diagram-container" class="diagram-wrapper flex-1 w-full h-full">
+                <div id="mermaid-output" class="w-full h-full flex items-center justify-center text-slate-400">
+                    Cargando...
+                </div>
+            </div>
+            
+            <div class="absolute bottom-4 right-4 bg-white p-2 rounded-lg shadow-lg border border-slate-200 flex flex-col gap-2">
+                <div class="text-[10px] font-bold text-center text-slate-400 uppercase">Zoom</div>
+                <button id="zoom-in" class="w-8 h-8 rounded hover:bg-slate-100 font-bold text-slate-600">+</button>
+                <button id="zoom-out" class="w-8 h-8 rounded hover:bg-slate-100 font-bold text-slate-600">-</button>
+                <button id="zoom-reset" class="w-8 h-8 rounded hover:bg-slate-100 font-bold text-slate-600"><i class="fa-solid fa-expand"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+        let currentTab = 'flow'; // 'flow' or 'mind'
+        let panZoomInstance = null;
+
+        // Expose functions to window
+        window.switchTab = function(tab) {
+            currentTab = tab;
+            
+            // Toggle Buttons
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + tab).classList.add('active');
+
+            // Toggle Textareas
+            document.getElementById('code-flow').classList.add('hidden');
+            document.getElementById('code-mind').classList.add('hidden');
+            document.getElementById('code-' + tab).classList.remove('hidden');
+
+            // Render
+            renderCurrent();
+        }
+
+        window.renderCurrent = async function() {
+            const code = document.getElementById('code-' + currentTab).value;
+            const output = document.getElementById('mermaid-output');
+
+            // Destroy previous PanZoom
+            if (panZoomInstance) {
+                panZoomInstance.destroy();
+                panZoomInstance = null;
+            }
+
+            output.innerHTML = '';
+            output.removeAttribute('data-processed');
+
+            try {
+                // Generate ID based on tab to avoid caching conflicts
+                const id = 'graph-' + currentTab + '-' + Date.now();
+                const { svg } = await mermaid.render(id, code);
+                output.innerHTML = svg;
+
+                const svgElement = output.querySelector('svg');
+                if (svgElement) {
+                    svgElement.style.width = '100%';
+                    svgElement.style.height = '100%';
+                    
+                    // Init PanZoom
+                    panZoomInstance = svgPanZoom(svgElement, {
+                        zoomEnabled: true,
+                        controlIconsEnabled: false,
+                        fit: true,
+                        center: true,
+                        minZoom: 0.1,
+                        maxZoom: 10
+                    });
+
+                    // Link custom controls
+                    document.getElementById('zoom-in').onclick = () => panZoomInstance.zoomIn();
+                    document.getElementById('zoom-out').onclick = () => panZoomInstance.zoomOut();
+                    document.getElementById('zoom-reset').onclick = () => panZoomInstance.resetZoom();
+                }
+
+            } catch (error) {
+                output.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-rose-500 p-8 text-center">
+                        <i class="fa-solid fa-triangle-exclamation text-4xl mb-4"></i>
+                        <strong class="text-lg">Error de Sintaxis</strong>
+                        <p class="text-sm mt-2 text-rose-400">Revisa las comillas o paréntesis en el código.</p>
+                        <pre class="mt-4 bg-rose-50 p-4 rounded text-xs text-left overflow-auto w-full max-w-lg border border-rose-200 font-mono">${error.message}</pre>
+                    </div>
+                `;
+                console.error(error);
+            }
+        }
+
+        // Init
+        window.onload = function() {
+            renderCurrent();
+        };
+    </script>
+</body>
+</html>

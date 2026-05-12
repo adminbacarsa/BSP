@@ -1,0 +1,12 @@
+{
+  "name": "pdf-elaborador",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node generate.mjs",
+    "sample": "node generate.mjs --input data/informe-sample.json"
+  },
+  "dependencies": {
+    "pdfkit": "^0.17.2"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "parameters": {
+    "method": "POST",
+    "url": "https://us-central1-comtroldata.cloudfunctions.net/nvrAgentEvents",
+    "sendHeaders": true,
+    "headerParameters": {
+      "parameters": [
+        {
+          "name": "Authorization",
+          "value": "Bearer RRrtHM69t3p-_lv9O3UXkQZvSBWvP51PJ0BxOQSnTe0"
+        }
+      ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={\n  \"nvrId\": \"{{ $json.body.nvrId }}\",\n  \"channel\": {{ $json.body.channel }},\n  \"eventTypeName\": \"{{ $json.body.eventTypeName }}\",\n  \"status\": \"{{ $json.body.status }}\",\n  \"timestamp\": \"{{ $json.body.timestamp }}\"\n}",
+    "options": {}
+  },
+  "id": "enviar-evento-cronoapp-directo-001",
+  "name": "Enviar evento a CronoApp (directo)",
+  "type": "n8n-nodes-base.httpRequest",
+  "typeVersion": 4.2,
+  "position": [-4304, 608],
+  "notesInFlow": true,
+  "notes": "Envía cada alerta a nvrAgentEvents en cuanto llega. Reemplazar TU_AGENT_SECRET_AQUI por platform.key (agent_secret) o nvr_config/webhook.secret."
+}

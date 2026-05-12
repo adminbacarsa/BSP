@@ -1,0 +1,23 @@
+URL de producción (Firebase Hosting del proyecto comtroldata):
+  https://comtroldata.web.app
+  (Nota: "controldata.web.app" sin la M devuelve Site Not Found — el hosting vivo es comtroldata.)
+
+Capturas PNG en esta carpeta (nombres usados por presentacion-cosp-v1.html):
+  portada.png, dashboard.png, operaciones.png, planificacion.png,
+  crm.png, servicios.png, reportes.png, analisis.png,
+  empleados.png, rrhh.png, configuracion.png, guia.png, empleado.png
+
+Regenerar desde la web (PowerShell, desde esta carpeta):
+  npx --yes playwright@1.51.0 install chromium
+  luego ejecutar los comandos screenshot como en docs/capture-cosp-screenshots.ps1
+
+Abrí el deck: docs/presentacion-cosp-v1.html (doble clic). Las rutas img son relativas a docs/.
+
+Portal empleado (panel de 3 capturas en el HTML):
+  empleado-main.png, empleado-turnos.png, empleado-notificaciones.png
+
+PDF exportados (sin margenes, 1 diapositiva por hoja):
+  docs/presentacion-cosp-v1.pdf (A4 horizontal)
+  docs/presentacion-cosp-v1-letter.pdf (Letter horizontal)
+  Variante Letter: presentacion-cosp-v1-letter.html
+

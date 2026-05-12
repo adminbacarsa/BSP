@@ -1,0 +1,52 @@
+{
+  "name": "cronoapp",
+  "version": "1.0.0",
+  "description": "Monorepositorio para la aplicación de cronogramas. Contiene Frontend (web) y Backend (functions).",
+  "main": "index.js",
+  "scripts": {
+    "docs:capturas": "node scripts/capture-tutorial-screens.cjs",
+    "docs:capturas-flujo": "node scripts/capture-tutorial-flows.cjs",
+    "docs:capturas-all": "npm run docs:capturas && npm run docs:capturas-flujo",
+    "dev": "npm --prefix apps/web2 run dev",
+    "build": "npm --prefix apps/web2 run build",
+    "start": "npm run serve:final",
+    "test": "echo \"Error: Los tests se ejecutan en las subcarpetas: npm run test --workspace=functions\" && exit 1",
+    "install:all": "npm install --workspaces",
+    "dev:backend": "npm run serve --workspace=functions",
+    "dev:frontend": "npm run dev --workspace=web",
+    "dev:web2": "npm --prefix apps/web2 run dev",
+    "serve:final": "node iniciar.js",
+    "sync": "node sync_cronoapp.js",
+    "watch": "npx nodemon -L --watch apps --ext ts,tsx,js,json --ignore \"**/node_modules/**\" --ignore \"**/.next/**\" --ignore \"**/out/**\" --delay 2 --exec \"node sync_cronoapp.js\"",
+    "dev:local": "bash scripts/start-local.sh",
+    "dev:local:backup": "bash scripts/start-local.sh",
+    "backup:import": "node scripts/import-backup.js",
+    "emulators": "firebase emulators:start --import=./backups/latest --export-on-exit=./backups/latest"
+  },
+  "keywords": [
+    "firebase",
+    "nestjs",
+    "nextjs",
+    "typescript",
+    "monorepo"
+  ],
+  "author": "Vale - Senior Tech Lead",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  },
+  "dependencies": {
+    "@types/leaflet": "^1.9.21",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "firebase": "^12.8.0",
+    "firebase-admin": "^13.6.0",
+    "form-data": "^4.0.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.555.0",
+    "pdfkit": "^0.17.2",
+    "react-leaflet": "^5.0.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.4.0"
+  }
+}

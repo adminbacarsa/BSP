@@ -1,0 +1,8 @@
+fix(analisis): analitica solo cuenta turnos de cobertura real
+
+- Filtra documentos con origin SLA_VIRTUAL/INTERRUPTION (vacantes virtuales).
+- Para metricas Horas/Turnos/Hs nocturnas exige isCoverageShift(t),
+  excluyendo F, FF, FP, V, L, E, A, AA, PG y RET.
+- Garantiza que el KPI "Total turnos" sume lo mismo en cualquier dimension
+  (Empleado, Objetivo, Cliente, etc.) y coincida con la planificacion real.
+- 'absence' sigue contando ausencias formales sin restringir a cobertura.

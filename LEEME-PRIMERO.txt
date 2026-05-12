@@ -1,0 +1,28 @@
+============================================
+  CONTROLDATA - Flujo de trabajo
+============================================
+
+ 1. DESARROLLAR (trabajar en local)
+    npm run dev
+    -> Abrir http://localhost:3000
+    Editás código en apps/web2/src, los cambios se ven al instante.
+
+ 2. COMPILAR (cuando terminás de probar)
+    npm run build
+    -> Genera apps/web2/out/ (la versión estática).
+
+ 3. PROBAR EL BUILD EN LOCAL (opcional)
+    npm start
+    -> Abrir http://localhost:5005
+    Es la misma versión que se sube a producción.
+
+ 4. DESPLEGAR
+    firebase deploy --only hosting
+
+--------------------------------------------
+Primera vez en esta PC / notebook:
+  git clone https://github.com/adminbacarsa/BSP.git
+  cd BSP
+  npm install
+  npm run dev
+--------------------------------------------

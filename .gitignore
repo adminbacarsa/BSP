@@ -1,0 +1,74 @@
+# --- Dependencias y Compilados ---
+node_modules/
+jspm_packages/
+dist/
+dist-ssr/
+build/
+.cache/
+.parcel-cache/
+.next/
+out/
+**/.next/
+**/out/
+_pdfgen/
+apps/web2/out_local_backup/
+apps/web2/out_prod/
+
+# --- Credenciales (nunca commitear) ---
+service-account.json
+backups/
+
+# --- Archivos de Datos y Media (Causantes de >100MB) ---
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.mp4
+*.mov
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+# Si usas bases de datos locales:
+*.sqlite
+*.db
+
+# --- Logs y Debug ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Capturas tutorial (credenciales locales; no commitear)
+docs/tutorial-capture.env
+scripts/tutorial-capture.env
+
+# --- Variables de Entorno (Seguridad y peso) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- Editor y Sistema ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+_SNAPSHOTS_ROOT/
+Thumbs.db
+
+# --- NVR Agent: SDK Dahua (terceros, no commitear) ---
+apps/nvr-agent/sdk/
+
+apps/web2/out/

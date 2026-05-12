@@ -1,0 +1,3342 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import { PageShell, TabBar } from '@/components/ui';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
+import {
+  TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
+  Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
+  Shield, AlertCircle, ArrowUp, ArrowDown, Minus, Calendar, ChevronDown,
+  Filter, PieChart as PieIcon, BarChart2, Download, RefreshCw, Scale,
+  MapPin,
+} from 'lucide-react';
+import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
+  PieChart, Pie, RadialBarChart, RadialBar, AreaChart, Area, Treemap,
+} from 'recharts';
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const JS_DAY_MAP   = ['D','L','M','X','J','V','S'];
+/** Códigos típicos operativos (referencia rápida para informes específicos como ART.12). */
+const OPERATIVE_CODES = new Set(['M','T','N','D12','N12','PU','GU','FT']);
+const FRANCO_SHIFT_CODES = new Set(['F', 'FF', 'FP']);
+/** Turnos no operativos desde planificación/RRHH (vacaciones, licencias, enfermedad, ART, PG…). */
+const LICENCIA_SHIFT_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
+/** Códigos que NO son cobertura de puesto (no suman hs programadas/operativas). */
+const NON_COVERAGE_SHIFT_CODES = new Set([
+  ...FRANCO_SHIFT_CODES,
+  ...LICENCIA_SHIFT_CODES,
+  'RET', // retén disponible — en planificador no cuenta como cobertura del puesto
+]);
+/** Determina si un turno aporta cobertura operativa real (suma horas) — alineado con el planificador. */
+const isCoverageShift = (t: any): boolean => {
+  const code = String(t?.code || '').trim().toUpperCase();
+  if (NON_COVERAGE_SHIFT_CODES.has(code)) return false;
+  if (t?.isFranco === true) return false;
+  return true;
+};
+
+const parseAbsenceInstant = (v: any, endOfDay: boolean): Date | null => {
+  if (v == null) return null;
+  if (typeof v === 'object' && v !== null && 'seconds' in v && typeof (v as { seconds: number }).seconds === 'number') {
+    const t = new Date((v as { seconds: number }).seconds * 1000);
+    const y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
+    return endOfDay ? new Date(y, m, d, 23, 59, 59, 999) : new Date(y, m, d, 0, 0, 0, 0);
+  }
+  const s = String(v).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const p = s.split('-').map(Number);
+  return endOfDay
+    ? new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999)
+    : new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+};
+
+const ausenciaSolapaPeriodo = (a: any, pStart: Date, pEnd: Date): boolean => {
+  const sd = parseAbsenceInstant(a.startDate, false);
+  const ed = parseAbsenceInstant(a.endDate, true);
+  if (!sd || !ed) return false;
+  return sd <= pEnd && ed >= pStart;
+};
+
+const ausenciaCuentaNoDisponible = (a: any): boolean => {
+  const st = String(a.status || '').toLowerCase();
+  return st !== 'rechazada';
+};
+
+/** Umbral referencia ART (convivencia / traslado): domicilio del personal vs ubicación del puesto. */
+const ART12_MAX_KM_VIVIENDA = 25;
+/** Por encima de esto se considera error de carga (coords invertidas, geocodificación fuera de país, etc.), no desplazamiento real. */
+const ART12_MAX_PLAUSIBLE_COMMUTE_KM = 500;
+
+/** Caja amplia Argentina para detectar domicilios claramente fuera de lugar o lat/lng invertidos. */
+function isRoughArgentinaLatLng(lat: number, lng: number): boolean {
+  return lat >= -56 && lat <= -20 && lng >= -74 && lng <= -52;
+}
+
+function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+/** Si la distancia es absurda, prueba lat/lng del legajo invertidos (error frecuente al guardar). */
+function art12EmployeeCoordsForDistance(
+  rawLat: number,
+  rawLng: number,
+  objLat: number,
+  objLng: number
+): { lat: number; lng: number; usedLatLngSwap: boolean } {
+  const km = haversineDistanceKm(rawLat, rawLng, objLat, objLng);
+  if (km <= ART12_MAX_PLAUSIBLE_COMMUTE_KM) return { lat: rawLat, lng: rawLng, usedLatLngSwap: false };
+  const kmSwap = haversineDistanceKm(rawLng, rawLat, objLat, objLng);
+  const swapLooksValid =
+    kmSwap < km &&
+    kmSwap <= ART12_MAX_PLAUSIBLE_COMMUTE_KM &&
+    isRoughArgentinaLatLng(rawLng, rawLat) &&
+    isRoughArgentinaLatLng(objLat, objLng);
+  if (swapLooksValid) return { lat: rawLng, lng: rawLat, usedLatLngSwap: true };
+  return { lat: rawLat, lng: rawLng, usedLatLngSwap: false };
+}
+
+type ObjectiveGeoEntry = { lat: number; lng: number; name: string; clientName: string };
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+type PeriodMode = 'day' | 'week' | 'month' | 'year';
+
+const clampDayInMonth = (y: number, m: number, d: number) => {
+  const last = new Date(y, m + 1, 0).getDate();
+  return Math.min(Math.max(1, d), last);
+};
+
+const startOfWeekMonday = (d: Date) => {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const wd = x.getDay();
+  const offset = wd === 0 ? -6 : 1 - wd;
+  x.setDate(x.getDate() + offset);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+
+const isLeapYear = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+
+const getPeriodRange = (mode: PeriodMode, y: number, m: number, dayInMonth: number) => {
+  const dClamped = clampDayInMonth(y, m, dayInMonth);
+  if (mode === 'day') {
+    const start = new Date(y, m, dClamped, 0, 0, 0, 0);
+    const end = new Date(y, m, dClamped, 23, 59, 59, 999);
+    return {
+      start,
+      end,
+      labelShort: `${String(dClamped).padStart(2, '0')}/${String(m + 1).padStart(2, '0')}/${y}`,
+      daysCount: 1,
+    };
+  }
+  if (mode === 'week') {
+    const anchor = new Date(y, m, dClamped, 12, 0, 0, 0);
+    const mon = startOfWeekMonday(anchor);
+    const end = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6, 23, 59, 59, 999);
+    return {
+      start: mon,
+      end,
+      labelShort: `Sem. ${String(mon.getDate()).padStart(2, '0')}/${String(mon.getMonth() + 1).padStart(2, '0')} – ${String(end.getDate()).padStart(2, '0')}/${String(end.getMonth() + 1).padStart(2, '0')}/${end.getFullYear()}`,
+      daysCount: 7,
+    };
+  }
+  if (mode === 'month') {
+    const start = new Date(y, m, 1, 0, 0, 0, 0);
+    const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    return { start, end, labelShort: `${MONTHS_SHORT[m]} ${y}`, daysCount: end.getDate() };
+  }
+  const start = new Date(y, 0, 1, 0, 0, 0, 0);
+  const end = new Date(y, 11, 31, 23, 59, 59, 999);
+  return { start, end, labelShort: `Año ${y}`, daysCount: isLeapYear(y) ? 366 : 365 };
+};
+
+/** Inicio (00:00) y fin inclusive (23:59:59) del contrato en fecha local YYYY-MM-DD. */
+const contractDayBounds = (srvStart: string, srvEnd: string): { sStart: Date; sEnd: Date } | null => {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(srvStart || '').trim());
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(srvEnd || '').trim());
+  if (!a || !b) return null;
+  const sStart = new Date(Number(a[1]), Number(a[2]) - 1, Number(a[3]), 0, 0, 0, 0);
+  const sEnd = new Date(Number(b[1]), Number(b[2]) - 1, Number(b[3]), 23, 59, 59, 999);
+  if (Number.isNaN(sStart.getTime()) || Number.isNaN(sEnd.getTime())) return null;
+  return { sStart, sEnd };
+};
+
+/** Tope hs/guardia en el período: prorrateo CCT usando días con demanda SLA cuando aplica. */
+const capHsPerGuardInPeriod = (
+  mode: PeriodMode,
+  calendarDaysInPeriod: number,
+  demandDaysWithSLA: number,
+  efectiveHsMonthly: number,
+  diasPorGuardia: number,
+  hsTurnoPlanif: number
+) => {
+  const cal = Math.max(1, calendarDaysInPeriod);
+  const demand = demandDaysWithSLA > 0 ? Math.min(demandDaysWithSLA, cal) : cal;
+
+  if (mode === 'day' || mode === 'week') {
+    const daysEff = Math.max(1, demand);
+    return hsTurnoPlanif * daysEff;
+  }
+
+  if (mode === 'month') {
+    const dClamped = Math.min(demand, diasPorGuardia);
+    const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
+    return Math.min(efectiveHsMonthly, Math.max(1, scaled));
+  }
+  if (mode === 'year') {
+    const capAnnual = efectiveHsMonthly * 12;
+    const dClamped = Math.min(demand, diasPorGuardia * 12);
+    const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
+    return Math.min(capAnnual, Math.max(1, scaled));
+  }
+  return Math.max(1, Math.round(efectiveHsMonthly * (Math.min(demand, cal) / diasPorGuardia)));
+};
+
+/** Horas de un puesto en un día calendario (0 si fuera de vigencia). */
+const calcPositionDayHours = (pos: any, srvStart: string, srvEnd: string, day: Date): number => {
+  const b = contractDayBounds(srvStart, srvEnd);
+  if (!b) return 0;
+  const cur = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12, 0, 0, 0);
+  if (cur < b.sStart || cur > b.sEnd) return 0;
+  const dc = JS_DAY_MAP[cur.getDay()];
+  let h = 0;
+  if (pos.coverageType === '24hs') h = 24;
+  else if (
+    pos.coverageType === '12hs_diurno' ||
+    pos.coverageType === '12hs_nocturno' ||
+    pos.coverageType === '12hs'
+  ) {
+    h = 12;
+  } else if (pos.coverageType === 'custom') {
+    (pos.allowedShiftTypes || []).forEach((s: any) => {
+      if (!s.days || s.days.length === 0 || s.days.includes(dc)) h += s.hours || 0;
+    });
+  }
+  return h * (pos.quantity || 1);
+};
+
+/**
+ * Días calendario del rango analizado donde hay al menos 1 hs teórica SLA (intersección vigencia contrato × período).
+ */
+const countDemandDaysInRange = (services: any[], rangeStart: Date, rangeEnd: Date): number => {
+  const rs = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 12, 0, 0, 0);
+  const re = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 12, 0, 0, 0);
+  let n = 0;
+  for (let d = new Date(rs); d <= re; d.setDate(d.getDate() + 1)) {
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+    let sum = 0;
+    for (const srv of services) {
+      if (!srv?.startDate || !srv?.endDate) continue;
+      sum += (srv.positions || []).reduce(
+        (acc: number, pos: any) => acc + calcPositionDayHours(pos, srv.startDate, srv.endDate, day),
+        0
+      );
+    }
+    if (sum > 0) n++;
+  }
+  return n;
+};
+
+/** quotaHsPerGuard: cupo mensual CCT (p. ej. 192) o hs por turno en vista día/semana (8 o 12). */
+const calcSrvDateRange = (srv: any, rangeStart: Date, rangeEnd: Date, quotaHsPerGuard = 192) => {
+  const rs = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 12, 0, 0, 0);
+  const re = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 12, 0, 0, 0);
+  let total = 0;
+  for (let d = new Date(rs); d <= re; d.setDate(d.getDate() + 1)) {
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+    total += (srv.positions || []).reduce(
+      (sum: number, pos: any) => sum + calcPositionDayHours(pos, srv.startDate, srv.endDate, day),
+      0
+    );
+  }
+  const hours = Math.round(total);
+  const guards = hours > 0 ? Math.ceil(hours / quotaHsPerGuard) : 0;
+  const surplus = guards * quotaHsPerGuard - hours;
+  return { hours, guards, surplus: Math.round(surplus) };
+};
+
+const calcSrvMonth = (srv: any, y: number, m: number, efectiveHs = 192) => {
+  const start = new Date(y, m, 1, 12, 0, 0, 0);
+  const end = new Date(y, m + 1, 0, 12, 0, 0, 0);
+  return calcSrvDateRange(srv, start, end, efectiveHs);
+};
+
+/** Fallback de horas por código de turno (alineado con planificador y reportes). */
+const SHIFT_HOURS_LOOKUP_FALLBACK: Record<string, number> = {
+  M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 12, FT: 8, C: 8,
+  F: 0, FF: 0, FP: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0,
+};
+
+/** Mismo orden que el planificador: campo hours > diferencia start/end > fallback por código.
+ * Franco/licencias/retén no suman horas de cobertura (aunque el documento tenga ventana horaria de 8h). */
+const shiftDur = (t: any): number => {
+  if (!isCoverageShift(t)) return 0;
+  const stored = Number(t?.hours);
+  if (Number.isFinite(stored) && stored > 0) return Math.min(stored, 24);
+  if (t?.startTime?.seconds && t?.endTime?.seconds) {
+    return Math.max(0, Math.min((t.endTime.seconds - t.startTime.seconds) / 3600, 24));
+  }
+  const code = String(t?.code || '').trim().toUpperCase();
+  if (code in SHIFT_HOURS_LOOKUP_FALLBACK) return SHIFT_HOURS_LOOKUP_FALLBACK[code];
+  return 0;
+};
+
+const shortName = (s: string, len = 14) => (s || '').length > len ? (s || '').substring(0, len) + '…' : (s || '');
+
+const formatYmdLocal = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// ─── CUSTOM TOOLTIP ───────────────────────────────────────────────────────────
+const ChartTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-3 text-xs min-w-[140px]">
+      {label && <p className="font-black text-slate-700 dark:text-white mb-2 uppercase">{label}</p>}
+      {payload.map((p: any, i: number) => (
+        <div key={i} className="flex items-center gap-2 py-0.5">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color || p.fill }}/>
+          <span className="text-slate-500 capitalize">{p.name}:</span>
+          <span className="font-black text-slate-700 dark:text-white ml-auto pl-3">
+            {typeof p.value === 'number' ? p.value.toLocaleString('es-AR') : p.value}{p.unit || ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── TREEMAP TILE ─────────────────────────────────────────────────────────────
+const TreemapTile = (props: any) => {
+  const { x, y, width, height, name, vacPct, size } = props;
+  if (!width || !height || width < 4 || height < 4) return null;
+  const color = vacPct === 0 ? '#059669' : vacPct <= 10 ? '#10b981' : vacPct <= 25 ? '#d97706' : '#dc2626';
+  const showText = width > 55 && height > 36;
+  return (
+    <g>
+      <rect x={x+1} y={y+1} width={width-2} height={height-2} rx={6} ry={6}
+        fill={color} fillOpacity={0.85} stroke="white" strokeWidth={2}/>
+      {showText && (
+        <>
+          <text x={x+width/2} y={y+height/2-(height>60?10:4)} textAnchor="middle"
+            fill="white" fontSize={Math.min(11, width/8)} fontWeight={700}>
+            {shortName(name, Math.max(6, Math.floor(width/8)))}
+          </text>
+          {height > 55 && (
+            <text x={x+width/2} y={y+height/2+10} textAnchor="middle"
+              fill="rgba(255,255,255,0.85)" fontSize={9} fontWeight={600}>
+              {Math.round(size).toLocaleString('es-AR')} hs · {vacPct}% vac
+            </text>
+          )}
+        </>
+      )}
+    </g>
+  );
+};
+
+// ─── DONUT CENTER LABEL ───────────────────────────────────────────────────────
+function DonutCenter({ cx, cy, value, label, color = '#4f46e5' }: {
+  cx: number; cy: number; value: React.ReactNode; label: string; color?: string;
+}) {
+  return (
+    <>
+      <text x={cx} y={cy - 9} textAnchor="middle" fill={color} fontSize={26} fontWeight={900}>{value}</text>
+      <text x={cx} y={cy + 12} textAnchor="middle" fill="#94a3b8" fontSize={9} fontWeight={700}>{label.toUpperCase()}</text>
+    </>
+  );
+}
+
+// ─── KPI CARD ─────────────────────────────────────────────────────────────────
+function KpiCard({ icon: Icon, color, label, value, unit, subtext, alert }: {
+  icon: React.ElementType; color: string; label: string; value: React.ReactNode;
+  unit?: string; subtext?: string; alert?: boolean;
+}) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm px-4 py-3.5 flex items-center gap-3
+      ${alert ? 'border-rose-300 dark:border-rose-800 ring-1 ring-rose-200 dark:ring-rose-900' : 'border-slate-100 dark:border-slate-700'}`}>
+      <div className="p-2 rounded-lg shrink-0" style={{ background: color + '1a' }}>
+        <Icon size={14} color={color} strokeWidth={2.5}/>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider leading-tight truncate">{label}</p>
+        <p className="text-xl font-black text-slate-800 dark:text-white leading-tight">
+          {value}{unit && <span className="text-xs font-bold text-slate-400 ml-0.5">{unit}</span>}
+        </p>
+        {subtext && <p className="text-[9px] text-slate-400 font-medium leading-tight">{subtext}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── SECTION CARD ─────────────────────────────────────────────────────────────
+function SectionCard({ title, icon: Icon, loading, children, className = '' }: {
+  title: string; icon: React.ElementType; loading?: boolean; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden ${className}`}>
+      <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/40 flex items-center justify-between">
+        <h3 className="font-black text-xs uppercase text-slate-700 dark:text-white flex gap-2 items-center tracking-wide">
+          <Icon size={14}/> {title}
+        </h3>
+        {loading && <span className="text-[9px] font-bold text-indigo-500 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> actualizando</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── LEGEND ROW ───────────────────────────────────────────────────────────────
+function LegendRow({ items }: { items: { color: string; label: string }[] }) {
+  return (
+    <div className="flex flex-wrap gap-3 px-5 pt-4 pb-1">
+      {items.map(l => (
+        <div key={l.label} className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: l.color }}/>
+          <span className="text-[10px] font-bold text-slate-500">{l.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── PAGE ─────────────────────────────────────────────────────────────────────
+export default function AnalisisPage() {
+  useAuth();
+  const { empresaId, empresa, loadingEmpresa } = useEmpresa();
+  const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+  const now = new Date();
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
+  const [periodYear, setPeriodYear] = useState(now.getFullYear());
+  const [periodMonth, setPeriodMonth] = useState(now.getMonth());
+  const [periodDay, setPeriodDay] = useState(now.getDate());
+  const [activeTab,      setActiveTab]      = useState<'capacidad'|'guardias'|'cobertura'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('capacidad');
+  const [vialSrvId,      setVialSrvId]      = useState<string>('');
+  const [diasPorGuardia, setDiasPorGuardia] = useState<24|25>(24);
+  /** Vista día/semana: cupo por guardia para calcular mínimos (turno 8h o tope 12h). Mes/año usan cupo mensual CCT. */
+  const [hsTurnoPlanif, setHsTurnoPlanif] = useState<8 | 12>(8);
+  const efectiveHours = diasPorGuardia * 8; // 192 o 200 hs/guardia (CCT 422/05)
+  const [expandedObjId,    setExpandedObjId]    = useState<string|null>(null);
+  const [showAusentismo,   setShowAusentismo]   = useState(false);
+
+  const [services,    setServices]    = useState<any[]>([]);
+  const [employees,   setEmployees]   = useState<any[]>([]);
+  const [turnos,      setTurnos]      = useState<any[]>([]);
+  const [ausencias,   setAusencias]   = useState<any[]>([]);
+  const [loadInit,    setLoadInit]    = useState(true);
+  const [loadTurnos,  setLoadTurnos]  = useState(false);
+  const [loadAus,     setLoadAus]     = useState(false);
+  const [objectivesGeoById, setObjectivesGeoById] = useState<Record<string, ObjectiveGeoEntry>>({});
+
+  const [analDateFrom,   setAnalDateFrom]   = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
+  const [analDateTo,     setAnalDateTo]     = useState(() => new Date().toISOString().slice(0,10));
+  const [analClientId,   setAnalClientId]   = useState('');
+  const [analObjectiveId,setAnalObjectiveId]= useState('');
+  const [analEmployeeId, setAnalEmployeeId] = useState('');
+  const [analStatus,     setAnalStatus]     = useState('');
+  const [analDimension,  setAnalDimension]  = useState<'employee'|'objective'|'client'|'code'|'status'|'date'>('employee');
+  const [analMetric,     setAnalMetric]     = useState<'hours'|'shifts'|'presence'|'absence'|'night'>('hours');
+  const [analChartType,  setAnalChartType]  = useState<'bar'|'pie'|'area'>('bar');
+  const [analRawTurnos,  setAnalRawTurnos]  = useState<any[]>([]);
+  const [loadAnal,       setLoadAnal]       = useState(false);
+  const [analLoaded,     setAnalLoaded]     = useState(false);
+
+  const periodRange = useMemo(
+    () => getPeriodRange(periodMode, periodYear, periodMonth, periodDay),
+    [periodMode, periodYear, periodMonth, periodDay]
+  );
+
+  const periodKey = `${periodMode}:${periodRange.start.getTime()}:${periodRange.end.getTime()}`;
+
+  const slaDemandDaysInPeriod = useMemo(
+    () => countDemandDaysInRange(services, periodRange.start, periodRange.end),
+    [services, periodKey]
+  );
+
+  const capHsPerGuardPeriod = useMemo(
+    () =>
+      capHsPerGuardInPeriod(
+        periodMode,
+        periodRange.daysCount,
+        slaDemandDaysInPeriod,
+        efectiveHours,
+        diasPorGuardia,
+        hsTurnoPlanif
+      ),
+    [periodMode, periodRange.daysCount, slaDemandDaysInPeriod, efectiveHours, diasPorGuardia, hsTurnoPlanif]
+  );
+
+  const guardQuotaHs =
+    periodMode === 'day' || periodMode === 'week' ? hsTurnoPlanif : efectiveHours;
+
+  const shiftPeriod = (dir: -1 | 1) => {
+    if (periodMode === 'day') {
+      const cur = new Date(periodYear, periodMonth, periodDay);
+      cur.setDate(cur.getDate() + dir);
+      setPeriodYear(cur.getFullYear());
+      setPeriodMonth(cur.getMonth());
+      setPeriodDay(cur.getDate());
+    } else if (periodMode === 'week') {
+      const cur = new Date(periodYear, periodMonth, periodDay);
+      cur.setDate(cur.getDate() + 7 * dir);
+      setPeriodYear(cur.getFullYear());
+      setPeriodMonth(cur.getMonth());
+      setPeriodDay(cur.getDate());
+    } else if (periodMode === 'month') {
+      const nm = periodMonth + dir;
+      const ny = periodYear + Math.floor(nm / 12);
+      const mm = ((nm % 12) + 12) % 12;
+      const lastD = new Date(ny, mm + 1, 0).getDate();
+      setPeriodYear(ny);
+      setPeriodMonth(mm);
+      setPeriodDay((d) => Math.min(d, lastD));
+    } else {
+      setPeriodYear((y) => y + dir);
+    }
+  };
+
+  const setPeriodModeSafe = (mode: PeriodMode) => {
+    setPeriodMode(mode);
+    if (mode === 'year') {
+      setPeriodMonth(0);
+      setPeriodDay(1);
+    }
+  };
+
+  // ── Ausentismo configurable ───────────────────────────────────────────────────
+  const [ausVac,   setAusVac]   = useState(5);   // vacaciones anuales prorrateadas
+  const [ausEnf,   setAusEnf]   = useState(5);   // enfermedad / certificados
+  const [ausArt,   setAusArt]   = useState(2);   // accidentes ART
+  const [ausAus,   setAusAus]   = useState(3);   // ausencias injustificadas
+  const [ausOtros, setAusOtros] = useState(1);   // licencias especiales / otros
+  const [aplicarAusentismo, setAplicarAusentismo] = useState(false);
+  const ausentismoTotal = Math.round((ausVac + ausEnf + ausArt + ausAus + ausOtros) * 10) / 10;
+  const hsRealesGuardia = Math.round(capHsPerGuardPeriod * (1 - ausentismoTotal / 100));
+
+  useEffect(() => {
+    if (loadingEmpresa) return;
+    (async () => {
+      try {
+        const empQ = migracionCompleta && empresaId
+          ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+          : collection(db, 'empleados');
+        const [sSnap, eSnap] = await Promise.all([
+          getDocs(collection(db, 'servicios_sla')),
+          getDocs(empQ),
+        ]);
+        setServices(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setEmployees(eSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter((e: any) => !['inactive','baja','inactivo'].includes((e.status||'').toLowerCase())));
+      } catch(e) { console.error(e); }
+      finally { setLoadInit(false); }
+    })();
+  }, [loadingEmpresa, empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (loadingEmpresa) return;
+    (async () => {
+      const map: Record<string, ObjectiveGeoEntry> = {};
+      const add = (key: string, lat: number, lng: number, name: string, clientName: string) => {
+        const k = String(key || '').trim();
+        if (!k || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        map[k] = { lat, lng, name: name || k, clientName: clientName || '' };
+      };
+      try {
+        const snap = await getDocs(collection(db, 'objetivos'));
+        snap.forEach((d) => {
+          const data = d.data();
+          const lat = Number(data.lat ?? data.latitude);
+          const lng = Number(data.lng ?? data.longitude);
+          const name = String(data.name || data.nombre || d.id);
+          const clientName = String(data.clientName || data.nombreCliente || '');
+          add(d.id, lat, lng, name, clientName);
+          if (data.name) add(String(data.name), lat, lng, name, clientName);
+          if (data.nombre) add(String(data.nombre), lat, lng, name, clientName);
+          if (data.id != null) add(String(data.id), lat, lng, name, clientName);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+      try {
+        const clientsQ =
+          migracionCompleta && empresaId
+            ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
+            : collection(db, 'clients');
+        const clientsSnap = await getDocs(clientsQ);
+        clientsSnap.forEach((cd) => {
+          const cdata = cd.data();
+          const clientName = String(cdata.name || cdata.nombre || cdata.razonSocial || '');
+          (cdata.objetivos || []).forEach((o: any) => {
+            const lat = Number(o.lat ?? o.latitude);
+            const lng = Number(o.lng ?? o.longitude);
+            const name = String(o.name || o.nombre || o.id || '');
+            const cn = String(o.clientName || clientName || '');
+            if (o.id != null) add(String(o.id), lat, lng, name, cn);
+            if (o.name) add(String(o.name), lat, lng, name, cn);
+            if (o.nombre) add(String(o.nombre), lat, lng, name, cn);
+          });
+        });
+      } catch (e) {
+        console.error(e);
+      }
+      setObjectivesGeoById(map);
+    })();
+  }, [loadingEmpresa, migracionCompleta, empresaId]);
+
+  useEffect(() => {
+    (async () => {
+      setLoadTurnos(true); setTurnos([]);
+      setLoadAus(true);   setAusencias([]);
+      try {
+        const start   = new Date(periodRange.start);
+        const end     = new Date(periodRange.end);
+        const tsStart = Timestamp.fromDate(start);
+        const tsEnd   = Timestamp.fromDate(end);
+        const [turnosSnap, ausSnap] = await Promise.all([
+          getDocs(query(
+            collection(db, 'turnos'),
+            where('startTime', '>=', tsStart),
+            where('startTime', '<=', tsEnd)
+          )),
+          getDocs(query(
+            collection(db, 'ausencias'),
+            where('startDate', '<=', tsEnd)
+          )),
+        ]);
+        setTurnos(turnosSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter((t: any) => t.type !== 'NOVEDAD' && t.startTime && t.endTime));
+        setAusencias(ausSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter((a: any) => {
+            const ed = a.endDate?.seconds ? new Date(a.endDate.seconds*1000) : new Date(a.endDate);
+            return ed >= start;
+          }));
+      } catch(e) { console.error(e); }
+      finally { setLoadTurnos(false); setLoadAus(false); }
+    })();
+  }, [periodKey]);
+
+  // ── Analítica: cargar turnos bajo demanda con filtros de fecha ────────────────
+  const loadAnalytics = async (dateFromOverride?: string, dateToOverride?: string) => {
+    const dFrom = dateFromOverride ?? analDateFrom;
+    const dTo = dateToOverride ?? analDateTo;
+    setLoadAnal(true); setAnalRawTurnos([]); setAnalLoaded(false);
+    try {
+      const start = new Date(dFrom + 'T00:00:00');
+      const end   = new Date(dTo   + 'T23:59:59');
+      const snap  = await getDocs(query(
+        collection(db, 'turnos'),
+        where('startTime', '>=', Timestamp.fromDate(start)),
+        where('startTime', '<=', Timestamp.fromDate(end))
+      ));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter((t: any) => t.type !== 'NOVEDAD' && t.startTime && t.endTime);
+      setAnalRawTurnos(docs);
+      setAnalLoaded(true);
+    } catch(e) { console.error(e); }
+    finally { setLoadAnal(false); }
+  };
+
+  // ── Mapas globales ID → nombre (empleados, objetivos, clientes) ────────────────
+  const empNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    employees.forEach((e: any) => {
+      m[e.id] = e.lastName ? `${e.lastName}, ${e.firstName || ''}`.trim() : (e.name || e.id);
+    });
+    return m;
+  }, [employees]);
+
+  const objectiveNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    services.forEach((s: any) => {
+      if (s.objectiveId) m[String(s.objectiveId)] = s.objectiveName || String(s.objectiveId);
+    });
+    Object.entries(objectivesGeoById).forEach(([k, v]) => {
+      if (v?.name) m[k] = m[k] || v.name;
+    });
+    return m;
+  }, [services, objectivesGeoById]);
+
+  const clientNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    services.forEach((s: any) => {
+      if (s.clientId) m[String(s.clientId)] = s.clientName || String(s.clientId);
+    });
+    return m;
+  }, [services]);
+
+  // ── Analítica: computar datos agregados según filtros y dimensión ─────────────
+  const analData = useMemo(() => {
+    if (!analRawTurnos.length) return { data: [] as { name: string; value: number }[], totalValue: 0, totalGroups: 0 };
+
+    const filtered = analRawTurnos.filter((t: any) => {
+      // Excluir vacantes virtuales generadas por operaciones (no son planificación real).
+      const origin = String(t.origin || '').trim().toUpperCase();
+      if (origin === 'SLA_VIRTUAL' || origin === 'INTERRUPTION') return false;
+      // Para métricas de turnos/horas solo cuentan turnos de COBERTURA real (no franco, licencia, retén).
+      // Para 'absence' se permite contar ausencias formales.
+      if (analMetric !== 'absence' && !isCoverageShift(t)) return false;
+      if (analClientId   && t.clientId    !== analClientId)   return false;
+      if (analObjectiveId&& t.objectiveId !== analObjectiveId) return false;
+      if (analEmployeeId && t.employeeId  !== analEmployeeId)  return false;
+      if (analStatus) {
+        const st = (t.status || '').toUpperCase();
+        if (analStatus === 'PRESENT'   && st !== 'PRESENT'   && !t.isPresent)  return false;
+        if (analStatus === 'COMPLETED' && st !== 'COMPLETED' && !t.isCompleted) return false;
+        if (analStatus === 'ABSENT'    && st !== 'ABSENT'    && !t.isAbsent)   return false;
+        if (analStatus === 'PENDING'   && st !== 'PENDING'   && st !== '')      return false;
+      }
+      return true;
+    });
+
+    const getDimKey = (t: any): string => {
+      if (analDimension === 'employee') {
+        const eid = String(t.employeeId || '').trim();
+        if (!eid || eid === 'VACANTE') return 'VACANTE';
+        return empNameById[eid] || t.employeeName || eid || 'Sin nombre';
+      }
+      if (analDimension === 'objective') {
+        const oid = String(t.objectiveId || '').trim();
+        return objectiveNameById[oid] || t.objectiveName || oid || 'Sin objetivo';
+      }
+      if (analDimension === 'client') {
+        const cid = String(t.clientId || '').trim();
+        return clientNameById[cid] || t.clientName || cid || 'Sin cliente';
+      }
+      if (analDimension === 'code')      return t.shiftCode     || t.code        || 'Sin código';
+      if (analDimension === 'status') {
+        const st = (t.status || '').toUpperCase();
+        if (t.isPresent  || st === 'PRESENT')   return 'Presente';
+        if (t.isCompleted|| st === 'COMPLETED') return 'Completado';
+        if (t.isAbsent   || st === 'ABSENT')    return 'Ausente';
+        return 'Pendiente';
+      }
+      if (analDimension === 'date') {
+        if (!t.startTime?.seconds) return 'Sin fecha';
+        const d = new Date(t.startTime.seconds * 1000);
+        return `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}`;
+      }
+      return 'Otro';
+    };
+
+    const getMetric = (t: any): number => {
+      if (analMetric === 'shifts') return 1;
+      if (analMetric === 'hours') return shiftDur(t);
+      if (analMetric === 'presence') {
+        const st = (t.status || '').toUpperCase();
+        return (t.isPresent || st === 'PRESENT' || t.isCompleted || st === 'COMPLETED') ? 1 : 0;
+      }
+      if (analMetric === 'absence') {
+        const st = (t.status || '').toUpperCase();
+        return (t.isAbsent || st === 'ABSENT') ? 1 : 0;
+      }
+      if (analMetric === 'night') {
+        if (!t.startTime?.seconds) return 0;
+        const h = new Date(t.startTime.seconds * 1000).getHours();
+        const dur = shiftDur(t);
+        return (h >= 21 || h < 6) ? dur : 0;
+      }
+      return 0;
+    };
+
+    const agg: Record<string, number> = {};
+    filtered.forEach(t => {
+      const key = getDimKey(t);
+      agg[key] = (agg[key] || 0) + getMetric(t);
+    });
+
+    const sorted = Object.entries(agg)
+      .map(([name, value]) => ({ name, value: Math.round(value * 10) / 10 }))
+      .sort((a, b) => b.value - a.value);
+
+    const totalValue = sorted.reduce((s, d) => s + d.value, 0);
+    const totalGroups = sorted.length;
+    const data = sorted.slice(0, 30);
+
+    return { data, totalValue: Math.round(totalValue * 10) / 10, totalGroups };
+  }, [analRawTurnos, analClientId, analObjectiveId, analEmployeeId, analStatus, analDimension, analMetric, empNameById, objectiveNameById, clientNameById]);
+
+  // ── Analítica: clientes/objetivos únicos del rango cargado ───────────────────
+  const analClientOptions = useMemo(() => {
+    const map: Record<string, string> = {};
+    analRawTurnos.forEach((t: any) => {
+      if (!t.clientId) return;
+      const cid = String(t.clientId);
+      map[cid] = clientNameById[cid] || t.clientName || cid;
+    });
+    return Object.entries(map).sort((a,b) => a[1].localeCompare(b[1]));
+  }, [analRawTurnos, clientNameById]);
+
+  const analObjectiveOptions = useMemo(() => {
+    const map: Record<string, string> = {};
+    analRawTurnos.forEach((t: any) => {
+      if (!t.objectiveId) return;
+      if (analClientId && t.clientId !== analClientId) return;
+      const oid = String(t.objectiveId);
+      map[oid] = objectiveNameById[oid] || t.objectiveName || oid;
+    });
+    return Object.entries(map).sort((a,b) => a[1].localeCompare(b[1]));
+  }, [analRawTurnos, analClientId, objectiveNameById]);
+
+  // ── Tasas reales de ausentismo desde colección ausencias ─────────────────────
+  const ausenciasStats = useMemo(() => {
+    const mStart = new Date(periodRange.start);
+    const mEnd   = new Date(periodRange.end);
+    const totalDisponibleHs = employees.length * capHsPerGuardPeriod;
+    if (totalDisponibleHs === 0) return null;
+
+    let vacHs=0, enfHs=0, artHs=0, injHs=0, otrosHs=0;
+    const detalle: any[] = [];
+
+    ausencias.forEach((a: any) => {
+      const sd = a.startDate?.seconds ? new Date(a.startDate.seconds*1000) : new Date(a.startDate);
+      const ed = a.endDate?.seconds   ? new Date(a.endDate.seconds*1000)   : new Date(a.endDate);
+      const cs = sd < mStart ? mStart : sd;
+      const ce = ed > mEnd   ? mEnd   : ed;
+      if (cs > ce) return;
+      const days = Math.round((ce.getTime()-cs.getTime())/(1000*60*60*24)) + 1;
+      const hs   = days * 8; // 8 hs/día como base de cálculo laboral
+
+      const tipo   = (a.type||'OTHER').toUpperCase();
+      const status = (a.status||'').toLowerCase();
+      const isART  = tipo === 'SICK_LEAVE' && (a.isART || (a.reason||'').toLowerCase().includes('art'));
+
+      if      (tipo === 'VACATION')                hs > 0 && (vacHs  += hs);
+      else if (tipo === 'SICK_LEAVE' && isART)     hs > 0 && (artHs  += hs);
+      else if (tipo === 'SICK_LEAVE')              hs > 0 && (enfHs  += hs);
+      else if (status === 'injustificada')         hs > 0 && (injHs  += hs);
+      else                                         hs > 0 && (otrosHs+= hs);
+
+      detalle.push({ id:a.id, emp:a.employeeName||a.employeeId, tipo, days, hs, status:a.status });
+    });
+
+    const pct = (hs: number) => Math.round(hs / totalDisponibleHs * 1000) / 10; // 1 decimal
+    return {
+      total: ausencias.length,
+      detalle,
+      vacPct:   pct(vacHs),
+      enfPct:   pct(enfHs),
+      artPct:   pct(artHs),
+      injPct:   pct(injHs),
+      otrosPct: pct(otrosHs),
+      totalPct: pct(vacHs+enfHs+artHs+injHs+otrosHs),
+      hsAfectadas: Math.round(vacHs+enfHs+artHs+injHs+otrosHs),
+    };
+  }, [ausencias, employees, capHsPerGuardPeriod, periodKey]);
+
+  // ── Theoretical ──────────────────────────────────────────────────────────────
+  /**
+   * Día/semana: TURNOS = ⌈hs / hsTurno⌉ y GUARDIAS = ⌈hs/día / hsTurno⌉ ≈ guardias en simultáneo en el día pico operativo.
+   * Mes/año: GUARDIAS = ⌈hs / hsMensualesGuardia (FTE CCT)⌉.
+   */
+  const theoretical = useMemo(() => {
+    const rs = new Date(periodRange.start);
+    const re = new Date(periodRange.end);
+    let totalHours = 0;
+    const active: any[] = [];
+    services.forEach(srv => {
+      if (!srv.startDate || !srv.endDate) return;
+      const { hours, guards, surplus } = calcSrvDateRange(srv, rs, re, guardQuotaHs);
+      if (hours === 0) return;
+      totalHours += hours;
+      active.push({ ...srv, monthHours: hours, guardsNeeded: guards, surplusHs: surplus });
+    });
+
+    const isShortPeriod = periodMode === 'day' || periodMode === 'week';
+    const demandDays = Math.max(1, slaDemandDaysInPeriod || periodRange.daysCount || 1);
+    const totalShifts = totalHours > 0 ? Math.ceil(totalHours / hsTurnoPlanif) : 0;
+    const guardsConcurrentes = totalHours > 0
+      ? Math.ceil((totalHours / demandDays) / hsTurnoPlanif)
+      : 0;
+
+    const totalGuards = isShortPeriod
+      ? guardsConcurrentes
+      : (totalHours > 0 ? Math.ceil(totalHours / guardQuotaHs) : 0);
+    const totalSurplus = isShortPeriod
+      ? Math.max(0, totalGuards * capHsPerGuardPeriod - totalHours)
+      : totalGuards * guardQuotaHs - totalHours;
+    return {
+      totalHours,
+      totalGuards,
+      totalSurplus,
+      totalShifts,
+      shiftsPerDay: Math.ceil(totalShifts / demandDays),
+      demandDays,
+      active,
+    };
+  }, [services, guardQuotaHs, capHsPerGuardPeriod, hsTurnoPlanif, periodMode, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
+
+  useEffect(() => {
+    const rs = new Date(periodRange.start);
+    const re = new Date(periodRange.end);
+    const activeIds: string[] = [];
+    services.forEach((srv: any) => {
+      if (!srv.startDate || !srv.endDate) return;
+      const { hours } = calcSrvDateRange(srv, rs, re, guardQuotaHs);
+      if (hours > 0) activeIds.push(srv.id);
+    });
+    if (activeIds.length === 0) {
+      if (vialSrvId) setVialSrvId('');
+      return;
+    }
+    if (!vialSrvId || !activeIds.includes(vialSrvId)) setVialSrvId(activeIds[0]);
+  }, [services, guardQuotaHs, periodKey, vialSrvId]);
+
+  // ── Actual ───────────────────────────────────────────────────────────────────
+  const actual = useMemo(() => {
+    const empNameMap = new Map(employees.map((e: any) => [
+      e.id, e.lastName ? `${e.lastName}, ${e.firstName||''}`.trim() : (e.name||e.id),
+    ]));
+    const objInfoMap = new Map(services.map((s: any) => [
+      s.objectiveId, { name: s.objectiveName||s.objectiveId, client: s.clientName||'Sin Cliente' },
+    ]));
+    const byGuard = new Map<string,{name:string;hours:number;shifts:number}>();
+    const byObj   = new Map<string,{name:string;client:string;scheduled:number;vacant:number}>();
+    type ShiftBd = { schCount:number; vacCount:number; schHours:number; vacHours:number };
+    type ObjDet  = { byCode:Map<string,ShiftBd>; guards:Map<string,{name:string;hours:number;shifts:number}> };
+    const byObjDetail = new Map<string, ObjDet>();
+    // shift duration analysis: key = duration in hours (rounded to nearest 0.5)
+    const byDuration  = new Map<number,{count:number;vacant:number;hours:number;codes:Set<string>}>();
+    let scheduledHours = 0, vacantHours = 0;
+
+    turnos.forEach((t: any) => {
+      if (!isCoverageShift(t)) return;
+      // Las vacantes virtuales (SLA_VIRTUAL, alertas de operaciones, remanentes por interrupción)
+      // son placeholders auto-generados; el planificador los ignora porque no son planificación real.
+      const origin = String(t.origin || '').trim().toUpperCase();
+      if (origin === 'SLA_VIRTUAL' || origin === 'INTERRUPTION') return;
+      const code = String(t.code || '').trim().toUpperCase() || '—';
+      const dur = shiftDur(t);
+      if (dur <= 0) return;
+      const empNameU = String(t.employeeName || '').trim().toUpperCase();
+      const isVacant =
+        !t.employeeId ||
+        t.employeeId === 'VACANTE' ||
+        empNameU === 'VACANTE' ||
+        empNameU.startsWith('VACANTE:') ||
+        !!t.isUnassigned;
+      if (!isVacant) {
+        const empName = empNameMap.get(t.employeeId) || t.employeeName || t.employeeId;
+        const g = byGuard.get(t.employeeId) || { name: empName, hours: 0, shifts: 0 };
+        byGuard.set(t.employeeId, { ...g, hours: g.hours+dur, shifts: g.shifts+1 });
+        scheduledHours += dur;
+      } else { vacantHours += dur; }
+      const ok = t.objectiveId || 'SIN_OBJETIVO';
+      const objInfo = objInfoMap.get(t.objectiveId) || { name: t.objectiveName||t.objectiveId||ok, client: t.clientName||'Sin Cliente' };
+      const o = byObj.get(ok) || { name: objInfo.name, client: objInfo.client, scheduled: 0, vacant: 0 };
+      byObj.set(ok, { ...o, scheduled: o.scheduled+(isVacant?0:dur), vacant: o.vacant+(isVacant?dur:0) });
+      // per-objective detail
+      const det = byObjDetail.get(ok) || { byCode: new Map<string,ShiftBd>(), guards: new Map<string,{name:string;hours:number;shifts:number}>() };
+      const bd = det.byCode.get(code) || { schCount:0, vacCount:0, schHours:0, vacHours:0 };
+      if (isVacant) { bd.vacCount++; bd.vacHours += dur; }
+      else          { bd.schCount++; bd.schHours += dur; }
+      det.byCode.set(code, bd);
+      if (!isVacant && t.employeeId) {
+        const en = empNameMap.get(t.employeeId) || t.employeeName || t.employeeId;
+        const gd = det.guards.get(t.employeeId) || { name: en, hours: 0, shifts: 0 };
+        det.guards.set(t.employeeId, { name: gd.name, hours: gd.hours+dur, shifts: gd.shifts+1 });
+      }
+      byObjDetail.set(ok, det);
+      // shift duration breakdown
+      const dk = Math.round(dur * 2) / 2; // bucket to nearest 0.5h
+      const dd = byDuration.get(dk) || { count:0, vacant:0, hours:0, codes:new Set<string>() };
+      dd.count++; if (isVacant) dd.vacant++; dd.hours += dur; dd.codes.add(code);
+      byDuration.set(dk, dd);
+    });
+    return {
+      byGuard: [...byGuard.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => b.hours-a.hours),
+      byObjective: [...byObj.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => (b.scheduled+b.vacant)-(a.scheduled+a.vacant)),
+      byObjDetail,
+      byDuration: [...byDuration.entries()]
+        .sort((a,b) => a[0]-b[0])
+        .map(([dur,d]) => ({ dur, count:d.count, vacant:d.vacant, hours:Math.round(d.hours), codes:[...d.codes].sort() })),
+      scheduledHours: Math.round(scheduledHours),
+      vacantHours: Math.round(vacantHours),
+    };
+  }, [turnos, employees, services]);
+
+  const art12Report = useMemo(() => {
+    const empById = new Map(employees.map((e: any) => [e.id, e]));
+    const resolveObj = (oid: string): ObjectiveGeoEntry | null => {
+      const k = String(oid || '').trim();
+      if (!k) return null;
+      return objectivesGeoById[k] ?? null;
+    };
+
+    const pairBest = new Map<
+      string,
+      {
+        empId: string;
+        empName: string;
+        objectiveId: string;
+        objectiveName: string;
+        clientName: string;
+        km: number;
+        usedLatLngSwap: boolean;
+      }
+    >();
+
+    const assignedEmpIds = new Set<string>();
+    const empMissingHomeGeo = new Set<string>();
+    const objectiveIdsMissingGeo = new Set<string>();
+
+    turnos.forEach((t: any) => {
+      const eid = t.employeeId;
+      if (!eid || !t.objectiveId) return;
+      const code = String(t.code || '').trim().toUpperCase();
+      if (!OPERATIVE_CODES.has(code)) return;
+      assignedEmpIds.add(eid);
+
+      const emp = empById.get(eid);
+      if (!emp) return;
+
+      const elat = Number(emp.lat);
+      const elng = Number(emp.lng);
+      if (!Number.isFinite(elat) || !Number.isFinite(elng)) {
+        empMissingHomeGeo.add(eid);
+        return;
+      }
+
+      const oid = String(t.objectiveId).trim();
+      const obj = resolveObj(oid);
+      if (!obj) {
+        objectiveIdsMissingGeo.add(oid);
+        return;
+      }
+
+      const { lat: elatU, lng: elngU, usedLatLngSwap } = art12EmployeeCoordsForDistance(
+        elat,
+        elng,
+        obj.lat,
+        obj.lng
+      );
+      const km = haversineDistanceKm(elatU, elngU, obj.lat, obj.lng);
+      const empName = emp.lastName
+        ? `${emp.lastName}, ${emp.firstName || ''}`.trim()
+        : String(emp.name || eid);
+      const key = `${eid}__${oid}`;
+      const prev = pairBest.get(key);
+      if (!prev || km > prev.km) {
+        pairBest.set(key, {
+          empId: eid,
+          empName,
+          objectiveId: oid,
+          objectiveName: obj.name,
+          clientName: obj.clientName || t.clientName || '',
+          km,
+          usedLatLngSwap,
+        });
+      }
+    });
+
+    const rowsRaw = [...pairBest.values()].map((r) => {
+      const kmRounded = Math.round(r.km * 10) / 10;
+      const distanceReliable = r.km <= ART12_MAX_PLAUSIBLE_COMMUTE_KM;
+      const needsCoordReview = !distanceReliable;
+      const exceedsArt25Usable = distanceReliable && r.km > ART12_MAX_KM_VIVIENDA;
+      const kmSobreUmbral = exceedsArt25Usable ? Math.round((r.km - ART12_MAX_KM_VIVIENDA) * 10) / 10 : 0;
+      return {
+        ...r,
+        kmRounded,
+        distanceReliable,
+        needsCoordReview,
+        exceedsArt25Usable,
+        kmSobreUmbral,
+      };
+    });
+
+    const rankRow = (r: (typeof rowsRaw)[0]) => {
+      if (r.exceedsArt25Usable) return 0;
+      if (r.needsCoordReview) return 1;
+      return 2;
+    };
+    const rows = rowsRaw.sort((a, b) => {
+      const d = rankRow(a) - rankRow(b);
+      if (d !== 0) return d;
+      return b.km - a.km;
+    });
+
+    const guardiasSobreUmbralConfiables = new Set(
+      rows.filter((r) => r.exceedsArt25Usable).map((r) => r.empId)
+    ).size;
+
+    const empleadosRevisarCoords = new Set(rows.filter((r) => r.needsCoordReview).map((r) => r.empId)).size;
+
+    const porGuardiaMaxKm = new Map<
+      string,
+      { empName: string; kmRounded: number; kmSobreUmbral: number; objectiveName: string; clientName: string }
+    >();
+    rows
+      .filter((r) => r.exceedsArt25Usable)
+      .forEach((r) => {
+        const prev = porGuardiaMaxKm.get(r.empId);
+        if (!prev || r.kmRounded > prev.kmRounded) {
+          porGuardiaMaxKm.set(r.empId, {
+            empName: r.empName,
+            kmRounded: r.kmRounded,
+            kmSobreUmbral: r.kmSobreUmbral,
+            objectiveName: r.objectiveName,
+            clientName: r.clientName,
+          });
+        }
+      });
+
+    const resumenGuardiasSobre25 = [...porGuardiaMaxKm.values()].sort((a, b) => b.kmRounded - a.kmRounded);
+
+    return {
+      rows,
+      guardiasSobreUmbralConfiables,
+      empleadosRevisarCoords,
+      parejasRevisarCoords: rows.filter((r) => r.needsCoordReview).length,
+      resumenGuardiasSobre25,
+      umbralKm: ART12_MAX_KM_VIVIENDA,
+      maxPlausibleKm: ART12_MAX_PLAUSIBLE_COMMUTE_KM,
+      parejasAnalizadas: rows.length,
+      empleadosConAsignacionOperativa: assignedEmpIds.size,
+      empleadosSinDomicilioGeo: empMissingHomeGeo.size,
+      objetivosSinGeoEnTurnos: objectiveIdsMissingGeo.size,
+    };
+  }, [turnos, employees, objectivesGeoById, periodKey]);
+
+  const viabilityReport = useMemo(() => {
+    if (!vialSrvId) return null;
+    const srv = services.find((s: any) => s.id === vialSrvId);
+    if (!srv?.startDate || !srv.endDate) return null;
+    const emps = employees.map((e: any) => ({
+      id: e.id,
+      restriccionesObjetivo: e.restriccionesObjetivo || [],
+      restriccionesCliente: e.restriccionesCliente || [],
+    }));
+    return buildViabilityRangeReport(srv, periodRange.start, periodRange.end, emps, ausencias, turnos);
+  }, [services, vialSrvId, employees, ausencias, turnos, periodKey]);
+
+  // ── Viabilidad ajustada por ausentismo (cuando el toggle está activo) ────────
+  // Aplica un colchón sobre el pico requerido (sube) y reduce los disponibles
+  // por día por la tasa configurada. Recalcula días en déficit y peor brecha.
+  const viabilityReportDisplay = useMemo(() => {
+    if (!viabilityReport) return null;
+    if (!aplicarAusentismo || ausentismoTotal <= 0) return viabilityReport;
+    const factor = 1 - ausentismoTotal / 100;
+    if (factor <= 0) return viabilityReport;
+    const adjustedRows = viabilityReport.rows.map((r: any) => {
+      const reqAdj = Math.ceil(r.requiredPax / factor);
+      const dispAdj = Math.floor(r.availablePax * factor);
+      const gapAdj = reqAdj - dispAdj;
+      return { ...r, requiredPax: reqAdj, availablePax: dispAdj, gap: gapAdj };
+    });
+    const peakRequired = adjustedRows.reduce((m: number, r: any) => Math.max(m, r.requiredPax), 0);
+    const deficitRows = adjustedRows.filter((r: any) => r.gap > 0);
+    const worstGap = deficitRows.reduce((m: number, r: any) => Math.max(m, r.gap), 0);
+    const peakRow = adjustedRows.reduce((acc: any, r: any) => (r.requiredPax > (acc?.requiredPax ?? -1) ? r : acc), null as any);
+    const minAvailable = peakRow ? peakRow.availablePax : viabilityReport.minAvailable;
+    return {
+      ...viabilityReport,
+      rows: adjustedRows,
+      peakRequired,
+      deficitDays: deficitRows.length,
+      worstGap,
+      minAvailable,
+    };
+  }, [viabilityReport, aplicarAusentismo, ausentismoTotal]);
+
+  const viabilityBarData = useMemo(() => {
+    if (!viabilityReportDisplay) return [];
+    return viabilityReportDisplay.rows
+      .filter((r) => r.requiredPax > 0)
+      .map((r) => ({
+        name: r.dayLabel,
+        Requeridos: r.requiredPax,
+        Disponibles: r.availablePax,
+      }));
+  }, [viabilityReportDisplay]);
+
+  // ── Plantel vs disponibles ──
+  /**
+   * Día: cuenta personas (plantel − franco/licencia ese día).
+   * Semana: GUARDIAS-DÍA (cada guardia aporta hasta `daysWithDemand`; franco y lic/aus restan días reales).
+   * Mes/Año: nómina completa, solo se restan licencias/ausencias que cubren el período (los francos ya están dentro del cupo CCT mensual y NO restan plantel).
+   */
+  const disponibilidadGuardias = useMemo(() => {
+    const plantel = new Set(employees.map((e: any) => e.id));
+    const pStart = new Date(periodRange.start);
+    const pEnd = new Date(periodRange.end);
+    const plantelTotal = employees.length;
+    const daysWithDemand = Math.max(1, slaDemandDaysInPeriod || periodRange.daysCount || 1);
+
+    if (periodMode === 'day') {
+      const francoIds = new Set<string>();
+      const licenciaIds = new Set<string>();
+      turnos.forEach((t: any) => {
+        const eid = t.employeeId;
+        if (!eid || !plantel.has(eid)) return;
+        const code = String(t.code || '').trim().toUpperCase();
+        if (FRANCO_SHIFT_CODES.has(code) || (t.isFranco === true && !LICENCIA_SHIFT_CODES.has(code))) {
+          francoIds.add(eid);
+        } else if (LICENCIA_SHIFT_CODES.has(code)) {
+          licenciaIds.add(eid);
+        }
+      });
+      ausencias.forEach((a: any) => {
+        const eid = a.employeeId;
+        if (!eid || !plantel.has(eid)) return;
+        if (!ausenciaCuentaNoDisponible(a)) return;
+        if (!ausenciaSolapaPeriodo(a, pStart, pEnd)) return;
+        licenciaIds.add(eid);
+      });
+      const unavailable = new Set<string>([...francoIds, ...licenciaIds]);
+      return {
+        plantelTotal,
+        availableEffective: Math.max(0, plantelTotal - unavailable.size),
+        unavailableTotal: unavailable.size,
+        francoCount: francoIds.size,
+        licenciaCount: licenciaIds.size,
+        daysWithDemand: 1,
+        guardDaysTotal: plantelTotal,
+        francoDays: francoIds.size,
+        licenciaDays: licenciaIds.size,
+        guardDaysAvailable: Math.max(0, plantelTotal - unavailable.size),
+        modo: 'persona' as const,
+      };
+    }
+
+    if (periodMode === 'month' || periodMode === 'year') {
+      // Nómina completa; solo licencias/ausencias bajan el plantel.
+      const francoEmpSet = new Set<string>();
+      const licenciaEmpSet = new Set<string>();
+      turnos.forEach((t: any) => {
+        const eid = t.employeeId;
+        if (!eid || !plantel.has(eid)) return;
+        const code = String(t.code || '').trim().toUpperCase();
+        if (FRANCO_SHIFT_CODES.has(code) || (t.isFranco === true && !LICENCIA_SHIFT_CODES.has(code))) {
+          francoEmpSet.add(eid);
+        } else if (LICENCIA_SHIFT_CODES.has(code)) {
+          licenciaEmpSet.add(eid);
+        }
+      });
+      ausencias.forEach((a: any) => {
+        const eid = a.employeeId;
+        if (!eid || !plantel.has(eid)) return;
+        if (!ausenciaCuentaNoDisponible(a)) return;
+        if (!ausenciaSolapaPeriodo(a, pStart, pEnd)) return;
+        licenciaEmpSet.add(eid);
+      });
+      const availableEffective = Math.max(0, plantelTotal - licenciaEmpSet.size);
+      return {
+        plantelTotal,
+        availableEffective,
+        unavailableTotal: licenciaEmpSet.size,
+        francoCount: francoEmpSet.size,
+        licenciaCount: licenciaEmpSet.size,
+        daysWithDemand,
+        guardDaysTotal: plantelTotal * daysWithDemand,
+        francoDays: 0,
+        licenciaDays: licenciaEmpSet.size * daysWithDemand,
+        guardDaysAvailable: availableEffective * daysWithDemand,
+        modo: 'persona-mes' as const,
+      };
+    }
+
+    // Modo semana: por guardias-día
+    const guardDaysTotal = plantelTotal * daysWithDemand;
+    let francoDays = 0;
+    let licenciaDays = 0;
+    const francoEmpSet = new Set<string>();
+    const licenciaEmpSet = new Set<string>();
+
+    turnos.forEach((t: any) => {
+      const eid = t.employeeId;
+      if (!eid || !plantel.has(eid)) return;
+      const code = String(t.code || '').trim().toUpperCase();
+      if (FRANCO_SHIFT_CODES.has(code) || (t.isFranco === true && !LICENCIA_SHIFT_CODES.has(code))) {
+        francoDays++;
+        francoEmpSet.add(eid);
+      } else if (LICENCIA_SHIFT_CODES.has(code)) {
+        licenciaDays++;
+        licenciaEmpSet.add(eid);
+      }
+    });
+
+    ausencias.forEach((a: any) => {
+      const eid = a.employeeId;
+      if (!eid || !plantel.has(eid)) return;
+      if (!ausenciaCuentaNoDisponible(a)) return;
+      const sd = parseAbsenceInstant(a.startDate, false);
+      const ed = parseAbsenceInstant(a.endDate, true);
+      if (!sd || !ed) return;
+      const cs = sd < pStart ? pStart : sd;
+      const ce = ed > pEnd ? pEnd : ed;
+      if (cs > ce) return;
+      const days = Math.max(0, Math.round((ce.getTime() - cs.getTime()) / 86400000) + 1);
+      const cap = Math.min(days, daysWithDemand);
+      licenciaDays += cap;
+      if (cap > 0) licenciaEmpSet.add(eid);
+    });
+
+    const guardDaysAvailable = Math.max(0, guardDaysTotal - francoDays - licenciaDays);
+    const availableEffective = Math.floor(guardDaysAvailable / daysWithDemand);
+
+    return {
+      plantelTotal,
+      availableEffective,
+      unavailableTotal: Math.max(0, plantelTotal - availableEffective),
+      francoCount: francoEmpSet.size,
+      licenciaCount: licenciaEmpSet.size,
+      daysWithDemand,
+      guardDaysTotal,
+      francoDays,
+      licenciaDays,
+      guardDaysAvailable,
+      modo: 'guardias-dia' as const,
+    };
+  }, [employees, turnos, ausencias, periodKey, periodMode, slaDemandDaysInPeriod, periodRange.daysCount]);
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+  const plantelGuardias    = disponibilidadGuardias.plantelTotal;
+  const availableGuards    = disponibilidadGuardias.availableEffective;
+  const guardiasNoDispTotal = disponibilidadGuardias.unavailableTotal;
+  const guardiasNoDispFranco = disponibilidadGuardias.francoCount;
+  const guardiasNoDispLicencia = disponibilidadGuardias.licenciaCount;
+
+  const gap                = theoretical.totalGuards - availableGuards;
+  const coveragePct        = theoretical.totalHours > 0 ? Math.round(actual.scheduledHours / theoretical.totalHours * 100) : 0;
+  const vacancyPct         = theoretical.totalHours > 0 ? Math.round(actual.vacantHours    / theoretical.totalHours * 100) : 0;
+
+  // ── Ajuste por ausentismo aplicado a "Guardias necesarios" y "Brecha" ────────
+  const guardiasAjustados = hsRealesGuardia > 0 ? Math.ceil(theoretical.totalHours / hsRealesGuardia) : 0;
+  const brechaAjustada    = guardiasAjustados - availableGuards;
+  // Cuando el toggle "Aplicar ausentismo" está activo, los KPIs principales muestran estos valores.
+  const totalGuardsDisplay = aplicarAusentismo ? guardiasAjustados : theoretical.totalGuards;
+  const gapDisplay         = aplicarAusentismo ? brechaAjustada    : gap;
+
+  // ── Viabilidad global ─────────────────────────────────────────────────────────
+  const totalHsDisponibles = availableGuards * capHsPerGuardPeriod;
+  const avgHsPerGuardia    = availableGuards > 0 ? Math.round(theoretical.totalHours / availableGuards) : 0;
+  const utilizacionPct     =
+    capHsPerGuardPeriod > 0 && availableGuards > 0
+      ? Math.round((theoretical.totalHours / availableGuards / capHsPerGuardPeriod) * 100)
+      : 0;
+  const superavitGlobal    = totalHsDisponibles - theoretical.totalHours; // >0 sobran hs, <0 faltan
+
+  // ── Projection ───────────────────────────────────────────────────────────────
+  const projection = useMemo(() => {
+    const end = new Date(periodRange.end);
+    const anchor = new Date(end.getFullYear(), end.getMonth() + 1, 1);
+    return [0, 1, 2].map((offset) => {
+      const d = new Date(anchor.getFullYear(), anchor.getMonth() + offset, 1);
+      const y = d.getFullYear(), m = d.getMonth();
+      let hours = 0, guards = 0, active = 0;
+      services.forEach(srv => {
+        if (!srv.startDate || !srv.endDate) return;
+        const r = calcSrvMonth(srv, y, m, efectiveHours);
+        if (r.hours > 0) { hours += r.hours; guards += r.guards; active++; }
+      });
+      return { label: `${MONTHS_SHORT[m]} ${y}`, monthLabel: MONTHS_SHORT[m], hours, guards, active, gap: guards - availableGuards };
+    });
+  }, [services, availableGuards, efectiveHours, periodKey]);
+
+  // ── Proyección con ajuste por ausentismo (cuando el toggle está activo) ──────
+  const projectionDisplay = useMemo(() => {
+    if (!aplicarAusentismo || hsRealesGuardia <= 0) return projection;
+    return projection.map(p => {
+      const guardsAdj = Math.ceil(p.hours / hsRealesGuardia);
+      return { ...p, guards: guardsAdj, gap: guardsAdj - availableGuards };
+    });
+  }, [projection, aplicarAusentismo, hsRealesGuardia, availableGuards]);
+
+  // ── Chart data ───────────────────────────────────────────────────────────────
+  // Capacidad: donut coverage
+  const coverageDonut = useMemo(() => {
+    const prog  = actual.scheduledHours;
+    const vac   = actual.vacantHours;
+    const noSrv = Math.max(0, theoretical.totalHours - prog - vac);
+    return [
+      { name: 'Programadas', value: prog,  color: '#4f46e5' },
+      { name: 'Vacantes',    value: vac,   color: '#f59e0b' },
+      { name: 'Sin cubrir',  value: noSrv, color: '#e2e8f0' },
+    ].filter(d => d.value > 0);
+  }, [actual.scheduledHours, actual.vacantHours, theoretical.totalHours]);
+
+  // Capacidad: grouped bars per service
+  const capacidadBars = useMemo(() => theoretical.active.map(srv => {
+    const obj = actual.byObjective.find(o => o.id === srv.objectiveId);
+    return {
+      name: shortName(srv.objectiveName||srv.clientName, 13),
+      'Teóricas':    srv.monthHours,
+      'Programadas': Math.round(obj?.scheduled??0),
+      'Vacantes':    Math.round(obj?.vacant??0),
+    };
+  }), [theoretical.active, actual.byObjective]);
+
+  // Guardias: band donut
+  const bandDonut = useMemo(() => [
+    { name: 'Con margen (<160h)',    value: actual.byGuard.filter(g=>g.hours<160).length,                     color: '#059669' },
+    { name: 'En capacidad (160-200)', value: actual.byGuard.filter(g=>g.hours>=160&&g.hours<=200).length,    color: '#d97706' },
+    { name: 'En extras (>200h)',      value: actual.byGuard.filter(g=>g.hours>200).length,                   color: '#dc2626' },
+  ].filter(d => d.value > 0), [actual.byGuard]);
+
+  // Guardias: radial utilization (top 10)
+  const radialGuards = useMemo(() =>
+    actual.byGuard.slice(0, 10).map(g => ({
+      name: shortName(g.name, 16),
+      pct:  Math.min(Math.round(g.hours/200*100), 150),
+      fill: g.hours>200 ? '#dc2626' : g.hours>=160 ? '#d97706' : '#059669',
+    })).reverse()
+  , [actual.byGuard]);
+
+  // Guardias: horizontal bars
+  const guardBars = useMemo(() => actual.byGuard.map(g => ({
+    name:  shortName(g.name, 16),
+    horas: Math.round(g.hours),
+  })), [actual.byGuard]);
+  const guardMaxH = useMemo(() => Math.max(220, ...actual.byGuard.map(g=>g.hours))+20, [actual.byGuard]);
+
+  // Cobertura: treemap
+  const treemapData = useMemo(() => actual.byObjective.map(obj => ({
+    name:   obj.name,
+    size:   Math.round(obj.scheduled+obj.vacant),
+    vacPct: (obj.scheduled+obj.vacant)>0 ? Math.round(obj.vacant/(obj.scheduled+obj.vacant)*100) : 0,
+  })).filter(d => d.size > 0), [actual.byObjective]);
+
+  // Cobertura: stacked bars
+  const coberturaBars = useMemo(() => actual.byObjective.slice(0,20).map(obj => ({
+    name:         shortName(obj.name, 13),
+    'Programadas': Math.round(obj.scheduled),
+    'Vacantes':    Math.round(obj.vacant),
+  })), [actual.byObjective]);
+
+  // Proyección: area chart (current + 3 months) — respeta el toggle de ausentismo
+  const areaData = useMemo(() => [
+    { name: periodRange.labelShort, 'Hs teóricas': theoretical.totalHours, 'Guardias mín.': totalGuardsDisplay },
+    ...projectionDisplay.map(p => ({ name: p.label, 'Hs teóricas': p.hours, 'Guardias mín.': p.guards })),
+  ], [theoretical.totalHours, totalGuardsDisplay, projectionDisplay, periodRange.labelShort]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (loadInit) return (
+    <DashboardLayout>
+      <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
+        <Loader2 className="animate-spin" size={24}/><span className="font-bold">Cargando datos...</span>
+      </div>
+    </DashboardLayout>
+  );
+
+  return (
+    <DashboardLayout>
+      <PageShell>
+        <div className="max-w-7xl mx-auto space-y-6">
+
+          {/* ── Header ──────────────────────────────────────────────────── */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-500/20 shrink-0">
+                <TrendingUp size={20} className="text-white"/>
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Análisis Operativo</h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">Capacidad · cobertura · proyección</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              {/* Selector días por guardia */}
+              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+                <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Días/guardia</span>
+                <div className="flex gap-1">
+                  {([24, 25] as const).map(d => (
+                    <button key={d} onClick={() => setDiasPorGuardia(d)}
+                      className={`w-8 h-7 rounded-lg text-xs font-black transition-all ${
+                        diasPorGuardia === d
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}>
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[9px] font-bold text-violet-600 border-l border-slate-200 dark:border-slate-700 pl-2">= {efectiveHours} hs/mes</span>
+              </div>
+              {/* Hs por turno: define el divisor para guardias mín. en vista día / semana */}
+              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+                <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Hs/turno</span>
+                <div className="flex gap-1">
+                  {([8, 12] as const).map((h) => (
+                    <button
+                      key={h}
+                      type="button"
+                      onClick={() => setHsTurnoPlanif(h)}
+                      className={`w-9 h-7 rounded-lg text-xs font-black transition-all ${
+                        hsTurnoPlanif === h
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {h}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[8px] font-bold text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2 max-w-[130px] leading-tight">
+                  {periodMode === 'day' || periodMode === 'week'
+                    ? `Mín. guardias = ⌈hs / ${hsTurnoPlanif} ⌉`
+                    : `Mes/año: ⌈hs / ${efectiveHours} ⌉ FTE`}
+                </span>
+              </div>
+              {/* Período: modo + navegación */}
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <div className="flex items-center gap-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-0.5">
+                  {([
+                    { id: 'day' as PeriodMode, label: 'Día' },
+                    { id: 'week' as PeriodMode, label: 'Sem.' },
+                    { id: 'month' as PeriodMode, label: 'Mes' },
+                    { id: 'year' as PeriodMode, label: 'Año' },
+                  ]).map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setPeriodModeSafe(id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide transition-all ${
+                        periodMode === id
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => shiftPeriod(-1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors"><ChevronLeft size={16}/></button>
+                  <span className="text-sm font-black text-slate-700 dark:text-white uppercase min-w-[140px] max-w-[280px] text-center leading-tight">{periodRange.labelShort}</span>
+                  <button type="button" onClick={() => shiftPeriod(1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors"><ChevronRight size={16}/></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── 6 KPIs operativos ───────────────────────────────────────── */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <KpiCard icon={Clock}       color="#4f46e5" label="Horas teóricas"       value={theoretical.totalHours.toLocaleString('es-AR')} unit="hs"/>
+            <KpiCard icon={Shield}      color="#7c3aed" label="Guardias mín. nec."   value={totalGuardsDisplay}
+              subtext={
+                aplicarAusentismo
+                  ? `Ajustado: ⌈hs / ${hsRealesGuardia} hs⌉ con ${ausentismoTotal}% aus. (puro: ${theoretical.totalGuards})`
+                  : periodMode === 'day' || periodMode === 'week'
+                    ? `${theoretical.totalShifts} turnos · ⌈hs/día / ${hsTurnoPlanif}⌉ guardias en simultáneo`
+                    : `⌈hs / ${guardQuotaHs} ⌉ FTE mes`
+              }/>
+            <KpiCard icon={Users}       color="#0891b2" label="Guardias disponibles" value={availableGuards}
+              subtext={
+                periodMode === 'day'
+                  ? guardiasNoDispTotal > 0
+                    ? `Plantel ${plantelGuardias} · −${guardiasNoDispTotal} no disp. (${guardiasNoDispFranco} franco · ${guardiasNoDispLicencia} lic./aus.)`
+                    : `Plantel ${plantelGuardias} sin F/FF ni licencias en el día`
+                  : periodMode === 'week'
+                    ? `Plantel ${plantelGuardias} · ${disponibilidadGuardias.guardDaysAvailable.toLocaleString('es-AR')}/${disponibilidadGuardias.guardDaysTotal.toLocaleString('es-AR')} guardias-día (−${disponibilidadGuardias.francoDays} franco · −${disponibilidadGuardias.licenciaDays} lic./aus.)`
+                    : guardiasNoDispLicencia > 0
+                      ? `Plantel ${plantelGuardias} · −${guardiasNoDispLicencia} lic./aus. · ${guardiasNoDispFranco} con franco (no resta al cupo CCT)`
+                      : guardiasNoDispFranco > 0
+                        ? `Plantel ${plantelGuardias} · ${guardiasNoDispFranco} con franco en el período (ya contemplado en el ciclo CCT)`
+                        : `Plantel ${plantelGuardias} sin bajas por licencias/ausencias`
+              }/>
+            <KpiCard icon={gapDisplay>0?AlertTriangle:gapDisplay<0?CheckCircle:Activity}
+              color={gapDisplay>0?'#dc2626':gapDisplay<0?'#059669':'#64748b'} label="Brecha" alert={gapDisplay>0}
+              value={gapDisplay>0?`+${gapDisplay}`:gapDisplay<0?gapDisplay:'='}
+              subtext={
+                aplicarAusentismo
+                  ? `Ajustada por ${ausentismoTotal}% aus. (puro: ${gap>0?`+${gap}`:gap})`
+                  : gapDisplay>0?'Déficit de guardias':gapDisplay<0?`Superávit ${Math.abs(gapDisplay)}G`:'Exacto'
+              }/>
+            <KpiCard icon={Activity}    color="#d97706" label="Cobertura programada" value={`${coveragePct}%`}
+              subtext={loadTurnos?'Cargando...':`${actual.scheduledHours.toLocaleString('es-AR')} hs prog.`}/>
+            <KpiCard icon={AlertCircle} color="#ef4444" label="Vacancia"             value={`${vacancyPct}%`} alert={vacancyPct>20}
+              subtext={loadTurnos?'Cargando...':`${actual.vacantHours.toLocaleString('es-AR')} hs vacantes`}/>
+          </div>
+
+          {/* ── Panel viabilidad global ──────────────────────────────────── */}
+          {theoretical.totalHours > 0 && (
+            <div className={`rounded-2xl border p-4 ${
+              superavitGlobal < 0
+                ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
+                : utilizacionPct >= 90
+                  ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+                  : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+            }`}>
+              <div className="flex flex-col md:flex-row md:items-center gap-4">
+                <div className="flex-1">
+                  <p className="text-[9px] font-black uppercase tracking-widest mb-1 text-slate-500">
+                    {periodMode === 'day' || periodMode === 'week' ? (
+                      <>
+                        Viabilidad global — {periodRange.labelShort} ({periodRange.daysCount} d. calendario, {slaDemandDaysInPeriod} d. con SLA vigente) · Planificación por turno de{' '}
+                        <strong className="text-slate-600 dark:text-slate-300">{hsTurnoPlanif} hs</strong> (turno estándar 8h / tope 12h) · tope guardia en período{' '}
+                        {capHsPerGuardPeriod} hs · turnos totales = ⌈
+                        {theoretical.totalHours.toLocaleString('es-AR')} / {hsTurnoPlanif}⌉ ={' '}
+                        <strong>{theoretical.totalShifts}</strong>; mín. guardias en simultáneo = ⌈
+                        {theoretical.totalHours.toLocaleString('es-AR')} / {theoretical.demandDays} d / {hsTurnoPlanif}⌉ ={' '}
+                        <strong>{theoretical.totalGuards}</strong> guardias
+                      </>
+                    ) : (
+                      <>
+                        Viabilidad global — {periodRange.labelShort} ({periodRange.daysCount} d. calendario, {slaDemandDaysInPeriod} d. con SLA vigente) · CCT base{' '}
+                        {diasPorGuardia} días × 8h = {efectiveHours} hs/guardia/mes · tope en período {capHsPerGuardPeriod} hs/guardia · mín. global (FTE) = ⌈
+                        {theoretical.totalHours.toLocaleString('es-AR')} / {guardQuotaHs} ⌉ = <strong>{theoretical.totalGuards}</strong> guardias
+                      </>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="text-center max-w-[11rem]">
+                      <p className="text-xl font-black text-slate-800 dark:text-white">{avgHsPerGuardia}</p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase">Carga media (hs ÷ disp.)</p>
+                      <p className="text-[9px] text-slate-400 leading-snug">
+                        {availableGuards > 0 ? (
+                          <>
+                            {theoretical.totalHours.toLocaleString('es-AR')} ÷ {availableGuards} ≈ {avgHsPerGuardia} hs. Es el reparto teórico del SLA entre guardias disponibles; no es la jornada máxima legal de una persona.
+                            {periodMode === 'week' && (
+                              <> Tope del panel: {capHsPerGuardPeriod} hs = {hsTurnoPlanif} h × {slaDemandDaysInPeriod} d. con demanda (no 48 h CCT semanal).</>
+                            )}
+                          </>
+                        ) : (
+                          'Sin guardias disponibles en el período.'
+                        )}
+                      </p>
+                    </div>
+                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
+                    <div className="text-center">
+                      <p className={`text-xl font-black ${utilizacionPct >= 100 ? 'text-rose-600' : utilizacionPct >= 90 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        {utilizacionPct}%
+                      </p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase">Utilización</p>
+                      <p className="text-[9px] text-slate-400">sobre {capHsPerGuardPeriod} hs tope período</p>
+                    </div>
+                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
+                    <div className="text-center">
+                      <p className={`text-xl font-black ${superavitGlobal < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {superavitGlobal < 0 ? '-' : '+'}{Math.abs(superavitGlobal).toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase">{superavitGlobal < 0 ? 'Déficit hs' : 'Superávit hs'}</p>
+                      <p className="text-[9px] text-slate-400">
+                        {availableGuards} efectivos × {capHsPerGuardPeriod} hs/guardia (plantel {plantelGuardias}
+                        {guardiasNoDispTotal > 0 ? `, −${guardiasNoDispTotal} no disp.` : ''}) = {totalHsDisponibles.toLocaleString('es-AR')} hs disp.
+                      </p>
+                    </div>
+                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
+                    <div className="text-center">
+                      <p className="text-xl font-black text-violet-600">{theoretical.totalSurplus.toLocaleString('es-AR')}</p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase">Colchón hs</p>
+                      <p className="text-[9px] text-slate-400">margen para francos / licencias / reemplazos</p>
+                    </div>
+                  </div>
+                </div>
+                {/* Barra utilización */}
+                <div className="md:w-64 space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                    <span>0 hs</span>
+                    <span>{capHsPerGuardPeriod} hs (tope período)</span>
+                  </div>
+                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden relative">
+                    <div className={`h-full rounded-full transition-all ${
+                      utilizacionPct >= 100 ? 'bg-rose-500' : utilizacionPct >= 90 ? 'bg-amber-500' : 'bg-emerald-500'
+                    }`} style={{ width: `${Math.min(utilizacionPct, 100)}%` }}/>
+                    {utilizacionPct > 100 && (
+                      <div className="absolute inset-0 flex items-center justify-end pr-2">
+                        <span className="text-[9px] font-black text-white">+{utilizacionPct-100}% sobre límite</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-center text-slate-400">
+                    Carga media {avgHsPerGuardia} hs (hs SLA ÷ guardias disp.) · tope panel: {capHsPerGuardPeriod} hs período
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Panel ausentismo ────────────────────────────────────────── */}
+          {theoretical.totalHours > 0 && (() => {
+            const COMPONENTES = [
+              { label:'Vacaciones',             val:ausVac,   set:setAusVac,   color:'#4f46e5', hint:'CCT: 14-28 días/año → ~4-9%', real: ausenciasStats?.vacPct   ?? null },
+              { label:'Enfermedad / Cert.',      val:ausEnf,   set:setAusEnf,   color:'#d97706', hint:'Promedio sector: 3-6%',        real: ausenciasStats?.enfPct   ?? null },
+              { label:'Accidentes ART',          val:ausArt,   set:setAusArt,   color:'#dc2626', hint:'Sector seguridad: 1-3%',       real: ausenciasStats?.artPct   ?? null },
+              { label:'Ausencias injustificadas',val:ausAus,   set:setAusAus,   color:'#7c3aed', hint:'Variable: 1-5%',               real: ausenciasStats?.injPct   ?? null },
+              { label:'Licencias / Otros',       val:ausOtros, set:setAusOtros, color:'#0891b2', hint:'Matrimonio, duelo, etc.',      real: ausenciasStats?.otrosPct ?? null },
+            ];
+            return (
+              <div className={`rounded-2xl border transition-colors ${
+                showAusentismo
+                  ? 'border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-900/10'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+              }`}>
+                {/* Header colapsable */}
+                <div className="w-full flex items-center justify-between px-5 py-3.5 gap-3">
+                  <button
+                    onClick={() => setShowAusentismo(s => !s)}
+                    className="flex-1 flex items-center gap-3 text-left">
+                    <div className="p-1.5 rounded-lg bg-violet-100 dark:bg-violet-900/40">
+                      <AlertTriangle size={14} className="text-violet-600"/>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase text-slate-700 dark:text-white tracking-wide">
+                        Ajuste por Ausentismo
+                      </p>
+                      <p className="text-[9px] text-slate-400 font-medium">
+                        Tasa actual: <strong className={`${ausentismoTotal>=20?'text-rose-600':ausentismoTotal>=12?'text-amber-600':'text-emerald-600'}`}>{ausentismoTotal}%</strong>
+                        {' · '}Hs reales/guardia: <strong className="text-violet-600">{hsRealesGuardia} hs</strong>
+                        {' · '}Guardias ajustados: <strong className={brechaAjustada>0?'text-rose-600':'text-emerald-600'}>{guardiasAjustados}</strong>
+                        {' · '}Brecha: <strong className={brechaAjustada>0?'text-rose-600':'text-emerald-600'}>{brechaAjustada>0?`+${brechaAjustada} déficit`:`${Math.abs(brechaAjustada)} superávit`}</strong>
+                      </p>
+                    </div>
+                  </button>
+                  {/* Toggle propaga el ajuste a los KPIs principales del header */}
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0 select-none" title="Cuando está activo, los KPIs Guardias mín. nec. y Brecha del header usan los valores ajustados por ausentismo.">
+                    <span className="text-[9px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-300 hidden sm:inline">
+                      Aplicar a KPIs
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={aplicarAusentismo}
+                      onChange={e => setAplicarAusentismo(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:bg-violet-600 transition-colors relative">
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${aplicarAusentismo?'translate-x-4':''}`}/>
+                    </div>
+                  </label>
+                  <button
+                    onClick={() => setShowAusentismo(s => !s)}
+                    className="p-1">
+                    <ChevronDown size={16} className={`text-slate-400 transition-transform ${showAusentismo?'rotate-180':''}`}/>
+                  </button>
+                </div>
+
+                {/* Contenido expandido */}
+                {showAusentismo && (
+                  <div className="px-5 pb-5 space-y-4 border-t border-violet-100 dark:border-violet-800/50 pt-4">
+
+                    {/* Datos reales del mes */}
+                    {ausenciasStats && (
+                      <div className={`rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between ${
+                        ausenciasStats.total > 0
+                          ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-700'
+                          : 'bg-slate-50 dark:bg-slate-700/30 border-slate-200 dark:border-slate-700'
+                      }`}>
+                        <div>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                            Datos reales — {ausenciasStats.total} ausencias registradas en {periodRange.labelShort}
+                            {loadAus && <span className="ml-2 text-indigo-500">· cargando...</span>}
+                          </p>
+                          {ausenciasStats.total > 0 ? (
+                            <div className="flex flex-wrap gap-3">
+                              {[
+                                { label:'Vacaciones', pct: ausenciasStats.vacPct,   color:'#4f46e5' },
+                                { label:'Enfermedad', pct: ausenciasStats.enfPct,   color:'#d97706' },
+                                { label:'ART',        pct: ausenciasStats.artPct,   color:'#dc2626' },
+                                { label:'Injust.',    pct: ausenciasStats.injPct,   color:'#7c3aed' },
+                                { label:'Otros',      pct: ausenciasStats.otrosPct, color:'#0891b2' },
+                              ].map(r => (
+                                <div key={r.label} className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: r.color }}/>
+                                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{r.label}:</span>
+                                  <span className="text-[10px] font-black" style={{ color: r.color }}>{r.pct}%</span>
+                                </div>
+                              ))}
+                              <span className="text-[10px] font-black text-slate-700 dark:text-white border-l border-slate-300 dark:border-slate-600 pl-3">
+                                Total real: {ausenciasStats.totalPct}% · {ausenciasStats.hsAfectadas} hs afectadas
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-slate-400">Sin ausencias registradas en RRHH para este período</p>
+                          )}
+                        </div>
+                        {ausenciasStats.total > 0 && (
+                          <button
+                            onClick={() => {
+                              setAusVac(ausenciasStats.vacPct);
+                              setAusEnf(ausenciasStats.enfPct);
+                              setAusArt(ausenciasStats.artPct);
+                              setAusAus(ausenciasStats.injPct);
+                              setAusOtros(ausenciasStats.otrosPct);
+                            }}
+                            className="shrink-0 px-4 py-2 bg-indigo-600 text-white text-[10px] font-black uppercase rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
+                            Usar datos reales
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Fórmula explicada */}
+                    <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-[10px] text-slate-500 leading-relaxed">
+                      <p className="font-black text-slate-700 dark:text-white mb-1 text-xs">Fórmula de disponibilidad real</p>
+                      <p>
+                        <span className="font-black text-violet-600">{capHsPerGuardPeriod} hs tope período/guardia</span>
+                        {' × (1 − '}
+                        <span className="font-black text-amber-600">{ausentismoTotal}%</span>
+                        {' ausentismo) = '}
+                        <span className="font-black text-emerald-600">{hsRealesGuardia} hs reales/guardia</span>
+                      </p>
+                      <p className="mt-1">
+                        {'⌈ '}
+                        <span className="font-black text-indigo-600">{theoretical.totalHours.toLocaleString('es-AR')} hs</span>
+                        {' / '}
+                        <span className="font-black text-emerald-600">{hsRealesGuardia} hs</span>
+                        {' ⌉ = '}
+                        <span className="font-black text-violet-600">{guardiasAjustados} guardias necesarios reales</span>
+                      </p>
+                      <p className="mt-1 text-slate-400">
+                        Con {ausentismoTotal}% de ausentismo, cada guardia está disponible efectivamente {hsRealesGuardia} hs en el período analizado.
+                        Cupo efectivo: {availableGuards} guardias (plantel {plantelGuardias}) aportan {(availableGuards * hsRealesGuardia).toLocaleString('es-AR')} hs reales totales.
+                      </p>
+                    </div>
+
+                    {/* Sliders por componente */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      {COMPONENTES.map(c => (
+                        <div key={c.label} className="space-y-1.5 bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] font-black uppercase text-slate-500 tracking-wide">{c.label}</span>
+                            <span className="text-sm font-black" style={{ color: c.color }}>{c.val.toFixed(1)}%</span>
+                          </div>
+                          {/* Indicador dato real */}
+                          {c.real !== null && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[8px] text-slate-400">Real RRHH:</span>
+                              <span className="text-[9px] font-black" style={{ color: c.color }}>{c.real}%</span>
+                              {Math.abs(c.val - c.real) > 0.1 && (
+                                <span className={`text-[8px] font-bold ${c.val > c.real ? 'text-amber-500' : 'text-rose-500'}`}>
+                                  {c.val > c.real ? `+${(c.val-c.real).toFixed(1)}` : (c.val-c.real).toFixed(1)} vs real
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <input
+                            type="range" min={0} max={20} step={0.1} value={c.val}
+                            onChange={e => c.set(Math.round(Number(e.target.value) * 10) / 10)}
+                            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                            style={{ accentColor: c.color }}
+                          />
+                          <p className="text-[8px] text-slate-400 text-center">{c.hint}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Resumen visual */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
+                        <p className="text-2xl font-black text-violet-600">{ausentismoTotal}%</p>
+                        <p className="text-[9px] font-black uppercase text-slate-400">Ausentismo configurado</p>
+                        {ausenciasStats && ausenciasStats.total > 0 && (
+                          <p className="text-[9px] text-slate-400 mt-0.5">Real RRHH: <strong style={{ color: ausenciasStats.totalPct>ausentismoTotal?'#dc2626':'#059669' }}>{ausenciasStats.totalPct}%</strong></p>
+                        )}
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
+                        <p className="text-2xl font-black text-emerald-600">{hsRealesGuardia}</p>
+                        <p className="text-[9px] font-black uppercase text-slate-400">Hs reales/guardia</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">vs {capHsPerGuardPeriod} hs tope período</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
+                        <p className={`text-2xl font-black ${brechaAjustada>0?'text-rose-600':'text-emerald-600'}`}>{guardiasAjustados}</p>
+                        <p className="text-[9px] font-black uppercase text-slate-400">Guardias necesarios</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">vs {theoretical.totalGuards} sin ausentismo</p>
+                      </div>
+                      <div className={`rounded-xl p-3 border text-center ${
+                        brechaAjustada>0
+                          ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
+                          : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                      }`}>
+                        <p className={`text-2xl font-black ${brechaAjustada>0?'text-rose-600':'text-emerald-600'}`}>
+                          {brechaAjustada>0?`+${brechaAjustada}`:brechaAjustada}
+                        </p>
+                        <p className="text-[9px] font-black uppercase text-slate-400">Brecha real</p>
+                        <p className="text-[9px] text-slate-500 mt-0.5">
+                          {brechaAjustada>0
+                            ? `Necesitás contratar ${brechaAjustada} guardia${brechaAjustada>1?'s':''}`
+                            : `Tenés ${Math.abs(brechaAjustada)} guardia${Math.abs(brechaAjustada)>1?'s':''} de margen`
+                          }
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Detalle ausencias del mes */}
+                    {ausenciasStats && ausenciasStats.detalle.length > 0 && (
+                      <details className="group">
+                        <summary className="cursor-pointer text-[9px] font-black uppercase text-indigo-500 tracking-widest hover:text-indigo-700 flex items-center gap-1.5">
+                          <ChevronDown size={11} className="transition-transform group-open:rotate-180"/>
+                          Ver detalle de {ausenciasStats.detalle.length} ausencia{ausenciasStats.detalle.length>1?'s':''} del período
+                        </summary>
+                        <div className="mt-2 overflow-x-auto">
+                          <table className="w-full text-[10px] text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-700/40 text-slate-500 font-black uppercase text-[8px]">
+                              <tr>
+                                <th className="px-3 py-2">Empleado</th>
+                                <th className="px-3 py-2">Tipo</th>
+                                <th className="px-3 py-2 text-center">Días</th>
+                                <th className="px-3 py-2 text-center">Hs afectadas</th>
+                                <th className="px-3 py-2 text-center">Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                              {ausenciasStats.detalle.map((a: any) => (
+                                <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/20">
+                                  <td className="px-3 py-1.5 font-bold text-slate-700 dark:text-white uppercase">{a.emp}</td>
+                                  <td className="px-3 py-1.5">
+                                    <span className={`px-1.5 py-0.5 rounded font-black text-[8px] ${
+                                      a.tipo==='VACATION'?'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400':
+                                      a.tipo==='SICK_LEAVE'?'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400':
+                                      'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                                    }`}>
+                                      {a.tipo==='VACATION'?'VACACIONES':a.tipo==='SICK_LEAVE'?'ENFERMEDAD':'OTRO'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-1.5 text-center text-slate-500">{a.days}</td>
+                                  <td className="px-3 py-1.5 text-center font-black text-rose-600">{a.hs} hs</td>
+                                  <td className="px-3 py-1.5 text-center">
+                                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${
+                                      a.status==='Justificada'?'bg-emerald-100 text-emerald-700':
+                                      a.status==='Injustificada'?'bg-rose-100 text-rose-700':
+                                      'bg-slate-100 text-slate-500'
+                                    }`}>{a.status||'—'}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )}
+
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Tabs ────────────────────────────────────────────────────── */}
+          <TabBar
+            tabs={[
+              { id:'capacidad',  label:'Capacidad',  icon:BarChart3  },
+              { id:'guardias',   label:'Guardias',   icon:Users      },
+              { id:'cobertura',  label:'Cobertura',  icon:Target     },
+              { id:'proyeccion', label:'Proyección', icon:TrendingUp },
+              { id:'viabilidad', label:'Viabilidad', icon:Scale       },
+              { id:'art12',      label:'ART.12',     icon:MapPin      },
+              { id:'analitica',  label:'Analítica',  icon:Filter     },
+            ]}
+            active={activeTab}
+            onChange={id => setActiveTab(id as typeof activeTab)}
+          />
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: CAPACIDAD
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'capacidad' && (
+            <div className="space-y-4">
+
+              {/* Donut cobertura + stats */}
+              {!loadTurnos && theoretical.totalHours > 0 && (
+                <SectionCard title={`Distribución de horas · ${periodRange.labelShort}`} icon={Activity} loading={loadTurnos}>
+                  <div className="flex flex-col md:flex-row items-center gap-0 md:gap-8 p-6">
+                    {/* Donut */}
+                    <div className="relative shrink-0">
+                      <PieChart width={200} height={200}>
+                        <Pie data={coverageDonut} cx={100} cy={100}
+                          innerRadius={62} outerRadius={88}
+                          paddingAngle={3} dataKey="value" stroke="none">
+                          {coverageDonut.map((e,i) => <Cell key={i} fill={e.color}/>)}
+                        </Pie>
+                        <DonutCenter cx={100} cy={100} value={`${coveragePct}%`} label="cobertura" color="#4f46e5"/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                      </PieChart>
+                    </div>
+                    {/* Stats */}
+                    <div className="flex-1 space-y-3 w-full">
+                      {coverageDonut.map(d => (
+                        <div key={d.name}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }}/>
+                              <span className="font-bold text-slate-600 dark:text-slate-300">{d.name}</span>
+                            </div>
+                            <span className="font-black text-slate-700 dark:text-white">
+                              {d.value.toLocaleString('es-AR')} hs
+                              <span className="text-slate-400 font-medium ml-1">
+                                ({theoretical.totalHours>0?Math.round(d.value/theoretical.totalHours*100):0}%)
+                              </span>
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ background: d.color, width:`${theoretical.totalHours>0?Math.round(d.value/theoretical.totalHours*100):0}%` }}/>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-[9px] text-slate-400 pt-1">Total teórico: <strong className="text-slate-600 dark:text-slate-300">{theoretical.totalHours.toLocaleString('es-AR')} hs</strong> en {theoretical.active.length} servicios activos</p>
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Barras por servicio */}
+              {capacidadBars.length > 0 && (
+                <SectionCard title={`Horas por servicio · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
+                  <LegendRow items={[
+                    { color:'#4f46e5', label:'Hs teóricas' },
+                    { color:'#059669', label:'Hs programadas' },
+                    { color:'#f59e0b', label:'Hs vacantes' },
+                  ]}/>
+                  <div className="p-5 pt-2">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={capacidadBars} margin={{ top:4, right:8, left:-16, bottom:52 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="name" tick={{ fontSize:9, fontWeight:700, fill:'#94a3b8' }} angle={-35} textAnchor="end" interval={0}/>
+                        <YAxis tick={{ fontSize:9, fill:'#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <Bar dataKey="Teóricas"    fill="#4f46e5" radius={[4,4,0,0]} maxBarSize={28}/>
+                        <Bar dataKey="Programadas" fill="#059669" radius={[4,4,0,0]} maxBarSize={28}/>
+                        <Bar dataKey="Vacantes"    fill="#f59e0b" radius={[4,4,0,0]} maxBarSize={28}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Distribución por duración de turno */}
+              {!loadTurnos && actual.byDuration.length > 0 && (
+                <SectionCard title={`Turnos planificados por duración · ${periodRange.labelShort}`} icon={Clock} loading={loadTurnos}>
+                  <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {actual.byDuration.map(d => {
+                      const progPct = d.count > 0 ? Math.round((d.count - d.vacant) / d.count * 100) : 0;
+                      const color =
+                        d.dur <= 8  ? '#4f46e5' :
+                        d.dur <= 12 ? '#7c3aed' :
+                                      '#0891b2';
+                      return (
+                        <div key={d.dur} className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3 border border-slate-100 dark:border-slate-700 flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xl font-black" style={{ color }}>{d.dur}h</span>
+                            <div className="flex gap-0.5 flex-wrap justify-end max-w-[80px]">
+                              {d.codes.map(c => (
+                                <span key={c} className="text-[8px] font-black px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300">{c}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <p className="text-xl font-black text-slate-800 dark:text-white leading-none">{d.count.toLocaleString('es-AR')}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase leading-tight">turnos · {Math.round(d.hours).toLocaleString('es-AR')} hs</p>
+                          {d.vacant > 0 && (
+                            <p className="text-[9px] font-black text-amber-600">{d.vacant} vacantes ({100-progPct}%)</p>
+                          )}
+                          <div className="h-1 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden mt-auto">
+                            <div className="h-full rounded-full" style={{ width:`${progPct}%`, background: color }}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* totales */}
+                    <div className="bg-slate-900 dark:bg-slate-900 rounded-xl p-3 flex flex-col gap-1.5 col-span-2 sm:col-span-1">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total</p>
+                      <p className="text-xl font-black text-white leading-none">
+                        {actual.byDuration.reduce((s,d) => s+d.count, 0).toLocaleString('es-AR')}
+                      </p>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">turnos programados</p>
+                      <p className="text-[9px] font-black text-indigo-400">
+                        {(actual.scheduledHours+actual.vacantHours).toLocaleString('es-AR')} hs totales
+                      </p>
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Tabla */}
+              <SectionCard title={`Servicios activos · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
+                {theoretical.active.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <BarChart3 size={36} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm font-bold">Sin servicios activos en este período</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-4">Cliente / Objetivo</th>
+                          <th className="p-4 text-center">Puestos</th>
+                          <th className="p-4 text-center text-indigo-600">Hs teóricas</th>
+                          <th className="p-4 text-center">G. mín.</th>
+                          <th className="p-4 text-center">Hs prog.</th>
+                          <th className="p-4 text-center">Cobertura</th>
+                          <th className="p-4 text-center text-amber-600">Hs vacantes</th>
+                          <th className="p-4 text-center text-violet-600" title={`Horas sobrantes del último guardia (G. mín. × ${guardQuotaHs} − Hs teóricas). Es el margen disponible para cubrir francos, licencias y reemplazos sin contratar otro guardia.`}>Colchón hs</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {theoretical.active.map(srv => {
+                          const obj = actual.byObjective.find(o => o.id === srv.objectiveId);
+                          const scheduled = obj?.scheduled??0, vacant = obj?.vacant??0;
+                          const cov = srv.monthHours>0 ? Math.round(scheduled/srv.monthHours*100) : 0;
+                          return (
+                            <tr key={srv.id} className="hover:bg-indigo-50/20 dark:hover:bg-indigo-900/10">
+                              <td className="p-4">
+                                <p className="font-black text-xs text-slate-800 dark:text-white uppercase">{srv.clientName}</p>
+                                <p className="text-xs text-indigo-500 font-bold">{srv.objectiveName}</p>
+                              </td>
+                              <td className="p-4 text-center text-slate-500">{(srv.positions||[]).length}</td>
+                              <td className="p-4 text-center font-black text-indigo-600">{srv.monthHours.toLocaleString('es-AR')}</td>
+                              <td className="p-4 text-center font-black text-slate-700 dark:text-white">{srv.guardsNeeded}</td>
+                              <td className="p-4 text-center font-bold text-slate-600 dark:text-slate-300">
+                                {loadTurnos ? <Loader2 size={13} className="animate-spin mx-auto text-slate-300"/> : Math.round(scheduled).toLocaleString('es-AR')}
+                              </td>
+                              <td className="p-4">
+                                {loadTurnos ? <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"/> : (
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden min-w-[60px]">
+                                      <div className={`h-full rounded-full ${cov>=80?'bg-emerald-500':cov>=50?'bg-amber-500':'bg-rose-500'}`} style={{ width:`${Math.min(cov,100)}%` }}/>
+                                    </div>
+                                    <span className={`text-[10px] font-black w-9 text-right shrink-0 ${cov>=80?'text-emerald-600':cov>=50?'text-amber-600':'text-rose-600'}`}>{cov}%</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-4 text-center">
+                                {!loadTurnos && (vacant>0
+                                  ? <span className="text-[10px] font-black text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-full">{Math.round(vacant)} hs</span>
+                                  : <span className="text-slate-300 dark:text-slate-600">—</span>)}
+                              </td>
+                              <td className="p-4 text-center">
+                                {srv.surplusHs > 0
+                                  ? <span className="text-[10px] font-black text-violet-600 bg-violet-50 dark:bg-violet-900/20 px-2 py-0.5 rounded-full">{srv.surplusHs} hs</span>
+                                  : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-slate-900 text-white font-black text-xs uppercase">
+                        <tr>
+                          <td className="p-4 text-right" colSpan={2}>Total</td>
+                          <td className="p-4 text-center text-emerald-400">{theoretical.totalHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center">{theoretical.totalGuards}</td>
+                          <td className="p-4 text-center">{actual.scheduledHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center">{coveragePct}%</td>
+                          <td className="p-4 text-center text-amber-400">{actual.vacantHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center text-violet-300">{theoretical.totalSurplus.toLocaleString('es-AR')} hs</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: GUARDIAS
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'guardias' && (
+            <div className="space-y-4">
+
+              {/* Donut bandas + RadialBar utilización */}
+              {!loadTurnos && actual.byGuard.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                  {/* Donut distribución de bandas */}
+                  <SectionCard title="Distribución de carga" icon={Users}>
+                    <div className="flex flex-col items-center py-4 gap-2">
+                      <PieChart width={200} height={200}>
+                        <Pie data={bandDonut} cx={100} cy={100}
+                          innerRadius={58} outerRadius={88}
+                          paddingAngle={4} dataKey="value" stroke="none">
+                          {bandDonut.map((e,i) => <Cell key={i} fill={e.color}/>)}
+                        </Pie>
+                        <DonutCenter cx={100} cy={100}
+                          value={actual.byGuard.length}
+                          label="guardias"
+                          color="#4f46e5"/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                      </PieChart>
+                      <div className="flex gap-4 flex-wrap justify-center">
+                        {bandDonut.map(b => (
+                          <div key={b.name} className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.color }}/>
+                            <span className="text-[10px] font-bold text-slate-500">{b.name}: <strong style={{ color: b.color }}>{b.value}</strong></span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  {/* RadialBar top guardias */}
+                  <SectionCard title={`Top ${radialGuards.length} guardias por utilización`} icon={Activity}>
+                    <div className="px-4 py-3">
+                      <p className="text-[9px] text-slate-400 font-bold mb-2 uppercase">% del límite CCT 200h/mes</p>
+                      <ResponsiveContainer width="100%" height={Math.max(160, radialGuards.length * 22)}>
+                        <RadialBarChart cx="50%" cy="50%"
+                          innerRadius="15%" outerRadius="95%"
+                          data={radialGuards} barSize={14}>
+                          <RadialBar
+                            dataKey="pct"
+                            background={{ fill: '#f1f5f9' }}
+                            label={{ position:'insideStart', fill:'#fff', fontSize:9, fontWeight:700 }}
+                          />
+                          <Tooltip content={({ active, payload }) => {
+                            if (!active||!payload?.length) return null;
+                            const d = payload[0].payload;
+                            return (
+                              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-3 text-xs">
+                                <p className="font-black text-slate-700 dark:text-white">{d.name}</p>
+                                <p style={{ color: d.fill }} className="font-bold">{d.pct}% del límite ({Math.round(d.pct*2)} hs)</p>
+                              </div>
+                            );
+                          }}/>
+                        </RadialBarChart>
+                      </ResponsiveContainer>
+                      {/* Leyenda nombres */}
+                      <div className="space-y-1 mt-2">
+                        {[...radialGuards].reverse().map((g, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: g.fill }}/>
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300 truncate flex-1">{g.name}</span>
+                            <span className="text-[10px] font-black shrink-0" style={{ color: g.fill }}>{g.pct}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </SectionCard>
+                </div>
+              )}
+
+              {/* Barras horizontales */}
+              {!loadTurnos && guardBars.length > 0 && (
+                <SectionCard title="Horas programadas por guardia" icon={BarChart3}>
+                  <LegendRow items={[
+                    { color:'#059669', label:'< 160 hs (margen)' },
+                    { color:'#d97706', label:'160–200 hs (capacidad)' },
+                    { color:'#dc2626', label:'> 200 hs (extras)' },
+                  ]}/>
+                  <div className="px-5 pb-5 pt-2">
+                    <ResponsiveContainer width="100%" height={Math.max(160, guardBars.length*30)}>
+                      <BarChart layout="vertical" data={guardBars} margin={{ top:4, right:60, left:4, bottom:4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false}/>
+                        <XAxis type="number" domain={[0,guardMaxH]} tick={{ fontSize:9, fill:'#94a3b8' }}/>
+                        <YAxis type="category" dataKey="name" tick={{ fontSize:10, fontWeight:700, fill:'#64748b' }} width={130}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <ReferenceLine x={160} stroke="#d97706" strokeDasharray="4 4" label={{ value:'160h', fontSize:9, fill:'#d97706', position:'top' }}/>
+                        <ReferenceLine x={200} stroke="#dc2626" strokeDasharray="4 4" label={{ value:'200h', fontSize:9, fill:'#dc2626', position:'top' }}/>
+                        <Bar dataKey="horas" radius={[0,4,4,0]} maxBarSize={22}>
+                          {guardBars.map((e,i) => <Cell key={i} fill={e.horas>200?'#dc2626':e.horas>=160?'#d97706':'#059669'}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Tabla detalle */}
+              <SectionCard title={`Utilización por guardia · ${periodRange.labelShort}`} icon={Users} loading={loadTurnos}>
+                {!loadTurnos && actual.byGuard.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <Users size={36} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm font-bold">Sin turnos programados en este período</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-4">Guardia</th>
+                          <th className="p-4 text-center">Turnos</th>
+                          <th className="p-4 text-center text-indigo-600">Horas</th>
+                          <th className="p-4">% límite 200h</th>
+                          <th className="p-4 text-center">Hs disponibles</th>
+                          <th className="p-4 text-center">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {actual.byGuard.map(g => {
+                          const pct    = Math.round(g.hours/200*100);
+                          const avail  = Math.round(Math.max(0, 200-g.hours));
+                          const status = g.hours>200?'red':g.hours>=160?'amber':'green';
+                          const colors = { red:'text-rose-600 bg-rose-100 dark:bg-rose-900/30', amber:'text-amber-700 bg-amber-100 dark:bg-amber-900/30', green:'text-emerald-700 bg-emerald-100 dark:bg-emerald-900/30' };
+                          const bars   = { red:'bg-rose-500', amber:'bg-amber-500', green:'bg-emerald-500' };
+                          return (
+                            <tr key={g.id} className="hover:bg-indigo-50/20 dark:hover:bg-indigo-900/10">
+                              <td className="p-4 font-bold text-slate-700 dark:text-white uppercase">{g.name}</td>
+                              <td className="p-4 text-center text-slate-500">{g.shifts}</td>
+                              <td className="p-4 text-center font-black text-indigo-600 text-lg">{Math.round(g.hours)}</td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden min-w-[80px]">
+                                    <div className={`h-full rounded-full ${bars[status]}`} style={{ width:`${Math.min(pct,100)}%` }}/>
+                                  </div>
+                                  <span className={`text-[10px] font-black w-9 text-right shrink-0 ${status==='red'?'text-rose-600':status==='amber'?'text-amber-600':'text-emerald-600'}`}>{pct}%</span>
+                                </div>
+                              </td>
+                              <td className="p-4 text-center">
+                                {avail>0
+                                  ? <span className="text-[10px] font-black text-emerald-600">{avail} hs</span>
+                                  : <span className="text-[10px] font-black text-rose-500">+{Math.round(g.hours-200)} extra</span>}
+                              </td>
+                              <td className="p-4 text-center">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${colors[status]}`}>
+                                  {status==='red'?'EN EXTRAS':status==='amber'?'CAPACIDAD':'CON MARGEN'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* Sin turnos */}
+              {!loadTurnos && (() => {
+                const conTurnoOperativo = new Set(actual.byGuard.map(g => g.id));
+                const conFrancoOLicencia = new Set<string>();
+                turnos.forEach((t: any) => {
+                  const eid = t.employeeId;
+                  if (!eid || eid === 'VACANTE') return;
+                  const code = String(t.code || '').trim().toUpperCase();
+                  if (
+                    FRANCO_SHIFT_CODES.has(code) ||
+                    LICENCIA_SHIFT_CODES.has(code) ||
+                    (t.isFranco === true && !LICENCIA_SHIFT_CODES.has(code))
+                  ) {
+                    conFrancoOLicencia.add(eid);
+                  }
+                });
+                const pStart = new Date(periodRange.start);
+                const pEnd = new Date(periodRange.end);
+                ausencias.forEach((a: any) => {
+                  if (!a.employeeId) return;
+                  if (!ausenciaCuentaNoDisponible(a)) return;
+                  if (!ausenciaSolapaPeriodo(a, pStart, pEnd)) return;
+                  conFrancoOLicencia.add(a.employeeId);
+                });
+                const free = employees.filter(
+                  e => !conTurnoOperativo.has(e.id) && !conFrancoOLicencia.has(e.id)
+                );
+                if (!free.length) return null;
+                return (
+                  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5">
+                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-3">
+                      Guardias sin turnos en el período · disponibles totales ({free.length})
+                      <span className="ml-1 normal-case font-medium text-slate-400">
+                        (excluye F/FF/FP, licencias planificadas y ausencias activas)
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {free.map(e => (
+                        <span key={e.id} className="text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 rounded-lg">
+                          {e.lastName ? `${e.lastName}, ${e.firstName}` : e.name||e.id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: COBERTURA
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'cobertura' && (
+            <div className="space-y-4">
+
+              {/* Treemap */}
+              {!loadTurnos && treemapData.length > 0 && (
+                <SectionCard title="Mapa de cobertura por objetivo" icon={Target}>
+                  <div className="px-5 pb-5 pt-3">
+                    <div className="flex gap-4 flex-wrap mb-3">
+                      {[
+                        { color:'#059669', label:'0% vacancia' },
+                        { color:'#10b981', label:'1-10%' },
+                        { color:'#d97706', label:'11-25%' },
+                        { color:'#dc2626', label:'>25%' },
+                      ].map(l => (
+                        <div key={l.label} className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: l.color }}/>
+                          <span className="text-[10px] font-bold text-slate-500">{l.label}</span>
+                        </div>
+                      ))}
+                      <span className="text-[10px] text-slate-400 ml-auto">Tamaño = horas totales</span>
+                    </div>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <Treemap
+                        data={treemapData}
+                        dataKey="size"
+                        aspectRatio={16/9}
+                        content={<TreemapTile/>}
+                      />
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Barras apiladas */}
+              {!loadTurnos && coberturaBars.length > 0 && (
+                <SectionCard title={`Horas por objetivo · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
+                  <LegendRow items={[
+                    { color:'#4f46e5', label:'Programadas' },
+                    { color:'#f59e0b', label:'Vacantes' },
+                  ]}/>
+                  <div className="px-5 pb-5 pt-2">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={coberturaBars} margin={{ top:4, right:8, left:-16, bottom:52 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="name" tick={{ fontSize:9, fontWeight:700, fill:'#94a3b8' }} angle={-40} textAnchor="end" interval={0}/>
+                        <YAxis tick={{ fontSize:9, fill:'#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <Bar dataKey="Programadas" stackId="a" fill="#4f46e5" radius={[0,0,0,0]} maxBarSize={32}/>
+                        <Bar dataKey="Vacantes"    stackId="a" fill="#f59e0b" radius={[4,4,0,0]} maxBarSize={32}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* Tabla */}
+              <SectionCard title={`Cobertura por objetivo · ${periodRange.labelShort}`} icon={Target} loading={loadTurnos}>
+                {!loadTurnos && actual.byObjective.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <Target size={36} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm font-bold">Sin datos de cobertura en este período</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-4">Objetivo</th>
+                          <th className="p-4">Cliente</th>
+                          <th className="p-4 text-center text-indigo-600">Hs prog.</th>
+                          <th className="p-4 text-center text-amber-600">Hs vacantes</th>
+                          <th className="p-4 text-center">Total hs</th>
+                          <th className="p-4 text-center">% Vacancia</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {actual.byObjective.map(obj => {
+                          const total      = obj.scheduled+obj.vacant;
+                          const vacPct     = total>0 ? Math.round(obj.vacant/total*100) : 0;
+                          const isExpanded = expandedObjId === obj.id;
+                          const det        = actual.byObjDetail.get(obj.id);
+                          return (
+                            <React.Fragment key={obj.id}>
+                              <tr
+                                onClick={() => setExpandedObjId(isExpanded ? null : obj.id)}
+                                className={`cursor-pointer select-none transition-colors
+                                  ${isExpanded
+                                    ? 'bg-indigo-50 dark:bg-indigo-900/20'
+                                    : vacPct>20
+                                      ? 'bg-rose-50/30 dark:bg-rose-900/10 hover:bg-rose-50/60 dark:hover:bg-rose-900/20'
+                                      : 'hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10'
+                                  }`}>
+                                <td className="p-4">
+                                  <div className="flex items-center gap-2">
+                                    <ChevronDown size={13} className={`shrink-0 text-slate-400 transition-transform duration-200 ${isExpanded?'rotate-180':''}`}/>
+                                    <span className="font-bold text-slate-700 dark:text-white uppercase text-xs">{obj.name}</span>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-slate-500 text-xs font-bold">{obj.client}</td>
+                                <td className="p-4 text-center font-black text-indigo-600">{Math.round(obj.scheduled)}</td>
+                                <td className="p-4 text-center font-bold text-amber-600">
+                                  {obj.vacant>0 ? Math.round(obj.vacant) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                                </td>
+                                <td className="p-4 text-center text-slate-500">{Math.round(total)}</td>
+                                <td className="p-4 text-center">
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                    vacPct===0?'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                    :vacPct<=20?'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                                    :'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
+                                    {vacPct}%
+                                  </span>
+                                </td>
+                              </tr>
+                              {isExpanded && det && (
+                                <tr>
+                                  <td colSpan={6} className="p-0">
+                                    <div className="bg-indigo-50/60 dark:bg-indigo-900/10 border-b-2 border-indigo-200 dark:border-indigo-700/50 px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                                      {/* Breakdown por tipo de turno */}
+                                      <div>
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                                          <Activity size={10}/> Turnos programados por tipo
+                                        </p>
+                                        {det.byCode.size === 0 ? (
+                                          <p className="text-[10px] text-slate-400 italic">Sin datos de turno</p>
+                                        ) : (
+                                          <div className="space-y-1.5">
+                                            {[...det.byCode.entries()]
+                                              .sort((a,b) => (b[1].schHours+b[1].vacHours)-(a[1].schHours+a[1].vacHours))
+                                              .map(([code, bd]) => {
+                                                const hsTotal = bd.schHours + bd.vacHours;
+                                                const progPct = hsTotal>0 ? Math.round(bd.schHours/hsTotal*100) : 0;
+                                                const codeBg =
+                                                  code==='M'   ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400' :
+                                                  code==='T'   ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400' :
+                                                  code==='N'   ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400' :
+                                                  code==='D12' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' :
+                                                  code==='N12' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400' :
+                                                  'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+                                                return (
+                                                  <div key={code} className="flex items-center gap-2.5 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 shadow-sm">
+                                                    <span className={`w-9 text-center text-[9px] font-black rounded-lg px-1 py-0.5 shrink-0 ${codeBg}`}>{code}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                      <div className="flex justify-between text-[10px] mb-1">
+                                                        <span className="font-bold text-slate-600 dark:text-slate-300">
+                                                          {bd.schCount} prog · <span className="text-amber-600">{bd.vacCount} vac</span>
+                                                        </span>
+                                                        <span className="text-slate-400 font-medium">{Math.round(hsTotal)} hs</span>
+                                                      </div>
+                                                      <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                                        <div className={`h-full rounded-full ${progPct===100?'bg-emerald-500':progPct>=70?'bg-indigo-500':'bg-rose-500'}`}
+                                                          style={{ width:`${progPct}%` }}/>
+                                                      </div>
+                                                    </div>
+                                                    <span className={`text-[10px] font-black shrink-0 w-10 text-right ${
+                                                      progPct===100?'text-emerald-600':progPct>=70?'text-indigo-600':'text-rose-500'}`}>
+                                                      {progPct}%
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Guardias asignados en este objetivo */}
+                                      <div>
+                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                                          <Shield size={10}/> Guardias asignados ({det.guards.size})
+                                        </p>
+                                        {det.guards.size === 0 ? (
+                                          <p className="text-[10px] text-slate-400 italic">Sin guardias asignados — todos los turnos son vacantes</p>
+                                        ) : (
+                                          <div className="space-y-1.5">
+                                            {[...det.guards.entries()]
+                                              .sort((a,b) => b[1].hours-a[1].hours)
+                                              .map(([gid, gd]) => {
+                                                const usePct = Math.min(Math.round(gd.hours/total*100*det.guards.size),100);
+                                                return (
+                                                  <div key={gid} className="flex items-center gap-2.5 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 shadow-sm">
+                                                    <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center shrink-0">
+                                                      <Shield size={12} className="text-indigo-500"/>
+                                                    </div>
+                                                    <span className="text-[10px] font-bold text-slate-700 dark:text-white flex-1 uppercase truncate">{gd.name}</span>
+                                                    <span className="text-[9px] text-slate-400 shrink-0">{gd.shifts} turnos</span>
+                                                    <span className="text-sm font-black text-indigo-600 shrink-0 w-14 text-right">{Math.round(gd.hours)} hs</span>
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: PROYECCIÓN
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'proyeccion' && (
+            <div className="space-y-4">
+
+              {/* AreaChart con gradiente */}
+              <SectionCard title={`Tendencia · ${periodRange.labelShort} + 3 meses`} icon={TrendingUp}>
+                <LegendRow items={[
+                  { color:'#4f46e5', label:'Hs teóricas' },
+                  { color:'#7c3aed', label:'Guardias mín.' },
+                ]}/>
+                <div className="px-5 pb-5 pt-2">
+                  <ResponsiveContainer width="100%" height={220}>
+                    <ComposedChart data={areaData} margin={{ top:4, right:50, left:-16, bottom:4 }}>
+                      <defs>
+                        <linearGradient id="horasGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor="#4f46e5" stopOpacity={0.25}/>
+                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.02}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                      <XAxis dataKey="name" tick={{ fontSize:10, fontWeight:700, fill:'#94a3b8' }}/>
+                      <YAxis yAxisId="left"  tick={{ fontSize:9, fill:'#94a3b8' }}/>
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize:9, fill:'#94a3b8' }}/>
+                      <Tooltip content={<ChartTooltip/>}/>
+                      <Area yAxisId="left" type="monotone" dataKey="Hs teóricas"
+                        stroke="#4f46e5" strokeWidth={2.5} fill="url(#horasGrad)"
+                        dot={{ fill:'#4f46e5', r:5, strokeWidth:0 }}/>
+                      <Line yAxisId="right" type="monotone" dataKey="Guardias mín."
+                        stroke="#7c3aed" strokeWidth={2.5}
+                        dot={{ fill:'#7c3aed', r:5, strokeWidth:0 }}
+                        strokeDasharray="6 3"/>
+                      <ReferenceLine yAxisId="right" y={availableGuards} stroke="#059669" strokeDasharray="5 4"
+                        label={{ value:`${availableGuards} disp.`, fontSize:9, fill:'#059669', position:'right' }}/>
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </SectionCard>
+
+              {/* Cards 3 meses */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {projectionDisplay.map(p => (
+                  <div key={p.label} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{p.label}</p>
+                      <Calendar size={13} className="text-slate-300"/>
+                    </div>
+                    <div className="flex items-end justify-between">
+                      <div>
+                        <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{p.hours.toLocaleString('es-AR')}</p>
+                        <p className="text-[9px] text-slate-400 uppercase font-bold">Horas teóricas</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-black text-slate-700 dark:text-white">{p.guards}</p>
+                        <p className="text-[9px] text-slate-400 uppercase font-bold">Guardias mín.{aplicarAusentismo ? ' (aj.)' : ''}</p>
+                      </div>
+                    </div>
+                    <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${p.gap>0?'bg-rose-50 dark:bg-rose-900/20':p.gap<0?'bg-emerald-50 dark:bg-emerald-900/20':'bg-slate-50 dark:bg-slate-700/40'}`}>
+                      <span className="text-[9px] font-black uppercase text-slate-500">Brecha</span>
+                      <span className={`text-sm font-black flex items-center gap-1 ${p.gap>0?'text-rose-600':p.gap<0?'text-emerald-600':'text-slate-400'}`}>
+                        {p.gap>0?<ArrowUp size={13}/>:p.gap<0?<ArrowDown size={13}/>:<Minus size={13}/>}
+                        {p.gap>0?`+${p.gap} G déficit`:p.gap<0?`${Math.abs(p.gap)} G superávit`:'Exacto'}
+                      </span>
+                    </div>
+                    <p className="text-[9px] text-slate-400">{p.active} {p.active===1?'servicio activo':'servicios activos'}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Servicios que vencen */}
+              {(() => {
+                const mStart = new Date(periodRange.start);
+                mStart.setHours(0, 0, 0, 0);
+                const mEnd = new Date(periodRange.end);
+                mEnd.setHours(23, 59, 59, 999);
+                const soon = services.filter(s => {
+                  if (!s.endDate) return false;
+                  const e = new Date(s.endDate + 'T00:00:00');
+                  return e >= mStart && e <= mEnd;
+                });
+                if (!soon.length) return null;
+                return (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
+                    <p className="text-[9px] font-black uppercase text-amber-600 tracking-widest flex items-center gap-1">
+                      <AlertTriangle size={11}/> Servicios que vencen en el período ({soon.length})
+                    </p>
+                    {soon.map(s => (
+                      <div key={s.id} className="flex items-center justify-between bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5">
+                        <div>
+                          <p className="text-xs font-black text-slate-700 dark:text-white uppercase">{s.clientName}</p>
+                          <p className="text-[9px] text-indigo-500 font-bold">{s.objectiveName}</p>
+                        </div>
+                        <span className="text-[9px] font-black text-amber-600 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">Vence {s.endDate}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Barra capacidad */}
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
+                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-3">
+                  Guardias necesarios vs disponibles · {availableGuards} efectivos (plantel {plantelGuardias})
+                  {guardiasNoDispTotal > 0 ? ` · −${guardiasNoDispTotal} no disp.` : ''}
+                </p>
+                <div className="space-y-2">
+                  {projectionDisplay.map(p => (
+                    <div key={p.label} className="flex items-center gap-3">
+                      <span className="text-[10px] font-black text-slate-500 w-12 uppercase">{p.monthLabel}</span>
+                      <div className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div className={`h-full rounded-full ${p.guards<=availableGuards?'bg-emerald-500':'bg-rose-500'}`}
+                          style={{ width:`${Math.min((p.guards/Math.max(availableGuards,p.guards))*100,100)}%` }}/>
+                      </div>
+                      <span className={`text-[10px] font-black w-20 text-right shrink-0 ${p.guards<=availableGuards?'text-emerald-600':'text-rose-600'}`}>
+                        {p.guards}/{availableGuards} G
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: VIABILIDAD (demanda pax/día vs dotación elegible)
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'viabilidad' && (
+            <div className="space-y-4">
+              <SectionCard title={`Viabilidad por servicio SLA · ${periodRange.labelShort}`} icon={Scale} loading={loadAus}>
+                <div className="p-5 space-y-4">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Compara el <strong>pico de pax</strong> que exige la estructura del servicio cada día (suma de <code className="text-[9px] bg-slate-100 dark:bg-slate-700 px-1 rounded">quantity</code> por puesto con cobertura)
+                    contra la <strong>dotación realmente disponible</strong> ese día. La dotación elegible (sin restricción a ese cliente/objetivo) baja por:
+                    <strong> ausencias</strong> formales (RRHH), <strong>franco</strong> planificado (F/FF/FP), <strong>licencias</strong> en planificación
+                    (V/L/E/A/AA/PG) y <strong>turnos en otro objetivo</strong> ese día.
+                  </p>
+
+                  {theoretical.active.length === 0 ? (
+                    <p className="text-sm font-bold text-slate-400 text-center py-8">No hay servicios SLA con horas teóricas en este período.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="text-[9px] font-black uppercase text-slate-400">Servicio</label>
+                        <select
+                          value={vialSrvId}
+                          onChange={(e) => setVialSrvId(e.target.value)}
+                          className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-700 text-slate-800 dark:text-white font-bold min-w-[240px] max-w-full"
+                        >
+                          {theoretical.active.map((s: any) => (
+                            <option key={s.id} value={s.id}>
+                              {(s.objectiveName || s.objectiveId || 'Objetivo')} · {s.clientName || s.clientId || 'Cliente'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {viabilityReportDisplay && (
+                        <>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <KpiCard
+                              icon={Users}
+                              color="#4f46e5"
+                              label="Dotación elegible"
+                              value={viabilityReportDisplay.eligiblePool}
+                              subtext="Sin restricción cliente/objetivo"
+                            />
+                            <KpiCard
+                              icon={Target}
+                              color="#7c3aed"
+                              label="Pico pax requerido"
+                              value={viabilityReportDisplay.peakRequired}
+                              subtext={
+                                aplicarAusentismo && viabilityReport
+                                  ? `Ajustado por ${ausentismoTotal}% aus. (puro: ${viabilityReport.peakRequired})`
+                                  : 'Máx. en un día del período'
+                              }
+                            />
+                            <KpiCard
+                              icon={AlertTriangle}
+                              color={viabilityReportDisplay.deficitDays > 0 ? '#dc2626' : '#059669'}
+                              label="Días en déficit"
+                              value={viabilityReportDisplay.deficitDays}
+                              subtext={
+                                viabilityReportDisplay.worstGap > 0
+                                  ? `Peor brecha: +${viabilityReportDisplay.worstGap} pax${aplicarAusentismo && viabilityReport ? ` · puro: ${viabilityReport.deficitDays} d / +${viabilityReport.worstGap} pax` : ''}`
+                                  : aplicarAusentismo && viabilityReport
+                                    ? `Sin brechas · puro: ${viabilityReport.deficitDays} d`
+                                    : 'Sin brechas'
+                              }
+                              alert={viabilityReportDisplay.deficitDays > 0}
+                            />
+                            <KpiCard
+                              icon={CheckCircle}
+                              color="#059669"
+                              label="Mín. disponible (día pico)"
+                              value={viabilityReportDisplay.minAvailable}
+                              subtext={
+                                aplicarAusentismo && viabilityReport
+                                  ? `Ajustado por ${ausentismoTotal}% aus. (puro: ${viabilityReport.minAvailable})`
+                                  : 'Elegibles − aus./franco/lic./otro objetivo'
+                              }
+                            />
+                          </div>
+
+                          {viabilityBarData.length > 0 && (
+                            <div className="pt-2">
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-2">
+                                Requeridos vs disponibles (días con demanda){aplicarAusentismo ? ` · ajustado por ${ausentismoTotal}% aus.` : ''}
+                              </p>
+                              <ResponsiveContainer width="100%" height={220}>
+                                <BarChart data={viabilityBarData} margin={{ top: 4, right: 8, left: -16, bottom: 28 }}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                                  <XAxis dataKey="name" tick={{ fontSize: 8, fontWeight: 700, fill: '#94a3b8' }} interval={0} angle={-40} textAnchor="end" height={48} />
+                                  <YAxis allowDecimals={false} tick={{ fontSize: 9, fill: '#94a3b8' }} />
+                                  <Tooltip content={<ChartTooltip />} />
+                                  <Bar dataKey="Requeridos" fill="#4f46e5" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                                  <Bar dataKey="Disponibles" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+
+                          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-600 max-h-[420px] overflow-y-auto custom-scrollbar">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 z-10 border-b border-slate-200 dark:border-slate-600">
+                                <tr className="text-[9px] font-black uppercase text-slate-400">
+                                  <th className="text-left p-2">Día</th>
+                                  <th className="text-center p-2 w-8">Letra</th>
+                                  <th className="text-right p-2">Req.{aplicarAusentismo ? ' (aj.)' : ''}</th>
+                                  <th className="text-right p-2" title="Ausencias formales (RRHH)">Aus.</th>
+                                  <th className="text-right p-2" title="Franco planificado (F/FF/FP)">Frc.</th>
+                                  <th className="text-right p-2" title="Licencia en planificación (V/L/E/A/AA/PG)">Lic.</th>
+                                  <th className="text-right p-2" title="Asignados a otro objetivo ese día">Otro</th>
+                                  <th className="text-right p-2">Disp.{aplicarAusentismo ? ' (aj.)' : ''}</th>
+                                  <th className="text-right p-2">Δ</th>
+                                  <th className="text-center p-2">Estado</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {viabilityReportDisplay.rows.map((r, i) => {
+                                  const show = r.requiredPax > 0 || r.gap > 0;
+                                  if (!show) return null;
+                                  const ok = r.gap <= 0;
+                                  return (
+                                    <tr
+                                      key={i}
+                                      className={`border-b border-slate-50 dark:border-slate-700/80 ${ok ? '' : 'bg-rose-50/80 dark:bg-rose-950/20'}`}
+                                    >
+                                      <td className="p-2 font-bold text-slate-700 dark:text-slate-200">{r.dayLabel}</td>
+                                      <td className="p-2 text-center text-slate-400 font-mono">{r.letter}</td>
+                                      <td className="p-2 text-right font-black text-indigo-600">{r.requiredPax}</td>
+                                      <td className="p-2 text-right text-amber-600 font-bold">{r.absentThatDay}</td>
+                                      <td className="p-2 text-right text-slate-500 font-bold">{r.francoThatDay}</td>
+                                      <td className="p-2 text-right text-violet-500 font-bold">{r.licenciaThatDay}</td>
+                                      <td className="p-2 text-right text-cyan-600 font-bold">{r.enOtroObjThatDay}</td>
+                                      <td className="p-2 text-right font-bold text-emerald-600">{r.availablePax}</td>
+                                      <td className={`p-2 text-right font-black ${ok ? 'text-slate-400' : 'text-rose-600'}`}>
+                                        {r.gap > 0 ? `+${r.gap}` : r.gap}
+                                      </td>
+                                      <td className="p-2 text-center">
+                                        {r.requiredPax === 0 ? (
+                                          <span className="text-[9px] text-slate-300">—</span>
+                                        ) : ok ? (
+                                          <span className="text-[9px] font-black text-emerald-600">OK</span>
+                                        ) : (
+                                          <span className="text-[9px] font-black text-rose-600">FALTA</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-[9px] text-slate-400">
+                            Solo se listan días con demanda de pax o con brecha positiva. Días fuera de contrato o sin cobertura quedan ocultos.
+                            {aplicarAusentismo && ` Valores ajustados con ${ausentismoTotal}% de ausentismo configurado: requeridos suben (colchón) y disponibles bajan.`}
+                          </p>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: ART.12 — domicilio vs ubicación del puesto (> 25 km)
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'art12' && (
+            <div className="space-y-4">
+              <SectionCard title={`ART.12 · Distancia domicilio–objetivo · ${periodRange.labelShort}`} icon={MapPin} loading={loadTurnos}>
+                <div className="p-5 space-y-4">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Sobre los turnos <strong>operativos</strong> del período (códigos {Array.from(OPERATIVE_CODES).sort().join(', ')}),
+                    compara el domicilio del guardia (coordenadas en RRHH) con el objetivo asignado. Distancia en línea recta;
+                    umbral de referencia <strong>{ART12_MAX_KM_VIVIENDA} km</strong>. Valores muy altos (típ. &gt;{' '}
+                    {ART12_MAX_PLAUSIBLE_COMMUTE_KM} km) suelen ser <strong>coordenadas mal cargadas</strong>, no trayectos reales:
+                    esas filas no cuentan para “superan 25 km” hasta corregir el legajo.
+                  </p>
+
+                  {art12Report.resumenGuardiasSobre25.length > 0 && (
+                    <div className="rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/70 dark:bg-rose-950/25 px-4 py-3 space-y-2">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-rose-700 dark:text-rose-300">
+                        Respuesta · Guardias que superan {art12Report.umbralKm} km (datos confiables)
+                      </p>
+                      <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                        Son <strong className="text-rose-700 dark:text-rose-400">{art12Report.guardiasSobreUmbralConfiables}</strong>{' '}
+                        guardia(s). Distancia total domicilio → objetivo y cuánto pasan del umbral:
+                      </p>
+                      <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1 list-disc pl-4">
+                        {art12Report.resumenGuardiasSobre25.map((g, idx) => (
+                          <li key={`${g.empName}-${idx}`}>
+                            <span className="font-black text-slate-800 dark:text-white">{g.empName}</span>
+                            {' — '}
+                            <span className="font-bold">{g.kmRounded} km</span> al objetivo{' '}
+                            <span className="text-slate-500">({g.clientName ? `${g.clientName} · ` : ''}{g.objectiveName})</span>
+                            {' · '}
+                            <span className="text-rose-600 dark:text-rose-400 font-black">
+                              +{g.kmSobreUmbral} km sobre los {art12Report.umbralKm} km
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {art12Report.resumenGuardiasSobre25.length === 0 && art12Report.empleadosRevisarCoords === 0 && art12Report.rows.length > 0 && (
+                    <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl px-4 py-3">
+                      Ningún guardia supera los {art12Report.umbralKm} km con los datos actuales (todas las distancias calculadas son
+                      plausibles y están por debajo del umbral).
+                    </p>
+                  )}
+
+                  {art12Report.resumenGuardiasSobre25.length === 0 && art12Report.empleadosRevisarCoords > 0 && (
+                    <p className="text-[11px] font-bold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-4 py-3">
+                      Con los datos actuales <strong>no hay guardias que superen los {art12Report.umbralKm} km de forma confiable</strong>:
+                      hay {art12Report.empleadosRevisarCoords} guardia(s) con distancias muy altas (posible domicilio mal geocodificado).
+                      Corregí las coordenadas en RRHH para obtener la respuesta real sobre ART.12.
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    <KpiCard
+                      icon={AlertTriangle}
+                      color={art12Report.guardiasSobreUmbralConfiables > 0 ? '#dc2626' : '#059669'}
+                      label="Superan 25 km"
+                      value={art12Report.guardiasSobreUmbralConfiables}
+                      subtext={`Solo distancias ≤ ${art12Report.maxPlausibleKm} km (confiables)`}
+                      alert={art12Report.guardiasSobreUmbralConfiables > 0}
+                    />
+                    <KpiCard
+                      icon={AlertCircle}
+                      color={art12Report.empleadosRevisarCoords > 0 ? '#f59e0b' : '#64748b'}
+                      label="Revisar domicilio"
+                      value={art12Report.empleadosRevisarCoords}
+                      subtext={`>${art12Report.maxPlausibleKm} km · corregir coords en RRHH`}
+                      alert={art12Report.empleadosRevisarCoords > 0}
+                    />
+                    <KpiCard
+                      icon={Users}
+                      color="#4f46e5"
+                      label="Con turno operativo"
+                      value={art12Report.empleadosConAsignacionOperativa}
+                      subtext="Guardias con al menos un turno citado"
+                    />
+                    <KpiCard
+                      icon={MapPin}
+                      color={art12Report.empleadosSinDomicilioGeo > 0 ? '#f59e0b' : '#64748b'}
+                      label="Sin coord. domicilio"
+                      value={art12Report.empleadosSinDomicilioGeo}
+                      subtext="No se puede calcular distancia"
+                      alert={art12Report.empleadosSinDomicilioGeo > 0}
+                    />
+                    <KpiCard
+                      icon={Target}
+                      color={art12Report.objetivosSinGeoEnTurnos > 0 ? '#f59e0b' : '#64748b'}
+                      label="Objetivos sin geo"
+                      value={art12Report.objetivosSinGeoEnTurnos}
+                      subtext="IDs en turnos sin lat/lng en CRM/objetivos"
+                      alert={art12Report.objetivosSinGeoEnTurnos > 0}
+                    />
+                  </div>
+
+                  {art12Report.rows.length === 0 ? (
+                    <p className="text-sm font-bold text-slate-400 text-center py-8">
+                      No hay pares guardia–objetivo con coordenadas completas en este período.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-600 max-h-[480px] overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 z-10 border-b border-slate-200 dark:border-slate-600">
+                          <tr className="text-[9px] font-black uppercase text-slate-400">
+                            <th className="text-left p-2">Guardia</th>
+                            <th className="text-left p-2">Cliente</th>
+                            <th className="text-left p-2">Objetivo</th>
+                            <th className="text-right p-2">Km</th>
+                            <th className="text-center p-2">ART.12</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {art12Report.rows.map((r, i) => (
+                            <tr
+                              key={`${r.empId}-${r.objectiveId}-${i}`}
+                              className={`border-b border-slate-50 dark:border-slate-700/80 ${
+                                r.exceedsArt25Usable
+                                  ? 'bg-rose-50/80 dark:bg-rose-950/20'
+                                  : r.needsCoordReview
+                                    ? 'bg-amber-50/70 dark:bg-amber-950/15'
+                                    : ''
+                              }`}
+                            >
+                              <td className="p-2 font-bold text-slate-700 dark:text-slate-200">
+                                {r.empName}
+                                {r.usedLatLngSwap ? (
+                                  <span className="block text-[8px] font-bold text-indigo-500 normal-case">
+                                    Lat/lng corregidos en cálculo (invertidos en legajo)
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="p-2 text-slate-600 dark:text-slate-300">{r.clientName || '—'}</td>
+                              <td className="p-2 text-slate-600 dark:text-slate-300">{r.objectiveName}</td>
+                              <td className="p-2 text-right font-black text-slate-800 dark:text-white">{r.kmRounded}</td>
+                              <td className="p-2 text-center">
+                                {r.needsCoordReview ? (
+                                  <span className="text-[9px] font-black text-amber-700 dark:text-amber-400">
+                                    Revisar RRHH
+                                  </span>
+                                ) : r.exceedsArt25Usable ? (
+                                  <span className="text-[9px] font-black text-rose-600">
+                                    &gt; {art12Report.umbralKm} km (+{r.kmSobreUmbral})
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-black text-emerald-600">≤ {art12Report.umbralKm} km</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <p className="text-[9px] text-slate-400">
+                    Pares guardia–objetivo con ambas coordenadas:{' '}
+                    <strong className="text-slate-500">{art12Report.parejasAnalizadas}</strong>
+                    {art12Report.parejasRevisarCoords > 0 ? (
+                      <>
+                        {' '}
+                        · <strong className="text-amber-600">{art12Report.parejasRevisarCoords}</strong> con distancia implausible (
+                        &gt;{art12Report.maxPlausibleKm} km): no usar para ART.12 hasta corregir domicilio u objetivo.
+                      </>
+                    ) : null}
+                    . Cada fila es única en el período (se toma la mayor distancia si hubiera varias mediciones).
+                  </p>
+                </div>
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: ANALÍTICA
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'analitica' && (
+            <div className="space-y-4">
+
+              {/* ── Panel de filtros ─────────────────────────────────────────── */}
+              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 space-y-3">
+                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
+                  <Filter size={10}/> Filtros y configuración
+                </p>
+
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Las <strong>hs teóricas</strong> del panel superior usan el período <strong>{periodRange.labelShort}</strong>.
+                  Esta pestaña carga turnos por el rango de fechas de abajo (por defecto el mes calendario actual): si no coinciden, los totales no van a igualar a las hs teóricas.
+                </p>
+
+                {/* Fila 1: rango de fechas + botón */}
+                <div className="flex flex-wrap gap-2 items-end">
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[9px] font-black uppercase text-slate-400">Desde</label>
+                    <input type="date" value={analDateFrom} onChange={e => setAnalDateFrom(e.target.value)}
+                      className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white"/>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[9px] font-black uppercase text-slate-400">Hasta</label>
+                    <input type="date" value={analDateTo} onChange={e => setAnalDateTo(e.target.value)}
+                      className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white"/>
+                  </div>
+                  <button type="button" onClick={() => {
+                    const f = formatYmdLocal(new Date(periodRange.start));
+                    const t = formatYmdLocal(new Date(periodRange.end));
+                    setAnalDateFrom(f);
+                    setAnalDateTo(t);
+                    void loadAnalytics(f, t);
+                  }} disabled={loadAnal}
+                    className="flex items-center gap-1.5 border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-60 text-indigo-800 dark:text-indigo-200 text-xs font-black px-3 py-1.5 rounded-lg transition-colors">
+                    Igualar al período y cargar
+                  </button>
+                  <button onClick={() => void loadAnalytics()} disabled={loadAnal}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-black px-3 py-1.5 rounded-lg transition-colors">
+                    {loadAnal ? <Loader2 size={12} className="animate-spin"/> : <RefreshCw size={12}/>}
+                    {loadAnal ? 'Cargando…' : 'Cargar datos'}
+                  </button>
+                  {analLoaded && (
+                    <span className="text-[9px] font-bold text-emerald-600 flex items-center gap-1">
+                      <CheckCircle size={10}/> {analRawTurnos.length.toLocaleString('es-AR')} turnos cargados
+                    </span>
+                  )}
+                </div>
+
+                {/* Fila 2: filtros de cruce (visibles solo cuando hay datos) */}
+                {analLoaded && (
+                  <div className="flex flex-wrap gap-2 items-end border-t border-slate-100 dark:border-slate-700 pt-3">
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-black uppercase text-slate-400">Cliente</label>
+                      <select value={analClientId} onChange={e => { setAnalClientId(e.target.value); setAnalObjectiveId(''); }}
+                        className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white min-w-[160px]">
+                        <option value="">Todos los clientes</option>
+                        {analClientOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-black uppercase text-slate-400">Objetivo</label>
+                      <select value={analObjectiveId} onChange={e => setAnalObjectiveId(e.target.value)}
+                        className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white min-w-[160px]">
+                        <option value="">Todos los objetivos</option>
+                        {analObjectiveOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-black uppercase text-slate-400">Empleado</label>
+                      <select value={analEmployeeId} onChange={e => setAnalEmployeeId(e.target.value)}
+                        className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white min-w-[160px]">
+                        <option value="">Todos los empleados</option>
+                        {employees.sort((a:any,b:any) => (a.name||'').localeCompare(b.name||'')).map((e:any) => (
+                          <option key={e.id} value={e.id}>{e.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[9px] font-black uppercase text-slate-400">Estado</label>
+                      <select value={analStatus} onChange={e => setAnalStatus(e.target.value)}
+                        className="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-white">
+                        <option value="">Todos</option>
+                        <option value="PRESENT">Presente</option>
+                        <option value="COMPLETED">Completado</option>
+                        <option value="ABSENT">Ausente</option>
+                        <option value="PENDING">Pendiente</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Configuración de visualización ────────────────────────────── */}
+              {analLoaded && (
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+                  <div className="flex flex-wrap gap-4 items-start">
+                    {/* Ver por */}
+                    <div className="space-y-1.5">
+                      <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Ver por</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {([
+                          { id:'employee',  label:'Empleado'   },
+                          { id:'objective', label:'Objetivo'   },
+                          { id:'client',    label:'Cliente'    },
+                          { id:'code',      label:'Código'     },
+                          { id:'status',    label:'Estado'     },
+                          { id:'date',      label:'Fecha'      },
+                        ] as {id:typeof analDimension; label:string}[]).map(d => (
+                          <button key={d.id} onClick={() => setAnalDimension(d.id)}
+                            className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-colors
+                              ${analDimension===d.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                            {d.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Métrica */}
+                    <div className="space-y-1.5">
+                      <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Métrica</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {([
+                          { id:'hours',    label:'Horas'           },
+                          { id:'shifts',   label:'Turnos'          },
+                          { id:'presence', label:'Presencias'      },
+                          { id:'absence',  label:'Ausencias'       },
+                          { id:'night',    label:'Horas nocturnas' },
+                        ] as {id:typeof analMetric; label:string}[]).map(m => (
+                          <button key={m.id} onClick={() => setAnalMetric(m.id)}
+                            className={`text-[10px] font-black px-2.5 py-1 rounded-lg transition-colors
+                              ${analMetric===m.id ? 'bg-violet-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Tipo de gráfico */}
+                    <div className="space-y-1.5">
+                      <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Gráfico</p>
+                      <div className="flex gap-1.5">
+                        {([
+                          { id:'bar',  label:'Barras', icon: BarChart2 },
+                          { id:'pie',  label:'Torta',  icon: PieIcon   },
+                          { id:'area', label:'Área',   icon: TrendingUp},
+                        ] as {id:typeof analChartType; label:string; icon:any}[]).map(c => (
+                          <button key={c.id} onClick={() => setAnalChartType(c.id)}
+                            className={`flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-lg transition-colors
+                              ${analChartType===c.id ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                            <c.icon size={10}/>{c.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Gráfico principal ─────────────────────────────────────────── */}
+              {analLoaded && analData.data.length > 0 && (() => {
+                const COLORS = ['#4f46e5','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#db2777','#65a30d','#ea580c','#0284c7'];
+                const metricLabel = analMetric==='hours'?'Horas':analMetric==='shifts'?'Turnos':analMetric==='presence'?'Presencias':analMetric==='absence'?'Ausencias':'Hs nocturnas';
+                const totalVal = analData.totalValue;
+                const totalGroups = analData.totalGroups;
+                const shownGroups = analData.data.length;
+                const truncated = totalGroups > shownGroups;
+
+                return (
+                  <SectionCard title={`${metricLabel} por ${analDimension==='employee'?'Empleado':analDimension==='objective'?'Objetivo':analDimension==='client'?'Cliente':analDimension==='code'?'Código':analDimension==='status'?'Estado':'Fecha'}`} icon={BarChart3}>
+                    {/* KPIs rápidos */}
+                    <div className="grid grid-cols-3 gap-3 px-5 pt-4 pb-2">
+                      <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-3 text-center">
+                        <p className="text-xl font-black text-indigo-700 dark:text-indigo-300">{totalVal.toLocaleString('es-AR', {maximumFractionDigits:1})}</p>
+                        <p className="text-[9px] font-black uppercase text-indigo-400">Total {metricLabel}</p>
+                      </div>
+                      <div className="bg-violet-50 dark:bg-violet-900/20 rounded-xl p-3 text-center">
+                        <p className="text-xl font-black text-violet-700 dark:text-violet-300">{totalGroups}</p>
+                        <p className="text-[9px] font-black uppercase text-violet-400">Grupos {truncated ? `(top ${shownGroups})` : ''}</p>
+                      </div>
+                      <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center">
+                        <p className="text-xl font-black text-emerald-700 dark:text-emerald-300">{totalGroups > 0 ? (totalVal/totalGroups).toLocaleString('es-AR',{maximumFractionDigits:1}) : 0}</p>
+                        <p className="text-[9px] font-black uppercase text-emerald-400">Promedio</p>
+                      </div>
+                    </div>
+                    {truncated && (
+                      <p className="px-5 pb-1 text-[10px] text-amber-600 dark:text-amber-400 font-bold">
+                        Se grafican los {shownGroups} grupos con más {metricLabel.toLowerCase()}. El total y promedio incluyen los {totalGroups} grupos.
+                      </p>
+                    )}
+
+                    {/* Gráfico */}
+                    <div className="px-5 pb-5 pt-2">
+                      {analChartType === 'bar' && (
+                        <ResponsiveContainer width="100%" height={Math.max(280, analData.data.length * 32)}>
+                          <BarChart data={analData.data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false}/>
+                            <XAxis type="number" tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }}/>
+                            <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }}
+                              tickFormatter={v => (v||'').length > 16 ? v.substring(0,16)+'…' : v}/>
+                            <Tooltip content={<ChartTooltip/>}/>
+                            <Bar dataKey="value" name={metricLabel} radius={[0,6,6,0]}>
+                              {analData.data.map((_,i) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+
+                      {analChartType === 'pie' && (
+                        <div className="flex flex-col md:flex-row items-center gap-6">
+                          <ResponsiveContainer width="100%" height={280}>
+                            <PieChart>
+                              <Pie data={analData.data.slice(0,10)} dataKey="value" nameKey="name"
+                                cx="50%" cy="50%" innerRadius={60} outerRadius={110}
+                                paddingAngle={2} label={({name,percent}) => `${(name||'').substring(0,10)} ${(percent*100).toFixed(0)}%`}
+                                labelLine={false}>
+                                {analData.data.slice(0,10).map((_,i) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}
+                              </Pie>
+                              <Tooltip content={<ChartTooltip/>}/>
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="space-y-1.5 shrink-0 min-w-[140px]">
+                            {analData.data.slice(0,10).map((d,i) => (
+                              <div key={d.name} className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }}/>
+                                <span className="text-[10px] text-slate-600 dark:text-slate-300 truncate max-w-[120px]">{d.name}</span>
+                                <span className="text-[10px] font-black text-slate-700 dark:text-white ml-auto">{d.value.toLocaleString('es-AR',{maximumFractionDigits:1})}</span>
+                              </div>
+                            ))}
+                            {analData.data.length > 10 && <p className="text-[9px] text-slate-400">+{analData.data.length-10} más…</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      {analChartType === 'area' && (
+                        <ResponsiveContainer width="100%" height={280}>
+                          <AreaChart data={analData.data} margin={{ left: 8, right: 16, top: 4, bottom: 40 }}>
+                            <defs>
+                              <linearGradient id="analGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
+                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0"/>
+                            <XAxis dataKey="name" tick={{ fontSize: 8, fontWeight: 700, fill: '#94a3b8' }} angle={-35} textAnchor="end" interval={0}
+                              tickFormatter={v => (v||'').length > 12 ? v.substring(0,12)+'…' : v}/>
+                            <YAxis tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }}/>
+                            <Tooltip content={<ChartTooltip/>}/>
+                            <Area type="monotone" dataKey="value" name={metricLabel} stroke="#4f46e5" fill="url(#analGrad)" strokeWidth={2.5}/>
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </SectionCard>
+                );
+              })()}
+
+              {/* ── Tabla de datos ────────────────────────────────────────────── */}
+              {analLoaded && analData.data.length > 0 && (
+                <SectionCard title="Detalle de datos" icon={Activity}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/40">
+                          <th className="text-left px-5 py-2.5 font-black uppercase text-[9px] text-slate-400 tracking-wide">#</th>
+                          <th className="text-left px-5 py-2.5 font-black uppercase text-[9px] text-slate-400 tracking-wide">
+                            {analDimension==='employee'?'Empleado':analDimension==='objective'?'Objetivo':analDimension==='client'?'Cliente':analDimension==='code'?'Código':analDimension==='status'?'Estado':'Fecha'}
+                          </th>
+                          <th className="text-right px-5 py-2.5 font-black uppercase text-[9px] text-slate-400 tracking-wide">
+                            {analMetric==='hours'?'Horas':analMetric==='shifts'?'Turnos':analMetric==='presence'?'Presencias':analMetric==='absence'?'Ausencias':'Hs nocturnas'}
+                          </th>
+                          <th className="text-right px-5 py-2.5 font-black uppercase text-[9px] text-slate-400 tracking-wide">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const total = analData.totalValue;
+                          return analData.data.map((row, i) => (
+                            <tr key={row.name} className={`border-b border-slate-50 dark:border-slate-700/50 ${i%2===0?'':'bg-slate-50/40 dark:bg-slate-700/20'}`}>
+                              <td className="px-5 py-2 text-slate-400 font-bold">{i+1}</td>
+                              <td className="px-5 py-2 font-bold text-slate-700 dark:text-white">{row.name}</td>
+                              <td className="px-5 py-2 text-right font-black text-slate-700 dark:text-white">{row.value.toLocaleString('es-AR',{maximumFractionDigits:1})}</td>
+                              <td className="px-5 py-2 text-right">
+                                <span className="text-[10px] font-black text-indigo-500">
+                                  {total > 0 ? ((row.value/total)*100).toFixed(1) : 0}%
+                                </span>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </SectionCard>
+              )}
+
+              {/* ── Estado vacío ──────────────────────────────────────────────── */}
+              {!analLoaded && !loadAnal && (
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-12 text-center">
+                  <BarChart3 size={40} className="mx-auto text-slate-200 dark:text-slate-700 mb-4"/>
+                  <p className="text-sm font-black text-slate-400">Seleccioná un rango de fechas y presioná <span className="text-indigo-600">Cargar datos</span></p>
+                  <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Podés filtrar por cliente, objetivo, empleado y estado, y elegir la dimensión y métrica que querés ver.</p>
+                </div>
+              )}
+
+              {/* ── Sin resultados ────────────────────────────────────────────── */}
+              {analLoaded && analData.data.length === 0 && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-200 dark:border-amber-800 p-8 text-center">
+                  <AlertCircle size={32} className="mx-auto text-amber-400 mb-3"/>
+                  <p className="text-sm font-black text-amber-700 dark:text-amber-300">Sin datos para los filtros seleccionados</p>
+                  <p className="text-[10px] text-amber-500 mt-1">{analRawTurnos.length} turnos cargados en total — probá relajar los filtros.</p>
+                </div>
+              )}
+
+            </div>
+          )}
+
+        </div>
+      </PageShell>
+    </DashboardLayout>
+  );
+}

@@ -1,0 +1,1 @@
+export const mensaje = "Si lees esto, la sincronización automática funciona";

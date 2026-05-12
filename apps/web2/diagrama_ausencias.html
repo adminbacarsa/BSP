@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flujo de Gestión de Ausencias - Beneficios</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            width: 100%;
+            text-align: center;
+        }
+        h1 { color: #0f172a; margin-bottom: 5px; }
+        p { color: #64748b; margin-bottom: 30px; }
+        
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            font-size: 0.8em;
+        }
+        .item { display: flex; align-items: center; gap: 6px; }
+        .box { width: 12px; height: 12px; border-radius: 3px; }
+        
+        /* Colores */
+        .yellow { background: #fff9c4; border: 2px solid #fbc02d; }
+        .blue { background: #e1f5fe; border: 2px solid #039be5; }
+        .red { background: #ffebee; border: 2px solid #ef5350; }
+        .green { background: #e8f5e9; border: 2px solid #43a047; }
+        .orange { background: #fff3e0; border: 2px solid #ff9800; }
+        .purple { background: #f3e5f5; border: 2px solid #ab47bc; } /* Nuevo para beneficio */
+        .grey { background: #f1f5f9; border: 2px solid #94a3b8; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Lógica de Gestión de Ausencias</h1>
+        <p>Actualizado: Beneficio de Turno Completo para Variantes.</p>
+
+        <div class="legend">
+            <div class="item"><div class="box yellow"></div> Decisión</div>
+            <div class="item"><div class="box blue"></div> Acción Sistema</div>
+            <div class="item"><div class="box red"></div> Alerta</div>
+            <div class="item"><div class="box orange"></div> Cobertura</div>
+            <div class="item"><div class="box purple"></div> Beneficio</div>
+            <div class="item"><div class="box green"></div> Resuelto</div>
+            <div class="item"><div class="box grey"></div> Pendiente</div>
+        </div>
+
+        <div class="mermaid">
+            graph TD
+            %% Estilos
+            classDef decision fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#333;
+            classDef action fill:#e1f5fe,stroke:#039be5,stroke-width:2px,color:#01579b;
+            classDef alert fill:#ffebee,stroke:#ef5350,stroke-width:2px,color:#c62828;
+            classDef success fill:#e8f5e9,stroke:#43a047,stroke-width:2px,stroke-dasharray: 5 5,color:#1b5e20;
+            classDef coverage fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#e65100;
+            classDef benefit fill:#f3e5f5,stroke:#ab47bc,stroke-width:2px,color:#4a148c;
+            classDef pending fill:#f1f5f9,stroke:#94a3b8,stroke-width:2px,stroke-dasharray: 5 5,color:#475569;
+
+            %% INICIO
+            START((INICIO)) --> Q1{"¿El guardia llegó?"};
+
+            %% FLUJO LLEGADA
+            Q1 -- "Sí (En Horario)" --> A1["Marcar PRESENTE"];
+            A1 --> END1("FIN: Turno OK");
+
+            %% FLUJO ESPERA
+            Q1 -- "No" --> WAIT["Esperar 15 min<br>(Tolerancia)"];
+            WAIT --> ALERT["ALERTA VISUAL"];
+            ALERT --> Q2{"¿Llegó ahora?"};
+
+            Q2 -- "Sí (Tarde)" --> A2["Marcar LLEGADA TARDE"];
+            A2 --> END2("FIN: Turno OK<br>(con Novedad)");
+
+            %% FLUJO AUSENCIA
+            Q2 -- "No (Definitivo)" --> A3["Confirmar AUSENCIA"];
+            A3 --> Q_ACTIVOS{"¿Hay guardia activo<br>en el objetivo HOY?"};
+
+            %% --- RAMA: HAY GUARDIAS PRESENTES ---
+            Q_ACTIVOS -- "SÍ (1 o más)" --> LIST["Mostrar Lista de Presentes"];
+            LIST --> DECISION_GUARDIA{"Acción sobre Presente"};
+
+            %% OPCION 1: RETENER
+            DECISION_GUARDIA -- "1. Opción: RETENER" --> RET["Dejar correr reloj<br>O<br>Hacer DOBLE TURNO"];
+            RET --> END_RET("FIN: Resuelto por Extensión");
+
+            %% OPCION 2: POSPONER
+            DECISION_GUARDIA -- "2. Opción: POSPONER" --> LATER["GESTIONAR DESPUÉS"];
+            LATER --> END_LATER("FIN: Pendiente<br><b>(Permite volver al modal)</b>");
+
+            %% OPCION 3: NO RETENER (IR A VARIANTES)
+            DECISION_GUARDIA -- "3. No Retener" --> VARIANTS_LINK((Ir a<br>Variantes));
+
+            %% --- RAMA: VARIANTES ---
+            Q_ACTIVOS -- "NO (Vacío)" --> VARIANTS_LINK;
+            
+            VARIANTS_LINK --> Q_VARIANTS{"Otras Variantes"};
+
+            %% ADELANTAR
+            Q_VARIANTS --> OPT_ADELANTAR["Opción: ADELANTAR<br>(Llamar siguiente turno)"];
+            OPT_ADELANTAR --> BEN_ADV["Se asigna HORARIO COMPLETO<br>(Beneficio por Cubrir)"];
+            BEN_ADV --> END_ADV("FIN: Resuelto por Anticipo");
+
+            %% RELEVO
+            Q_VARIANTS --> OPT_RELEVO["Opción: BUSCAR RELEVO<br>(Traer Franco)"];
+            OPT_RELEVO --> BEN_REL["Se asigna HORARIO COMPLETO<br>(Beneficio por Cubrir)"];
+            BEN_REL --> END_REL("FIN: Resuelto por Relevo");
+
+            %% CLASES
+            class Q1,Q2,Q_ACTIVOS,DECISION_GUARDIA,Q_VARIANTS decision;
+            class A1,A2,LIST action;
+            class A3,ALERT alert;
+            class RET,OPT_ADELANTAR,OPT_RELEVO coverage;
+            class BEN_ADV,BEN_REL benefit;
+            class END1,END2,END_RET,END_ADV,END_REL success;
+            class LATER,END_LATER pending;
+        </div>
+    </div>
+
+</body>
+</html>

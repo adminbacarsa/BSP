@@ -1,0 +1,356 @@
+{
+  "meta": {
+    "title": "Informe Directorio",
+    "subtitle": "Sistemas IT — Visión estratégica · Desarrollo propio · Roadmap 2026–2027",
+    "org": "Grupo Bacar S.A.",
+    "date": "Abril 2026",
+    "tagline": "Uso exclusivo Directorio · Confidencial",
+    "coverKicker": "Informe al Directorio · Sistemas IT",
+    "coverChips": ["ERP + APIs", "Roadmap 2026–2027", "BI corporativo", "Desarrollo propio"],
+    "coverImage": "assets/cover-hero.png",
+    "coverImageMode": "containSharp"
+  },
+  "vision": {
+    "sectionTitle": "Visión del área",
+    "quote": "El área de Sistemas de Grupo Bacar se posiciona como motor de la transformación digital del grupo: dejamos de ser soporte técnico para convertirnos en arquitectos de los sistemas que hacen funcionar cada unidad de negocio.",
+    "paragraphs": [
+      "Desde octubre de 2025, el área de Sistemas asumió la responsabilidad integral sobre los sistemas informáticos del grupo. Esta evolución implicó incorporar capacidades de desarrollo de software propio, asumir el ciclo completo de análisis, diseño e implementación de sistemas, y construir una visión de arquitectura tecnológica que impacta directamente en la eficiencia operativa de cada unidad de negocio.",
+      "Lo que antes era un departamento reactivo orientado al mantenimiento de equipos, es hoy una dirección que desarrolla sus propios sistemas, analiza la arquitectura tecnológica del grupo de forma integral y traza un roadmap de digitalización con visión de largo plazo. La apuesta es clara: sistemas propios, integrados entre sí y conectados al ERP y a un futuro BI corporativo vía APIs, eliminando silos y dando al directorio visibilidad en tiempo real sobre toda la operación."
+    ]
+  },
+  "kpis": [
+    { "value": "5", "label": "Unidades de negocio" },
+    { "value": "2", "label": "Sistemas finalizados" },
+    { "value": "2", "label": "Sistemas en desarrollo" },
+    { "value": "1", "label": "Sistema integral en análisis (SGT)" }
+  ],
+  "pillarsSectionTitle": "Misión y enfoque estratégico",
+  "missionIntro": "El área opera con un mandato claro y no negociable: reducir costos operativos, eliminar ineficiencias y modernizar los procesos de cada unidad de negocio. No gestionamos tecnología por la tecnología misma — cada sistema que construimos tiene un impacto directo y medible en la rentabilidad del grupo.",
+  "pillars": [
+    {
+      "title": "Bajar costos",
+      "body": "Reemplazar procesos manuales, planillas y herramientas dispersas por sistemas propios que automatizan tareas, eliminan reprocesos y reducen el costo operativo real de cada unidad."
+    },
+    {
+      "title": "Mejorar procesos",
+      "body": "Diseñar y construir sistemas que reflejan cómo funciona el negocio realmente, digitalizando flujos, eliminando fricciones y dando a cada área control total sobre su operación."
+    },
+    {
+      "title": "Integrar y escalar",
+      "body": "Conectar todos los sistemas propios entre sí y con el ERP vía APIs, consolidando la información del grupo en un BI corporativo con visibilidad en tiempo real para el Directorio."
+    }
+  ],
+  "missionClosing": "Cada peso invertido en un sistema propio se recupera en eficiencia: menos horas perdidas en tareas manuales, menos errores por datos duplicados, menos dependencia de proveedores externos. La transformación digital no es un gasto — es la palanca de rentabilidad más poderosa que tiene hoy el grupo.",
+  "unitsSectionTitle": "Estado por unidad de negocio",
+  "unitsIntro": "El siguiente mapa muestra el estado actual de los sistemas en cada unidad del grupo, reflejando los avances consolidados, los frentes activos y los proyectos en cartera.",
+  "units": [
+    {
+      "area": "Transporte de caudales · Operaciones",
+      "systems": "Módulo básico (hojas de ruta y remitos) → SGT",
+      "status": "En curso",
+      "next": "Análisis SGT integral en curso"
+    },
+    {
+      "area": "Transporte de caudales · Administración",
+      "systems": "ERP: facturación, contabilidad, pagos y banco",
+      "status": "Operativo",
+      "next": "Consolidación y reporting"
+    },
+    {
+      "area": "Transporte de caudales · Capital Humano",
+      "systems": "Sistema Salarial + LOL — desarrollo propio",
+      "status": "Operativo",
+      "next": "Integración con ERP vía API"
+    },
+    {
+      "area": "Transporte de caudales · Sala de Armas",
+      "systems": "Excel manual → módulo SGT",
+      "status": "Legado",
+      "next": "Integrada al SGT en diseño"
+    },
+    {
+      "area": "Transporte de caudales · Tesorería",
+      "systems": "Módulo aislado en ERP → integración al SGT",
+      "status": "En curso",
+      "next": "Parte del SGT integral"
+    },
+    {
+      "area": "Sistemas IT",
+      "systems": "Tickets · Inventario · Omada · Ciberseguridad",
+      "status": "Operativo",
+      "next": "Maduración y dashboards"
+    },
+    {
+      "area": "Seguridad privada · Cronogramas y gestión",
+      "systems": "COSP v1.0 (CronApp) — desarrollo propio en curso",
+      "status": "En curso",
+      "next": "Piloto 5 objetivos — mayo 2026"
+    },
+    {
+      "area": "Grúas · Gestión general",
+      "systems": "Sin sistema — planillas Excel",
+      "status": "Legado",
+      "next": "Relevamiento y propuesta Q2 2026"
+    },
+    {
+      "area": "Taller mecánico · Gestión de flotas",
+      "systems": "Sistema de flotas adquirido — en implementación",
+      "status": "Planificado",
+      "next": "Despliegue en curso"
+    },
+    {
+      "area": "Servicios humanos a terceros · Gestión operativa",
+      "systems": "Excel · Rindegastos (viáticos)",
+      "status": "Legado",
+      "next": "Sistema de gestión unificado"
+    }
+  ],
+  "milestonesSectionTitle": "Hitos desde octubre 2025",
+  "milestonesIntro": "En los primeros meses desde la asunción de la responsabilidad integral, el área ejecutó hitos concretos de desarrollo e implementación que marcan el nuevo rumbo estratégico del área:",
+  "milestones": [
+    {
+      "title": "Sistema de liquidación salarial",
+      "badge": "Capital Humano",
+      "body": "Finalización e implementación del sistema de liquidación de salarios para Capital Humano. Primer sistema propio del área puesto en producción, reemplazando procesos manuales con un motor de cálculo robusto y trazable."
+    },
+    {
+      "title": "Sistema LOL — Novedades y partes",
+      "badge": "Capital Humano",
+      "body": "Implementación del sistema de novedades y partes blandas (LOL). Digitaliza el registro de ausentismo, licencias y novedades del personal, cerrando el ciclo de gestión de RRHH junto al módulo de liquidación."
+    },
+    {
+      "title": "COSP v1.0 — CronApp Seguridad Privada",
+      "badge": "En desarrollo",
+      "body": "Inicio del desarrollo de COSP v1.0, sistema propio de cronogramas y gestión operativa para Seguridad Privada. Piloto con 5 objetivos en mayo 2026. Diseño y desarrollo 100% interno."
+    },
+    {
+      "title": "SGT — Sistema de Gestión de Transporte",
+      "badge": "En análisis",
+      "body": "En análisis y bosquejo: el SGT será el sistema integral para Transporte de Caudales (CRM, Operaciones, Tesorería, Sala de Armas). Diseñado desde el inicio para integrarse al ERP y al BI vía APIs."
+    }
+  ],
+  "roadmapSectionTitle": "Roadmap de transformación — diagrama de Gantt",
+  "roadmapIntro": "El siguiente diagrama refleja el plan de implementaciones ordenado por horizonte temporal. Las barras indican el período de ejecución de cada proyecto; el avance de relleno representa el progreso actual.",
+  "timelineBuckets": ["Oct–Dic 2025", "Q1 2026", "Q2 2026", "Q3 2026", "Q4 2026", "2027+"],
+  "roadmap": [
+    {
+      "label": "Infra IT (Tickets · Omada · Ciber)",
+      "owner": "Sistemas IT",
+      "track": "done",
+      "fromBucket": 0,
+      "toBucket": 1,
+      "progress": 1
+    },
+    {
+      "label": "Sistema salarial",
+      "owner": "Capital Humano",
+      "track": "done",
+      "fromBucket": 0,
+      "toBucket": 2,
+      "progress": 1
+    },
+    {
+      "label": "LOL — Novedades/Partes",
+      "owner": "Capital Humano",
+      "track": "done",
+      "fromBucket": 0,
+      "toBucket": 2,
+      "progress": 1
+    },
+    {
+      "label": "COSP v1.0 — Desarrollo",
+      "owner": "Seguridad Privada",
+      "track": "progress",
+      "fromBucket": 1,
+      "toBucket": 3,
+      "progress": 0.5
+    },
+    {
+      "label": "COSP — Piloto 5 obj.",
+      "owner": "Seguridad Privada",
+      "track": "progress",
+      "fromBucket": 2,
+      "toBucket": 3,
+      "progress": 0.25
+    },
+    {
+      "label": "COSP — Rollout total",
+      "owner": "Seguridad Privada",
+      "track": "planned",
+      "fromBucket": 3,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "SGT — Análisis/Diseño",
+      "owner": "Transporte",
+      "track": "planned",
+      "fromBucket": 2,
+      "toBucket": 4,
+      "progress": 0.12
+    },
+    {
+      "label": "SGT v1.0 — Desarrollo",
+      "owner": "Transporte",
+      "track": "planned",
+      "fromBucket": 3,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "SGT — Integración ERP",
+      "owner": "Transporte",
+      "track": "planned",
+      "fromBucket": 4,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "Sistema de Flotas",
+      "owner": "Taller Mecánico",
+      "track": "progress",
+      "fromBucket": 2,
+      "toBucket": 4,
+      "progress": 0.35
+    },
+    {
+      "label": "Sistema Grúas",
+      "owner": "Grúas",
+      "track": "planned",
+      "fromBucket": 4,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "Sistema Serv. humanos",
+      "owner": "Servicios humanos",
+      "track": "planned",
+      "fromBucket": 3,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "APIs ERP ↔ Sistemas",
+      "owner": "Arquitectura",
+      "track": "planned",
+      "fromBucket": 3,
+      "toBucket": 5,
+      "progress": 0
+    },
+    {
+      "label": "BI corporativo — Directorio",
+      "owner": "Visión 2027",
+      "track": "vision",
+      "fromBucket": 4,
+      "toBucket": 5,
+      "progress": 0
+    }
+  ],
+  "closingQuote": "El objetivo no es tener tecnología de punta — es que cada persona del grupo trabaje mejor, más rápido y con menos errores que ayer. Eso es lo que construimos: sistemas que bajan costos, mejoran procesos y le dan al negocio la agilidad que necesita para crecer.",
+  "footerNote": "Confidencial — Directorio | Grupo Bacar S.A. · Abril 2026",
+  "annex": {
+    "sectionNumber": 6,
+    "title": "Anexo · Informe de implementación — Sistema Salario & LOL",
+    "intro": "El presente anexo detalla el estado de implementación y optimización del ecosistema digital de gestión de Capital Humano, compuesto por los módulos Salario (liquidación) y LOL (Legajos Online — novedades y partes blandas), junto con los sistemas integrados Rindegastos (viáticos) y Vientri (marcación y operaciones).",
+    "comparisonTitle": "1 · Comparativa de evolución estratégica",
+    "comparisonRows": [
+      {
+        "axis": "Integración de datos",
+        "before": "Carga duplicada manual y errores en DNI/CBU.",
+        "after": "Automatización total: datos viajan de Salario a LOL. Carga única."
+      },
+      {
+        "axis": "Cálculo de convenios",
+        "before": "Errores legales en extras y nocturnidad.",
+        "after": "Lógica validada: aplicación automática para Comercio, Camioneros y Coca Cola."
+      },
+      {
+        "axis": "Seguridad privada",
+        "before": "Gestión manual en planillas externas.",
+        "after": "Sistema unificado: cálculos automáticos de jornada y auditoría centralizada."
+      },
+      {
+        "axis": "Operaciones y marcación",
+        "before": "Procesamiento manual lento de archivos CSV.",
+        "after": "Web App Vientri: marcación simple e integración de jornadas extendidas."
+      },
+      {
+        "axis": "UX y estructura",
+        "before": "Navegación confusa y legajos duplicados.",
+        "after": "Navegación jerárquica: base unificada por CUIL y acceso por niveles."
+      }
+    ],
+    "implementationTitle": "2 · Detalle de implementaciones finalizadas",
+    "implementationBlocks": [
+      {
+        "title": "A · Liquidación y convenios laborales",
+        "lines": [
+          "Validación de reglas de cálculo para Comercio, Camioneros y Coca Cola.",
+          "Incorporación automática de feriados por convenio y asignación masiva de básicos.",
+          "Módulo de Adelantos: buscador por colaborador y rechazo automático integrado a liquidación."
+        ]
+      },
+      {
+        "title": "B · Gestión de Seguridad Privada",
+        "lines": [
+          "Cálculo automático de horas al 50%, 100%, Plus Feriado, Horas Diurnas y Nocturnas.",
+          "Interfaz de altas/bajas con generación automática de solapas y fórmulas.",
+          "Herramienta de auditoría centralizada con filtros por objetivo y detección de errores.",
+          "Cruce preventivo de vacaciones con sistema Salario pre-liquidación."
+        ]
+      },
+      {
+        "title": "C · Operaciones y marcación (Vientri)",
+        "lines": [
+          "Automatización del procesamiento de archivos — eliminación de carga manual.",
+          "Cálculo automático de jornadas extendidas (>8 hs).",
+          "Integración de marcación simple y visualización de horas.",
+          "Optimización de cronogramas bancarios con fórmulas automáticas."
+        ]
+      },
+      {
+        "title": "D · Gestión de viáticos (Rindegastos)",
+        "lines": [
+          "Sistema 100% operativo — en uso activo por los colaboradores.",
+          "Circuito de carga y aprobación parametrizado con trazabilidad total.",
+          "RRHH opera de forma autónoma: reportes, validaciones y capacitaciones finalizadas."
+        ]
+      }
+    ],
+    "adoptionTable": {
+      "title": "3 · Proyectos en producción y adopción",
+      "columns": [
+        { "key": "name", "title": "Proyecto", "w": 0.34 },
+        { "key": "state", "title": "Estado", "w": 0.16 },
+        { "key": "detail", "title": "Detalle", "w": 0.5 }
+      ],
+      "rows": [
+        {
+          "name": "ChatBot RRHH — Atención 24/7",
+          "state": "En adopción",
+          "detail": "Plataforma lista en producción. Pendiente adopción operativa de RRHH y validación de FAQs como contenido oficial."
+        }
+      ]
+    },
+    "analysisTable": {
+      "title": "4 · Temas en análisis y desarrollo",
+      "columns": [
+        { "key": "item", "title": "Ítem", "w": 0.28 },
+        { "key": "status", "title": "Estado", "w": 0.18 },
+        { "key": "desc", "title": "Descripción", "w": 0.54 }
+      ],
+      "rows": [
+        {
+          "item": "Adelantos Vacaciones vs. Sueldo",
+          "status": "En evaluación",
+          "desc": "Evaluación técnica para menú desplegable con topes diferenciados por tipo de adelanto."
+        },
+        {
+          "item": "Carpetas de Desempeño",
+          "status": "En análisis",
+          "desc": "Diseño de estructura de acceso restringido e invisible para el colaborador."
+        }
+      ]
+    }
+  }
+}

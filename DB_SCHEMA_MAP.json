@@ -1,0 +1,372 @@
+{
+  "ausencias": {
+    "sampleDocId": "MZTo3j6HC8zcyN1VYmEK",
+    "schema": {
+      "employeeId": "kEsOFbXetreRDrG2O3DdKzaFRVh1",
+      "employeeName": "Garcia Valentina",
+      "type": "Enfermedad",
+      "startDate": "2026-01-02",
+      "status": "Justificada",
+      "hasCertificate": true,
+      "reason": "Gripe",
+      "comments": "",
+      "createdAt": "2025-12-30T13:04:03.582Z",
+      "endDate": "2026-01-04",
+      "id": "MZTo3j6HC8zcyN1VYmEK"
+    },
+    "subcollections": []
+  },
+  "clientes": {
+    "sampleDocId": "C2vShpgfPZur9RRDWhy3",
+    "schema": {
+      "businessName": "Bacar sa.",
+      "cuit": "30-66813497-8",
+      "contactName": "",
+      "contactEmail": "",
+      "status": "Active",
+      "id": "C2vShpgfPZur9RRDWhy3",
+      "createdAt": {
+        "_seconds": 1764600314,
+        "_nanoseconds": 168000000
+      }
+    },
+    "subcollections": []
+  },
+  "clients": {
+    "sampleDocId": "G7X6lne5Pre8Fl8YawGI",
+    "schema": {
+      "cuit": "33-66554433-9",
+      "condition": "Resp. Inscripto",
+      "web": "",
+      "industry": "",
+      "status": "activo",
+      "address": "Av. Fuerza aerea 2475",
+      "id": "G7X6lne5Pre8Fl8YawGI",
+      "objetivos": [
+        {
+          "id": "1766790543839",
+          "name": "Casa Central",
+          "address": "Av. Fuerza Aérea Argentina 2475, X5010 Córdoba, Argentina",
+          "lat": -31.4310826,
+          "lng": -64.2206356,
+          "type": "Planta",
+          "contact": ""
+        }
+      ],
+      "city": "Cordoba",
+      "phone": "3515465559",
+      "taxId": "20244722432",
+      "name": "Martinez Almeyra Mauro",
+      "fantasyName": "Logistica del Sur",
+      "email": "mauromartinez@hotmail.com",
+      "historial": [
+        {
+          "id": "1766790515348",
+          "date": "2025-12-26T23:08:35.348Z",
+          "note": "Datos actualizados",
+          "user": "Sistema"
+        },
+        {
+          "id": "1767030997799",
+          "date": "2025-12-29T17:56:37.799Z",
+          "note": "Datos actualizados",
+          "user": "Sistema"
+        }
+      ]
+    },
+    "subcollections": []
+  },
+  "contratos_servicio": {
+    "sampleDocId": "3q6nwi3RFekTqlRblRYQ",
+    "schema": {
+      "objectiveId": "rqH5QSY3VZDSDaq68B09",
+      "name": "1x24hs",
+      "totalHoursPerMonth": 720,
+      "startDate": {
+        "_seconds": 1764997050,
+        "_nanoseconds": 657000000
+      },
+      "isActive": true,
+      "id": "3q6nwi3RFekTqlRblRYQ",
+      "daysOfWeek": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "quantity": 1
+    },
+    "subcollections": []
+  },
+  "convenios_colectivos": {
+    "sampleDocId": "EvXc0Hl3s7EaSISRyzJr",
+    "schema": {
+      "id": "EvXc0Hl3s7EaSISRyzJr",
+      "code": "FUERA_CONVENIO",
+      "name": "Personal Jerárquico",
+      "maxHoursWeekly": 999,
+      "maxHoursMonthly": 999,
+      "overtimeThresholdDaily": 24,
+      "saturdayCutoffHour": 24,
+      "nightShiftStart": 22,
+      "nightShiftEnd": 6,
+      "isActive": true,
+      "createdAt": {
+        "_seconds": 1765543588,
+        "_nanoseconds": 908000000
+      }
+    },
+    "subcollections": []
+  },
+  "empleados": {
+    "sampleDocId": "6egkZ5PfXYgQUkmitsYVe9eDf6v2",
+    "schema": {
+      "payrollCycleStartDay": 26,
+      "isAvailable": true,
+      "fileNumber": "3040",
+      "role": "employee",
+      "contractType": "FullTime",
+      "importedBy": "2fBfJKMseuTKTNZxXVbsM8JUZ0J3",
+      "createdAt": {
+        "_seconds": 1765996268,
+        "_nanoseconds": 354000000
+      },
+      "uid": "6egkZ5PfXYgQUkmitsYVe9eDf6v2",
+      "payrollCycleEndDay": 25,
+      "name": "Iranzo Fernando Flavio",
+      "dni": "37626110",
+      "email": "iranzofernandoflavio@mail.com",
+      "password": "",
+      "clientId": "JcL6UK26aHrwP3sc4qNi",
+      "maxHoursPerMonth": 176,
+      "legajo": "3040",
+      "cuit": "37626110",
+      "cct": "Seguridad Privada (CCT 422/05)",
+      "id": "6egkZ5PfXYgQUkmitsYVe9eDf6v2",
+      "status": "Activo",
+      "periodType": "Mensual",
+      "cutoffDay": 20,
+      "maxHours": 200,
+      "address": "Santiago del Estero 264, X5022FOF Córdoba, Argentina",
+      "lng": -64.1760596,
+      "lat": -31.4150737,
+      "cycleStartDay": 26,
+      "firstName": "Iranzo",
+      "lastName": "Fernando Flavio",
+      "phone": "",
+      "preferredClientId": "NXuH05MhMeTD6wJhw4HW",
+      "preferredObjectiveId": "1766792942091",
+      "laborAgreement": "Seguridad Privada (CCT 422/05)",
+      "category": ""
+    },
+    "subcollections": []
+  },
+  "feriados": {
+    "sampleDocId": "1xGnUhTzBRHMmkfK6ep8",
+    "schema": {
+      "date": "2026-08-17",
+      "name": "San Martín",
+      "type": "Trasladable"
+    },
+    "subcollections": []
+  },
+  "historial_operaciones": {
+    "sampleDocId": "0VSazNuTLSsT2lsAwQjS",
+    "schema": {
+      "docId": "f0VmrSt0v8qHL1ntf8Cz",
+      "collection": "turnos",
+      "action": "UPDATE",
+      "changedBy": "BIar6f7ILATdkucXKH9NTDUkKQG2",
+      "timestamp": {
+        "_seconds": 1766086706,
+        "_nanoseconds": 265000000
+      },
+      "details": {
+        "before": {
+          "emp": "Mauro Martinez Almeyra",
+          "start": {
+            "_seconds": 1765936800,
+            "_nanoseconds": 0
+          }
+        },
+        "after": {
+          "emp": "VACANTE",
+          "start": "No Change"
+        },
+        "overtime": false
+      }
+    },
+    "subcollections": []
+  },
+  "patrones_servicio": {
+    "sampleDocId": "0W9tZsqrVGEGQ4n5du07",
+    "schema": {
+      "id": "0W9tZsqrVGEGQ4n5du07",
+      "contractId": "SYDgtNzZUuZpcZMeitSk",
+      "shiftTypeId": "M4WNVVYiFpmiijGhv3iy",
+      "daysOfWeek": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "quantityPerDay": 1,
+      "validTo": null,
+      "active": true,
+      "createdAt": {
+        "_seconds": 1765231187,
+        "_nanoseconds": 159000000
+      },
+      "createdBy": "BIar6f7ILATdkucXKH9NTDUkKQG2",
+      "updatedBy": "BIar6f7ILATdkucXKH9NTDUkKQG2",
+      "validFrom": {
+        "_seconds": 1765236845,
+        "_nanoseconds": 224000000
+      },
+      "updatedAt": {
+        "_seconds": 1765236838,
+        "_nanoseconds": 454000000
+      }
+    },
+    "subcollections": []
+  },
+  "services": {
+    "sampleDocId": "mVQuhqCUBKiSTxhu8sgP",
+    "schema": {
+      "objectiveId": "bsfnnuRih0R5SqJMDFFy",
+      "name": "Vigilancia 24hs",
+      "scheduleType": "24x48"
+    },
+    "subcollections": []
+  },
+  "servicios_sla": {
+    "sampleDocId": "3qZoX2dY5aSbE7RM8QXo",
+    "schema": {
+      "clientId": "NXuH05MhMeTD6wJhw4HW",
+      "clientName": "Bacar sa.",
+      "objectiveId": "1766792942091",
+      "objectiveName": "Planta",
+      "startDate": "2026-01-01",
+      "shifts": [
+        {
+          "id": "1766793011723",
+          "name": "Mañana",
+          "position": "Guardia",
+          "startTime": "06:00",
+          "endTime": "14:00",
+          "hours": 8,
+          "quantity": 2,
+          "days": [
+            "L",
+            "M",
+            "X",
+            "J",
+            "V",
+            "S",
+            "D"
+          ]
+        },
+        {
+          "id": "1766793049256",
+          "name": "",
+          "position": "Guardia",
+          "startTime": "14:00",
+          "endTime": "22:00",
+          "hours": 8,
+          "quantity": 2,
+          "days": [
+            "L",
+            "M",
+            "X",
+            "J",
+            "V",
+            "S",
+            "D"
+          ]
+        },
+        {
+          "id": "1766793064576",
+          "name": "",
+          "position": "Guardia",
+          "startTime": "22:00",
+          "endTime": "06:00",
+          "hours": 8,
+          "quantity": 1,
+          "days": [
+            "L",
+            "M",
+            "X",
+            "J",
+            "V",
+            "S",
+            "D"
+          ]
+        }
+      ],
+      "status": "active",
+      "endDate": "2026-01-31",
+      "id": "3qZoX2dY5aSbE7RM8QXo",
+      "totalMonthlyHours": 1240
+    },
+    "subcollections": []
+  },
+  "system_users": {
+    "sampleDocId": "BIar6f7ILATdkucXKH9NTDUkKQG2",
+    "schema": {
+      "uid": "BIar6f7ILATdkucXKH9NTDUkKQG2",
+      "email": "admin@bacarsa.com.ar",
+      "displayName": "Mauro Martinez Almeyra",
+      "role": "SuperAdmin",
+      "status": "Active",
+      "createdAt": {
+        "_seconds": 1764609504,
+        "_nanoseconds": 375000000
+      }
+    },
+    "subcollections": []
+  },
+  "tipos_turno": {
+    "sampleDocId": "0z4CaocweURKmDa6fI0O",
+    "schema": {
+      "contractId": "3q6nwi3RFekTqlRblRYQ",
+      "color": "#4F46E5",
+      "id": "0z4CaocweURKmDa6fI0O",
+      "name": "Turno mañana",
+      "code": "TM",
+      "startTime": "06:00",
+      "durationHours": 12
+    },
+    "subcollections": []
+  },
+  "turnos": {
+    "sampleDocId": "092zM6UOemDni3gy8Y40",
+    "schema": {
+      "schedulerId": "SYSTEM_GENERATOR",
+      "updatedAt": {
+        "_seconds": 1766418620,
+        "_nanoseconds": 12000000
+      },
+      "status": "Assigned",
+      "role": "Vigilador",
+      "startTime": {
+        "_seconds": 1766196000,
+        "_nanoseconds": 0
+      },
+      "objectiveId": "GTIf57iYSYHLDs09JFwO",
+      "employeeName": "VACANTE",
+      "id": "092zM6UOemDni3gy8Y40",
+      "endTime": {
+        "_seconds": 1766224800,
+        "_nanoseconds": 0
+      },
+      "shiftTypeId": "lX8ev8sf5U4Zx8Da6HXb",
+      "objectiveName": "Sede",
+      "employeeId": "VACANTE"
+    },
+    "subcollections": []
+  }
+}

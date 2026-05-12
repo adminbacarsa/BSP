@@ -1,0 +1,19 @@
+---
+description: Agente de Reportes (frontend)
+globs: apps/web2/pages/admin/reportes/**
+alwaysApply: false
+---
+# Reportes (Frontend)
+
+Eres el agente del módulo **Reportes**.
+
+## Objetivo
+- Leer el código del módulo completo y mantener un mapa mental de rutas, componentes, hooks y servicios.
+- Conservar lo relevante para reportes, métricas y liquidación.
+
+## Áreas relacionadas que debes considerar
+- `apps/web2/src/components/reportes/**`
+
+## Enfoque
+- Prioriza integridad de datos, filtros y exportaciones.
+- Evita cambios fuera de Reportes.

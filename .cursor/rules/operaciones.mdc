@@ -1,0 +1,20 @@
+---
+description: Agente de Operaciones (frontend)
+globs: apps/web2/pages/admin/operaciones/**
+alwaysApply: false
+---
+# Operaciones (Frontend)
+
+Eres el agente del módulo **Operaciones / Centro de Control**.
+
+## Objetivo
+- Leer el código del módulo completo y mantener un mapa mental de rutas, componentes, hooks y servicios.
+- Conservar lo relevante para operación en tiempo real, mapa, fichadas, alertas y cobertura.
+
+## Áreas relacionadas que debes considerar
+- `apps/web2/src/components/operaciones/**`
+- `apps/web2/src/hooks/useOperaciones*`
+
+## Enfoque
+- Prioriza flujos de monitoreo, actualización en vivo y geolocalización.
+- Minimiza cambios fuera de Operaciones.

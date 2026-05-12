@@ -1,0 +1,398 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { db, functions } from '@/lib/firebase';
+import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
+
+const STORAGE_KEY = 'emulator_loaded_backup';
+
+interface LoadedVersion {
+  fileName: string;
+  loadedAt: string;   // ISO string
+  totalDocs: number;
+  collections: string[];
+  sizeBytes: number;
+}
+
+const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
+const PROJECT_ID  = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'comtroldata';
+
+interface BackupRecord {
+  id: string;
+  fileName: string;
+  driveLink: string;
+  driveFileId: string;
+  sizeBytes: number;
+  totalDocs: number;
+  collections: string[];
+  createdAt: any;
+  status: 'ok' | 'error';
+  error?: string;
+}
+
+const fmt = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+const fmtDate = (val: any) => {
+  if (!val) return '—';
+  try {
+    const d = val instanceof Timestamp ? val.toDate() : (typeof val === 'string' ? new Date(val) : new Date(val));
+    return d.toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' });
+  } catch { return '—'; }
+};
+
+// Deserializa { _seconds, _nanoseconds } → Firestore Timestamp recursivamente
+const deserialize = (obj: any): any => {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(deserialize);
+  if (typeof obj === 'object') {
+    if ('_seconds' in obj && '_nanoseconds' in obj) return new Timestamp(obj._seconds, obj._nanoseconds);
+    const out: any = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = deserialize(v);
+    return out;
+  }
+  return obj;
+};
+
+export default function BackupTab() {
+  const [backups, setBackups] = useState<BackupRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [lastResult, setLastResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [restoreModal, setRestoreModal] = useState<{ backup: BackupRecord; mode: 'merge' | 'full' } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
+  const [loadedVersion, setLoadedVersion] = useState<LoadedVersion | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Leer versión activa del emulador desde localStorage
+  useEffect(() => {
+    if (!IS_EMULATOR) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setLoadedVersion(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  // Suscripción Firestore (producción: remota / emulador: local localhost:8080)
+  useEffect(() => {
+    const q = query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(20));
+    const unsub = onSnapshot(q, snap => {
+      setBackups(snap.docs.map(d => ({ id: d.id, ...d.data() } as BackupRecord)));
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const handleRunBackup = async () => {
+    setRunning(true); setLastResult(null);
+    try {
+      const fn = httpsCallable(functions, 'triggerBackup');
+      const res: any = await fn({});
+      setLastResult({ ok: true, msg: `Backup creado: ${res.data.fileName} (${fmt(res.data.sizeBytes)}, ${res.data.totalDocs} docs)` });
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al crear backup' });
+    } finally { setRunning(false); }
+  };
+
+  // Carga un backup JSON local directo al emulador desde el browser
+  const handleLoadLocalFile = async (file: File) => {
+    setLastResult(null);
+    setProgress({ done: 0, total: 0, phase: 'Leyendo archivo...' });
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+
+      const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, any[]][];
+      const totalDocs = cols.reduce((acc, [, docs]) => acc + (docs?.length ?? 0), 0);
+
+      setProgress({ done: 0, total: totalDocs, phase: 'Limpiando emulador...' });
+
+      // Borrar todo el Firestore del emulador via REST
+      await fetch(`http://localhost:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
+        method: 'DELETE',
+      });
+
+      let written = 0;
+      for (const [colName, docs] of cols) {
+        if (!Array.isArray(docs) || docs.length === 0) continue;
+        for (let i = 0; i < docs.length; i += 400) {
+          const chunk = docs.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach((d: any) => {
+            const { _id, ...data } = d;
+            if (!_id) return;
+            batch.set(fsDoc(db, colName, _id), deserialize(data));
+          });
+          await batch.commit();
+          written += chunk.length;
+          setProgress({ done: written, total: totalDocs, phase: `Cargando ${colName}…` });
+        }
+      }
+
+      // Guardar versión activa en localStorage
+      const version: LoadedVersion = {
+        fileName: file.name,
+        loadedAt: new Date().toISOString(),
+        totalDocs: written,
+        collections: cols.map(([k]) => k),
+        sizeBytes: file.size,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(version));
+      setLoadedVersion(version);
+
+      setLastResult({ ok: true, msg: `Emulador actualizado — ${written.toLocaleString()} docs en ${cols.length} colecciones.` });
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al cargar el archivo' });
+    } finally {
+      setProgress(null);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!restoreModal) return;
+    setRestoring(true); setLastResult(null);
+    try {
+      const fn = httpsCallable(functions, 'restoreBackup');
+      const res: any = await fn({ driveFileId: restoreModal.backup.driveFileId, mode: restoreModal.mode });
+      const d = res.data;
+      setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored} docs en ${(d.durationMs/1000).toFixed(1)}s` });
+      setRestoreModal(null);
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al restaurar' });
+    } finally { setRestoring(false); }
+  };
+
+  return (
+    <div className="animate-in fade-in space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center">
+            <HardDrive size={20} className="text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div>
+            <h2 className="font-black text-lg text-slate-800 dark:text-white">Backup de Base de Datos</h2>
+            <p className="text-xs text-slate-500 font-bold uppercase">Google Drive · Colecciones Firestore</p>
+          </div>
+        </div>
+        {!IS_EMULATOR && (
+          <button onClick={handleRunBackup} disabled={running}
+            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-black text-sm shadow-lg transition-all hover:scale-105 disabled:scale-100">
+            <RefreshCw size={16} className={running ? 'animate-spin' : ''} />
+            {running ? 'Ejecutando...' : 'Crear backup ahora'}
+          </button>
+        )}
+      </div>
+
+      {/* Resultado */}
+      {lastResult && (
+        <div className={`flex items-start gap-3 p-4 rounded-xl border font-bold text-sm ${lastResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+          {lastResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
+          {lastResult.msg}
+        </div>
+      )}
+
+      {/* ── Carga local (solo emulador) ── */}
+      {IS_EMULATOR && (
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+              <Upload size={18} className="text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-sm text-amber-900">Actualizar datos del emulador</h3>
+              <p className="text-xs text-amber-700 mt-0.5 mb-4">
+                Descargá el backup desde Drive (botón <b>Drive</b> en la lista) y seleccionalo acá.
+                Los datos del emulador se reemplazarán completamente.
+              </p>
+
+              {progress ? (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-bold text-amber-800">
+                    <span>{progress.phase}</span>
+                    <span>{progress.done.toLocaleString()} / {progress.total.toLocaleString()}</span>
+                  </div>
+                  <div className="h-2.5 bg-amber-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500 transition-all duration-300 rounded-full"
+                      style={{ width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+                  </div>
+                  <p className="text-[10px] text-amber-600">
+                    {progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}% completado
+                  </p>
+                </div>
+              ) : (
+                <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-sm cursor-pointer transition-colors shadow">
+                  <Upload size={15} />
+                  Seleccionar backup .json
+                  <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadLocalFile(f); e.target.value = ''; }} />
+                </label>
+              )}
+
+              {/* Versión activa cargada en el emulador */}
+              {loadedVersion && !progress && (
+                <div className="mt-4 bg-white border border-amber-200 rounded-xl p-3.5 flex items-start gap-3">
+                  <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center shrink-0">
+                    <Tag size={14} className="text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase text-amber-600 mb-0.5">Versión activa en emulador</p>
+                    <p className="font-black text-sm text-amber-900 truncate">{loadedVersion.fileName}</p>
+                    <div className="flex items-center gap-3 mt-1 flex-wrap">
+                      <span className="text-xs text-amber-700 font-bold flex items-center gap-1">
+                        <Clock size={10} /> {fmtDate(loadedVersion.loadedAt)}
+                      </span>
+                      <span className="text-xs text-amber-700 font-bold">
+                        {loadedVersion.totalDocs.toLocaleString()} docs
+                      </span>
+                      <span className="text-xs text-amber-700 font-bold">
+                        {fmt(loadedVersion.sizeBytes)}
+                      </span>
+                      <span className="text-xs text-amber-700 font-bold">
+                        {loadedVersion.collections.length} col.
+                      </span>
+                    </div>
+                    {loadedVersion.collections.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {loadedVersion.collections.map(c => (
+                          <span key={c} className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">{c}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 grid grid-cols-3 gap-4 text-center">
+        <div>
+          <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Destino</p>
+          <p className="font-bold text-sm text-slate-700 dark:text-slate-200">Google Drive</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Backups guardados</p>
+          <p className="font-black text-2xl text-indigo-600">{backups.length}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Último backup</p>
+          <p className="font-bold text-sm text-slate-700 dark:text-slate-200">{backups[0] ? fmtDate(backups[0].createdAt) : '—'}</p>
+        </div>
+      </div>
+
+      {/* Lista de backups */}
+      {loading ? (
+        <div className="text-center py-12 text-slate-400 font-bold">Cargando historial...</div>
+      ) : backups.length === 0 ? (
+        <div className="text-center py-12">
+          <Database size={40} className="mx-auto text-slate-300 mb-3" />
+          <p className="font-bold text-slate-500">
+            {IS_EMULATOR ? 'Cargá un backup para ver el historial.' : 'Sin backups aún. Creá el primero.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {backups.map((b, i) => (
+            <div key={b.id} className={`bg-white dark:bg-slate-800 border rounded-2xl p-4 flex items-center gap-4 hover:shadow-md transition-all ${i === 0 ? 'border-indigo-200 dark:border-indigo-700' : 'border-slate-200 dark:border-slate-700'}`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${b.status === 'ok' ? 'bg-emerald-100' : 'bg-rose-100'}`}>
+                {b.status === 'ok' ? <FileJson size={18} className="text-emerald-600" /> : <AlertTriangle size={18} className="text-rose-500" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-black text-sm text-slate-800 dark:text-white truncate">{b.fileName}</p>
+                  {i === 0 && <span className="text-[9px] font-black uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full shrink-0">Último</span>}
+                </div>
+                <div className="flex items-center gap-4 mt-1 flex-wrap">
+                  <span className="flex items-center gap-1 text-xs text-slate-500 font-bold"><Clock size={11} /> {fmtDate(b.createdAt)}</span>
+                  {b.sizeBytes > 0 && <span className="text-xs text-slate-400 font-bold">{fmt(b.sizeBytes)}</span>}
+                  {b.totalDocs > 0 && <span className="text-xs text-slate-400 font-bold">{b.totalDocs?.toLocaleString()} docs</span>}
+                  {b.collections?.length > 0 && <span className="text-xs text-slate-400 font-bold">{b.collections.length} col.</span>}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {b.driveLink && (
+                  <a href={b.driveLink} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-indigo-600 hover:bg-indigo-50 rounded-lg border border-indigo-200 transition-colors">
+                    <ExternalLink size={12} /> Drive
+                  </a>
+                )}
+                {b.status === 'ok' && !IS_EMULATOR && (
+                  <>
+                    <button onClick={() => setRestoreModal({ backup: b, mode: 'merge' })}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-emerald-600 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors">
+                      <RotateCcw size={12} /> Merge
+                    </button>
+                    <button onClick={() => setRestoreModal({ backup: b, mode: 'full' })}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors">
+                      <ShieldAlert size={12} /> Full
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal restauración (producción) */}
+      {restoreModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-md p-8 shadow-2xl border dark:border-slate-700 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 mb-6">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${restoreModal.mode === 'full' ? 'bg-rose-100' : 'bg-emerald-100'}`}>
+                {restoreModal.mode === 'full' ? <ShieldAlert size={24} className="text-rose-600"/> : <RotateCcw size={24} className="text-emerald-600"/>}
+              </div>
+              <div>
+                <h3 className="font-black text-lg text-slate-900 dark:text-white">
+                  {restoreModal.mode === 'full' ? 'Restauración Completa' : 'Restauración Merge'}
+                </h3>
+                <p className="text-xs text-slate-500 font-bold">{restoreModal.backup.fileName}</p>
+              </div>
+              <button onClick={() => setRestoreModal(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X size={20}/></button>
+            </div>
+            <div className={`p-4 rounded-xl mb-6 text-sm font-bold ${restoreModal.mode === 'full' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+              {restoreModal.mode === 'full'
+                ? <><ShieldAlert size={14} className="inline mr-1.5"/>ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.</>
+                : <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setRestoreModal(null)} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50">Cancelar</button>
+              <button onClick={handleRestore} disabled={restoring}
+                className={`flex-1 py-3 rounded-xl text-white font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 ${restoreModal.mode === 'full' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                {restoring ? <RefreshCw size={16} className="animate-spin"/> : <RotateCcw size={16}/>}
+                {restoring ? 'Restaurando...' : `Confirmar ${restoreModal.mode === 'full' ? 'Full Restore' : 'Merge'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Instrucciones Drive */}
+      <details className="group">
+        <summary className="cursor-pointer text-xs font-black uppercase text-slate-400 hover:text-slate-600 flex items-center gap-2 select-none">
+          <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+          Configuración inicial de Google Drive
+        </summary>
+        <div className="mt-3 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 text-xs font-mono space-y-2 text-slate-600">
+          <p className="font-black text-slate-700">Pasos para habilitar la carpeta Drive:</p>
+          <ol className="list-decimal list-inside space-y-1.5">
+            <li>Crear una carpeta en Google Drive llamada <strong>COSP-Backups</strong></li>
+            <li>Compartir con rol Editor:
+              <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+                <li><strong className="text-indigo-600">comtroldata@appspot.gserviceaccount.com</strong></li>
+              </ul>
+            </li>
+            <li>Habilitar Drive API en Google Cloud Console</li>
+          </ol>
+        </div>
+      </details>
+    </div>
+  );
+}
