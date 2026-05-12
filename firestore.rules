@@ -152,5 +152,11 @@ service cloud.firestore {
       allow read, create: if request.auth != null;
       allow update, delete: if isAdmin();
     }
+
+    // 11. Credenciales públicas — lectura sin auth para verificación por QR
+    match /credenciales_publicas/{credId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
   }
 }
