@@ -432,7 +432,11 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SR) {
         const recog = new SR(); recog.lang = 'es-AR'; recog.continuous = true; recog.interimResults = false;
-        recog.onresult = (ev: any) => setTranscription(Array.from(ev.results).map((r: any) => r[0].transcript).join(' '));
+        recog.onresult = (ev: any) => {
+          const t = Array.from(ev.results).map((r: any) => r[0].transcript).join(' ');
+          setTranscription(t);
+          setTexto(t);
+        };
         recog.start(); speechRef.current = recog;
       }
     } catch { alert('No se pudo acceder al micrófono.'); }
@@ -600,12 +604,6 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
                   </button>
                 </div>
                 <audio src={audioUrl} controls className="w-full h-8" />
-                {transcription && (
-                  <div className="px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg">
-                    <p className="text-[10px] font-black text-violet-600 uppercase tracking-wider mb-0.5">Transcripción automática</p>
-                    <p className="text-xs text-slate-600">{transcription}</p>
-                  </div>
-                )}
               </div>
             )}
           </div>
