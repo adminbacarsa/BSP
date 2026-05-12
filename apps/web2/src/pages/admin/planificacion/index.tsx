@@ -105,6 +105,28 @@ const calcShiftHours = (shift: any): number => {
     return 8;
 };
 
+/** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
+function isOperationalOriginShift(data: any): boolean {
+    const o = String(data?.origin || '').toUpperCase();
+    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
+    if (data?.resolvedBy === 'OPERACIONES') return true;
+    if (data?.isReten === true) return true;
+    return false;
+}
+
+/**
+ * Horas CCT / pie de grilla: solo turnos del objetivo en pantalla, publicados (no draft)
+ * y no operativos. Evita “200h en abril” cuando en realidad eran turnos de otro objetivo
+ * o cobertura de ops mezclados en `turnos` con la misma fecha+empleado.
+ */
+function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefined | null): boolean {
+    if (!data || !objectiveId) return false;
+    if (String(data.objectiveId || '') !== String(objectiveId)) return false;
+    if (isOperationalOriginShift(data)) return false;
+    if (data.draft === true) return false;
+    return true;
+}
+
 const getDateKey = (dateInput: any) => {
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
     const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -293,8 +315,21 @@ export default function PlanificacionPage() {
     const [autoV2Report, setAutoV2Report] = useState<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const [autoV2BudgetMode, setAutoV2BudgetMode] = useState<'cct'|'calendar'>('cct');
     const [autoV2ShowEmpDetail, setAutoV2ShowEmpDetail] = useState(false);
+    // Stats post-generación (capacidad CCT por empleado)
+    const [autoV2GenStats, setAutoV2GenStats] = useState<{
+        employeeMonthlyHours: Record<string, number>;
+        employeeCycleHours: { current: Record<string, number>; next: Record<string, number> };
+        targetHours: number;
+        totalBillableHours: number;
+        uncoveredSlots: number;
+        idleEmployeeIds?: string[];
+        primaryShiftByEmp?: Record<string, string | null>;
+        positionGroups?: Record<string, string[]>;
+    } | null>(null);
+    const [showCapacityModal, setShowCapacityModal] = useState(false);
     const [slaDebug, setSlaDebug] = useState<{ id: string; data: any } | null>(null);
     const [slaDebugLoading, setSlaDebugLoading] = useState(false);
+    const [hoursMode, setHoursMode] = useState<'mes' | 'cct'>('mes');
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
@@ -419,15 +454,64 @@ export default function PlanificacionPage() {
                 const key = `${emp.id}_${getDateKey(day)}`;
                 const pending = pendingChanges[key];
                 const existing = shiftsMap[key];
-                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                const activeShift = pending && !pending.isDeleted ? pending : existing;
                 if (!activeShift) return;
+                if (pending && !pending.isDeleted) {
+                    if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
+                        String(activeShift.objectiveId) !== String(selectedObjective)) return;
+                } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
                 if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
                 total += calcShiftHours(activeShift);
             });
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
+
+    // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
+    // Suma:
+    //   - Cola del mes anterior (días 26..fin) → tomada de shiftsMap (no editable acá).
+    //   - Días 1..25 del mes activo → toma pendingChanges si existe, si no shiftsMap.
+    // Filtra todos los códigos no facturables (RET, F, FF, FP, FT, V, L, etc.).
+    const empCctCurrentHours = useMemo(() => {
+        const result: Record<string, number> = {};
+        const yr = currentDate.getFullYear();
+        const mo = currentDate.getMonth();
+        // Cola del mes anterior: 26..fin
+        const prevMonthDate = new Date(yr, mo - 1, 1);
+        const prevYr = prevMonthDate.getFullYear();
+        const prevMo = prevMonthDate.getMonth();
+        const prevLast = new Date(yr, mo, 0).getDate();
+        const tailDays: Date[] = [];
+        for (let d = 26; d <= prevLast; d++) tailDays.push(new Date(prevYr, prevMo, d));
+        // Mes activo: días 1..25
+        const headDays = daysInMonth.filter((d: Date) => d.getDate() <= 25);
+        const acumular = (empId: string, key: string, useShiftsMap: boolean) => {
+            const pending = pendingChanges[key];
+            const existing = shiftsMap[key];
+            let activeShift: any = null;
+            if (useShiftsMap) {
+                activeShift = existing;
+                if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+            } else if (pending && !pending.isDeleted) {
+                activeShift = pending;
+                if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
+                    String(activeShift.objectiveId) !== String(selectedObjective)) return;
+            } else {
+                activeShift = existing;
+                if (activeShift && !turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+            }
+            if (!activeShift) return;
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
+            result[empId] = (result[empId] || 0) + calcShiftHours(activeShift);
+        };
+        displayedEmployees.forEach((emp: any) => {
+            result[emp.id] = 0;
+            tailDays.forEach((d) => acumular(emp.id, `${emp.id}_${getDateKey(d)}`, true));
+            headDays.forEach((d) => acumular(emp.id, `${emp.id}_${getDateKey(d)}`, false));
+        });
+        return result;
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective]);
 
     const retCount = useMemo(() => {
         let count = 0;
@@ -442,6 +526,29 @@ export default function PlanificacionPage() {
         });
         return count;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+
+    // Colchón disponible (horas): si hoy se ausenta alguien, ¿cuánto se podría cubrir
+    // promoviendo RETs a turno facturable sin pasar 200h por empleado?
+    // Estimación: 8h por RET (turno típico), limitada por la capacidad restante de
+    // cada empleado hasta 200h. Pesimista pero segura.
+    const retBufferHours = useMemo(() => {
+        let total = 0;
+        displayedEmployees.forEach((emp: any) => {
+            let empRetCount = 0;
+            daysInMonth.forEach(day => {
+                const key = `${emp.id}_${getDateKey(day)}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                if (activeShift && String(activeShift.code || '').toUpperCase() === 'RET') empRetCount++;
+            });
+            if (empRetCount === 0) return;
+            const monthH = empMonthlyHours[emp.id] || 0;
+            const spareToCap = Math.max(0, 200 - monthH);
+            total += Math.min(empRetCount * 8, spareToCap);
+        });
+        return total;
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empMonthlyHours]);
 
     // Calcula las horas totales de descanso de un bloque de francos consecutivos.
     // Incluye: horas restantes tras el último turno trabajado + 24h × días de franco + horas hasta el próximo turno.
@@ -3208,7 +3315,6 @@ export default function PlanificacionPage() {
 
         setAutoV2Loading(true);
         try {
-            const FRANCO_SET_LOCAL = new Set(['F','FF','FP','FT','V','L','A','E','AA','PG','RET']);
             const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
 
             // Cargar ausencias del mes actual
@@ -3245,8 +3351,9 @@ export default function PlanificacionPage() {
             ));
             prevTailSnap.docs.forEach(d => {
                 const data = d.data() as any;
+                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
                 const empId = data.employeeId; if (!empId) return;
-                if (FRANCO_SET_LOCAL.has(String(data.code||'').toUpperCase())) return;
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
                 const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
                 empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
             });
@@ -3307,7 +3414,6 @@ export default function PlanificacionPage() {
         if (!autoV2Report?.ok) { toast.error('Calculá viabilidad primero (debe dar viable)'); return; }
         setAutoV2Generating(true);
         try {
-            const FRANCO_SET_LOCAL = new Set(['F','FF','FP','FT','V','L','A','E','AA','PG','RET']);
             const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
 
             const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
@@ -3342,8 +3448,9 @@ export default function PlanificacionPage() {
             ));
             prevTailSnap.docs.forEach(d => {
                 const data = d.data() as any;
+                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
                 const empId = data.employeeId; if (!empId) return;
-                if (FRANCO_SET_LOCAL.has(String(data.code||'').toUpperCase())) return;
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
                 const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
                 empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
             });
@@ -3402,6 +3509,17 @@ export default function PlanificacionPage() {
             setPendingChanges(newChanges);
             setAutoGeneratedReady(true);
             setShowAutoV2Modal(false);
+            // Guardamos las stats post-generación para el panel "Capacidad CCT"
+            setAutoV2GenStats({
+                employeeMonthlyHours: gen.stats.employeeMonthlyHours,
+                employeeCycleHours: gen.stats.employeeCycleHours,
+                targetHours: gen.stats.targetHours,
+                totalBillableHours: gen.stats.totalBillableHours,
+                uncoveredSlots: gen.stats.uncoveredSlots,
+                idleEmployeeIds: gen.stats.idleEmployeeIds,
+                primaryShiftByEmp: gen.stats.primaryShiftByEmp,
+                positionGroups: gen.stats.positionGroups,
+            });
 
             const uncov = gen.stats.uncoveredSlots > 0 ? ` · ⚠ ${gen.stats.uncoveredSlots} slots sin cubrir` : '';
             const over  = gen.stats.employeesOver200.length > 0 ? ` · ⚠ ${gen.stats.employeesOver200.length} empleados >200h ciclo (revisar)` : '';
@@ -3548,25 +3666,97 @@ export default function PlanificacionPage() {
                 promPorPuesto[pos] = Math.round((hrs as number[]).reduce((a, b) => a + b, 0) / (hrs as number[]).length);
             });
 
+            // ── Inferencia de owner virtual (alineado con V2): puesto qty=1 con un único
+            // empleado en su grupo → ese empleado es owner virtual aunque no tenga
+            // defaultPos cargado en la UI. Se calcula a partir de la planificación actual.
+            const ownerVirtualByPos: Record<string, string> = {};
+            positionStructure.forEach((pos: any) => {
+                const qty = Number(pos.qty || 1);
+                if (qty !== 1) return;
+                // candidatos: empleados con al menos 1 turno facturable en este puesto el mes
+                const candidatos = new Set<string>();
+                displayedEmployees.forEach((emp: any) => {
+                    daysInMonth.forEach((day: Date) => {
+                        const sh = pendingChanges[`${emp.id}_${getDateKey(day)}`] || shiftsMap[`${emp.id}_${getDateKey(day)}`];
+                        if (!sh || sh.isDeleted) return;
+                        if (sh.positionName !== pos.positionName) return;
+                        if (NON_BILLABLE.has(String(sh.code || '').toUpperCase())) return;
+                        candidatos.add(emp.id);
+                    });
+                });
+                // si exactamente 1 candidato exclusivo → owner virtual
+                if (candidatos.size === 1) {
+                    const empId = Array.from(candidatos)[0];
+                    if (!empDefaultPos[`${empId}___${selectedObjective}`]) {
+                        ownerVirtualByPos[empId] = pos.positionName;
+                    }
+                }
+            });
+
+            // ── Cola del ciclo CCT del mes anterior (priorHoursCiclo) ──
+            // CCT corre del día 26 del mes anterior al día 25 del mes actual.
+            // priorHoursCiclo = horas facturables que el empleado hizo en días 26..fin del mes pasado.
+            const priorHoursCiclo: Record<string, number> = {};
+            try {
+                const prevMonth = new Date(year, month - 2, 1);
+                const prevMonthLast = new Date(year, month - 1, 0);
+                const cyclePreStart = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 26);
+                const cyclePreEnd = new Date(prevMonthLast.getFullYear(), prevMonthLast.getMonth(), prevMonthLast.getDate());
+                const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
+                const prevTailSnap = await getDocs(query(
+                    collection(db, 'turnos'),
+                    where('objectiveId', '==', selectedObjective),
+                    where('startTime', '>=', Timestamp.fromDate(cyclePreStart)),
+                    where('startTime', '<=', Timestamp.fromDate(cyclePreEnd))
+                ));
+                prevTailSnap.docs.forEach(d => {
+                    const data = d.data() as any;
+                    if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
+                    const empId = data.employeeId; if (!empId) return;
+                    if (OBJECTIVE_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
+                    const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
+                    priorHoursCiclo[empId] = (priorHoursCiclo[empId] || 0) + h;
+                });
+            } catch {
+                // si falla la query, simplemente no se envía priorHoursCiclo
+            }
+
+            // ── Descripción del ciclo CCT para el prompt ──
+            const cicloCutPrev = `${year}-${String(month - 1).padStart(2,'0')}-26`;
+            const cicloCutAct  = `${year}-${String(month).padStart(2,'0')}-25`;
+            const cicloCCT = {
+                cortePrev: cicloCutPrev,
+                corteActual: cicloCutAct,
+                descripcion: `Ciclo CCT: del ${cicloCutPrev} al ${cicloCutAct}. Las horas del 1..25 del mes actual + priorHoursCiclo cuentan al ciclo actual. Las horas del 26..fin del mes actual cuentan al ciclo siguiente.`,
+            };
+
             const context = {
                 mes: `${year}-${String(month).padStart(2,'0')}`,
                 objetivo: selectedObjective,
                 slaVendidas: slaVendidas || 0,
+                cicloCCT,
+                autoCycles: autoCycles || [],
                 puestos: positionStructure.map((p: any) => ({
                     positionName: p.positionName,
                     qty: Number(p.qty || 1),
                     shifts: (p.shifts || []).map((s: any) => ({ code: s.code, hours: s.hours || 8, startTime: s.startTime || '', endTime: s.endTime || '' })),
                     activeDays: p.activeDays || 'todos',
+                    coverageType: p.coverageType || '24hs',
                 })),
                 empleados: displayedEmployees.map((emp: any) => {
                     const pos = empDefaultPos[`${emp.id}___${selectedObjective}`] || 'Sin puesto';
+                    const defaultPosCargado = empDefaultPos[`${emp.id}___${selectedObjective}`] || null;
+                    const owVirtual = ownerVirtualByPos[emp.id] || null;
                     const h = horasAcum[emp.id] || 0;
                     const prom = promPorPuesto[pos] || h;
                     return {
                         id: emp.id,
                         nombre: emp.name,
                         puestoAsignado: pos,
+                        defaultPos: defaultPosCargado || owVirtual,  // V2 inferencia: si no hay defaultPos pero es único → virtual
+                        ownerVirtual: !defaultPosCargado && !!owVirtual,
                         horasMes: h,
+                        priorHoursCiclo: priorHoursCiclo[emp.id] || 0,
                         diferenciaProm: h - prom,
                     };
                 }),
@@ -3604,14 +3794,19 @@ export default function PlanificacionPage() {
                 const eraBillable  = !!codeActual && !NON_BILLABLE.has(codeActual);
                 const seraBillable = !NON_BILLABLE.has(codeNuevo);
                 if (eraBillable && !seraBillable && posActual) {
-                    let actualCov = 0;
-                    displayedEmployees.forEach((e: any) => {
-                        const sh = pendingChanges[`${e.id}_${c.fecha}`] || shiftsMap[`${e.id}_${c.fecha}`];
-                        if (!sh || sh.isDeleted || sh.positionName !== posActual) return;
-                        if (!NON_BILLABLE.has(String(sh.code || '').toUpperCase())) actualCov++;
-                    });
                     const posData = positionStructure.find((p: any) => p.positionName === posActual);
-                    if (actualCov <= Number(posData?.qty || 1)) return false;
+                    // Excepción R9: si el puesto NO opera ese día (limitado L-V con S/D no activo),
+                    // aceptamos el cambio (es justamente la limpieza que pide la regla).
+                    const posOperaEseDia = posData ? isPosActiveOnDay(posData, getDayLetter(c.fecha)) : true;
+                    if (posOperaEseDia) {
+                        let actualCov = 0;
+                        displayedEmployees.forEach((e: any) => {
+                            const sh = pendingChanges[`${e.id}_${c.fecha}`] || shiftsMap[`${e.id}_${c.fecha}`];
+                            if (!sh || sh.isDeleted || sh.positionName !== posActual) return;
+                            if (!NON_BILLABLE.has(String(sh.code || '').toUpperCase())) actualCov++;
+                        });
+                        if (actualCov <= Number(posData?.qty || 1)) return false;
+                    }
                 }
                 // R4: verificar descanso nocturno → mañana
                 if (seraBillable) {
@@ -3842,10 +4037,12 @@ export default function PlanificacionPage() {
                                             const objLng = Number(selectedObjectiveData?.lng ?? 0);
                                             const distKm = (empLat && empLng && objLat && objLng) ? haversineKm(empLat, empLng, objLat, objLng) : null;
                                             const monthHours = empMonthlyHours[emp.id] || 0;
-                                            const hoursColor = monthHours >= 200 ? 'text-red-600 font-black'
-                                                : monthHours >= 185 ? 'text-orange-500 font-bold'
-                                                : monthHours >= 160 ? 'text-amber-500'
-                                                : monthHours > 0   ? 'text-slate-500 dark:text-slate-300'
+                                            const cctHours = empCctCurrentHours[emp.id] || 0;
+                                            const displayHours = hoursMode === 'cct' ? cctHours : monthHours;
+                                            const hoursColor = displayHours >= 200 ? 'text-red-600 font-black'
+                                                : displayHours >= 185 ? 'text-orange-500 font-bold'
+                                                : displayHours >= 160 ? 'text-amber-500'
+                                                : displayHours > 0   ? 'text-slate-500 dark:text-slate-300'
                                                 : 'text-slate-400 dark:text-slate-500';
                                             return (
                                                 <div className="flex items-center justify-between w-full">
@@ -3854,7 +4051,15 @@ export default function PlanificacionPage() {
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                         {isGuest && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
                                                         {/* Horas mensuales planificadas */}
-                                                        <span title={`${monthHours}h planificadas este mes (límite ~200h)`} className={`shrink-0 text-[8px] ${hoursColor}`}>{monthHours}h</span>
+                                                        <span
+                                                            title={hoursMode === 'cct'
+                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.`
+                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).`}
+                                                            className={`shrink-0 text-[8px] ${hoursColor}`}
+                                                        >
+                                                            {Math.round(displayHours)}h
+                                                            {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
+                                                        </span>
                                                         {/* Distancia al objetivo — solo si hay coordenadas */}
                                                         {distKm !== null ? (
                                                             <span title="Distancia al objetivo" className={`shrink-0 flex items-center gap-0.5 text-[8px] ${distKm >= 9 ? 'text-orange-500' : distKm >= 3 ? 'text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>
@@ -3963,8 +4168,27 @@ export default function PlanificacionPage() {
             </tbody>
             <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
                 <tr>
-                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] text-right uppercase text-slate-500 shadow-sm flex items-center justify-end gap-2 h-8">
-                        <ShieldCheck size={12}/> Cobertura:
+                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-sm h-8">
+                        <div className="flex items-center justify-between gap-2 w-full">
+                            <button
+                                type="button"
+                                onClick={() => setHoursMode((m) => (m === 'mes' ? 'cct' : 'mes'))}
+                                title={hoursMode === 'mes'
+                                    ? 'Mostrando horas del mes calendario. Click para ver horas del ciclo CCT (26→25, tope 200h).'
+                                    : 'Mostrando horas del ciclo CCT actual (26→25, tope 200h). Click para volver al mes calendario.'}
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wide transition-colors ${
+                                    hoursMode === 'cct'
+                                        ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700'
+                                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                                }`}
+                            >
+                                <span>Hs:</span>
+                                <span>{hoursMode === 'cct' ? 'CCT' : 'Mes'}</span>
+                            </button>
+                            <span className="flex items-center gap-1 text-slate-500">
+                                <ShieldCheck size={12}/> Cobertura:
+                            </span>
+                        </div>
                     </td>
                     {daysInMonth.map(day => {
                         const dateStr = getDateKey(day);
@@ -4504,10 +4728,26 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                         {retCount > 0 && (
-                            <div className="text-center px-3">
+                            <div className="text-center px-3" title="Cantidad de celdas en RET en el mes.">
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Retenes</p>
                                 <p className="text-sm font-black text-amber-600 leading-tight">{retCount}</p>
                             </div>
+                        )}
+                        {retBufferHours > 0 && (
+                            <div className="text-center px-3" title="Colchón disponible: horas que se podrían cubrir promoviendo RETs a turno facturable sin pasar 200h por empleado. Estimación 8h por RET.">
+                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Colchón</p>
+                                <p className="text-sm font-black text-emerald-600 leading-tight">{retBufferHours}h</p>
+                            </div>
+                        )}
+                        {autoV2GenStats && (
+                            <button
+                                onClick={() => setShowCapacityModal(true)}
+                                className="text-center px-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded transition-colors"
+                                title="Ver capacidad CCT por empleado: cuánto consumió cada uno del ciclo CCT (corte 25/26) en current y next."
+                            >
+                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Cap. CCT</p>
+                                <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Ver</p>
+                            </button>
                         )}
                         {slaVendidas > 0 && (
                             <div className="text-center pl-3">
@@ -5512,6 +5752,148 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 , document.body)}
+
+                {/* ── MODAL CAPACIDAD CCT POR EMPLEADO ── */}
+                {showCapacityModal && autoV2GenStats && createPortal(
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCapacityModal(false)}>
+                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[860px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                            <h3 className="font-black text-lg mb-1 flex items-center gap-2">
+                                <span className="text-indigo-600">Cap. CCT</span>
+                                <span className="text-slate-700">Capacidad por empleado — ciclo CCT</span>
+                            </h3>
+                            {(() => {
+                                const fmt = (d: Date) => {
+                                    const dd = String(d.getDate()).padStart(2,'0');
+                                    const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getMonth()];
+                                    return `${dd}-${mes}-${d.getFullYear()}`;
+                                };
+                                const yr = currentDate.getFullYear();
+                                const mo = currentDate.getMonth();
+                                const lastDay = new Date(yr, mo + 1, 0).getDate();
+                                const startCurr = new Date(yr, mo - 1, 26);
+                                const endCurr = new Date(yr, mo, 25);
+                                const startNext = new Date(yr, mo, 26);
+                                const endNext = new Date(yr, mo + 1, 25);
+                                const monthName = currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+                                return (
+                                    <>
+                                        <p className="text-xs text-slate-600 font-medium mb-1">
+                                            Cronograma visualizado: <b className="text-indigo-700">{monthName}</b> (días 1..{lastDay}).
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2 text-[11px]">
+                                                <div className="font-black text-indigo-800">Ciclo CCT actual (Current)</div>
+                                                <div className="text-slate-700"><b>{fmt(startCurr)}</b> → <b>{fmt(endCurr)}</b></div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Cola del mes anterior (días 26..fin) + días 1..25 de este mes.</div>
+                                            </div>
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[11px]">
+                                                <div className="font-black text-amber-800">Ciclo CCT siguiente (Next)</div>
+                                                <div className="text-slate-700"><b>{fmt(startNext)}</b> → <b>{fmt(endNext)}</b></div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Días 26..fin de este mes pertenecen al próximo ciclo.</div>
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-slate-500 font-medium mb-4">
+                                            Tope CCT 422/05: <b>200h por ciclo</b>. La tabla refleja la <b>última generación automática V2</b> de este objetivo: si corregiste datos o filtros, volvé a <b>generar</b> para actualizarla.
+                                            La cola del ciclo (26..mes anterior) solo suma turnos <b>de este objetivo</b>, <b>publicados</b> (no borrador) y <b>no operativos</b> (reten/cobertura ops.), para no mezclar con otros cronogramas.
+                                        </p>
+                                    </>
+                                );
+                            })()}
+                            <div className="overflow-x-auto rounded-xl border border-slate-200">
+                                <table className="w-full text-[11px] bg-white">
+                                    <thead className="bg-slate-50 text-slate-700">
+                                        <tr>
+                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Empleado</th>
+                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Puesto</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Hs. Mes</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">CCT Current</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">CCT Next</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Curr.</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Next</th>
+                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Estado</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(() => {
+                                            const empMap: Record<string, any> = {};
+                                            displayedEmployees.forEach((e:any) => { empMap[e.id] = e; });
+                                            const idleSet = new Set(autoV2GenStats.idleEmployeeIds || []);
+                                            const posByEmp: Record<string, string> = {};
+                                            Object.entries(autoV2GenStats.positionGroups || {}).forEach(([pos, ids]) => {
+                                                (ids as string[]).forEach(id => { posByEmp[id] = pos; });
+                                            });
+                                            const rows = displayedEmployees.map((emp:any) => {
+                                                const monthH = autoV2GenStats.employeeMonthlyHours[emp.id] || 0;
+                                                const curr = autoV2GenStats.employeeCycleHours.current[emp.id] || 0;
+                                                const next = autoV2GenStats.employeeCycleHours.next[emp.id] || 0;
+                                                const bufCurr = Math.max(0, 200 - curr);
+                                                const bufNext = Math.max(0, 200 - next);
+                                                const pos = posByEmp[emp.id] || (idleSet.has(emp.id) ? '—' : 'Sin puesto');
+                                                const isIdle = idleSet.has(emp.id);
+                                                const isCapped = curr >= 200 || next >= 200;
+                                                const isHigh = curr >= 192 || next >= 192;
+                                                const status = isIdle ? 'Capacidad ociosa' :
+                                                    isCapped ? 'CAP 200h alcanzado' :
+                                                    isHigh ? 'Cerca del cap (≥192h)' :
+                                                    bufCurr + bufNext >= 40 ? 'Disponible para más' :
+                                                    'Carga normal';
+                                                const statusColor = isIdle ? 'text-slate-400' :
+                                                    isCapped ? 'text-rose-600' :
+                                                    isHigh ? 'text-amber-600' :
+                                                    bufCurr + bufNext >= 40 ? 'text-emerald-600' :
+                                                    'text-slate-600';
+                                                return { emp, monthH, curr, next, bufCurr, bufNext, pos, status, statusColor };
+                                            });
+                                            // Ordenar: capped primero, después por buffer descendente
+                                            rows.sort((a, b) => {
+                                                const aCap = a.curr >= 200 || a.next >= 200 ? 0 : 1;
+                                                const bCap = b.curr >= 200 || b.next >= 200 ? 0 : 1;
+                                                if (aCap !== bCap) return aCap - bCap;
+                                                return (b.bufCurr + b.bufNext) - (a.bufCurr + a.bufNext);
+                                            });
+                                            return rows.map((r) => (
+                                                <tr key={r.emp.id} className="border-t border-slate-100 hover:bg-slate-50">
+                                                    <td className="px-3 py-2 font-bold text-slate-700">{r.emp.name || r.emp.nombre}</td>
+                                                    <td className="px-3 py-2 text-slate-500">{r.pos}</td>
+                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.monthH)}h</td>
+                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.curr)} / 200</td>
+                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.next)} / 200</td>
+                                                    <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufCurr)}h</td>
+                                                    <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufNext)}h</td>
+                                                    <td className={`px-3 py-2 font-bold ${r.statusColor}`}>{r.status}</td>
+                                                </tr>
+                                            ));
+                                        })()}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="mt-4 grid grid-cols-2 gap-3 text-[11px]">
+                                <div className="bg-slate-50 rounded-lg p-3">
+                                    <div className="font-black text-slate-700 mb-1">Cómo leer la tabla</div>
+                                    <ul className="text-slate-600 space-y-1 list-disc list-inside">
+                                        <li><b>CCT Current</b>: horas ya consumidas en el ciclo CCT del mes actual (incluye cola del mes anterior).</li>
+                                        <li><b>CCT Next</b>: horas asignadas al ciclo siguiente (días 26..fin de este mes).</li>
+                                        <li><b>Buffer</b>: horas libres hasta llegar a 200h en cada ciclo.</li>
+                                    </ul>
+                                </div>
+                                <div className="bg-slate-50 rounded-lg p-3">
+                                    <div className="font-black text-slate-700 mb-1">Estado</div>
+                                    <ul className="text-slate-600 space-y-1 list-disc list-inside">
+                                        <li><span className="text-rose-600 font-bold">CAP 200h</span>: no se le pueden agregar más turnos en ese ciclo.</li>
+                                        <li><span className="text-amber-600 font-bold">≥192h</span>: cerca del cap, no apto para horas extras en otros objetivos.</li>
+                                        <li><span className="text-emerald-600 font-bold">Disponible</span>: tiene buffer ≥40h para otros objetivos o emergencias.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div className="flex justify-end mt-4">
+                                <button onClick={() => setShowCapacityModal(false)} className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                                    Cerrar
+                                </button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body
+                )}
 
                 {/* ── MODAL CRONOGRAMA AUTOMÁTICO V2 (beta — viabilidad primero) ── */}
                 {showAutoV2Modal && createPortal(
