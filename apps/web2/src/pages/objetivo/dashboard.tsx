@@ -784,28 +784,39 @@ export default function ObjetivoPortal() {
   const init = async (uid: string) => {
     setLoadingInit(true);
     try {
-      // ¿Es admin? → existe doc en system_users
-      const sysSnap = await getDoc(doc(db, 'system_users', uid));
-      const admin = sysSnap.exists();
+      // 1. Buscar en system_users → definitivamente admin
+      let inSystemUsers = false;
+      let adminName = '';
+      try {
+        const sysSnap = await getDoc(doc(db, 'system_users', uid));
+        if (sysSnap.exists()) {
+          inSystemUsers = true;
+          const d = sysSnap.data();
+          adminName = [d.firstName, d.lastName].filter(Boolean).join(' ') || d.displayName || d.email || '';
+        }
+      } catch { /* ignorar error de permisos */ }
+
+      // 2. Buscar en empleados → definitivamente empleado (si lo está)
+      let inEmpleados = false;
+      let empName = '';
+      const empQ = query(collection(db, 'empleados'), where('uid', '==', uid));
+      const empSnap = await getDocs(empQ);
+      if (!empSnap.empty) {
+        inEmpleados = true;
+        const d = empSnap.docs[0].data();
+        empName = [d.firstName, d.lastName].filter(Boolean).join(' ');
+      }
+
+      // 3. Decisión: admin si está en system_users, o si NO está en empleados
+      //    (cualquier usuario autenticado no-empleado → admin del portal)
+      const admin = inSystemUsers || !inEmpleados;
       setIsAdmin(admin);
 
       if (admin) {
-        // Nombre del admin
-        const d = sysSnap.data();
-        setEmpNombre([d.firstName, d.lastName].filter(Boolean).join(' ') || d.displayName || d.email || 'Admin');
-        // Cargar todos los objetivos
+        setEmpNombre(adminName || auth.currentUser?.email || 'Admin');
         await loadAllObjetivos();
       } else {
-        // Es empleado → buscar por uid en empleados
-        const empQ = query(collection(db, 'empleados'), where('uid', '==', uid));
-        const empSnap = await getDocs(empQ);
-        if (!empSnap.empty) {
-          const d = empSnap.docs[0].data();
-          setEmpNombre([d.firstName, d.lastName].filter(Boolean).join(' ') || fireUser?.email || 'Guardia');
-        } else {
-          setEmpNombre(fireUser?.email || 'Guardia');
-        }
-        // Buscar turno activo
+        setEmpNombre(empName || fireUser?.email || 'Guardia');
         await loadTurnoActivo(uid);
       }
     } catch (e) {
