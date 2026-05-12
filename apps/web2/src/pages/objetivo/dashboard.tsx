@@ -414,17 +414,27 @@ function SelectorObjetivo({ clientes, onSelect, onLogout, nombre }: {
   );
 }
 
-// ─── Panel nueva entrada con taxonomía ────────────────────────────────────────
+// ─── Panel nueva entrada — mobile-first ───────────────────────────────────────
+
+const GRUPO_META: Record<string, { dot: string; activeCls: string }> = {
+  'Seguridad':        { dot: 'bg-red-500',     activeCls: 'bg-red-600 border-red-600 text-white'       },
+  'Operación':        { dot: 'bg-blue-500',    activeCls: 'bg-blue-600 border-blue-600 text-white'      },
+  'Mantenimiento':    { dot: 'bg-orange-500',  activeCls: 'bg-orange-500 border-orange-500 text-white'  },
+  'Emergencia Médica':{ dot: 'bg-rose-500',    activeCls: 'bg-rose-600 border-rose-600 text-white'      },
+  'Administrativo':   { dot: 'bg-slate-400',   activeCls: 'bg-slate-600 border-slate-600 text-white'    },
+};
 
 function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno, objetivo }: {
   onSave: () => void; onClose: () => void; empleadoNombre: string;
   objectiveId: string; turno: TurnoActivo | null; objetivo: ObjetivoInfo;
 }) {
   const [tipo,         setTipo]         = useState<EntryType>('novedad');
-  const [etiqueta,     setEtiqueta]     = useState('SEGURIDAD');
-  const [gravedad,     setGravedad]     = useState<Gravedad>('MEDIA');
+  const [grupoActivo,  setGrupoActivo]  = useState('Seguridad');
+  const [etiqueta,     setEtiqueta]     = useState('INCIDENTE');
+  const [gravedad,     setGravedad]     = useState<Gravedad>('ALTA');
   const [texto,        setTexto]        = useState('');
   const [accion,       setAccion]       = useState('');
+  const [showAccion,   setShowAccion]   = useState(false);
   const [imageFile,    setImageFile]    = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [recording,    setRecording]    = useState(false);
@@ -440,11 +450,13 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
   const timerRef     = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Al cambiar tipo → defaults de etiqueta y gravedad
+  // Al cambiar tipo → defaults de etiqueta, gravedad y grupo activo
   useEffect(() => {
     const cfg = typeConfig(tipo);
     setEtiqueta(cfg.defaultEtiqueta);
     setGravedad(cfg.defaultGravedad);
+    const g = ETIQUETA_GRUPOS.find(gr => gr.etiquetas.some(e => e.id === cfg.defaultEtiqueta));
+    if (g) setGrupoActivo(g.grupo);
   }, [tipo]);
 
   const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -499,52 +511,58 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
       }
       await addDoc(collection(db, 'libro_guardia'), {
         objectiveId,
-        clientId:       turno?.clientId    || objetivo.clientId   || '',
-        objetivoNombre: objetivo.name      || turno?.objectiveName || '',
-        clientName:     objetivo.clientName || turno?.clientName  || '',
-        shiftId:        turno?.id          || '',
+        clientId:       turno?.clientId     || objetivo.clientId    || '',
+        objetivoNombre: objetivo.name       || turno?.objectiveName || '',
+        clientName:     objetivo.clientName || turno?.clientName    || '',
+        shiftId:        turno?.id           || '',
         employeeId:     auth.currentUser?.uid || '',
         empleadoNombre, type: tipo, etiqueta, gravedad,
         text:           texto.trim() || transcription.trim() || '',
-        ...(accion.trim()   && { accionTomada: accion.trim() }),
-        ...(imgUrl          && { imageUrl: imgUrl }),
-        ...(audUrl          && { audioUrl: audUrl }),
-        ...(transcription   && { transcription }),
+        ...(accion.trim() && { accionTomada: accion.trim() }),
+        ...(imgUrl        && { imageUrl: imgUrl }),
+        ...(audUrl        && { audioUrl: audUrl }),
+        ...(transcription && { transcription }),
         createdAt: serverTimestamp(),
       });
       onSave(); onClose();
     } catch (e: any) { alert('Error al guardar: ' + (e?.message || e)); } finally { setSaving(false); }
   };
 
-  const cfg = typeConfig(tipo);
-  const gcfg = gravedadCfg(gravedad);
+  const cfg  = typeConfig(tipo);
+  const ecfg = etiquetaCfg(etiqueta);
+  const etiquetasActivas = ETIQUETA_GRUPOS.find(g => g.grupo === grupoActivo)?.etiquetas || [];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40"
+    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-t-2xl border-t border-slate-200 shadow-2xl flex flex-col max-h-[94dvh]">
-        <div className="flex justify-center pt-3 pb-1 cursor-pointer" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl shadow-2xl flex flex-col max-h-[96dvh]">
+
+        {/* Handle + header */}
+        <div className="flex justify-center pt-3 pb-0 cursor-pointer" onClick={onClose}>
           <div className="w-10 h-1 rounded-full bg-slate-200" />
         </div>
-        <div className="px-5 py-3 flex items-center justify-between border-b border-slate-100">
-          <h3 className="text-slate-800 font-black text-base">Nueva entrada</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-            <X size={18} className="text-slate-400" />
+        <div className="px-5 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-slate-900 font-black text-base">Nueva entrada</h3>
+            <p className="text-slate-400 text-[11px] mt-0.5">{objetivo.name}</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+            <X size={17} className="text-slate-500" />
           </button>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-5 py-4 flex flex-col gap-5">
+        <div className="overflow-y-auto flex-1 px-5 flex flex-col gap-5 pb-4">
 
-          {/* Tipo */}
+          {/* Tipo — 2 filas de 3, touch-friendly */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Tipo de registro</label>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Tipo de registro</p>
             <div className="grid grid-cols-3 gap-2">
               {ENTRY_TYPES.map(t => {
                 const Icon = t.icon; const active = tipo === t.id;
                 return (
                   <button key={t.id} onClick={() => setTipo(t.id)}
-                    className={`flex flex-col items-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${active ? `${t.light} ${t.border} ${t.color}` : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
-                    <Icon size={17} strokeWidth={active ? 2 : 1.5} />
+                    className={`flex flex-col items-center gap-2 py-3.5 rounded-2xl border-2 text-xs font-black transition-all active:scale-95 ${active ? `${t.light} ${t.border} ${t.color}` : 'bg-slate-50 border-transparent text-slate-400'}`}>
+                    <Icon size={20} strokeWidth={active ? 2.5 : 1.5} />
                     {t.label}
                   </button>
                 );
@@ -552,39 +570,51 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
             </div>
           </div>
 
-          {/* Etiqueta */}
+          {/* Categoría — tabs de grupo + chips */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
               <Tag size={11} /> Categoría
-            </label>
-            <div className="flex flex-col gap-3">
-              {ETIQUETA_GRUPOS.map(g => (
-                <div key={g.grupo}>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">{g.grupo}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {g.etiquetas.map(e => (
-                      <button key={e.id}
-                        onClick={() => { setEtiqueta(e.id); setGravedad(e.defaultGravedad); }}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-black border transition-all ${etiqueta === e.id ? e.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
-                        {e.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {ecfg && <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${ecfg.cls}`}>{ecfg.label}</span>}
+            </p>
+
+            {/* Tabs de grupo — scroll horizontal */}
+            <div className="flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+              {ETIQUETA_GRUPOS.map(g => {
+                const meta = GRUPO_META[g.grupo];
+                const isActive = grupoActivo === g.grupo;
+                const hasSelected = g.etiquetas.some(e => e.id === etiqueta);
+                return (
+                  <button key={g.grupo} onClick={() => setGrupoActivo(g.grupo)}
+                    className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-black transition-all whitespace-nowrap ${isActive ? meta.activeCls : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                    {!isActive && hasSelected && <span className={`w-2 h-2 rounded-full ${meta.dot}`} />}
+                    {g.grupo}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Chips del grupo activo */}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {etiquetasActivas.map(e => (
+                <button key={e.id}
+                  onClick={() => { setEtiqueta(e.id); setGravedad(e.defaultGravedad); }}
+                  className={`px-4 py-2.5 rounded-xl border-2 text-sm font-black transition-all active:scale-95 ${etiqueta === e.id ? e.cls + ' border-current' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                  {e.label}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Gravedad */}
+          {/* Gravedad — 2×2 grid, touch-friendly */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
               <Zap size={11} /> Gravedad
-            </label>
-            <div className="grid grid-cols-4 gap-2">
+            </p>
+            <div className="grid grid-cols-2 gap-2">
               {GRAVEDADES.map(g => (
                 <button key={g.id} onClick={() => setGravedad(g.id)}
-                  className={`flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-bold transition-all ${gravedad === g.id ? g.cls : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
-                  <div className={`w-2.5 h-2.5 rounded-full ${gravedad === g.id ? g.dot : 'bg-slate-200'}`} />
+                  className={`flex items-center gap-3 px-4 py-3 rounded-2xl border-2 text-sm font-black transition-all active:scale-95 ${gravedad === g.id ? g.cls + ' border-current' : 'bg-slate-50 border-transparent text-slate-400'}`}>
+                  <span className={`w-3 h-3 rounded-full flex-shrink-0 ${gravedad === g.id ? g.dot : 'bg-slate-200'}`} />
                   {g.label}
                 </button>
               ))}
@@ -593,75 +623,81 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
 
           {/* Descripción */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Descripción</label>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Descripción</p>
             <textarea
               placeholder={tipo === 'sos' ? '¡Describí la emergencia con detalle!' : `Descripción de la ${cfg.label.toLowerCase()}...`}
-              value={texto} onChange={e => setTexto(e.target.value)} rows={3}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
+              value={texto} onChange={e => setTexto(e.target.value)} rows={4}
+              className="w-full px-4 py-3 rounded-2xl border-2 border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:border-indigo-400 transition-all"
             />
           </div>
 
-          {/* Acción tomada */}
+          {/* Acción tomada — colapsable */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Acción tomada <span className="font-medium normal-case text-slate-400">(opcional)</span></label>
-            <textarea
-              placeholder="Ej: Se notificó a supervisor, se solicitó refuerzo, se tomó registro fotográfico..."
-              value={accion} onChange={e => setAccion(e.target.value)} rows={2}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
-            />
+            <button onClick={() => setShowAccion(v => !v)}
+              className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 hover:text-slate-600 transition-colors">
+              <CheckCircle2 size={11} className={showAccion ? 'text-indigo-500' : ''} />
+              Acción tomada
+              <span className="font-medium normal-case text-slate-300">(opcional)</span>
+            </button>
+            {showAccion && (
+              <textarea
+                placeholder="Ej: Se notificó a supervisor, se solicitó refuerzo..."
+                value={accion} onChange={e => setAccion(e.target.value)} rows={2}
+                className="w-full px-4 py-3 rounded-2xl border-2 border-slate-200 text-sm text-slate-700 placeholder-slate-300 resize-none outline-none focus:border-indigo-400 transition-all"
+              />
+            )}
           </div>
 
-          {/* Foto */}
+          {/* Foto + Audio en fila */}
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Evidencia fotográfica</label>
-            <div className="flex gap-2">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Evidencia</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
               <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleImage} />
               <button onClick={() => fileInputRef.current?.click()}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors shadow-sm">
-                <Camera size={15} className="text-slate-400" /> Cámara
+                className="flex flex-col items-center gap-2 py-4 rounded-2xl border-2 border-slate-200 bg-white text-slate-500 font-bold text-xs hover:bg-slate-50 active:scale-95 transition-all">
+                <Camera size={22} className="text-slate-400" strokeWidth={1.5} />
+                Cámara
               </button>
-              <button onClick={() => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = (e: any) => handleImage(e); inp.click(); }}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors shadow-sm">
-                <ImageIcon size={15} className="text-slate-400" /> Galería
+              <button onClick={recording ? stopRecording : startRecording}
+                className={`flex flex-col items-center gap-2 py-4 rounded-2xl border-2 font-bold text-xs active:scale-95 transition-all ${recording ? 'border-red-200 bg-red-50 text-red-600' : audioUrl ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                {recording
+                  ? <><MicOff size={22} strokeWidth={1.5} className="animate-pulse" />{audioSeconds}s grabando…</>
+                  : audioUrl
+                  ? <><CheckCircle2 size={22} strokeWidth={1.5} />Audio listo</>
+                  : <><Mic size={22} strokeWidth={1.5} className="text-slate-400" />Grabar voz</>
+                }
               </button>
             </div>
+
+            {/* Preview imagen */}
             {imagePreview && (
-              <div className="relative mt-2">
-                <img src={imagePreview} alt="preview" className="w-full rounded-xl object-cover max-h-48 border border-slate-200" />
+              <div className="relative mb-3">
+                <img src={imagePreview} alt="preview" className="w-full rounded-2xl object-cover max-h-52 border border-slate-200" />
                 <button onClick={() => { setImageFile(null); setImagePreview(null); }}
-                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center">
-                  <X size={13} className="text-slate-500" />
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white border border-slate-200 shadow-md flex items-center justify-center">
+                  <X size={14} className="text-slate-500" />
+                </button>
+              </div>
+            )}
+
+            {/* Audio grabado */}
+            {audioUrl && !recording && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center gap-3">
+                <audio src={audioUrl} controls className="flex-1 h-9" />
+                <button onClick={() => { setAudioBlob(null); setAudioUrl(null); setTranscription(''); setAudioSeconds(0); }}
+                  className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center flex-shrink-0">
+                  <X size={14} className="text-slate-400" />
                 </button>
               </div>
             )}
           </div>
 
-          {/* Audio */}
-          <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">Audio / Dictado</label>
-            {!audioUrl ? (
-              <button onClick={recording ? stopRecording : startRecording}
-                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl border font-medium text-sm transition-all shadow-sm ${recording ? 'bg-red-50 border-red-200 text-red-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                {recording ? <><MicOff size={15} className="animate-pulse" /> Detener ({audioSeconds}s)</> : <><Mic size={15} className="text-slate-400" /> Grabar nota de voz</>}
-              </button>
-            ) : (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500">Audio grabado ({audioSeconds}s)</span>
-                  <button onClick={() => { setAudioBlob(null); setAudioUrl(null); setTranscription(''); setAudioSeconds(0); }} className="p-1 rounded hover:bg-slate-200 transition-colors">
-                    <X size={13} className="text-slate-400" />
-                  </button>
-                </div>
-                <audio src={audioUrl} controls className="w-full h-8" />
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Guardar */}
-        <div className="px-5 pb-6 pt-3 border-t border-slate-100 flex-shrink-0">
+        {/* Botón guardar — sticky */}
+        <div className="px-5 pb-8 pt-3 border-t border-slate-100 flex-shrink-0 bg-white">
           <button onClick={handleSave} disabled={saving}
-            className={`w-full py-3.5 rounded-xl font-black text-white text-sm flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-60 ${tipo === 'sos' ? 'bg-red-600 hover:bg-red-700 shadow-red-500/20' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'}`}>
+            className={`w-full py-4 rounded-2xl font-black text-white text-sm flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] disabled:opacity-60 ${tipo === 'sos' ? 'bg-red-600 shadow-red-500/20' : 'bg-indigo-600 shadow-indigo-500/20'}`}>
             {saving ? <Loader2 size={18} className="animate-spin" /> : <><Send size={16} /> REGISTRAR {cfg.label.toUpperCase()}</>}
           </button>
         </div>
