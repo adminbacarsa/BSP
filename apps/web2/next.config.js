@@ -59,10 +59,17 @@ const nextConfig = {
   experimental: {
     esmExternals: 'loose'
   },
+  transpilePackages: ['onnxruntime-web'],
   staticPageGenerationTimeout: 300,
   webpack: (config) => {
     // Soporte WASM para @imgly/background-removal
     config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
+    // Fix import.meta en .mjs de onnxruntime-web
+    config.module.rules.push({
+      test: /\.mjs$/,
+      include: /node_modules/,
+      type: 'javascript/auto',
+    });
     return config;
   }
 };
