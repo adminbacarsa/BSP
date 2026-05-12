@@ -154,7 +154,7 @@ function LoginScreen({ onLogin }: { onLogin: (u: User) => void }) {
   );
 }
 
-// ─── Selector de objetivo (modo admin) ────────────────────────────────────────
+// ─── Selector de objetivo (modo admin) — dos niveles ─────────────────────────
 
 function SelectorObjetivo({
   clientes,
@@ -167,22 +167,90 @@ function SelectorObjetivo({
   onLogout: () => void;
   nombre: string;
 }) {
-  const [search, setSearch] = useState('');
+  const [search,          setSearch]          = useState('');
+  const [clienteActivo,   setClienteActivo]   = useState<ClienteConObjetivos | null>(null);
 
-  const filtered = clientes
-    .map(c => ({
-      ...c,
-      objetivos: c.objetivos.filter(o =>
-        !search ||
-        o.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.name.toLowerCase().includes(search.toLowerCase())
-      ),
-    }))
-    .filter(c => c.objetivos.length > 0);
+  // ── Nivel 1: lista de clientes ──────────────────────────────────────────────
+  if (!clienteActivo) {
+    const filtered = clientes.filter(c =>
+      !search || c.name.toLowerCase().includes(search.toLowerCase())
+    );
+
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: '#080f1e' }}>
+        <div className="flex-shrink-0 relative"
+          style={{ background: 'linear-gradient(135deg, #0a1628 0%, #1a3a6b 100%)' }}>
+          <div className="absolute inset-0 pointer-events-none opacity-20" style={{
+            backgroundImage: 'repeating-linear-gradient(135deg, rgba(200,168,75,0.15) 0px, rgba(200,168,75,0.15) 1px, transparent 1px, transparent 14px)',
+          }} />
+          <div className="relative px-4 pt-5 pb-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Shield size={16} className="text-amber-400" strokeWidth={1.5} />
+                <span className="text-amber-400 text-[11px] font-black uppercase tracking-widest">Libro de Guardia</span>
+              </div>
+              <button onClick={onLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400"
+                style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <LogOut size={12} /> Salir
+              </button>
+            </div>
+            <p className="text-white font-black text-lg">Clientes</p>
+            <p className="text-slate-400 text-xs mt-0.5">Modo administrador · {nombre}</p>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 flex-shrink-0">
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)' }}>
+            <Search size={14} className="text-slate-500 flex-shrink-0" />
+            <input
+              type="text" placeholder="Buscar cliente..."
+              value={search} onChange={e => setSearch(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 outline-none"
+            />
+            {search && <button onClick={() => setSearch('')}><X size={14} className="text-slate-500" /></button>}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 pb-8 flex flex-col gap-3">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Building2 size={28} className="text-slate-600 mb-2" strokeWidth={1.5} />
+              <p className="text-slate-500 text-sm">Sin clientes encontrados</p>
+            </div>
+          ) : (
+            filtered.map(cliente => (
+              <button key={cliente.id} onClick={() => { setSearch(''); setClienteActivo(cliente); }}
+                className="w-full text-left px-4 py-4 rounded-2xl flex items-center gap-4 transition-all active:scale-[0.98]"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                {/* Icono cliente */}
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #0f2040, #2d4a7a)' }}>
+                  <Building2 size={20} className="text-amber-400" strokeWidth={1.5} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-black truncate">{cliente.name}</p>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {cliente.objetivos.length} objetivo{cliente.objetivos.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ChevronLeft size={16} className="text-slate-500 rotate-180 flex-shrink-0" />
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Nivel 2: objetivos del cliente seleccionado ─────────────────────────────
+  const objFiltered = clienteActivo.objetivos.filter(o =>
+    !search || o.name.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#080f1e' }}>
-      {/* Header */}
       <div className="flex-shrink-0 relative"
         style={{ background: 'linear-gradient(135deg, #0a1628 0%, #1a3a6b 100%)' }}>
         <div className="absolute inset-0 pointer-events-none opacity-20" style={{
@@ -190,28 +258,37 @@ function SelectorObjetivo({
         }} />
         <div className="relative px-4 pt-5 pb-4">
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Shield size={16} className="text-amber-400" strokeWidth={1.5} />
-              <span className="text-amber-400 text-[11px] font-black uppercase tracking-widest">Libro de Guardia</span>
-            </div>
+            <button onClick={() => { setClienteActivo(null); setSearch(''); }}
+              className="flex items-center gap-1.5 text-amber-400 text-[11px] font-black">
+              <ChevronLeft size={14} /> Clientes
+            </button>
             <button onClick={onLogout}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400"
               style={{ background: 'rgba(255,255,255,0.06)' }}>
               <LogOut size={12} /> Salir
             </button>
           </div>
-          <p className="text-white font-black text-base">Seleccioná un objetivo</p>
-          <p className="text-slate-400 text-xs mt-0.5">Modo administrador · {nombre}</p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #0f2040, #2d4a7a)' }}>
+              <Building2 size={18} className="text-amber-400" strokeWidth={1.5} />
+            </div>
+            <div>
+              <p className="text-white font-black text-base leading-tight">{clienteActivo.name}</p>
+              <p className="text-slate-400 text-xs mt-0.5">
+                {clienteActivo.objetivos.length} objetivo{clienteActivo.objetivos.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Buscador */}
       <div className="px-4 py-3 flex-shrink-0">
         <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)' }}>
           <Search size={14} className="text-slate-500 flex-shrink-0" />
           <input
-            type="text" placeholder="Buscar objetivo o cliente..."
+            type="text" placeholder="Buscar objetivo..."
             value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 outline-none"
           />
@@ -219,38 +296,27 @@ function SelectorObjetivo({
         </div>
       </div>
 
-      {/* Lista */}
-      <div className="flex-1 overflow-y-auto px-4 pb-8">
-        {filtered.length === 0 ? (
+      <div className="flex-1 overflow-y-auto px-4 pb-8 flex flex-col gap-3">
+        {objFiltered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <MapPin size={28} className="text-slate-600 mb-2" strokeWidth={1.5} />
             <p className="text-slate-500 text-sm">Sin objetivos encontrados</p>
           </div>
         ) : (
-          filtered.map(cliente => (
-            <div key={cliente.id} className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Building2 size={12} className="text-slate-500" />
-                <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider">{cliente.name}</p>
+          objFiltered.map(obj => (
+            <button key={obj.id} onClick={() => onSelect(obj)}
+              className="w-full text-left px-4 py-4 rounded-2xl flex items-center gap-4 transition-all active:scale-[0.98]"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(200,168,75,0.12)', border: '1px solid rgba(200,168,75,0.2)' }}>
+                <Shield size={20} className="text-amber-400" strokeWidth={1.5} />
               </div>
-              <div className="flex flex-col gap-2">
-                {cliente.objetivos.map(obj => (
-                  <button key={obj.id} onClick={() => onSelect(obj)}
-                    className="w-full text-left px-4 py-3.5 rounded-2xl flex items-center gap-3 transition-all active:scale-98"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style={{ background: 'rgba(200,168,75,0.12)', border: '1px solid rgba(200,168,75,0.2)' }}>
-                      <Shield size={16} className="text-amber-400" strokeWidth={1.5} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-bold truncate">{obj.name}</p>
-                      {obj.address && <p className="text-slate-500 text-[11px] truncate mt-0.5">{obj.address}</p>}
-                    </div>
-                    <ChevronLeft size={14} className="text-slate-600 rotate-180 flex-shrink-0" />
-                  </button>
-                ))}
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-black truncate">{obj.name}</p>
+                {obj.address && <p className="text-slate-500 text-[11px] truncate mt-0.5">{obj.address}</p>}
               </div>
-            </div>
+              <ChevronLeft size={16} className="text-slate-500 rotate-180 flex-shrink-0" />
+            </button>
           ))
         )}
       </div>
