@@ -1,14 +1,17 @@
 /**
  * Descansos entre turnos (SUVICO y convenios con campos opcionales).
  * - Mínimo entre turnos laborales: 12 h (configurable).
- * - Tras ≥48 h trabajadas en racha consecutiva: 35 h desde el fin del último turno
- *   hasta el inicio del siguiente (el franco F y días no laborales cuentan en el calendario).
+ * - Tras ≥48 h trabajadas en racha consecutiva, o ≥N días laborales consecutivos (p. ej. 6):
+ *   35 h desde el fin del último turno hasta el inicio del siguiente (F/RET/licencias
+ *   cuentan en el calendario hacia esas 35 h; no alcanza con “un día calendario” suelto).
  */
 import { getDateKey } from './utils';
 
 const DEFAULT_MIN_REST = 12;
 const DEFAULT_STREAK_THRESHOLD = 48;
 const DEFAULT_LONG_REST = 35;
+/** Días consecutivos con turno laboral que disparan el descanso extendido (además del umbral en horas). */
+const DEFAULT_STREAK_WORK_DAYS = 6;
 
 /** Rompen la racha de trabajo consecutivo (no suman a las 48 h). RET no suma pero tampoco cierra racha legal → lo tratamos como corte de racha. */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
@@ -78,13 +81,14 @@ export const getShiftStartEndAbs = (dateStr: string, sh: any): { start: Date; en
 
 const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) / 3600000;
 
-/** Suma horas de trabajo en días consecutivos hacia atrás desde `fromDateStr` (inclusive). Corta en primer día sin turno laboral o streak-break. */
-export const workStreakHoursBackward = (
+/** Horas y cantidad de días laborales consecutivos hacia atrás desde `fromDateStr` (inclusive). */
+export const workStreakStatsBackward = (
     empId: string,
     fromDateStr: string,
     getShift: (eid: string, ds: string) => any | null
-): number => {
-    let sum = 0;
+): { hours: number; workDays: number } => {
+    let hours = 0;
+    let workDays = 0;
     let d = fromDateStr;
     for (let i = 0; i < 40; i++) {
         const sh = getShift(empId, d);
@@ -92,11 +96,18 @@ export const workStreakHoursBackward = (
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
         if (!isWorkShift(sh)) break;
-        sum += shiftHours(sh);
+        hours += shiftHours(sh);
+        workDays += 1;
         d = addDaysStr(d, -1);
     }
-    return sum;
+    return { hours, workDays };
 };
+
+export const workStreakHoursBackward = (
+    empId: string,
+    fromDateStr: string,
+    getShift: (eid: string, ds: string) => any | null
+): number => workStreakStatsBackward(empId, fromDateStr, getShift).hours;
 
 const findPrevWorkBoundary = (
     empId: string,
@@ -138,6 +149,8 @@ export type AgreementRestConfig = {
     minRestBetweenShiftsHours?: number;
     longRestAfterWorkedHours?: number;
     minLongRestHours?: number;
+    /** Si está definido (>0), tras esta cantidad de días seguidos con turno laboral también exige `minLongRestHours`. */
+    longRestAfterConsecutiveWorkDays?: number;
 };
 
 export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRestConfig | null => {
@@ -154,15 +167,18 @@ export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRe
     const a = num(r.minRestBetweenShiftsHours);
     const b = num(r.longRestAfterWorkedHours);
     const c = num(r.minLongRestHours);
+    const d = num(r.longRestAfterConsecutiveWorkDays);
     if (a !== undefined) custom.minRestBetweenShiftsHours = a;
     if (b !== undefined) custom.longRestAfterWorkedHours = b;
     if (c !== undefined) custom.minLongRestHours = c;
+    if (d !== undefined) custom.longRestAfterConsecutiveWorkDays = d;
     if (Object.keys(custom).length > 0) return custom;
     if (name.includes('suvico') || String(r?.name || '').toLowerCase().includes('suvico') || r.suvicoRestRules) {
         return {
             minRestBetweenShiftsHours: DEFAULT_MIN_REST,
             longRestAfterWorkedHours: DEFAULT_STREAK_THRESHOLD,
             minLongRestHours: DEFAULT_LONG_REST,
+            longRestAfterConsecutiveWorkDays: DEFAULT_STREAK_WORK_DAYS,
         };
     }
     return null;
@@ -184,6 +200,8 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
     const minRest = Number.isFinite(p.cfg.minRestBetweenShiftsHours!) ? p.cfg.minRestBetweenShiftsHours! : DEFAULT_MIN_REST;
     const thr = Number.isFinite(p.cfg.longRestAfterWorkedHours!) ? p.cfg.longRestAfterWorkedHours! : DEFAULT_STREAK_THRESHOLD;
     const longRest = Number.isFinite(p.cfg.minLongRestHours!) ? p.cfg.minLongRestHours! : DEFAULT_LONG_REST;
+    const thrDaysRaw = p.cfg.longRestAfterConsecutiveWorkDays;
+    const thrDays = Number.isFinite(thrDaysRaw!) && (thrDaysRaw as number) > 0 ? (thrDaysRaw as number) : undefined;
 
     const proposedShift = {
         code: p.proposed.code,
@@ -196,22 +214,28 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
 
     const prev = findPrevWorkBoundary(p.empId, p.targetDateStr, p.getShift);
     if (prev) {
-        const streakBeforePrev = workStreakHoursBackward(p.empId, prev.dateStr, p.getShift);
-        const need = streakBeforePrev >= thr ? longRest : minRest;
+        const streakBeforePrev = workStreakStatsBackward(p.empId, prev.dateStr, p.getShift);
+        const needLong =
+            streakBeforePrev.hours >= thr ||
+            (thrDays !== undefined && streakBeforePrev.workDays >= thrDays);
+        const need = needLong ? longRest : minRest;
         const gap = hoursBetween(prev.end, seNew.start);
         if (gap + 1e-6 < need) {
-            return `Convenio: descanso insuficiente respecto al turno anterior (${gap.toFixed(1)}h < ${need}h; racha previa ~${streakBeforePrev}h).`;
+            return `Convenio: descanso insuficiente respecto al turno anterior (${gap.toFixed(1)}h < ${need}h; racha previa ~${streakBeforePrev.hours}h / ${streakBeforePrev.workDays}d).`;
         }
     }
 
     const next = findNextWorkBoundary(p.empId, p.targetDateStr, p.getShift);
     if (next) {
         // Racha de trabajo que termina al cerrar el turno propuesto (incluye propuesto + días laborales consecutivos hacia atrás).
-        const streakEndingAtProposed = workStreakHoursBackward(p.empId, p.targetDateStr, p.getShift);
-        const needAfter = streakEndingAtProposed >= thr ? longRest : minRest;
+        const streakEndingAtProposed = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
+        const needLongAfter =
+            streakEndingAtProposed.hours >= thr ||
+            (thrDays !== undefined && streakEndingAtProposed.workDays >= thrDays);
+        const needAfter = needLongAfter ? longRest : minRest;
         const gap2 = hoursBetween(seNew.end, next.start);
         if (gap2 + 1e-6 < needAfter) {
-            return `Convenio: descanso insuficiente respecto al turno siguiente (${gap2.toFixed(1)}h < ${needAfter}h; racha que termina este día ~${streakEndingAtProposed}h).`;
+            return `Convenio: descanso insuficiente respecto al turno siguiente (${gap2.toFixed(1)}h < ${needAfter}h; racha que termina este día ~${streakEndingAtProposed.hours}h / ${streakEndingAtProposed.workDays}d).`;
         }
     }
 

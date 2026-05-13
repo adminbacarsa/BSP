@@ -40,6 +40,8 @@
  * por el componente y devuelve un objeto con métricas + diagnóstico.
  */
 
+import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
+
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
 const CYCLE_MAP: Record<string, [number, number]> = {
@@ -54,6 +56,15 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+1': 8,
     '6+2': 8,
 };
+
+/** Alineado a `checkRestBetweenShifts`: 12 h entre turnos, 35 h tras 48 h y/o 6 días laborales seguidos. */
+const V2_AGREEMENT_REST: AgreementRestConfig = {
+    minRestBetweenShiftsHours: 12,
+    longRestAfterWorkedHours: 48,
+    minLongRestHours: 35,
+    longRestAfterConsecutiveWorkDays: 6,
+};
+
 /** Tope target promedio por empleado / mes (CCT 422/05 ≈ 192h). */
 export const TARGET_AVG_HOURS = 192;
 /** Tope duro CCT 422/05 art. 7. */
@@ -708,6 +719,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    // ── INFERENCIA DE OWNER VIRTUAL ──
+    // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
+    // empleado no tiene defaultPos cargado desde la UI, lo marcamos como owner
+    // virtual. Esto activa la consolidación-por-owner aun cuando el usuario no
+    // configuró `puestoPredeterminado` manualmente (caso Romina/Goyochea).
+    Object.entries(positionGroups).forEach(([posName, empIds]) => {
+        const pos = ctx.positions.find((p) => p.positionName === posName);
+        if (!pos) return;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        if (qty !== 1) return;
+        if (empIds.length !== 1) return;
+        const onlyEmp = empIds[0];
+        if (!defaultPos[onlyEmp]) {
+            defaultPos[onlyEmp] = posName;
+        }
+    });
+
     // ── PASO 2: Anillo de turnos + offset de ciclo + fase de rotación semanal ──
     // Cada puesto define un anillo ordenado (p.ej. M→T→N). Cada empleado tiene
     // `empRotationSlot` (0..n-1) para arrancar desfasado; la banda del día se
@@ -849,33 +877,38 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (!m) return null;
         return Number(m[1]) + Number(m[2]) / 60;
     };
-    const respectsRest = (
-        st: EmpRuntimeState,
-        dateStr: string,
-        shiftCode: string,
-        curStartTime?: string,
-        curHrs?: number,
-    ): boolean => {
-        if (!st.lastWorkDate || !st.lastShiftCode) return true;
-        const prev = new Date(st.lastWorkDate); prev.setHours(0, 0, 0, 0);
-        const cur = new Date(dateStr); cur.setHours(0, 0, 0, 0);
-        const diffDays = Math.round((cur.getTime() - prev.getTime()) / 86400000);
-        if (diffDays >= 2) return true; // siempre OK si pasó >=1 día completo
-        // Día consecutivo: usar startTime/duración reales si están disponibles.
-        // Códigos no estándar (EN/RO/etc.) caen al fallback solo si no tenemos data.
-        const lastStart = st.lastShiftStart != null ? st.lastShiftStart : (SHIFT_START_HOUR[st.lastShiftCode] ?? 6);
-        const lastDur = st.lastShiftHours != null ? st.lastShiftHours : 8;
-        const lastEnd = (lastStart + lastDur) % 24;
-        const curStart = parseHour(curStartTime) ?? SHIFT_START_HOUR[shiftCode] ?? 6;
-        const overnight = (lastStart + lastDur) >= 24;
-        const gap = overnight
-            ? ((curStart - lastEnd) + 24) % 24
-            : ((curStart - lastEnd) + 24) % 24;
-        // 12h CCT 422/05; permitimos 8h cuando el turno previo fue corto (≤6h)
-        const required = (lastDur <= 6) ? 8 : 12;
-        // marcar curHrs como usado (signatura mantenida para futuros chequeos)
-        void curHrs;
-        return gap >= required;
+    const passesAgreementRest = (empId: string, dateStr: string, shiftCode: string, curStartTime: string | undefined, curHrs: number): boolean => {
+        const codeUp = String(shiftCode || '').toUpperCase();
+        if (FRANCO_SET.has(codeUp)) return true;
+        const hrs = Number(curHrs);
+        if (!Number.isFinite(hrs) || hrs <= 0) return true;
+        const defaultStart = DEFAULT_SHIFT_TIMES[codeUp] || '07:00';
+        const startResolved = curStartTime || defaultStart;
+        const getShift = (eid: string, ds: string): any | null => {
+            const absMap = ctx.absences[eid];
+            if (absMap?.has(ds)) return { code: absMap.get(ds), hours: 0, startTime: '00:00' };
+            if (eid === empId && ds === dateStr) {
+                return { code: codeUp, startTime: startResolved, hours: hrs };
+            }
+            const a = assignments.find((x) => x.empId === eid && x.dateStr === ds);
+            if (!a) return null;
+            const c = String(a.code || '').toUpperCase();
+            return {
+                code: c,
+                startTime: a.startTime || DEFAULT_SHIFT_TIMES[c] || '07:00',
+                hours: Number(a.hours) || SHIFT_HRS_DEFAULT[c] || 8,
+                endTime: (a as any).endTime,
+            };
+        };
+        return (
+            checkRestBetweenShifts({
+                empId,
+                targetDateStr: dateStr,
+                proposed: { code: codeUp, startTime: startResolved, hours: hrs },
+                getShift,
+                cfg: V2_AGREEMENT_REST,
+            }) === null
+        );
     };
 
     // pickEmployee — solo considera empleados del grupo del puesto y con primaryShift
@@ -904,7 +937,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (used + shiftHrs > HARD_MAX_HOURS) continue;
             const wkKey = isoWeekKey(new Date(dateStr));
             if ((st.weekHours[wkKey] || 0) + shiftHrs > WEEKLY_SOFT_CAP) continue;
-            if (!respectsRest(st, dateStr, shiftCode, shiftStart, shiftHrs)) continue;
+            if (!passesAgreementRest(empId, dateStr, shiftCode, shiftStart, shiftHrs)) continue;
 
             const meta = empMeta[empId];
             const spareHard = HARD_MAX_HOURS - used - shiftHrs;
@@ -1027,7 +1060,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (used + slot.sHrs > HARD_MAX_HOURS) return false;
         const wkKey = isoWeekKey(new Date(slot.dateStr));
         if ((st.weekHours[wkKey] || 0) + slot.sHrs > WEEKLY_SOFT_CAP) return false;
-        if (!respectsRest(st, slot.dateStr, slot.sCode, slot.sStart, slot.sHrs)) return false;
+        if (!passesAgreementRest(empId, slot.dateStr, slot.sCode, slot.sStart, slot.sHrs)) return false;
         return true;
     };
 
@@ -1179,7 +1212,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             if (used + sHrs > HARD_MAX_HOURS) continue;
                             const wkKey = isoWeekKey(new Date(dateStr));
                             if ((st.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
-                            if (!respectsRest(st, dateStr, sCode, sStart, sHrs)) continue;
+                            if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                             const spare = HARD_MAX_HOURS - used - sHrs;
                             const boost = used >= TARGET_AVG_HOURS && spare >= 0 ? 30 : 0;
                             const ownerBonus = defaultPos[empId] === pos.positionName ? 10000 : 0;
@@ -1241,7 +1274,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             if (used + sHrs > HARD_MAX_HOURS) continue;
                             const wkKey = isoWeekKey(new Date(dateStr));
                             if ((st.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
-                            if (!respectsRest(st, dateStr, sCode, sStart, sHrs)) continue;
+                            if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                             // Preferir owner del puesto, después menos horas (balanceo).
                             const ownerBonus = defaultPos[empId] === pos.positionName ? 100000 : 0;
                             const sc = ownerBonus + (-st.monthHours);
@@ -1303,7 +1336,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     if (usedO + sHrs > HARD_MAX_HOURS) continue;
                     const wkKey = isoWeekKey(new Date(dateStr));
                     if ((stO.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
-                    if (!respectsRest(stO, dateStr, sCode, sStart, sHrs)) continue;
+                    if (!passesAgreementRest(ownerId, dateStr, sCode, sStart, sHrs)) continue;
                     // Saco al suplente
                     const supIdx = assignments.findIndex((a) => a === suplente);
                     if (supIdx < 0) continue;
@@ -1381,9 +1414,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         if (usedL + sHrs > HARD_MAX_HOURS) continue;
                         const wkKey = isoWeekKey(new Date(dateStr));
                         if ((stL.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
-                        // Simulamos liberación del highId para el check de rest del lowId
-                        // (no es perfecto: respectsRest mira lastShift global del lowId).
-                        if (!respectsRest(stL, dateStr, sCode, sStart, sHrs)) continue;
+                        // Simulamos liberación del highId para el check de descanso del lowId
+                        if (!passesAgreementRest(lowId, dateStr, sCode, sStart, sHrs)) continue;
 
                         // OK: ejecutamos el swap.
                         // 1) Saco el turno del highId
@@ -1446,6 +1478,342 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
         if (!swapped) break;
+    }
+
+    // ── EMERGENCIA: cubrir slots descubiertos quitando un F/RET al que más capacidad tenga ─
+    // Último recurso. Si después de todas las pasadas anteriores quedan slots
+    // sin cubrir, relajamos cycleWorkDays (un día de franco se permuta por un
+    // turno) siempre que se respeten reglas duras: 200h/ciclo, descanso 12h,
+    // ausencias, defaultPos limitado de OTRO puesto activo.
+    // Cap semanal subido a 72h en esta pasada (5x12h = 60h, +1 turno extra OK).
+    // OWNER del puesto siempre prevalece si tiene cupo: evita que un suplente
+    // con más spare le robe el turno al titular fijo (Romina/EN, Goyochea/RO).
+    const EMERGENCY_WEEKLY_CAP = 72;
+    let emergencySafety = 0;
+    while (emergencySafety++ < 2000) {
+        let emergencyFilled = false;
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            const inCurrentCycle = day.getDate() <= cutoffDay;
+            for (const pos of ctx.positions) {
+                if (!positionIsActiveOn(pos, dayLetter)) continue;
+                const qty = Math.max(1, Number(pos.qty) || 1);
+                const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+                for (const sh of dayShifts) {
+                    const sCode = String(sh.code || '').toUpperCase();
+                    const sHrs = shiftHours(sh);
+                    const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                    const sName = sh.name || sCode;
+                    let have = countBillableSlot(pos.positionName, dateStr, sCode);
+                    while (have < qty && stats.totalBillableHours + sHrs <= billableCap) {
+                        let best: { id: string; spare: number; score: number } | null = null;
+                        for (const emp of ctx.employees) {
+                            const empId = emp.id;
+                            const st = runtime[empId];
+                            if (ctx.absences[empId]?.has(dateStr)) continue;
+                            // owner limitado de OTRO puesto activo ese día → no tocar
+                            const ownerPosName = defaultPos[empId];
+                            if (ownerPosName && ownerPosName !== pos.positionName) {
+                                const ownerPos = ctx.positions.find((p) => p.positionName === ownerPosName);
+                                if (ownerPos && positionIsActiveOn(ownerPos, dayLetter)) continue;
+                            }
+                            // solo F/RET o sin asignar
+                            const cur = assignments.find((a) => a.empId === empId && a.dateStr === dateStr);
+                            if (cur) {
+                                const curCode = String(cur.code || '').toUpperCase();
+                                if (curCode !== 'F' && curCode !== 'RET') continue;
+                            }
+                            const used = inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed;
+                            if (used + sHrs > HARD_MAX_HOURS) continue;
+                            const wkKey = isoWeekKey(new Date(dateStr));
+                            if ((st.weekHours[wkKey] || 0) + sHrs > EMERGENCY_WEEKLY_CAP) continue;
+                            if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                            const spare = HARD_MAX_HOURS - used;
+                            const ownerScore = defaultPos[empId] === pos.positionName ? 1_000_000 : 0;
+                            const score = ownerScore + spare;
+                            if (!best || score > best.score) best = { id: empId, spare, score };
+                        }
+                        if (!best) break;
+                        const prevIdx = assignments.findIndex(
+                            (a) => a.empId === best!.id && a.dateStr === dateStr
+                        );
+                        if (prevIdx >= 0) {
+                            assignments.splice(prevIdx, 1);
+                            runtime[best.id].assignedDays.delete(dateStr);
+                        }
+                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle);
+                        have++;
+                        emergencyFilled = true;
+                        stats.uncoveredSlots = Math.max(0, stats.uncoveredSlots - 1);
+                    }
+                }
+            }
+        }
+        if (!emergencyFilled) break;
+    }
+
+    // ── SALVAGUARDA FINAL: owner limitado NUNCA recibe turno en día NO operativo ──
+    // Si por algún motivo (rescate, fill final, emergencia) un owner quedó con un
+    // turno facturable en S/D y su puesto no opera ese día, forzar F y descontar
+    // las horas. Evita errores tipo "Romina con EN un sábado".
+    for (const empId of Object.keys(defaultPos)) {
+        const ownerPosName = defaultPos[empId];
+        const ownerPos = ctx.positions.find((p) => p.positionName === ownerPosName);
+        if (!ownerPos) continue;
+        if (positionOperatesAllWeek(ownerPos)) continue; // solo aplica a puestos limitados (L-V, etc.)
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            if (positionIsActiveOn(ownerPos, dayLetter)) continue;
+            const idx = assignments.findIndex((a) => a.empId === empId && a.dateStr === dateStr);
+            if (idx < 0) continue;
+            const cur = assignments[idx];
+            const code = String(cur.code || '').toUpperCase();
+            if (code === 'F') continue;
+            const wasBillable = !FRANCO_SET.has(code) && code !== 'RET';
+            if (wasBillable) {
+                const oldHrs = Number(cur.hours) || 0;
+                const inCC = day.getDate() <= cutoffDay;
+                const st = runtime[empId];
+                if (inCC) { st.cycleCurrentUsed -= oldHrs; stats.employeeCycleHours.current[empId] = st.cycleCurrentUsed; }
+                else { st.cycleNextUsed -= oldHrs; stats.employeeCycleHours.next[empId] = st.cycleNextUsed; }
+                st.monthHours -= oldHrs;
+                stats.employeeMonthlyHours[empId] = st.monthHours;
+                const wkKey = isoWeekKey(new Date(dateStr));
+                st.weekHours[wkKey] = Math.max(0, (st.weekHours[wkKey] || oldHrs) - oldHrs);
+                stats.totalAssignments--;
+                stats.totalBillableHours -= oldHrs;
+            }
+            assignments.splice(idx, 1);
+            runtime[empId].assignedDays.delete(dateStr);
+            assignments.push({
+                empId, dateStr, positionName: '', code: 'F', name: 'Franco',
+                hours: 0, startTime: '00:00', isFranco: true,
+            });
+            runtime[empId].assignedDays.add(dateStr);
+        }
+    }
+
+    // ── PROMOCIÓN FINAL OWNER → su propio puesto en días operativos ──
+    // Después de la salvaguarda, el owner puede haber quedado con F/RET en días
+    // donde SU puesto está activo y descubierto. Lo asignamos al puesto del owner.
+    for (const empId of Object.keys(defaultPos)) {
+        const ownerPosName = defaultPos[empId];
+        const ownerPos = ctx.positions.find((p) => p.positionName === ownerPosName);
+        if (!ownerPos) continue;
+        const st = runtime[empId];
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            if (!positionIsActiveOn(ownerPos, dayLetter)) continue;
+            if (ctx.absences[empId]?.has(dateStr)) continue;
+            const cur = assignments.find((a) => a.empId === empId && a.dateStr === dateStr);
+            const curCode = cur ? String(cur.code || '').toUpperCase() : '';
+            if (cur && curCode !== 'F' && curCode !== 'RET') continue; // ya tiene turno
+            const dayShifts = effectiveShiftsForPositionDay(ownerPos, dayLetter, ctx.autoCycles);
+            if (dayShifts.length === 0) continue;
+            // Probar cada shift del puesto, preferir el primero (típicamente único en puestos singulares)
+            let assigned = false;
+            for (const sh of dayShifts) {
+                const sCode = String(sh.code || '').toUpperCase();
+                const sHrs = shiftHours(sh);
+                const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                const sName = sh.name || sCode;
+                const inCC = day.getDate() <= cutoffDay;
+                const used = inCC ? st.cycleCurrentUsed : st.cycleNextUsed;
+                if (used + sHrs > HARD_MAX_HOURS) continue;
+                const wkKey = isoWeekKey(new Date(dateStr));
+                if ((st.weekHours[wkKey] || 0) + sHrs > 72) continue;
+                            if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                // Si ya hay un suplente cubriendo ese slot, sacarlo primero
+                const qty = Math.max(1, Number(ownerPos.qty) || 1);
+                const slotCovered = countBillableSlot(ownerPosName, dateStr, sCode);
+                if (slotCovered >= qty) {
+                    // Buscar suplente para sacar (que no sea owner del puesto)
+                    const supIdx = assignments.findIndex((a) =>
+                        a.positionName === ownerPosName && a.dateStr === dateStr &&
+                        String(a.code || '').toUpperCase() === sCode &&
+                        a.empId !== empId &&
+                        defaultPos[a.empId] !== ownerPosName
+                    );
+                    if (supIdx < 0) continue; // no hay suplente para sacar
+                    const sup = assignments[supIdx];
+                    const supHrs = Number(sup.hours) || sHrs;
+                    const stS = runtime[sup.empId];
+                    assignments.splice(supIdx, 1);
+                    stS.assignedDays.delete(dateStr);
+                    if (inCC) { stS.cycleCurrentUsed -= supHrs; stats.employeeCycleHours.current[sup.empId] = stS.cycleCurrentUsed; }
+                    else { stS.cycleNextUsed -= supHrs; stats.employeeCycleHours.next[sup.empId] = stS.cycleNextUsed; }
+                    stS.monthHours -= supHrs;
+                    stats.employeeMonthlyHours[sup.empId] = stS.monthHours;
+                    stS.weekHours[wkKey] = Math.max(0, (stS.weekHours[wkKey] || supHrs) - supHrs);
+                    stats.totalAssignments--;
+                    stats.totalBillableHours -= supHrs;
+                    // Ese suplente queda RET o F según ciclo
+                    if (cycleWorkDays[sup.empId]?.has(dateStr)) {
+                        assignments.push({ empId: sup.empId, dateStr, positionName: '', code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', isReten: true });
+                    } else {
+                        assignments.push({ empId: sup.empId, dateStr, positionName: '', code: 'F', name: 'Franco', hours: 0, startTime: '00:00', isFranco: true });
+                    }
+                    stS.assignedDays.add(dateStr);
+                }
+                // Sacar F/RET previo del owner
+                if (cur) {
+                    const curIdx = assignments.findIndex((a) => a === cur);
+                    if (curIdx >= 0) {
+                        assignments.splice(curIdx, 1);
+                        st.assignedDays.delete(dateStr);
+                    }
+                }
+                writeAssignment(empId, dateStr, ownerPosName, sCode, sName, sHrs, sStart, inCC);
+                assigned = true;
+                break;
+            }
+            if (assigned) {
+                stats.uncoveredSlots = Math.max(0, stats.uncoveredSlots - 1);
+            }
+        }
+    }
+
+    // ── ANTI-SOBRECOBERTURA: garantiza que ningún (día, puesto, turno) tenga más
+    // turnos asignados que el cupo (qty) del SLA. Si alguna pasada anterior creó
+    // un turno extra (bug de mezcla 8h/12h, doble pasada, etc.), lo eliminamos
+    // priorizando NO sacar al owner. El sobrante pasa a RET o F según ciclo.
+    for (const day of ctx.daysInMonth) {
+        const dateStr = ctx.getDateKey(day);
+        const dayLetter = ctx.getDayLetter(dateStr);
+        for (const pos of ctx.positions) {
+            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            for (const sh of dayShifts) {
+                const sCode = String(sh.code || '').toUpperCase();
+                const slotAssignments = assignments.filter(
+                    (a) => a.positionName === pos.positionName && a.dateStr === dateStr &&
+                        String(a.code || '').toUpperCase() === sCode
+                );
+                if (slotAssignments.length <= qty) continue;
+                const exceso = slotAssignments.length - qty;
+                const sortable = slotAssignments.map((a) => ({
+                    a,
+                    isOwner: defaultPos[a.empId] === pos.positionName ? 1 : 0,
+                    hours: runtime[a.empId].monthHours,
+                })).sort((x, y) => {
+                    if (x.isOwner !== y.isOwner) return x.isOwner - y.isOwner; // no-owner primero
+                    return y.hours - x.hours; // más cargado primero
+                });
+                for (let i = 0; i < exceso; i++) {
+                    const toRemove = sortable[i].a;
+                    const removeHrs = Number(toRemove.hours) || 0;
+                    const inCC = day.getDate() <= cutoffDay;
+                    const stR = runtime[toRemove.empId];
+                    const idx = assignments.findIndex((a) => a === toRemove);
+                    if (idx < 0) continue;
+                    assignments.splice(idx, 1);
+                    stR.assignedDays.delete(dateStr);
+                    if (inCC) { stR.cycleCurrentUsed -= removeHrs; stats.employeeCycleHours.current[toRemove.empId] = stR.cycleCurrentUsed; }
+                    else { stR.cycleNextUsed -= removeHrs; stats.employeeCycleHours.next[toRemove.empId] = stR.cycleNextUsed; }
+                    stR.monthHours -= removeHrs;
+                    stats.employeeMonthlyHours[toRemove.empId] = stR.monthHours;
+                    const wkKey = isoWeekKey(new Date(dateStr));
+                    stR.weekHours[wkKey] = Math.max(0, (stR.weekHours[wkKey] || removeHrs) - removeHrs);
+                    stats.totalAssignments--;
+                    stats.totalBillableHours -= removeHrs;
+                    if (cycleWorkDays[toRemove.empId]?.has(dateStr)) {
+                        assignments.push({ empId: toRemove.empId, dateStr, positionName: '', code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', isReten: true });
+                    } else {
+                        assignments.push({ empId: toRemove.empId, dateStr, positionName: '', code: 'F', name: 'Franco', hours: 0, startTime: '00:00', isFranco: true });
+                    }
+                    stR.assignedDays.add(dateStr);
+                }
+            }
+        }
+    }
+
+    // ── BALANCE DE RET DENTRO DEL GRUPO ──────────────────────────────────────
+    // Iguala la cantidad de RET por empleado dentro de un mismo grupo de puesto
+    // (y dentro del pool de empleados idle). NO mueve horas facturables: solo
+    // intercambia RET ↔ F entre dos empleados del mismo grupo en el mismo día.
+    // Motivo: un empleado que queda con 3 RET en este cronograma típicamente
+    // los termina trabajando en operaciones (cobertura de ausencias, refuerzos),
+    // sumando 24-36 horas extra invisibles desde la planificación. Forzando que
+    // la cuenta de RET sea pareja, la "sombra" potencial de horas también lo es.
+    //
+    // Reglas:
+    //  - Solo se permuta entre empleados del MISMO grupo (mismo puesto) o
+    //    entre empleados idle.
+    //  - El intercambio es estrictamente RET ↔ F en el MISMO día → no afecta
+    //    horas facturables, ni topes CCT, ni descanso, ni cobertura.
+    //  - Owner de puesto limitado: no tocamos sus F (su patrón L-V se mantiene).
+    const RET_BALANCE_DELTA = 2;
+    const isOwnerLimited = (empId: string): boolean => {
+        const ownerPosName = defaultPos[empId];
+        if (!ownerPosName) return false;
+        const pos = ctx.positions.find((p) => p.positionName === ownerPosName);
+        return !!pos && !positionOperatesAllWeek(pos);
+    };
+    let retBalanceSafety = 0;
+    while (retBalanceSafety++ < 2000) {
+        let swappedRet = false;
+        const retDaysByEmp: Record<string, Set<string>> = {};
+        const fDaysByEmp: Record<string, Set<string>> = {};
+        for (const a of assignments) {
+            const code = String(a.code || '').toUpperCase();
+            if (code === 'RET') (retDaysByEmp[a.empId] ||= new Set()).add(a.dateStr);
+            else if (code === 'F') (fDaysByEmp[a.empId] ||= new Set()).add(a.dateStr);
+        }
+        const allGroups: string[][] = [
+            ...Object.values(positionGroups),
+            ctx.employees.filter((e) => empAssignedTo[e.id] === null).map((e) => e.id),
+        ];
+        for (const group of allGroups) {
+            if (group.length < 2) continue;
+            const sortedByRetCount = [...group].sort(
+                (a, b) => (retDaysByEmp[b]?.size || 0) - (retDaysByEmp[a]?.size || 0)
+            );
+            for (let i = 0; i < sortedByRetCount.length; i++) {
+                const highId = sortedByRetCount[i];
+                const highCount = retDaysByEmp[highId]?.size || 0;
+                for (let j = sortedByRetCount.length - 1; j > i; j--) {
+                    const lowId = sortedByRetCount[j];
+                    const lowCount = retDaysByEmp[lowId]?.size || 0;
+                    if (highCount - lowCount < RET_BALANCE_DELTA) break;
+                    if (isOwnerLimited(lowId)) continue; // no romper patrón L-V del owner
+                    const highRetSet = retDaysByEmp[highId] || new Set<string>();
+                    const lowFSet = fDaysByEmp[lowId] || new Set<string>();
+                    let pickedDay: string | null = null;
+                    for (const d of highRetSet) {
+                        if (lowFSet.has(d)) { pickedDay = d; break; }
+                    }
+                    if (!pickedDay) continue;
+                    if (ctx.absences[lowId]?.has(pickedDay)) continue;
+                    if (ctx.absences[highId]?.has(pickedDay)) continue;
+                    const idxHigh = assignments.findIndex(
+                        (a) => a.empId === highId && a.dateStr === pickedDay && String(a.code || '').toUpperCase() === 'RET'
+                    );
+                    const idxLow = assignments.findIndex(
+                        (a) => a.empId === lowId && a.dateStr === pickedDay && String(a.code || '').toUpperCase() === 'F'
+                    );
+                    if (idxHigh < 0 || idxLow < 0) continue;
+                    assignments[idxHigh] = {
+                        ...assignments[idxHigh],
+                        code: 'F', name: 'Franco', isReten: false, isFranco: true,
+                    };
+                    assignments[idxLow] = {
+                        ...assignments[idxLow],
+                        code: 'RET', name: 'Retén', isReten: true, isFranco: false,
+                    };
+                    retDaysByEmp[highId]!.delete(pickedDay);
+                    (fDaysByEmp[highId] ||= new Set()).add(pickedDay);
+                    fDaysByEmp[lowId]!.delete(pickedDay);
+                    (retDaysByEmp[lowId] ||= new Set()).add(pickedDay);
+                    swappedRet = true;
+                    break;
+                }
+            }
+        }
+        if (!swappedRet) break;
     }
 
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)

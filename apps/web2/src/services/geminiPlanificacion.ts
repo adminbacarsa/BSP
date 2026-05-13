@@ -25,112 +25,157 @@ export interface GeminiRespuesta {
 }
 
 export interface PlannerContext {
-    mes: string;                   // YYYY-MM
+    mes: string;                         // YYYY-MM
     objetivo: string;
-    slaVendidas: number;           // horas vendidas en el contrato
-    puestos: any[];
-    empleados: any[];              // incluye horasMes y horasCola (mes anterior)
-    dias: string[];                // todos los días del mes YYYY-MM-DD
-    diasBloqueados: string[];      // días pasados/cerrados, no tocar
-    planificacionCompleta: any;    // empId → [{fecha, codigo, puesto}] TODOS los días
-    ausencias: any;                // empId → {fecha: código}
-    coberturaPorDia: any;          // fecha → puesto → {actual, requerido, deficit}
+    slaVendidas: number;                 // horas vendidas en el contrato
+    puestos: any[];                      // incluye activeDays, shifts, qty
+    empleados: any[];                    // incluye horasMes, priorHoursCiclo, defaultPos, ownerVirtual
+    dias: string[];                      // todos los días del mes YYYY-MM-DD
+    diasBloqueados: string[];            // días pasados/cerrados, no tocar
+    planificacionCompleta: any;          // empId → [{fecha, codigo, puesto}] TODOS los días
+    ausencias: any;                      // empId → {fecha: código}
+    coberturaPorDia: any;                // fecha → puesto → {actual, requerido, deficit, retDisponibles}
+    cicloCCT?: {
+        cortePrev: string;               // YYYY-MM-DD día 26 del mes anterior
+        corteActual: string;             // YYYY-MM-DD día 25 del mes actual
+        descripcion: string;             // explicación humana
+    };
+    autoCycles?: any[];                  // ciclos seleccionados (4x2, 6x2, etc.)
 }
 
-// ─── System Prompt (fijo entre llamadas, se cachea en Gemini) ─────────────────
+// ─── Tope horas facturables por puesto/día (R10, alineado a SLA del puesto) ───
 
-const SYSTEM_PROMPT = `Sos un optimizador experto de planificaciones de turnos para empresas de seguridad privada en Argentina (CCT 422/05, convenio SUVICO).
+function maxHorasFacturablesDiaPorPuesto(p: any): number {
+    const qty = Math.max(1, Number(p?.qty) || 1);
+    const cov = String(p?.coverageType || 'custom').toLowerCase();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return qty * 24;
+    const shiftsArr = Array.isArray(p?.shifts) ? p.shifts : [];
+    const sumHs = shiftsArr.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
+    const banda = sumHs > 0 ? sumHs : 8;
+    return qty * banda;
+}
 
-Recibís un cronograma ya generado y devolvés TODAS las correcciones necesarias para que cumpla las reglas. Tu única salida es JSON válido. No incluyas texto fuera del JSON, ni markdown, ni comentarios.
+// ─── System Prompt (motor alineado a planificación COSP; salida solo JSON) ───
 
-═══════════════════════════════════════════════════
-REGLAS DURAS (no se violan jamás)
-═══════════════════════════════════════════════════
+const SYSTEM_PROMPT = `Sos un asistente de AJUSTE FINO de cronogramas de seguridad privada en Argentina (CCT 422/05).
 
-R1. COBERTURA: para cada (puesto, día activo): empleados con turno facturable >= pos.qty. Nunca reduzcas cobertura por debajo del mínimo requerido.
+IMPORTANTE: NO inventás un cronograma nuevo desde cero. Solo proponés correcciones puntuales (cambios de celda) que mejoren cobertura, equidad y cumplimiento legal, sin inflar horas de más en ningún puesto.
 
-R2. HORAS VENDIDAS: el total de horas facturables del mes debe acercarse lo máximo posible a slaVendidas (dentro del 2%). Prioridad máxima después de R1.
-
-R3. TOPES CCT: nunca superes 200h mensuales por empleado en jornadas de 8h, ni 192h en jornadas de 12h. El campo horasMes ya incluye lo acumulado; sumale las horas de cada corrección antes de proponerla.
-
-R4. DESCANSOS MÍNIMOS: 12h entre fin de turno e inicio del siguiente.
-   - N (termina 07:00 del día siguiente) → el día siguiente NO puede ser: M (07:00), D12 (07:00), T (15:00).
-   - N12 (termina 07:00 del día siguiente) → misma restricción.
-   - Si proponés un turno el día D+1, verificá que el turno del día D no sea nocturno terminando en conflicto.
-
-R5. EQUIDAD: diferencia máxima entre el empleado con más y menos horas del mismo puesto: 16h. Si superan 16h, priorizá Franco (F) al más cargado en días donde la cobertura lo permita.
-
-R6. PROMOCIÓN RET → TURNO FACTURABLE: si deficit > 0 en un puesto un día, promové el empleado en RET de ese puesto (o cualquier posición si no hay del mismo puesto) con MENOS horasMes a turno facturable. Esta regla tiene prioridad sobre R5.
-
-R7. TURNO FACTURABLE → F: solo si actual > requerido en ese puesto ese día Y el empleado tiene más horas que el promedio del puesto.
-
-R8. AUSENCIAS: nunca modifiques una celda que tenga código de ausencia (V, L, A, E, AA, PG). Esas fechas son intocables.
-
-R9. DÍAS BLOQUEADOS: no generes correcciones para fechas en diasBloqueados.
-
-R10. CÓDIGOS VÁLIDOS: para turnos facturables, SOLO podés usar códigos que aparezcan en el campo 'shifts[]' del puesto en los datos enviados. Para no facturables, SOLO podés usar: F, FF, FP, RET. Cualquier otro código (inventado, deducido, o de otro puesto) es inválido y será rechazado. Nunca uses "RO", "EN", "TN", ni ningún otro código que no aparezca explícitamente en la lista de turnos del puesto.
+Tu única salida es JSON válido. Sin markdown, sin texto fuera del JSON.
 
 ═══════════════════════════════════════════════════
-PROCESO DE OPTIMIZACIÓN
+REGLAS DURAS (no negociables)
 ═══════════════════════════════════════════════════
 
-Paso 1 — Verificación estructural:
-   Si Nemp × 200h < slaVendidas con margen > 5%: bloqueoEstructural=true, correcciones vacías.
-   Si cobertura mínima imposible con los empleados disponibles: bloqueoEstructural=true.
+R1. COBERTURA MÍNIMA: en cada (puesto, día en que el puesto opera según activeDays): debe haber al menos tantos turnos facturables distintos como indica pos.qty (según la métrica que ya recibís en coberturaPorDia). Nunca dejes déficit al bajar cobertura.
 
-Paso 2 — Recorrido completo (todos los empleados, todos los días):
-   a) Para cada día con deficit > 0 en algún puesto: aplicar R6 (RET → facturable).
-   b) Para cada empleado con horasMes muy por debajo del promedio y hay deficit: asignar turno facturable.
-   c) Para cada par de empleados del mismo puesto con diferencia > 16h: aplicar R5 (Franco al más cargado si la cobertura lo permite).
-   d) Para cada día con turno nocturno seguido de turno conflictivo: corregir con R4.
+R10. TOPE DE HORAS FACTURABLES POR PUESTO Y DÍA (crítico):
+   - Para cada puesto P y cada fecha D, la SUMA de horas facturables de TODOS los empleados asignados a P ese día NO puede superar el tope que recibís en el bloque "TOPE_HS_FACTURABLES_POR_PUESTO_Y_DIA".
+   - Eso equivale a: no agregar suplentes de más, no duplicar bandas, no "rellenar" con turnos extra cuando ya se cubrió la demanda diaria del SLA.
+   - Si ya se alcanzó el tope de horas en P ese día, la única acción permitida es redistribuir (swap), bajar a F/RET, o mover a otro día — jamás sumar más horas en ese (P,D).
 
-Paso 3 — Validación interna antes de responder:
-   Verificá que cada corrección propuesta no viole R1-R10. Si viola alguna, no la incluyas.`;
+R2. SLA_VENDIDAS: es referencia mensual de contrato. NO la uses para justificar pasarte del tope diario R10 en un puesto. Preferí equidad y legalidad antes que inflar un día.
+
+R3. TOPES CCT POR CICLO: 200h por ciclo CCT (26 del mes anterior → 25 del mes actual para el tramo "current"; 26→fin del mes en "next"). Respetá priorHoursCiclo + horas del mes según el día de la corrección.
+
+R4. DESCANSOS: 12h entre fin de turno e inicio del siguiente (8h solo si el turno previo fue ≤6h).
+
+R5. CAP SEMANAL: máximo 60h/semana ISO; emergencia hasta 72h sin romper R3 ni R4.
+
+R6. AUSENCIAS: no tocar celdas V, L, A, E, AA, PG.
+
+R7. diasBloqueados: no generar correcciones para esas fechas.
+
+R8. CÓDIGOS: solo códigos en shifts[].code del puesto para facturables; para no facturables solo F, FF, FP, RET.
+
+R9. OWNER en puesto limitado (L-V, etc.): días que el puesto no opera → el owner solo F; días que opera → priorizar su turno; suplente a RET/F si hace falta consolidar.
+
+═══════════════════════════════════════════════════
+QUÉ SÍ PODÉS HACER (prioridad)
+═══════════════════════════════════════════════════
+
+P1. Consolidar owner vs suplente (swap) sin violar R10.
+P2. Cubrir déficit real (deficit>0 en coberturaPorDia) promoviendo RET→facturable, siempre dentro de R10, R3, R4, R5.
+P3. Equidad intra-puesto (reducir diferencia de horasMes) con swaps que no rompan R10.
+P4. Jamás agregar un turno facturable extra en un (puesto,día) que ya cumple o supera el tope R10.
+
+═══════════════════════════════════════════════════
+PROCESO
+═══════════════════════════════════════════════════
+
+1) Detectar violaciones de R9 y corregir.
+2) Para cada día con deficit>0 en coberturaPorDia: P2 respetando R10 (si el tope ya está lleno, no agregues más horas en ese puesto; buscá swap o otro puesto/día).
+3) Equidad P3.
+4) Autochequeo: ninguna corrección puede violar R1,R3,R4,R5,R6,R7,R8,R9,R10. Si una corrección la rompe, no la incluyas.
+
+Paso final: JSON según el esquema pedido en el mensaje del usuario.`;
 
 // ─── User Prompt (variables del mes/objetivo) ─────────────────────────────────
 
 function buildUserPrompt(context: PlannerContext): string {
+    const topeHsPorPuesto = Object.fromEntries(
+        (context.puestos || []).map((p: any) => [p.positionName, maxHorasFacturablesDiaPorPuesto(p)])
+    );
     return `MES: ${context.mes}
 OBJETIVO: ${context.objetivo}
 SLA_VENDIDAS_HS: ${context.slaVendidas}
 
-PUESTOS — lista exacta de códigos permitidos por puesto (R10: solo podés usar estos códigos):
+CICLO_CCT: ${context.cicloCCT?.descripcion || 'No especificado (asumir mes calendario)'}
+${context.cicloCCT ? `  cortePrev = ${context.cicloCCT.cortePrev}\n  corteActual = ${context.cicloCCT.corteActual}` : ''}
+
+CICLOS_AUTORIZADOS (autoCycles seleccionados): ${context.autoCycles ? JSON.stringify(context.autoCycles.map((c:any)=>c.id || c.name || c)) : '[]'}
+
+TOPE_HS_FACTURABLES_POR_PUESTO_Y_DIA (R10 — suma máxima de horas facturables en ese puesto cualquier día activo):
+${JSON.stringify(topeHsPorPuesto, null, 2)}
+
+PUESTOS — lista exacta de códigos permitidos por puesto (R8: solo podés usar estos códigos):
 ${context.puestos.map(p => {
     const billable = (p.shifts || []).map((s: any) => s.code).join(', ') || 'M';
-    return `  ${p.positionName}: facturables=[${billable}] | no-facturables=[F, FF, FP, RET] | qty=${p.qty} | días=${p.activeDays}`;
+    const days = Array.isArray(p.activeDays) ? p.activeDays.join(',') : 'todos';
+    const opera7 = Array.isArray(p.activeDays) ? p.activeDays.length === 7 : true;
+    return `  ${p.positionName}: facturables=[${billable}] | no-facturables=[F, FF, FP, RET] | qty=${p.qty} | días=${days} ${opera7 ? '(7 días)' : '(LIMITADO)'} | topeHsDia=${maxHorasFacturablesDiaPorPuesto(p)}`;
 }).join('\n')}
 
 PUESTOS (datos completos):
 ${JSON.stringify(context.puestos, null, 2)}
 
-EMPLEADOS (id, nombre, puestoAsignado, horasMes=horas facturables acumuladas este mes, diferenciaProm=diferencia vs promedio del puesto — negativo=menos horas que el promedio):
+EMPLEADOS — campos clave:
+  - id, nombre
+  - puestoAsignado: puesto donde se lo está usando este mes
+  - defaultPos: puesto FIJO/PREDETERMINADO (R9). Si null y es único en su grupo, considerar owner virtual.
+  - ownerVirtual: true si es único empleado del grupo de un puesto qty=1.
+  - horasMes: horas facturables acumuladas en el mes calendario actual.
+  - priorHoursCiclo: horas del ciclo CCT que cayeron en el mes ANTERIOR (días 26..fin). Sumadas con las del 1..25 del mes actual = uso ciclo actual.
+  - diferenciaProm: diferencia con promedio del puesto (negativo = menos).
 ${JSON.stringify(context.empleados, null, 2)}
 
 DÍAS DEL MES:
 ${JSON.stringify(context.dias)}
 
-DÍAS BLOQUEADOS (no generar correcciones para estas fechas):
+DÍAS BLOQUEADOS (R7 — no generar correcciones para estas fechas):
 ${JSON.stringify(context.diasBloqueados)}
 
 PLANIFICACIÓN ACTUAL — cronograma completo (empId → [{fecha, codigo, puesto}]):
 ${JSON.stringify(context.planificacionCompleta, null, 2)}
 
-AUSENCIAS (empId → {fecha: código} — no tocar):
+AUSENCIAS (R6 — no tocar):
 ${JSON.stringify(context.ausencias, null, 2)}
 
-COBERTURA POR DÍA (fecha → puesto → {actual, requerido, deficit}):
+COBERTURA POR DÍA (fecha → puesto → {actual, requerido, deficit, retDisponibles}):
 ${JSON.stringify(context.coberturaPorDia, null, 2)}
 
 INSTRUCCIÓN:
-Revisá el cronograma completo. Generá TODAS las correcciones necesarias (sin límite) para que:
-1. Cada puesto activo tenga cobertura >= requerido TODOS los días (R1) — promover RET a turno facturable en días con déficit
-2. Las horas facturables totales se acerquen a SLA_VENDIDAS_HS dentro del 2% (R2)
-3. La diferencia de horas entre empleados del mismo puesto no supere 16h (R5)
-4. No haya violaciones de descanso nocturno→mañana (R4)
+Revisá el cronograma. Solo incluí correcciones que cumplan TODAS las reglas duras (en especial R10: antes de agregar un turno facturable en (puesto,fecha), calculá la suma de horas facturables que quedaría ese día en ese puesto y no superés el tope).
 
-CRÍTICO (R10): el campo "codigoNuevo" DEBE ser uno de los códigos listados arriba para ese puesto.
-Para facturables: usa EXACTAMENTE el código de la lista 'facturables=[...]' del puesto.
-Para no facturables: usa SOLO F, FF, FP o RET.
+Orden sugerido:
+1) R9 (owners limitados)
+2) P1 consolidación owner/suplente sin pasar R10
+3) P2 déficit real (deficit>0) sin pasar R10
+4) P3 equidad con swaps
+
+CRÍTICO (R8): "codigoNuevo" DEBE ser uno de los códigos listados arriba para ese puesto.
+  - Para facturables: usá EXACTAMENTE el código de la lista 'facturables=[...]' del puesto.
+  - Para no facturables: usá SOLO F, FF, FP o RET.
 NO uses ningún otro código. Las correcciones con código inválido son automáticamente rechazadas.
 
 Respondé ÚNICAMENTE con este JSON:
@@ -143,7 +188,7 @@ Respondé ÚNICAMENTE con este JSON:
       "fecha": "YYYY-MM-DD",
       "codigoNuevo": "codigo_exacto_de_la_lista",
       "puesto": "nombre_exacto_del_puesto",
-      "razon": "breve: qué problema resuelve"
+      "razon": "breve: qué problema resuelve (R9, P1, P2, P3, R10)"
     }
   ],
   "metricas": {

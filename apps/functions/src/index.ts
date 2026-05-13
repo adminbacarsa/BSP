@@ -1063,6 +1063,11 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 
+// =========================================================
+// Payroll API (HTTP) — para sistemas de liquidación externos
+// =========================================================
+export { payrollApi } from './payroll-api/handler';
+
 export const sendTestNotification = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const db = admin.firestore();
