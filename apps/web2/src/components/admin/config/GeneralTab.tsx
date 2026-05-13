@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
     Save, Building, FileText, Mail, Phone, AlertTriangle, Trash2,
-    ShieldAlert, RefreshCw, Moon, Sun, Monitor, Zap, Hexagon, Camera, ArrowRight, X, Loader2
+    ShieldAlert, RefreshCw, Moon, Sun, Monitor, Zap, Hexagon, ArrowRight, X, Loader2,
+    UserCircle, BookOpen, ShieldCheck, ExternalLink
 } from 'lucide-react';
 import { functions, db } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -189,20 +190,67 @@ export default function GeneralTab() {
                 </div>
             </div>
 
-            {/* 2b. CÁMARAS NVR */}
+            {/* 2b. PORTALES DE ACCESO */}
             <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-4 flex items-center gap-3">
-                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/50 rounded-xl text-indigo-600 dark:text-indigo-400"><Camera size={24}/></div>
-                    CÁMARAS NVR
+                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-3">
+                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/50 rounded-xl text-indigo-600 dark:text-indigo-400"><ExternalLink size={24}/></div>
+                    PORTALES DE ACCESO
                 </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Configurá rutas de cámaras, asignación a cliente/objetivo y horarios de atención (ej. solo de noche o fines de semana).</p>
-                <Link
-                    href="/admin/camera-routes"
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all"
-                >
-                    Abrir panel de Cámaras NVR
-                    <ArrowRight size={18}/>
-                </Link>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <Link
+                        href="/empleado/dashboard"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-indigo-300 hover:shadow-md transition-all"
+                    >
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/60 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-200 transition-colors">
+                            <UserCircle size={22}/>
+                        </div>
+                        <div>
+                            <p className="font-black text-slate-800 dark:text-white text-sm uppercase">Portal Empleado</p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">Turnos, presencia y novedades del guardia</p>
+                        </div>
+                        <span className="text-[10px] font-black text-indigo-500 uppercase flex items-center gap-1 mt-auto">
+                            Abrir <ArrowRight size={11}/>
+                        </span>
+                    </Link>
+
+                    <Link
+                        href="/objetivo/dashboard"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-emerald-300 hover:shadow-md transition-all"
+                    >
+                        <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/60 rounded-xl flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-200 transition-colors">
+                            <BookOpen size={22}/>
+                        </div>
+                        <div>
+                            <p className="font-black text-slate-800 dark:text-white text-sm uppercase">Libro de Guardia</p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">Portal del objetivo — accesos y novedades</p>
+                        </div>
+                        <span className="text-[10px] font-black text-emerald-500 uppercase flex items-center gap-1 mt-auto">
+                            Abrir <ArrowRight size={11}/>
+                        </span>
+                    </Link>
+
+                    <Link
+                        href="/cliente/dashboard"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-violet-300 hover:shadow-md transition-all"
+                    >
+                        <div className="w-10 h-10 bg-violet-100 dark:bg-violet-900/60 rounded-xl flex items-center justify-center text-violet-600 dark:text-violet-400 group-hover:bg-violet-200 transition-colors">
+                            <ShieldCheck size={22}/>
+                        </div>
+                        <div>
+                            <p className="font-black text-slate-800 dark:text-white text-sm uppercase">Portal Cliente</p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">Personal autorizado y accesos del día</p>
+                        </div>
+                        <span className="text-[10px] font-black text-violet-500 uppercase flex items-center gap-1 mt-auto">
+                            Abrir <ArrowRight size={11}/>
+                        </span>
+                    </Link>
+                </div>
             </div>
 
             {/* 3. ZONA DE MANTENIMIENTO */}
