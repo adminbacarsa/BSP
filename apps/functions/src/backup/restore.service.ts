@@ -11,8 +11,16 @@ export interface RestoreResult {
   durationMs: number;
 }
 
-export async function runRestore(driveFileId: string, mode: RestoreMode): Promise<RestoreResult> {
+export async function runRestore(driveFileId: string, mode: RestoreMode, jobId?: string): Promise<RestoreResult> {
   const t0 = Date.now();
+  const db = admin.firestore();
+
+  const setJob = (data: object) => {
+    if (!jobId) return Promise.resolve();
+    return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
+  };
+
+  await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
 
   // 1. Descargar JSON desde Drive
   const { google } = await import('googleapis');
@@ -36,14 +44,20 @@ export async function runRestore(driveFileId: string, mode: RestoreMode): Promis
   const payload = JSON.parse(raw);
   const { _meta, ...collections } = payload;
 
-  const db = admin.firestore();
+  const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && (docs as any[]).length > 0) as [string, any[]][];
+  const total = colEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
+
+  await setJob({ phase: 'Preparando restauración…', total });
+
   let docsRestored = 0;
   let docsDeleted = 0;
 
   const BATCH_SIZE = 400;
 
-  for (const [colName, docs] of Object.entries(collections)) {
-    if (!Array.isArray(docs) || docs.length === 0) continue;
+  for (let ci = 0; ci < colEntries.length; ci++) {
+    const [colName, docs] = colEntries[ci];
+
+    await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${colEntries.length})…`, docsRestored });
 
     // Full restore: borrar todos los docs actuales de la colección
     if (mode === 'full') {
@@ -77,6 +91,8 @@ export async function runRestore(driveFileId: string, mode: RestoreMode): Promis
       docsRestored += written;
     }
   }
+
+  await setJob({ status: 'done', phase: 'Completado', docsRestored, total });
 
   // Registrar la restauración en audit_logs
   await db.collection('audit_logs').add({

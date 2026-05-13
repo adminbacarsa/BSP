@@ -1619,12 +1619,12 @@ export const restoreBackup = functions
     if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
       throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
     }
-    const { driveFileId, mode } = data as { driveFileId: string; mode: RestoreMode };
+    const { driveFileId, mode, jobId } = data as { driveFileId: string; mode: RestoreMode; jobId?: string };
     if (!driveFileId) throw new functions.https.HttpsError('invalid-argument', 'driveFileId requerido');
     if (!['merge', 'full'].includes(mode)) throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
 
     try {
-      return await runRestore(driveFileId, mode);
+      return await runRestore(driveFileId, mode, jobId);
     } catch (e: any) {
       throw new functions.https.HttpsError('internal', e?.message || 'Error al restaurar');
     }

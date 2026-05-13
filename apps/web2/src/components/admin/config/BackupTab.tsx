@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions } from '@/lib/firebase';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
 
@@ -155,15 +155,29 @@ export default function BackupTab() {
   const handleRestore = async () => {
     if (!restoreModal) return;
     setRestoring(true); setLastResult(null);
+    const jobId = `restore_${Date.now()}`;
+    const jobRef = fsDoc(db, 'restore_jobs', jobId);
+    let unsub: (() => void) | null = null;
     try {
-      const fn = httpsCallable(functions, 'restoreBackup');
-      const res: any = await fn({ driveFileId: restoreModal.backup.driveFileId, mode: restoreModal.mode });
+      await setDoc(jobRef, { status: 'pending', docsRestored: 0, total: 0, phase: 'Iniciando…' });
+      unsub = onSnapshot(jobRef, snap => {
+        const d = snap.data();
+        if (!d) return;
+        setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
+      });
+      const fn = httpsCallable(functions, 'restoreBackup', { timeout: 540000 });
+      const res: any = await fn({ driveFileId: restoreModal.backup.driveFileId, mode: restoreModal.mode, jobId });
       const d = res.data;
-      setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored} docs en ${(d.durationMs/1000).toFixed(1)}s` });
+      setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored.toLocaleString()} docs en ${(d.durationMs/1000).toFixed(1)}s` });
       setRestoreModal(null);
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al restaurar' });
-    } finally { setRestoring(false); }
+    } finally {
+      unsub?.();
+      setRestoring(false);
+      setProgress(null);
+      deleteDoc(jobRef).catch(() => {});
+    }
   };
 
   return (
@@ -362,8 +376,27 @@ export default function BackupTab() {
                 ? <><ShieldAlert size={14} className="inline mr-1.5"/>ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.</>
                 : <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>}
             </div>
+            {restoring && progress && (
+              <div className="mb-5 space-y-2">
+                <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-300">
+                  <span className="truncate pr-2">{progress.phase}</span>
+                  <span className="shrink-0">
+                    {progress.total > 0 ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()}` : '…'}
+                  </span>
+                </div>
+                <div className="h-3 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${restoreModal.mode === 'full' ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                    style={{ width: `${progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 5}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 font-bold text-right">
+                  {progress.total > 0 ? `${Math.min(100, Math.round((progress.done / progress.total) * 100))}% completado` : 'Procesando…'}
+                </p>
+              </div>
+            )}
             <div className="flex gap-3">
-              <button onClick={() => setRestoreModal(null)} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50">Cancelar</button>
+              <button onClick={() => setRestoreModal(null)} disabled={restoring} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 disabled:opacity-40">Cancelar</button>
               <button onClick={handleRestore} disabled={restoring}
                 className={`flex-1 py-3 rounded-xl text-white font-black text-sm flex items-center justify-center gap-2 disabled:opacity-60 ${restoreModal.mode === 'full' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                 {restoring ? <RefreshCw size={16} className="animate-spin"/> : <RotateCcw size={16}/>}
