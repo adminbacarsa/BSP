@@ -674,7 +674,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31 ? ctx.cctCutoffDay : 25;
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleLen = cL + cF; // p.ej. 6+1 → 7
-    const defaultPos = ctx.defaultPositionByEmp || {};
+    const defaultPos = { ...(ctx.defaultPositionByEmp || {}) };
+    // Empleados con puesto fijo EXPLÍCITO (configurado por el usuario, no auto-detectado).
+    // Se usa en el emergency pass para diferenciar quién puede moverse entre puestos.
+    const userLockedPos: Record<string, string> = { ...(ctx.defaultPositionByEmp || {}) };
 
     // Config de descanso dinámico: agrega el tope HARD de días seguidos según el ciclo.
     const V2_AGREEMENT_REST: AgreementRestConfig = {
@@ -1058,10 +1061,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     // Cola de slots uncovered para el rescue pass.
-    type UncoveredSlot = { dateStr: string; positionName: string; sCode: string; sHrs: number; sStart: string; sName: string; inCurrentCycle: boolean };
+    type UncoveredSlot = { dateStr: string; positionName: string; sCode: string; sHrs: number; sStart: string; sEnd?: string; sName: string; inCurrentCycle: boolean };
     const uncoveredQueue: UncoveredSlot[] = [];
 
-    const writeAssignment = (empId: string, dateStr: string, positionName: string, sCode: string, sName: string, sHrs: number, sStart: string, inCurrentCycle: boolean) => {
+    const writeAssignment = (empId: string, dateStr: string, positionName: string, sCode: string, sName: string, sHrs: number, sStart: string, inCurrentCycle: boolean, sEnd?: string) => {
         const st = runtime[empId];
         const wkKey = isoWeekKey(new Date(dateStr));
         st.weekHours[wkKey] = (st.weekHours[wkKey] || 0) + sHrs;
@@ -1079,7 +1082,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         st.lastShiftStart = parseHour(sStart);
         st.lastShiftHours = sHrs;
         st.assignedDays.add(dateStr);
-        assignments.push({ empId, dateStr, positionName, code: sCode, name: sName, hours: sHrs, startTime: sStart });
+        const a: V2Assignment = { empId, dateStr, positionName, code: sCode, name: sName, hours: sHrs, startTime: sStart };
+        if (sEnd) a.endTime = sEnd;
+        assignments.push(a);
         stats.totalAssignments++;
         stats.totalBillableHours += sHrs;
     };
@@ -1100,19 +1105,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const sCode = String(sh.code || '').toUpperCase();
                 const sHrs = shiftHours(sh);
                 const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                const sEnd = sh.endTime || undefined;
                 const sName = sh.name || sCode;
 
                 for (let slot = 0; slot < qty; slot++) {
                     if (stats.totalBillableHours + sHrs > billableCap) {
-                        uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sName, inCurrentCycle });
+                        uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
                     }
                     const empId = pickEmployee(dateStr, sCode, sHrs, pos.positionName, inCurrentCycle, sStart);
                     if (!empId) {
-                        uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sName, inCurrentCycle });
+                        uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
                     }
-                    writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle);
+                    writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
                 }
             }
         }
@@ -1167,7 +1173,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (!best || score > best.score) best = { id: emp.id, score };
         }
         if (best) {
-            writeAssignment(best.id, slot.dateStr, slot.positionName, slot.sCode, slot.sName, slot.sHrs, slot.sStart, slot.inCurrentCycle);
+            writeAssignment(best.id, slot.dateStr, slot.positionName, slot.sCode, slot.sName, slot.sHrs, slot.sStart, slot.inCurrentCycle, slot.sEnd);
             // Si era idle, lo convertimos en miembro del grupo y le marcamos primaryShift
             // para que el resto del mes siga con turnos coherentes (no salpicado).
             if (empAssignedTo[best.id] === null) {
@@ -1266,6 +1272,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const sCode = String(sh.code || '').toUpperCase();
                     const sHrs = shiftHours(sh);
                     const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                    const sEnd = sh.endTime || undefined;
                     const sName = sh.name || sCode;
                     let have = countBillableSlot(pos.positionName, dateStr, sCode);
                     while (have < qty && stats.totalBillableHours + sHrs <= billableCap) {
@@ -1293,7 +1300,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         }
                         if (!best) break;
                         if (!stripRetAssignment(best.id, dateStr)) break;
-                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle);
+                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
                         have++;
                         progressed = true;
                     }
@@ -1322,6 +1329,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const sCode = String(sh.code || '').toUpperCase();
                     const sHrs = shiftHours(sh);
                     const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                    const sEnd = sh.endTime || undefined;
                     const sName = sh.name || sCode;
                     let have = countBillableSlot(pos.positionName, dateStr, sCode);
                     while (have < qty && stats.totalBillableHours + sHrs <= billableCap) {
@@ -1355,7 +1363,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         if (!best) break;
                         // Si tenía RET ese día, lo eliminamos antes de asignar el turno.
                         stripRetAssignment(best.id, dateStr);
-                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle);
+                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
                         // Si era idle, lo enrolamos al grupo.
                         if (empAssignedTo[best.id] === null) {
                             empAssignedTo[best.id] = pos.positionName;
@@ -1369,6 +1377,66 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
         if (!filled) break;
+    }
+
+    // ── EMERGENCY CROSS-POSITION RESCUE ─────────────────────────────────
+    // Si quedan slots sin cubrir y hay empleados de otros puestos en RET ese día
+    // (sin bloqueo explícito de puesto fijo por el usuario), los usamos como
+    // último recurso. Solo empleados que no tienen userLockedPos hacia otro puesto.
+    {
+        let emSafety = 0;
+        let emFilled = true;
+        while (emFilled && emSafety++ < 500) {
+            emFilled = false;
+            for (const day of ctx.daysInMonth) {
+                const dateStr = ctx.getDateKey(day);
+                const dayLetter = ctx.getDayLetter(dateStr);
+                const inCurrentCycle = day.getDate() <= cutoffDay;
+                for (const pos of ctx.positions) {
+                    if (!positionIsActiveOn(pos, dayLetter)) continue;
+                    const qty = Math.max(1, Number(pos.qty) || 1);
+                    const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+                    for (const sh of dayShifts) {
+                        const sCode = String(sh.code || '').toUpperCase();
+                        const sHrs = shiftHours(sh);
+                        const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                        const sEnd = sh.endTime || undefined;
+                        const sName = sh.name || sCode;
+                        let have = countBillableSlot(pos.positionName, dateStr, sCode);
+                        while (have < qty && stats.totalBillableHours + sHrs <= billableCap) {
+                            let best: { id: string; score: number } | null = null;
+                            for (const emp of ctx.employees) {
+                                const empId = emp.id;
+                                // Solo empleados con RET ese día (no perturbar asignaciones normales)
+                                const hasRet = assignments.some(
+                                    (a) => a.empId === empId && a.dateStr === dateStr && String(a.code || '').toUpperCase() === 'RET'
+                                );
+                                if (!hasRet) continue;
+                                // Respetar bloqueo explícito del usuario (no auto-detectado)
+                                if (userLockedPos[empId] && userLockedPos[empId] !== pos.positionName) continue;
+                                if (ctx.absences[empId]?.has(dateStr)) continue;
+                                if (!cycleWorkDays[empId]?.has(dateStr)) continue;
+                                const st = runtime[empId];
+                                const used = inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed;
+                                if (used + sHrs > HARD_MAX_HOURS) continue;
+                                const wkKey = isoWeekKey(new Date(dateStr));
+                                if ((st.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
+                                if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                                // Preferir empleados del mismo puesto (por si quedó alguno)
+                                const samePos = empAssignedTo[empId] === pos.positionName ? 500 : 0;
+                                const sc = samePos + (-st.monthHours);
+                                if (!best || sc > best.score) best = { id: empId, score: sc };
+                            }
+                            if (!best) break;
+                            stripRetAssignment(best.id, dateStr);
+                            writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
+                            have++;
+                            emFilled = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── CONSOLIDACIÓN POR OWNER: si el titular del puesto está en RET y un suplente
@@ -1403,6 +1471,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const sCode = String(suplente.code || '').toUpperCase();
                     const sHrs = Number(suplente.hours) || 8;
                     const sStart = suplente.startTime || '07:00';
+                    const sEnd = suplente.endTime;
                     const stO = runtime[ownerId];
                     const usedO = inCurrentCycle ? stO.cycleCurrentUsed : stO.cycleNextUsed;
                     if (usedO + sHrs > HARD_MAX_HOURS) continue;
@@ -1432,7 +1501,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     // Saco RET del owner
                     stripRetAssignment(ownerId, dateStr);
                     // Asigno el turno al owner
-                    writeAssignment(ownerId, dateStr, posName, sCode, suplente.name || sCode, sHrs, sStart, inCurrentCycle);
+                    writeAssignment(ownerId, dateStr, posName, sCode, suplente.name || sCode, sHrs, sStart, inCurrentCycle, sEnd);
                     didOwnerSwap = true;
                 }
             }
@@ -1481,6 +1550,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         const sCode = String(highShift.code || '').toUpperCase();
                         const sHrs = Number(highShift.hours) || 8;
                         const sStart = highShift.startTime || '07:00';
+                        const sEnd = highShift.endTime;
                         const inCurrentCycle = new Date(dateStr + 'T12:00:00').getDate() <= cutoffDay;
                         const usedL = inCurrentCycle ? stL.cycleCurrentUsed : stL.cycleNextUsed;
                         if (usedL + sHrs > HARD_MAX_HOURS) continue;
@@ -1515,7 +1585,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             stL.assignedDays.delete(dateStr);
                         }
                         // 3) Asigno el turno al lowId
-                        writeAssignment(lowId, dateStr, posName, sCode, highShift.name || sCode, sHrs, sStart, inCurrentCycle);
+                        writeAssignment(lowId, dateStr, posName, sCode, highShift.name || sCode, sHrs, sStart, inCurrentCycle, sEnd);
                         // 4) Marco RET al highId ese día (queda con menos horas, igual disponible)
                         if (cycleWorkDays[highId]?.has(dateStr)) {
                             assignments.push({
@@ -1576,6 +1646,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const sCode = String(sh.code || '').toUpperCase();
                     const sHrs = shiftHours(sh);
                     const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                    const sEnd = sh.endTime || undefined;
                     const sName = sh.name || sCode;
                     let have = countBillableSlot(pos.positionName, dateStr, sCode);
                     while (have < qty && stats.totalBillableHours + sHrs <= billableCap) {
@@ -1614,7 +1685,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             assignments.splice(prevIdx, 1);
                             runtime[best.id].assignedDays.delete(dateStr);
                         }
-                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle);
+                        writeAssignment(best.id, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
                         have++;
                         emergencyFilled = true;
                         stats.uncoveredSlots = Math.max(0, stats.uncoveredSlots - 1);
@@ -1691,6 +1762,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const sCode = String(sh.code || '').toUpperCase();
                 const sHrs = shiftHours(sh);
                 const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                const sEnd = sh.endTime || undefined;
                 const sName = sh.name || sCode;
                 const inCC = day.getDate() <= cutoffDay;
                 const used = inCC ? st.cycleCurrentUsed : st.cycleNextUsed;
@@ -1738,7 +1810,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         st.assignedDays.delete(dateStr);
                     }
                 }
-                writeAssignment(empId, dateStr, ownerPosName, sCode, sName, sHrs, sStart, inCC);
+                writeAssignment(empId, dateStr, ownerPosName, sCode, sName, sHrs, sStart, inCC, sEnd);
                 assigned = true;
                 break;
             }
