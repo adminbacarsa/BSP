@@ -4817,7 +4817,8 @@ export default function PlanificacionPage() {
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
-                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[560px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                            <div className="flex-1 min-h-0 overflow-y-auto px-6 pt-6 pb-2">
                             <h3 className="font-black text-lg mb-1 flex items-center gap-2 flex-wrap">
                                 <Wand2 size={20} className="text-amber-600 shrink-0"/>
                                 <span className="text-slate-800">Automatizar cronograma</span>
@@ -4826,22 +4827,6 @@ export default function PlanificacionPage() {
                             <p className="text-xs text-slate-400 font-medium mb-4">
                                 Primero se calcula la <strong>viabilidad</strong> (dotación, CCT 200h, SLA). Si no cierra, ves el diagnóstico y no se modifica la grilla. Si cierra, podés <strong>generar</strong> el mes en pendientes (revisá antes de guardar).
                             </p>
-
-                            {(autoV2Loading || autoV2Generating) && (
-                                <div className="mb-4 rounded-xl bg-slate-900 px-4 py-3 text-white shadow-inner ring-1 ring-slate-700/80" role="progressbar" aria-valuenow={Math.round(autoV2Progress?.pct ?? 0)} aria-valuemin={0} aria-valuemax={100} aria-label={autoV2Progress?.label || 'Procesando'}>
-                                    <div className="flex justify-between items-center mb-2 gap-2">
-                                        <span className="text-[11px] font-black uppercase tracking-wide text-amber-300 shrink-0">Progreso</span>
-                                        <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
-                                    </div>
-                                    <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2">
-                                        <div
-                                            className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-300 transition-[width] duration-300 ease-out"
-                                            style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}
-                                        />
-                                    </div>
-                                    <p className="text-[11px] font-medium text-slate-300 leading-snug">{autoV2Progress?.label ?? 'Procesando…'}</p>
-                                </div>
-                            )}
 
                             <div className="space-y-4">
                                 <div>
@@ -5082,8 +5067,27 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
                             </div>
+                            </div>
 
-                            <div className="flex gap-2 mt-5">
+                            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4 space-y-3 rounded-b-2xl">
+                            {(autoV2Loading || autoV2Generating) && (
+                                <div className="rounded-xl bg-slate-900 px-4 py-3 text-white shadow-inner ring-1 ring-slate-700/80" role="progressbar" aria-valuenow={Math.round(autoV2Progress?.pct ?? 0)} aria-valuemin={0} aria-valuemax={100} aria-label={autoV2Progress?.label || 'Procesando'}>
+                                    <div className="flex justify-between items-center mb-2 gap-2">
+                                        <span className="text-[11px] font-black uppercase tracking-wide text-amber-300 shrink-0">Progreso</span>
+                                        <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
+                                    </div>
+                                    <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2">
+                                        <div
+                                            className={`h-full rounded-full bg-gradient-to-r transition-[width] duration-300 ease-out ${
+                                                autoV2Generating ? 'from-emerald-500 to-emerald-300' : 'from-amber-500 to-amber-300'
+                                            }`}
+                                            style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}
+                                        />
+                                    </div>
+                                    <p className="text-[11px] font-medium text-slate-300 leading-snug">{autoV2Progress?.label ?? 'Procesando…'}</p>
+                                </div>
+                            )}
+                            <div className="flex gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowAutoV2Modal(false)}
@@ -5101,6 +5105,7 @@ export default function PlanificacionPage() {
                                 >
                                     {autoV2Generating ? <><Loader2 size={14} className="animate-spin"/> Generando…</> : <>Generar cronograma</>}
                                 </button>
+                            </div>
                             </div>
                         </div>
                     </div>
