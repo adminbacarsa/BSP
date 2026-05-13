@@ -219,10 +219,12 @@ Diagnóstico: `npm run diagnose:lab`. Trazas siempre en **`%ProgramData%\COSP\tr
 Con emuladores activos, admin + guardia de prueba:
 
 ```bash
-npm run seed:lab
+npm run seed
 ```
 
-Equivale a `node scripts/seed-admin.js` + `node scripts/seed-empleado.js` (`admin@bacarsa.com.ar` / `admin1234`, `guardia@bacarsa.com.ar` / `guardia1234`). Solo admin: `node scripts/seed-admin.js`.
+(Mismo comando que `npm run seed:lab`.) Equivale a `node scripts/seed-admin.js` + `node scripts/seed-empleado.js` (`admin@bacarsa.com.ar` / `admin1234`, `guardia@bacarsa.com.ar` / `guardia1234`). Solo admin: `node scripts/seed-admin.js`.
+
+**Front en :3000 “viejo”:** el dev server es `next dev` (`npm run dev` desde la raíz). Pará el proceso, borrá `apps/web2/.next`, volvé a `npm run dev` y en el navegador recarga forzada (Ctrl+F5). Si en :3000 corre **otra app** u otro clon de repo, cerrá ese proceso o cambiá el puerto en `apps/web2/package.json` (`next dev -p`).
 
 ---
 
