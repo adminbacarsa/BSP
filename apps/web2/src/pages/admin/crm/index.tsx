@@ -240,11 +240,15 @@ export default function CRMPage() {
   const [historyNote, setHistoryNote] = useState('');
 
   // --- PORTAL CLIENTE ---
-  const [portalUserMap, setPortalUserMap] = useState<Record<string, any>>({});
+  // undefined = sin cargar, [] = cargado vacío, [...] = lista de usuarios
+  const [portalUserMap, setPortalUserMap] = useState<Record<string, any[] | undefined>>({});
   const [portalFormOpen, setPortalFormOpen] = useState(false);
+  const [portalEditingDocId, setPortalEditingDocId] = useState<string | null>(null);
   const [portalForm, setPortalForm] = useState({ nombre: '', email: '' });
   const [portalObjectiveIds, setPortalObjectiveIds] = useState<string[]>([]);
   const [portalSaving, setPortalSaving] = useState(false);
+  const [portalResendingId, setPortalResendingId] = useState<string | null>(null);
+  const [portalDeletingId, setPortalDeletingId] = useState<string | null>(null);
   const [portalError, setPortalError] = useState('');
 
   // --- PROFORMA ---
@@ -276,46 +280,88 @@ export default function CRMPage() {
   const loadPortalUserForClient = async (clientId: string) => {
     try {
       const snap = await getDocs(query(collection(db, 'client_users'), where('clientId', '==', clientId)));
-      if (!snap.empty) {
-        const data = snap.docs[0].data();
-        setPortalUserMap(prev => ({ ...prev, [clientId]: data }));
-      } else {
-        setPortalUserMap(prev => ({ ...prev, [clientId]: null }));
-      }
+      setPortalUserMap(prev => ({ ...prev, [clientId]: snap.docs.map(d => ({ id: d.id, ...d.data() })) }));
     } catch (e) {
       console.error(e);
+      setPortalUserMap(prev => ({ ...prev, [clientId]: [] }));
     }
   };
 
-  const handleCreatePortalUser = async () => {
+  const closePortalForm = () => {
+    setPortalFormOpen(false);
+    setPortalEditingDocId(null);
+    setPortalForm({ nombre: '', email: '' });
+    setPortalObjectiveIds([]);
+    setPortalError('');
+  };
+
+  const handleSavePortalUser = async () => {
     if (!selectedClient?.id) return;
-    if (!portalForm.email.trim() || !portalForm.nombre.trim()) {
-      setPortalError('Completá nombre y email.');
-      return;
-    }
+    if (!portalForm.nombre.trim()) { setPortalError('Completá el nombre.'); return; }
+    if (!portalEditingDocId && !portalForm.email.trim()) { setPortalError('Completá el email.'); return; }
     setPortalSaving(true);
     setPortalError('');
+    try {
+      if (portalEditingDocId) {
+        await updateDoc(doc(db, 'client_users', portalEditingDocId), {
+          nombre: portalForm.nombre.trim(),
+          objectiveIds: portalObjectiveIds,
+        });
+        toast.success('Usuario actualizado');
+      } else {
+        const fn = httpsCallable(getFunctions(), 'createClientPortalAccess');
+        await fn({
+          clientId: selectedClient.id,
+          clientName: selectedClient.name,
+          nombre: portalForm.nombre.trim(),
+          email: portalForm.email.trim(),
+          objectiveIds: portalObjectiveIds,
+        });
+        toast.success('Acceso enviado por email al cliente');
+      }
+      closePortalForm();
+      loadPortalUserForClient(selectedClient.id);
+    } catch (e: any) {
+      const msg = e?.message || '';
+      if (msg.includes('no configurado')) setPortalError('Servicio de email no configurado en el servidor.');
+      else setPortalError('Error al guardar. Intentá nuevamente.');
+    } finally {
+      setPortalSaving(false);
+    }
+  };
+
+  const handleResendPortalAccess = async (pu: any) => {
+    if (!selectedClient?.id) return;
+    setPortalResendingId(pu.id);
     try {
       const fn = httpsCallable(getFunctions(), 'createClientPortalAccess');
       await fn({
         clientId: selectedClient.id,
         clientName: selectedClient.name,
-        nombre: portalForm.nombre.trim(),
-        email: portalForm.email.trim(),
-        objectiveIds: portalObjectiveIds,
+        nombre: pu.nombre,
+        email: pu.email,
+        objectiveIds: pu.objectiveIds || [],
       });
-      setPortalForm({ nombre: '', email: '' });
-      setPortalObjectiveIds([]);
-      setPortalFormOpen(false);
-      toast.success('Acceso enviado por email al cliente');
+      toast.success(`Acceso reenviado a ${pu.email}`);
       loadPortalUserForClient(selectedClient.id);
-    } catch (e: any) {
-      const msg = e?.message || '';
-      if (msg.includes('email-already-in-use')) setPortalError('El email ya tiene una cuenta. El acceso fue reenviado.');
-      else if (msg.includes('no configurado')) setPortalError('Servicio de email no configurado en el servidor.');
-      else setPortalError('Error al crear acceso. Intentá nuevamente.');
+    } catch {
+      toast.error('Error al reenviar acceso');
     } finally {
-      setPortalSaving(false);
+      setPortalResendingId(null);
+    }
+  };
+
+  const handleDeletePortalUser = async (docId: string) => {
+    if (!confirm('¿Eliminar este acceso de portal? El usuario no podrá ingresar al portal.')) return;
+    setPortalDeletingId(docId);
+    try {
+      await deleteDoc(doc(db, 'client_users', docId));
+      toast.success('Acceso eliminado');
+      if (selectedClient?.id) loadPortalUserForClient(selectedClient.id);
+    } catch {
+      toast.error('Error al eliminar acceso');
+    } finally {
+      setPortalDeletingId(null);
     }
   };
 
@@ -1230,64 +1276,90 @@ export default function CRMPage() {
                     <ShieldCheck size={14} className="text-indigo-500" />
                     <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Portal Cliente</p>
                   </div>
-                  {!portalUserMap[selectedClient?.id] && !portalFormOpen && (
+                  {!portalFormOpen && (
                     <button
                       onClick={() => {
+                        setPortalEditingDocId(null);
                         setPortalForm({ nombre: '', email: '' });
                         setPortalObjectiveIds([]);
                         setPortalFormOpen(true);
                         setPortalError('');
-                        loadPortalUserForClient(selectedClient.id);
+                        if (portalUserMap[selectedClient.id] === undefined) loadPortalUserForClient(selectedClient.id);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
                     >
-                      <UserPlus size={12} /> Crear
+                      <UserPlus size={12} /> Agregar
                     </button>
                   )}
                 </div>
 
-                {portalUserMap[selectedClient?.id] ? (
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                      <ShieldCheck size={14} className="text-emerald-600 shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <p className="text-xs font-black text-emerald-700 truncate">{portalUserMap[selectedClient.id].nombre}</p>
-                        <p className="text-[10px] text-emerald-600 font-medium truncate">{portalUserMap[selectedClient.id].email}</p>
-                        {portalUserMap[selectedClient.id].portalInvite?.sentAt && (
-                          <p className="text-[10px] text-emerald-500 font-medium mt-0.5">
-                            Enviado {portalUserMap[selectedClient.id].portalInvite.sentAt?.toDate?.()?.toLocaleDateString?.('es-AR') || ''}
-                          </p>
-                        )}
-                        {(portalUserMap[selectedClient.id].objectiveIds?.length ?? 0) > 0 && (
-                          <p className="text-[10px] text-emerald-500 font-medium">
-                            {portalUserMap[selectedClient.id].objectiveIds.length} objetivo{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {!portalFormOpen && (
-                      <button
-                        onClick={() => {
-                          const pu = portalUserMap[selectedClient.id];
-                          setPortalForm({ nombre: pu.nombre || '', email: pu.email || '' });
-                          setPortalObjectiveIds(pu.objectiveIds || []);
-                          setPortalFormOpen(true);
-                          setPortalError('');
-                        }}
-                        className="w-full flex items-center justify-center gap-1 px-3 py-2 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase transition-colors"
-                      >
-                        <Send size={12} /> Reenviar acceso
-                      </button>
-                    )}
-                  </div>
-                ) : portalUserMap[selectedClient?.id] === null && !portalFormOpen ? (
-                  <p className="text-[10px] text-slate-400 font-medium">Sin acceso creado.</p>
-                ) : !portalFormOpen ? (
+                {/* Lista de usuarios */}
+                {portalUserMap[selectedClient?.id] === undefined && !portalFormOpen ? (
                   <p className="text-[10px] text-slate-400 font-medium">Verificando...</p>
-                ) : null}
-
-                {portalFormOpen && (
+                ) : (portalUserMap[selectedClient?.id] ?? []).length === 0 && !portalFormOpen ? (
+                  <p className="text-[10px] text-slate-400 font-medium">Sin accesos creados.</p>
+                ) : (
                   <div className="space-y-2">
+                    {(portalUserMap[selectedClient?.id] ?? []).map((pu: any) => (
+                      <div key={pu.id} className="border border-slate-200 rounded-xl p-3 space-y-1.5">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-slate-800 truncate">{pu.nombre}</p>
+                            <p className="text-[10px] text-slate-500 font-medium truncate">{pu.email}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {(pu.objectiveIds?.length ?? 0) > 0 ? (
+                                <span className="text-[10px] text-indigo-500 font-bold">{pu.objectiveIds.length} obj.</span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-medium">Todos los obj.</span>
+                              )}
+                              {pu.portalInvite?.sentAt && (
+                                <span className="text-[10px] text-slate-400">· {pu.portalInvite.sentAt?.toDate?.()?.toLocaleDateString?.('es-AR') || ''}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex gap-1 flex-shrink-0">
+                            <button
+                              title="Editar"
+                              onClick={() => {
+                                setPortalEditingDocId(pu.id);
+                                setPortalForm({ nombre: pu.nombre || '', email: pu.email || '' });
+                                setPortalObjectiveIds(pu.objectiveIds || []);
+                                setPortalFormOpen(true);
+                                setPortalError('');
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                            <button
+                              title="Reenviar acceso"
+                              onClick={() => handleResendPortalAccess(pu)}
+                              disabled={portalResendingId === pu.id}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-40"
+                            >
+                              {portalResendingId === pu.id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                            </button>
+                            <button
+                              title="Eliminar acceso"
+                              onClick={() => handleDeletePortalUser(pu.id)}
+                              disabled={portalDeletingId === pu.id}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-40"
+                            >
+                              {portalDeletingId === pu.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Formulario crear / editar */}
+                {portalFormOpen && (
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      {portalEditingDocId ? 'Editar usuario' : 'Nuevo acceso'}
+                    </p>
                     {portalError && (
                       <div className="flex items-center gap-1.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-bold text-rose-600">
                         <AlertCircle size={12} /> {portalError}
@@ -1298,35 +1370,42 @@ export default function CRMPage() {
                       placeholder="Nombre del contacto *"
                       className="w-full p-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     />
-                    <div className="relative">
-                      <Mail size={13} className="absolute left-3 top-2.5 text-slate-400" />
-                      <input
-                        type="email" value={portalForm.email} onChange={e => setPortalForm(f => ({ ...f, email: e.target.value }))}
-                        placeholder="Email *"
-                        className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                      />
-                    </div>
-                    <div className="flex gap-2 pt-1">
+                    {!portalEditingDocId && (
+                      <div className="relative">
+                        <Mail size={13} className="absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="email" value={portalForm.email} onChange={e => setPortalForm(f => ({ ...f, email: e.target.value }))}
+                          placeholder="Email *"
+                          className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        />
+                      </div>
+                    )}
+                    {portalEditingDocId && (
+                      <p className="text-[10px] text-slate-400 font-medium px-1">
+                        Email: <span className="font-bold text-slate-600">{portalForm.email}</span>
+                      </p>
+                    )}
+                    <div className="flex gap-2">
                       <button
-                        onClick={handleCreatePortalUser} disabled={portalSaving}
+                        onClick={handleSavePortalUser} disabled={portalSaving}
                         className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
                       >
-                        {portalSaving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Enviar
+                        {portalSaving ? <Loader2 size={12} className="animate-spin" /> : portalEditingDocId ? <Edit2 size={12} /> : <Send size={12} />}
+                        {portalEditingDocId ? 'Guardar' : 'Enviar acceso'}
                       </button>
                       <button
-                        onClick={() => { setPortalFormOpen(false); setPortalError(''); }}
+                        onClick={closePortalForm}
                         className="flex-1 border border-slate-200 hover:bg-slate-50 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 transition-colors"
                       >
                         Cancelar
                       </button>
                     </div>
 
-                    {/* Selector de objetivos — chips toggleables */}
                     {(selectedClient?.objetivos?.length ?? 0) > 0 && (
                       <div className="border border-slate-200 rounded-xl p-3">
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">
                           Objetivos{' '}
-                          <span className="text-slate-400 font-medium normal-case tracking-normal">
+                          <span className="font-medium normal-case tracking-normal text-slate-400">
                             {portalObjectiveIds.length === 0 ? '(todos)' : `(${portalObjectiveIds.length} sel.)`}
                           </span>
                         </p>
@@ -1335,15 +1414,13 @@ export default function CRMPage() {
                             const sel = portalObjectiveIds.includes(o.id);
                             return (
                               <button
-                                key={o.id}
-                                type="button"
+                                key={o.id} type="button"
                                 onClick={() => setPortalObjectiveIds(prev =>
                                   sel ? prev.filter(id => id !== o.id) : [...prev, o.id]
                                 )}
                                 className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
-                                  sel
-                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                                  sel ? 'bg-indigo-600 text-white border-indigo-600'
+                                      : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
                                 }`}
                               >
                                 {o.name}
@@ -1352,11 +1429,8 @@ export default function CRMPage() {
                           })}
                         </div>
                         {portalObjectiveIds.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setPortalObjectiveIds([])}
-                            className="mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline transition-colors"
-                          >
+                          <button type="button" onClick={() => setPortalObjectiveIds([])}
+                            className="mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline transition-colors">
                             Limpiar
                           </button>
                         )}
