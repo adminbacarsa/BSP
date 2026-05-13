@@ -89,7 +89,7 @@ function Start-LabCmd([string]$label, [string]$innerCmd) {
 
 Start-LabCmd 'emulators' "`"$npm`" run emulators:light >> `"$logEmul`" 2>&1"
 
-Append-Boot 'Esperando 127.0.0.1:8080...'
+Append-Boot 'Esperando 127.0.0.1:8080 (Firestore; seed-lab espera tambien 9099 Auth)...'
 if (-not (Wait-FirestoreEmulator 180)) {
   Append-Boot 'ERROR: timeout 8080; revisar emulators-task.log y JDK/firebase-tools'
 } else {
