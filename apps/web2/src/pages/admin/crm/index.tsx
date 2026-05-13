@@ -2299,31 +2299,8 @@ export default function CRMPage() {
                             />
                           </div>
 
-                          {/* Selector de objetivos */}
-                          {(selectedClient?.objetivos?.length ?? 0) > 0 && (
-                            <div className="border border-slate-200 rounded-xl p-3 bg-white space-y-1.5">
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">
-                                Objetivos con acceso <span className="text-slate-300 font-medium normal-case">(vacío = todos)</span>
-                              </p>
-                              {selectedClient.objetivos.filter((o: any) => o.id && o.name).map((o: any) => (
-                                <label key={o.id} className="flex items-center gap-2 cursor-pointer group">
-                                  <input
-                                    type="checkbox"
-                                    checked={portalObjectiveIds.includes(o.id)}
-                                    onChange={e => setPortalObjectiveIds(prev =>
-                                      e.target.checked ? [...prev, o.id] : prev.filter(id => id !== o.id)
-                                    )}
-                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                  />
-                                  <span className="text-xs font-medium text-slate-700 group-hover:text-slate-900 transition-colors uppercase truncate">
-                                    {o.name}
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="flex gap-2">
+                          {/* Botones — siempre visibles, antes del selector */}
+                          <div className="flex gap-2 pt-1">
                             <button
                               onClick={handleCreatePortalUser} disabled={portalSaving}
                               className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
@@ -2337,6 +2314,48 @@ export default function CRMPage() {
                               Cancelar
                             </button>
                           </div>
+
+                          {/* Selector de objetivos — chips toggleables */}
+                          {(selectedClient?.objetivos?.length ?? 0) > 0 && (
+                            <div className="border border-slate-200 rounded-xl p-3 bg-white">
+                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2.5">
+                                Restringir a objetivos{' '}
+                                <span className="text-slate-400 font-medium normal-case tracking-normal">
+                                  {portalObjectiveIds.length === 0 ? '(acceso a todos)' : `(${portalObjectiveIds.length} seleccionado${portalObjectiveIds.length !== 1 ? 's' : ''})`}
+                                </span>
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {selectedClient.objetivos.filter((o: any) => o.id && o.name).map((o: any) => {
+                                  const sel = portalObjectiveIds.includes(o.id);
+                                  return (
+                                    <button
+                                      key={o.id}
+                                      type="button"
+                                      onClick={() => setPortalObjectiveIds(prev =>
+                                        sel ? prev.filter(id => id !== o.id) : [...prev, o.id]
+                                      )}
+                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
+                                        sel
+                                          ? 'bg-indigo-600 text-white border-indigo-600'
+                                          : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                                      }`}
+                                    >
+                                      {o.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {portalObjectiveIds.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPortalObjectiveIds([])}
+                                  className="mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline transition-colors"
+                                >
+                                  Limpiar selección
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
