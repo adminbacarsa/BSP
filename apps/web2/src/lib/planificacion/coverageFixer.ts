@@ -85,10 +85,12 @@ function makeGetShift(
         const a = idx.get(`${empId}__${dateStr}`);
         if (!a) return null;
         const c = String(a.code || '').toUpperCase();
+        // RET / francos no son turnos trabajados: 0 horas, sin start laboral
+        const isNonWork = c === 'RET' || FRANCO_CODES.has(c);
         return {
             code: c,
-            startTime: a.startTime || DEFAULT_START[c] || '07:00',
-            hours: Number(a.hours) || SHIFT_HRS[c] || 8,
+            startTime: a.startTime || (isNonWork ? '00:00' : DEFAULT_START[c] || '07:00'),
+            hours: isNonWork ? 0 : (Number(a.hours) || SHIFT_HRS[c] || 8),
         };
     };
 }

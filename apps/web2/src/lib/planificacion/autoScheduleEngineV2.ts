@@ -40,7 +40,12 @@
  * por el componente y devuelve un objeto con métricas + diagnóstico.
  */
 
-import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
+import {
+    checkRestBetweenShifts,
+    workStreakStatsBackward,
+    workStreakStatsForward,
+    type AgreementRestConfig,
+} from './restBetweenShifts';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
@@ -903,10 +908,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const a = assignments.find((x) => x.empId === eid && x.dateStr === ds);
             if (!a) return null;
             const c = String(a.code || '').toUpperCase();
+            // RET y francos no son turnos trabajados: deben reportar 0 horas
+            const isNonWork = c === 'RET' || FRANCO_SET.has(c);
             return {
                 code: c,
-                startTime: a.startTime || DEFAULT_SHIFT_TIMES[c] || '07:00',
-                hours: Number(a.hours) || SHIFT_HRS_DEFAULT[c] || 8,
+                startTime: a.startTime || (isNonWork ? '00:00' : DEFAULT_SHIFT_TIMES[c] || '07:00'),
+                hours: isNonWork ? 0 : (Number(a.hours) || SHIFT_HRS_DEFAULT[c] || 8),
                 endTime: (a as any).endTime,
             };
         };
@@ -1763,6 +1770,31 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const pos = ctx.positions.find((p) => p.positionName === ownerPosName);
         return !!pos && !positionOperatesAllWeek(pos);
     };
+    // Verifica que swappear `pickedDay` a `newCode` para el empleado no genere
+    // racha (incluyendo RET) mayor a cL.
+    const swapKeepsCycleStreak = (empId: string, dateStr: string, newCode: string): boolean => {
+        const simGet = (eid: string, ds: string): any | null => {
+            if (eid === empId && ds === dateStr) {
+                const nonWork = newCode === 'RET' || FRANCO_SET.has(newCode);
+                return { code: newCode, hours: nonWork ? 0 : 8, startTime: '00:00' };
+            }
+            const absMap = ctx.absences[eid];
+            if (absMap?.has(ds)) return { code: absMap.get(ds), hours: 0, startTime: '00:00' };
+            const a = assignments.find((x) => x.empId === eid && x.dateStr === ds);
+            if (!a) return null;
+            const c = String(a.code || '').toUpperCase();
+            const nonWork = c === 'RET' || FRANCO_SET.has(c);
+            return {
+                code: c,
+                startTime: a.startTime || (nonWork ? '00:00' : DEFAULT_SHIFT_TIMES[c] || '07:00'),
+                hours: nonWork ? 0 : (Number(a.hours) || SHIFT_HRS_DEFAULT[c] || 8),
+            };
+        };
+        const back = workStreakStatsBackward(empId, dateStr, simGet).workDays;
+        const fwd = workStreakStatsForward(empId, dateStr, simGet).workDays;
+        return back + fwd <= cL;
+    };
+
     let retBalanceSafety = 0;
     while (retBalanceSafety++ < 2000) {
         let swappedRet = false;
@@ -1799,6 +1831,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     if (!pickedDay) continue;
                     if (ctx.absences[lowId]?.has(pickedDay)) continue;
                     if (ctx.absences[highId]?.has(pickedDay)) continue;
+                    // Guard: el F→RET en lowId no debe extender la racha más allá de cL
+                    if (!swapKeepsCycleStreak(lowId, pickedDay, 'RET')) continue;
                     const idxHigh = assignments.findIndex(
                         (a) => a.empId === highId && a.dateStr === pickedDay && String(a.code || '').toUpperCase() === 'RET'
                     );

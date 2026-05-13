@@ -12,8 +12,15 @@ const DEFAULT_MIN_REST = 12;
 const DEFAULT_STREAK_THRESHOLD = 48;
 const DEFAULT_LONG_REST = 35;
 
-/** Rompen la racha de trabajo consecutivo (no suman a las 48 h). RET no suma pero tampoco cierra racha legal → lo tratamos como corte de racha. */
-const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
+/**
+ * Códigos que ROMPEN la racha de trabajo consecutivo: francos reales y licencias.
+ * RET NO está acá: el retén es un día de stand-by que el guardia debe quedarse
+ * disponible — por eso suma a "días consecutivos" del ciclo, aunque aporte 0 horas.
+ */
+const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+
+/** Stand-by: cuenta como día disponible pero sin horas reales (no es un turno trabajado). */
+const STANDBY_CODES = new Set(['RET']);
 
 const HOURS_BY_CODE: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, EN: 8, P: 8,
@@ -45,10 +52,11 @@ const isWorkShift = (sh: any | null | undefined): boolean => {
     const code = String(sh.code || sh.type || '').toUpperCase();
     if (!code) return false;
     if (STREAK_BREAK_CODES.has(code)) return false;
+    if (STANDBY_CODES.has(code)) return false; // RET no es turno real (sin start/end laboral)
     return shiftHours(sh) > 0;
 };
 
-const addDaysStr = (dateStr: string, delta: number): string => {
+export const addDaysStr = (dateStr: string, delta: number): string => {
     const [y, m, d] = dateStr.split('-').map(Number);
     const dt = new Date(y, m - 1, d + delta);
     return getDateKey(dt);
@@ -80,7 +88,14 @@ export const getShiftStartEndAbs = (dateStr: string, sh: any): { start: Date; en
 
 const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) / 3600000;
 
-/** Horas y cantidad de días laborales consecutivos hacia atrás desde `fromDateStr` (inclusive). */
+/**
+ * Horas y cantidad de DÍAS consecutivos disponibles para trabajar hacia atrás
+ * desde `fromDateStr` (inclusive).
+ *  - F / FF / FP / FT / licencias → rompen la racha.
+ *  - RET → cuenta como día (sigue siendo "stand-by") pero aporta 0 horas.
+ *  - Turno real → cuenta como día y suma sus horas.
+ *  - Día vacío (sin asignación) → rompe la racha (no sabemos si fue franco).
+ */
 export const workStreakStatsBackward = (
     empId: string,
     fromDateStr: string,
@@ -94,9 +109,16 @@ export const workStreakStatsBackward = (
         if (!sh || sh.isDeleted) break;
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
-        if (!isWorkShift(sh)) break;
-        hours += shiftHours(sh);
-        workDays += 1;
+        if (STANDBY_CODES.has(code)) {
+            // RET = día consumido del ciclo, 0 horas reales
+            workDays += 1;
+        } else if (shiftHours(sh) > 0) {
+            hours += shiftHours(sh);
+            workDays += 1;
+        } else {
+            // Turno raro sin horas (no franco, no RET) → cortamos por seguridad
+            break;
+        }
         d = addDaysStr(d, -1);
     }
     return { hours, workDays };
@@ -107,6 +129,36 @@ export const workStreakHoursBackward = (
     fromDateStr: string,
     getShift: (eid: string, ds: string) => any | null
 ): number => workStreakStatsBackward(empId, fromDateStr, getShift).hours;
+
+/**
+ * Igual que `workStreakStatsBackward` pero contando hacia adelante,
+ * empezando EXCLUSIVO desde `fromDateStr` (no lo incluye).
+ */
+export const workStreakStatsForward = (
+    empId: string,
+    fromDateStr: string,
+    getShift: (eid: string, ds: string) => any | null
+): { hours: number; workDays: number } => {
+    let hours = 0;
+    let workDays = 0;
+    let d = addDaysStr(fromDateStr, 1);
+    for (let i = 0; i < 40; i++) {
+        const sh = getShift(empId, d);
+        if (!sh || sh.isDeleted) break;
+        const code = String(sh.code || '').toUpperCase();
+        if (STREAK_BREAK_CODES.has(code)) break;
+        if (STANDBY_CODES.has(code)) {
+            workDays += 1;
+        } else if (shiftHours(sh) > 0) {
+            hours += shiftHours(sh);
+            workDays += 1;
+        } else {
+            break;
+        }
+        d = addDaysStr(d, 1);
+    }
+    return { hours, workDays };
+};
 
 const findPrevWorkBoundary = (
     empId: string,
