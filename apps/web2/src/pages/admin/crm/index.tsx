@@ -3,14 +3,16 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { db } from '@/lib/firebase';
+import { db, app as firebaseApp } from '@/lib/firebase';
 import {
   addDoc,
   arrayUnion,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -18,10 +20,12 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
+  AlertCircle,
   BarChart3,
   Building2,
   Calculator,
@@ -30,11 +34,15 @@ import {
   Copy,
   Edit2,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileText,
   Globe,
   Grid3x3,
   LayoutList,
   Loader2,
+  Lock,
+  Mail,
   MapPin,
   Navigation,
   Plus,
@@ -42,8 +50,10 @@ import {
   Receipt,
   Search,
   Send,
+  ShieldCheck,
   Trash2,
   TrendingUp,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -232,6 +242,14 @@ export default function CRMPage() {
   // --- HISTORIAL ---
   const [historyNote, setHistoryNote] = useState('');
 
+  // --- PORTAL CLIENTE ---
+  const [portalUserMap, setPortalUserMap] = useState<Record<string, any>>({});
+  const [portalFormOpen, setPortalFormOpen] = useState(false);
+  const [portalForm, setPortalForm] = useState({ nombre: '', email: '', password: '' });
+  const [portalFormShowPass, setPortalFormShowPass] = useState(false);
+  const [portalSaving, setPortalSaving] = useState(false);
+  const [portalError, setPortalError] = useState('');
+
   // --- PROFORMA ---
   const [proformaOpen, setProformaOpen] = useState(false);
   const [proformaMonth, setProformaMonth] = useState(new Date().getMonth());
@@ -257,6 +275,58 @@ export default function CRMPage() {
     fetchClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empresaId, migracionCompleta]);
+
+  const loadPortalUserForClient = async (clientId: string) => {
+    try {
+      const snap = await getDocs(query(collection(db, 'client_users'), where('clientId', '==', clientId)));
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setPortalUserMap(prev => ({ ...prev, [clientId]: data }));
+      } else {
+        setPortalUserMap(prev => ({ ...prev, [clientId]: null }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCreatePortalUser = async () => {
+    if (!selectedClient?.id) return;
+    if (!portalForm.email.trim() || !portalForm.password.trim() || !portalForm.nombre.trim()) {
+      setPortalError('Completá todos los campos.');
+      return;
+    }
+    setPortalSaving(true);
+    setPortalError('');
+    try {
+      const secondaryApp = getApps().find(a => a.name === 'secondary') || initializeApp(
+        { apiKey: firebaseApp.options.apiKey, authDomain: firebaseApp.options.authDomain, projectId: firebaseApp.options.projectId },
+        'secondary'
+      );
+      const secondaryAuth = getAuth(secondaryApp);
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, portalForm.email.trim(), portalForm.password.trim());
+      await addDoc(collection(db, 'client_users'), {
+        uid: cred.user.uid,
+        clientId: selectedClient.id,
+        clientName: selectedClient.name,
+        nombre: portalForm.nombre.trim(),
+        email: portalForm.email.trim(),
+        activo: true,
+        creadoEn: serverTimestamp(),
+      });
+      await secondaryAuth.signOut();
+      setPortalForm({ nombre: '', email: '', password: '' });
+      setPortalFormOpen(false);
+      toast.success('Usuario de portal creado');
+      loadPortalUserForClient(selectedClient.id);
+    } catch (e: any) {
+      if (e.code === 'auth/email-already-in-use') setPortalError('El email ya está en uso.');
+      else if (e.code === 'auth/weak-password') setPortalError('La contraseña debe tener al menos 6 caracteres.');
+      else setPortalError('Error al crear usuario. Intentá nuevamente.');
+    } finally {
+      setPortalSaving(false);
+    }
+  };
 
   const fetchClients = async () => {
     setLoadingClients(true);
@@ -1100,7 +1170,7 @@ export default function CRMPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { setSelectedClient(c); loadClientFullData(c.id); setView('detail'); close(); }}
+                    onClick={() => { setSelectedClient(c); loadClientFullData(c.id); loadPortalUserForClient(c.id); setView('detail'); close(); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase hover:bg-indigo-700 transition-colors shadow-sm"
                   >
                     <ExternalLink size={13}/> Ver Detalle
@@ -2153,6 +2223,86 @@ export default function CRMPage() {
                         ))}
                       </div>
                     )}
+
+                    {/* Acceso Portal Cliente */}
+                    <div className="border border-slate-200 rounded-2xl p-4 space-y-3 bg-slate-50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck size={14} className="text-indigo-500" />
+                          <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Acceso Portal Cliente</p>
+                        </div>
+                        {!portalUserMap[selectedClient?.id] && !portalFormOpen && (
+                          <button
+                            onClick={() => { setPortalFormOpen(true); setPortalError(''); loadPortalUserForClient(selectedClient.id); }}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
+                          >
+                            <UserPlus size={12} /> Crear acceso
+                          </button>
+                        )}
+                      </div>
+
+                      {portalUserMap[selectedClient?.id] ? (
+                        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                          <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
+                          <div>
+                            <p className="text-xs font-black text-emerald-700">{portalUserMap[selectedClient.id].nombre}</p>
+                            <p className="text-[10px] text-emerald-600 font-medium">{portalUserMap[selectedClient.id].email}</p>
+                          </div>
+                        </div>
+                      ) : portalUserMap[selectedClient?.id] === null && !portalFormOpen ? (
+                        <p className="text-[10px] text-slate-400 font-bold">Sin usuario de portal asignado. Creá un acceso para que el cliente pueda gestionar su personal autorizado.</p>
+                      ) : !portalFormOpen ? (
+                        <p className="text-[10px] text-slate-400 font-medium">Verificando...</p>
+                      ) : null}
+
+                      {portalFormOpen && (
+                        <div className="space-y-2">
+                          {portalError && (
+                            <div className="flex items-center gap-1.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-bold text-rose-600">
+                              <AlertCircle size={12} /> {portalError}
+                            </div>
+                          )}
+                          <input
+                            value={portalForm.nombre} onChange={e => setPortalForm(f => ({ ...f, nombre: e.target.value }))}
+                            placeholder="Nombre del contacto *"
+                            className="w-full p-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                          />
+                          <div className="relative">
+                            <Mail size={13} className="absolute left-3 top-2.5 text-slate-400" />
+                            <input
+                              type="email" value={portalForm.email} onChange={e => setPortalForm(f => ({ ...f, email: e.target.value }))}
+                              placeholder="Email *"
+                              className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                            />
+                          </div>
+                          <div className="relative">
+                            <Lock size={13} className="absolute left-3 top-2.5 text-slate-400" />
+                            <input
+                              type={portalFormShowPass ? 'text' : 'password'} value={portalForm.password} onChange={e => setPortalForm(f => ({ ...f, password: e.target.value }))}
+                              placeholder="Contraseña (mín. 6 caracteres) *"
+                              className="w-full pl-8 pr-8 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                            />
+                            <button type="button" onClick={() => setPortalFormShowPass(p => !p)} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                              {portalFormShowPass ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleCreatePortalUser} disabled={portalSaving}
+                              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
+                            >
+                              {portalSaving ? <Loader2 size={12} className="animate-spin" /> : null} Crear usuario
+                            </button>
+                            <button
+                              onClick={() => { setPortalFormOpen(false); setPortalError(''); }}
+                              className="bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 transition-colors"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 

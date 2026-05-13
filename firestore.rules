@@ -48,6 +48,11 @@ service cloud.firestore {
       );
     }
 
+    function isClientUser() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/client_users/$(request.auth.uid));
+    }
+
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
@@ -166,9 +171,16 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // 13. Personal autorizado por objetivo — admins gestionan, empleados consultan
+    // 13. Personal autorizado por objetivo — admins y usuarios de portal cliente gestionan
     match /personal_autorizado/{docId} {
       allow read: if request.auth != null;
+      allow create: if isAdmin() || isClientUser();
+      allow update, delete: if isAdmin() || isClientUser();
+    }
+
+    // 14. Usuarios del portal de clientes
+    match /client_users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if isAdmin();
     }
   }
