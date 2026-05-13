@@ -986,6 +986,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         );
     };
 
+    // Cuenta slots facturables ya asignados para un (puesto, día, turno) dado.
+    // Definido aquí (antes de pickEmployee) para que el guard anti-robo lo pueda usar.
+    const countBillableSlot = (posName: string, dateStr: string, sCode: string): number =>
+        assignments.filter(
+            (a) =>
+                a.positionName === posName &&
+                a.dateStr === dateStr &&
+                String(a.code || '').toUpperCase() === sCode &&
+                !FRANCO_SET.has(String(a.code || '').toUpperCase())
+        ).length;
+
     // pickEmployee — solo considera empleados del grupo del puesto y con primaryShift
     // coincidente. Si nadie del grupo encaja (p.ej. todos están en franco ese día),
     // permitimos un fallback dentro del mismo puesto con OTRO primaryShift (cobertura
@@ -998,6 +1009,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         positionName: string,
         inCurrentCycle: boolean,
         shiftStart?: string,
+        qty: number = 1,
+        positionDayShifts: readonly V2ShiftDef[] = [],
     ): string | null => {
         const groupIds = positionGroups[positionName] || [];
         if (groupIds.length === 0) return null;
@@ -1033,6 +1046,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 // Relief MUY penalizado: queremos que la rotación semanal M/T/N domine
                 // sobre la inercia. Si el primary no entra hoy, el slot quedará uncovered
                 // y se resolverá en el pase de relleno final (que ignora rotación).
+                //
+                // Guard anti-robo: si el turno esperado del empleado (expected) todavía
+                // no tiene ningún slot cubierto para hoy en este puesto, no lo usamos
+                // como relevo. Lo reservamos para su turno primario.
+                if (expected) {
+                    const expCode = expected.toUpperCase();
+                    const expInToday = positionDayShifts.some(
+                        (s) => String(s.code || '').toUpperCase() === expCode,
+                    );
+                    if (expInToday && countBillableSlot(positionName, dateStr, expCode) < qty) continue;
+                }
                 if (!bestRelief || baseScore > bestRelief.score) bestRelief = { id: empId, score: baseScore - 300 };
             }
         }
@@ -1113,7 +1137,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
                     }
-                    const empId = pickEmployee(dateStr, sCode, sHrs, pos.positionName, inCurrentCycle, sStart);
+                    const empId = pickEmployee(dateStr, sCode, sHrs, pos.positionName, inCurrentCycle, sStart, qty, dayShifts);
                     if (!empId) {
                         uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
@@ -1248,14 +1272,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         runtime[empId].assignedDays.delete(dateStr);
         return true;
     };
-    const countBillableSlot = (posName: string, dateStr: string, sCode: string): number =>
-        assignments.filter(
-            (a) =>
-                a.positionName === posName &&
-                a.dateStr === dateStr &&
-                String(a.code || '').toUpperCase() === sCode &&
-                !FRANCO_SET.has(String(a.code || '').toUpperCase())
-        ).length;
 
     let promoSafety = 0;
     while (promoSafety++ < 2000) {
