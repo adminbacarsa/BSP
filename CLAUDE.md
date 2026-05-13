@@ -199,15 +199,28 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=comtroldata
 | Auth | 9099 |
 | Functions | 5001 |
 | UI | 4000 |
+| Emulator Hub | 4400 |
+
+**Windows — lab tras reinicio (emuladores + seed + Next):** no suben solos hasta registrar la tarea **COSP Lab** (PowerShell **como administrador** desde la raíz del repo):
+
+```powershell
+npm install
+powershell -ExecutionPolicy Bypass -File scripts\register-cosp-lab-scheduled-task.ps1
+```
+
+Modo **sin iniciar sesión** (PC encendida, usuario no logueado): `...\register-cosp-lab-scheduled-task.ps1 -AtStartupAsSystem` (SYSTEM, demora 3 min; Node en `Program Files\nodejs`, JDK 21).
+
+Diagnóstico: `npm run diagnose:lab`. Trazas siempre en **`%ProgramData%\COSP\trace.log`** (útil si falla antes de escribir en `logs\`). Quitar tarea: `npm run unregister:lab-task` (admin).
 
 ### Primer arranque / emulador vacío
 
-Si el emulador no tiene datos (usuarios, colecciones), correr con los emuladores activos:
+Con emuladores activos, admin + guardia de prueba:
+
 ```bash
-node scripts/seed-admin.js
+npm run seed:lab
 ```
-Crea: usuario SUPERADMIN en Auth + `system_users` + `roles/SUPERADMIN` + `empresas/bacarsa`.
-Credenciales: `admin@bacarsa.com.ar` / `admin1234`
+
+Equivale a `node scripts/seed-admin.js` + `node scripts/seed-empleado.js` (`admin@bacarsa.com.ar` / `admin1234`, `guardia@bacarsa.com.ar` / `guardia1234`). Solo admin: `node scripts/seed-admin.js`.
 
 ---
 
@@ -232,8 +245,8 @@ DESARROLLO (Notebook)
 
 TESTING (N8N — sincronizar desde Notebook)
   4. git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
-  5. En N8N: firebase emulators:start
-  6. En N8N: cd apps/web2 && npm run dev -- -H 0.0.0.0
+  5. En N8N: `npm install` y `npm run emulators`
+  6. En N8N: `npm run dev` (Next en 0.0.0.0:3000)
   7. Testers acceden a http://192.168.0.8:3000
 
 PRODUCCIÓN (Notebook)

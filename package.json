@@ -4,6 +4,12 @@
   "description": "Monorepositorio para la aplicación de cronogramas. Contiene Frontend (web) y Backend (functions).",
   "main": "index.js",
   "scripts": {
+    "postinstall": "npm --prefix apps/web2 install",
+    "register:lab-task": "powershell -ExecutionPolicy Bypass -File scripts/register-cosp-lab-scheduled-task.ps1",
+    "register:lab-task:system": "powershell -ExecutionPolicy Bypass -File scripts/register-cosp-lab-scheduled-task.ps1 -AtStartupAsSystem",
+    "unregister:lab-task": "powershell -ExecutionPolicy Bypass -File scripts/unregister-cosp-lab-scheduled-task.ps1",
+    "diagnose:lab": "powershell -ExecutionPolicy Bypass -File scripts/diagnose-cosp-lab.ps1",
+    "seed:lab": "node scripts/seed-lab.js",
     "docs:capturas": "node scripts/capture-tutorial-screens.cjs",
     "docs:capturas-flujo": "node scripts/capture-tutorial-flows.cjs",
     "docs:capturas-all": "npm run docs:capturas && npm run docs:capturas-flujo",
@@ -21,7 +27,7 @@
     "dev:local": "bash scripts/start-local.sh",
     "dev:local:backup": "bash scripts/start-local.sh",
     "backup:import": "node scripts/import-backup.js",
-    "emulators": "firebase emulators:start --import=./backups/latest --export-on-exit=./backups/latest"
+    "emulators": "node scripts/run-emulators.js"
   },
   "keywords": [
     "firebase",
@@ -33,6 +39,7 @@
   "author": "Vale - Senior Tech Lead",
   "license": "ISC",
   "devDependencies": {
+    "firebase-tools": "^15.0.0",
     "playwright": "^1.49.1"
   },
   "dependencies": {
