@@ -24,7 +24,7 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { pickRepresentativeCycle } from './autoScheduleEngineV2';
+import { pickRepresentativeCycle, effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 
@@ -45,7 +45,14 @@ function makeFixRestCfg(ctx: V2EngineContext): AgreementRestConfig {
 
 export interface FixerLogEntry {
     iteration: number;
-    issueType: 'rest_swap' | 'rest_demote' | 'license_replace' | 'license_cover' | 'uncovered_fill' | 'noop';
+    issueType:
+        | 'rest_swap'
+        | 'rest_demote'
+        | 'license_replace'
+        | 'license_cover'
+        | 'band_rebalance'
+        | 'uncovered_fill'
+        | 'noop';
     empId: string;
     dateStr: string;
     detail: string;
@@ -278,6 +285,106 @@ function fixLicenseConflict(
     }
 }
 
+/**
+ * Demanda esperada por banda para un (puesto, día) según el ciclo elegido.
+ * Replica la misma lógica que usa el verificador: usa `effectiveShiftsForPositionDay`,
+ * que filtra bandas 8h vs 12h según los ciclos seleccionados por el usuario.
+ */
+function expectedByShiftCode(
+    ctx: V2EngineContext,
+    positionName: string,
+    dateStr: string,
+): Record<string, number> {
+    const pos = ctx.positions.find((p) => p.positionName === positionName);
+    if (!pos) return {};
+    const qty = Number(pos.qty) || 0;
+    if (qty <= 0) return {};
+    const dayLetter = ctx.getDayLetter(dateStr) || '';
+    const eff = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+    const out: Record<string, number> = {};
+    eff.forEach((sh) => {
+        const c = String(sh.code || '').toUpperCase();
+        if (!c) return;
+        out[c] = (out[c] || 0) + qty;
+    });
+    return out;
+}
+
+/**
+ * Rebalanceo dentro del mismo (puesto, día): si hay una banda sobre-cubierta y otra
+ * sub-cubierta, intenta mover un empleado de la sobre-cubierta a la sub-cubierta.
+ * No cambia la cantidad total de gente trabajando — solo redistribuye bandas.
+ */
+function fixOverlapRebalance(
+    positionName: string,
+    dateStr: string,
+    underCode: string,
+    underMissing: number,
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    cfg: AgreementRestConfig,
+    log: FixerLogEntry[],
+    iteration: number,
+): number {
+    if (underMissing <= 0) return 0;
+    const expected = expectedByShiftCode(ctx, positionName, dateStr);
+    const expectedForUnder = expected[underCode] || 0;
+    if (expectedForUnder <= 0) return 0;
+
+    // Bandas reales en este (puesto, día), agrupadas por código.
+    const actualByCode: Record<string, V2Assignment[]> = {};
+    for (const a of assignments) {
+        if (a.dateStr !== dateStr) continue;
+        if (a.positionName !== positionName) continue;
+        const c = String(a.code || '').toUpperCase();
+        if (!c) continue;
+        if (FRANCO_CODES.has(c) || c === 'RET') continue;
+        (actualByCode[c] ||= []).push(a);
+    }
+
+    // Códigos sobre-cubiertos ordenados por mayor excedente (los reasignamos primero).
+    const overflows: Array<{ code: string; surplus: number; list: V2Assignment[] }> = [];
+    Object.entries(actualByCode).forEach(([c, list]) => {
+        if (c === underCode) return;
+        const exp = expected[c] || 0;
+        const surplus = list.length - exp;
+        if (surplus > 0) overflows.push({ code: c, surplus, list });
+    });
+    overflows.sort((a, b) => b.surplus - a.surplus);
+
+    let filled = 0;
+    for (const ov of overflows) {
+        if (filled >= underMissing) break;
+        const movesAvailable = Math.min(ov.surplus, underMissing - filled);
+        let moved = 0;
+        for (const candidate of ov.list) {
+            if (moved >= movesAvailable) break;
+            // Probar in-place: cambiamos a underCode y vemos si pasa descanso/ciclo
+            const save = { ...candidate };
+            candidate.code = underCode;
+            candidate.name = underCode;
+            candidate.hours = SHIFT_HRS[underCode] || 8;
+            candidate.startTime = DEFAULT_START[underCode] || '07:00';
+            // Conserva positionName
+            const ok = canTakeShift(candidate.empId, dateStr, underCode, assignments, ctx, cfg);
+            if (!ok) {
+                Object.assign(candidate, save);
+                continue;
+            }
+            log.push({
+                iteration,
+                issueType: 'band_rebalance',
+                empId: candidate.empId,
+                dateStr,
+                detail: `Rebalanceo en ${positionName}: ${save.code} → ${underCode} (sobraba ${ov.code}, faltaba ${underCode}).`,
+            });
+            moved++;
+            filled++;
+        }
+    }
+    return filled;
+}
+
 /** Intenta cubrir un slot descubierto (positionName, dateStr, shiftCode) con un RET/F del grupo. */
 function fixUncoveredSlot(
     positionName: string,
@@ -365,12 +472,20 @@ export function fixScheduleIssues(
             );
         }
 
-        // 3. Slots descubiertos — intentamos rellenar con RET/F del grupo
+        // 3. Slots descubiertos — primero probamos rebalancear bandas dentro del
+        //    mismo puesto+día (mover gente de una banda sobre-cubierta a la
+        //    sub-cubierta), antes de gastar capacidad ociosa (RET/F).
         for (const u of report.uncovered) {
             const missing = u.qtyRequested - u.qtyAssigned;
             if (missing <= 0) continue;
-            fixUncoveredSlot(
+            const rebalanced = fixOverlapRebalance(
                 u.positionName, u.dateStr, u.shiftCode, missing,
+                current, ctx, cfg, log, iter,
+            );
+            const remaining = missing - rebalanced;
+            if (remaining <= 0) continue;
+            fixUncoveredSlot(
+                u.positionName, u.dateStr, u.shiftCode, remaining,
                 current, byKey, ctx, stats, cfg, log, iter,
             );
         }
