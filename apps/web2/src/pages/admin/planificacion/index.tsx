@@ -3506,9 +3506,9 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                         {retCount > 0 && (
-                            <div className="text-center px-3" title="Cantidad de celdas en RET en el mes.">
+                            <div className="text-center px-3" title={`Cantidad de celdas en RET (stand-by) en el mes. Potencial: ${retCount * 8}h activables como cobertura.`}>
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Retenes</p>
-                                <p className="text-sm font-black text-amber-600 leading-tight">{retCount}</p>
+                                <p className="text-sm font-black text-amber-600 leading-tight">{retCount} <span className="text-[9px] text-amber-500 font-bold">({retCount * 8}h)</span></p>
                             </div>
                         )}
                         {retBufferHours > 0 && (
@@ -4481,6 +4481,8 @@ export default function PlanificacionPage() {
                                             <th className="text-right px-3 py-2 font-black uppercase tracking-wide">CCT Next</th>
                                             <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Curr.</th>
                                             <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Next</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide" title="Cantidad de RETs (retenido stand-by) que tiene asignados el empleado en el mes. Cada RET = potencial 8h de cobertura para otros objetivos.">RET</th>
+                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide" title="Horas RET potenciales = cantidad de RETs × 8h. NO suman a horas trabajadas, son horas de stand-by disponibles para activar como cobertura.">Hs RET</th>
                                             <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Estado</th>
                                         </tr>
                                     </thead>
@@ -4499,6 +4501,8 @@ export default function PlanificacionPage() {
                                                 const next = autoV2GenStats.employeeCycleHours.next[emp.id] || 0;
                                                 const bufCurr = Math.max(0, 200 - curr);
                                                 const bufNext = Math.max(0, 200 - next);
+                                                const retCount = (autoV2GenStats.employeeRetCount || {})[emp.id] || 0;
+                                                const retHours = (autoV2GenStats.employeeRetHoursPotential || {})[emp.id] || 0;
                                                 const pos = posByEmp[emp.id] || (idleSet.has(emp.id) ? '—' : 'Sin puesto');
                                                 const isIdle = idleSet.has(emp.id);
                                                 const isCapped = curr >= 200 || next >= 200;
@@ -4513,7 +4517,7 @@ export default function PlanificacionPage() {
                                                     isHigh ? 'text-amber-600' :
                                                     bufCurr + bufNext >= 40 ? 'text-emerald-600' :
                                                     'text-slate-600';
-                                                return { emp, monthH, curr, next, bufCurr, bufNext, pos, status, statusColor };
+                                                return { emp, monthH, curr, next, bufCurr, bufNext, retCount, retHours, pos, status, statusColor };
                                             });
                                             // Ordenar: capped primero, después por buffer descendente
                                             rows.sort((a, b) => {
@@ -4531,6 +4535,8 @@ export default function PlanificacionPage() {
                                                     <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.next)} / 200</td>
                                                     <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufCurr)}h</td>
                                                     <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufNext)}h</td>
+                                                    <td className={`px-3 py-2 text-right font-mono ${r.retCount > 0 ? 'text-violet-700 font-bold' : 'text-slate-400'}`} title={r.retCount > 0 ? `${r.retCount} RET(s) en stand-by` : 'Sin RETs'}>{r.retCount}</td>
+                                                    <td className={`px-3 py-2 text-right font-mono ${r.retHours > 0 ? 'text-violet-700' : 'text-slate-400'}`} title={r.retHours > 0 ? `Hasta ${r.retHours}h potenciales activables como cobertura` : ''}>{r.retHours}h</td>
                                                     <td className={`px-3 py-2 font-bold ${r.statusColor}`}>{r.status}</td>
                                                 </tr>
                                             ));
@@ -4545,6 +4551,7 @@ export default function PlanificacionPage() {
                                         <li><b>CCT Current</b>: horas ya consumidas en el ciclo CCT del mes actual (incluye cola del mes anterior).</li>
                                         <li><b>CCT Next</b>: horas asignadas al ciclo siguiente (días 26..fin de este mes).</li>
                                         <li><b>Buffer</b>: horas libres hasta llegar a 200h en cada ciclo.</li>
+                                        <li><b>RET / Hs RET</b>: cantidad de días en stand-by (retenido) y horas potenciales (RET × 8h). NO suman a horas trabajadas — son capacidad disponible para cubrir ausencias en otros objetivos.</li>
                                     </ul>
                                 </div>
                                 <div className="bg-slate-50 rounded-lg p-3">

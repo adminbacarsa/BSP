@@ -592,6 +592,18 @@ export interface V2GenerateStats {
     idleEmployeeIds?: string[];
     /** Turno principal del mes por empleado asignado (M, T, N, D12, N12). */
     primaryShiftByEmp?: Record<string, string | null>;
+    /**
+     * Cantidad de RETs por empleado en el mes.
+     * RET = stand-by ("retenido por si hace falta"); no suma a horas trabajadas
+     * pero representa horas POTENCIALES que pueden activarse para cubrir ausencias
+     * en otros objetivos (típicamente 8h por RET).
+     */
+    employeeRetCount?: Record<string, number>;
+    /** Horas RET potenciales por empleado = retCount × 8 (estimación operativa). */
+    employeeRetHoursPotential?: Record<string, number>;
+    /** Total mes de RETs y horas RET potenciales (suma de todos los empleados). */
+    totalRetCount?: number;
+    totalRetHoursPotential?: number;
 }
 
 export interface V2GenerateResult {
@@ -1867,6 +1879,27 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             stats.employeesOver200.push(emp.id);
         }
     }
+
+    // Acumulado de RETs por empleado (horas potenciales en stand-by)
+    // RET no suma a horas trabajadas pero queremos mostrar en el reporte
+    // cuántas horas "potenciales" tiene cada vigilador retenido.
+    const RET_POTENTIAL_HOURS = 8;
+    const empRetCount: Record<string, number> = {};
+    for (const a of assignments) {
+        if (a.code === 'RET' && a.employeeId) {
+            empRetCount[a.employeeId] = (empRetCount[a.employeeId] || 0) + 1;
+        }
+    }
+    const empRetHoursPotential: Record<string, number> = {};
+    let totalRetCount = 0;
+    for (const [empId, count] of Object.entries(empRetCount)) {
+        empRetHoursPotential[empId] = count * RET_POTENTIAL_HOURS;
+        totalRetCount += count;
+    }
+    stats.employeeRetCount = empRetCount;
+    stats.employeeRetHoursPotential = empRetHoursPotential;
+    stats.totalRetCount = totalRetCount;
+    stats.totalRetHoursPotential = totalRetCount * RET_POTENTIAL_HOURS;
 
     return { feasibility, assignments, stats };
 }
