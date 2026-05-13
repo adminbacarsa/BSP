@@ -288,15 +288,19 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
     }
 
     // ── BLOQUEO DURO DEL CICLO ────────────────────────────────────────────
-    // Independiente del descanso largo: si la racha (incluyendo el propuesto)
-    // supera maxConsecutiveWorkDays, bloqueamos. Esto refleja el límite del
-    // ciclo elegido (6+2 → 6 días seguidos, 4+2 → 4, etc.).
+    // La racha TOTAL = días trabajados antes del propuesto (inclusive) + días
+    // laborales consecutivos DESPUÉS del propuesto. Hay que contar ambos lados
+    // porque el balance-swap o el emergency pass pueden insertar un turno entre
+    // dos bloques de trabajo, creando 7 días corridos sin que la check backward
+    // (unilateral) lo detecte.
     const maxConsRaw = p.cfg.maxConsecutiveWorkDays;
     if (Number.isFinite(maxConsRaw!) && (maxConsRaw as number) > 0) {
         const maxCons = maxConsRaw as number;
-        const streakWithProposed = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
-        if (streakWithProposed.workDays > maxCons) {
-            return `Ciclo: ${streakWithProposed.workDays} días seguidos de trabajo (máximo permitido por el ciclo: ${maxCons}).`;
+        const backStreak = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
+        const fwdStreak  = workStreakStatsForward(p.empId, p.targetDateStr, p.getShift);
+        const total = backStreak.workDays + fwdStreak.workDays;
+        if (total > maxCons) {
+            return `Ciclo: ${total} días seguidos de trabajo (máximo permitido por el ciclo: ${maxCons}).`;
         }
     }
 

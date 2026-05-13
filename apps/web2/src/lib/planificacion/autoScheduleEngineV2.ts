@@ -1655,11 +1655,19 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             const empId = emp.id;
                             const st = runtime[empId];
                             if (ctx.absences[empId]?.has(dateStr)) continue;
-                            // owner limitado de OTRO puesto activo ese día → no tocar
+                            // owner de OTRO puesto activo → solo bloquearlo si su propio puesto
+                            // todavía necesita cobertura ese día. Si ya está a capacidad, el
+                            // empleado (en RET/F) puede usarse como último recurso aquí.
                             const ownerPosName = defaultPos[empId];
                             if (ownerPosName && ownerPosName !== pos.positionName) {
                                 const ownerPos = ctx.positions.find((p) => p.positionName === ownerPosName);
-                                if (ownerPos && positionIsActiveOn(ownerPos, dayLetter)) continue;
+                                if (ownerPos && positionIsActiveOn(ownerPos, dayLetter)) {
+                                    const ownerQty = Math.max(1, Number(ownerPos.qty) || 1);
+                                    const ownerShifts = effectiveShiftsForPositionDay(ownerPos, dayLetter, ctx.autoCycles);
+                                    const ownerFilled = ownerShifts.reduce((acc, oSh) =>
+                                        acc + countBillableSlot(ownerPosName, dateStr, String(oSh.code || '').toUpperCase()), 0);
+                                    if (ownerFilled < ownerQty) continue; // su puesto aún necesita cobertura
+                                }
                             }
                             // solo F/RET o sin asignar
                             const cur = assignments.find((a) => a.empId === empId && a.dateStr === dateStr);
