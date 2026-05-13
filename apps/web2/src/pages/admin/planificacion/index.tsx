@@ -2528,6 +2528,7 @@ export default function PlanificacionPage() {
                     name: a.name,
                     hours: a.hours,
                     startTime: a.startTime,
+                    ...(a.endTime ? { endTime: a.endTime } : {}),
                     ...(a.isFranco ? { isFranco: true } : {}),
                 };
                 written++;
@@ -2646,6 +2647,7 @@ export default function PlanificacionPage() {
                     name: a.name,
                     hours: a.hours,
                     startTime: a.startTime,
+                    ...(a.endTime ? { endTime: a.endTime } : {}),
                     ...(a.isFranco ? { isFranco: true } : {}),
                     ...(a.isReten ? { isReten: true } : {}),
                 };
