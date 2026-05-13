@@ -13,14 +13,16 @@ const DEFAULT_STREAK_THRESHOLD = 48;
 const DEFAULT_LONG_REST = 35;
 
 /**
- * Códigos que ROMPEN la racha de trabajo consecutivo: francos reales y licencias.
- * RET NO está acá: el retén es un día de stand-by que el guardia debe quedarse
- * disponible — por eso suma a "días consecutivos" del ciclo, aunque aporte 0 horas.
+ * Códigos que ROMPEN la racha de trabajo consecutivo.
+ * Incluye:
+ *  - Francos reales (F, FF, FP, FT) y licencias (V, L, A, E, AA, PG).
+ *  - RET (retén): por definición operativa es un día de stand-by — si nadie lo
+ *    activa, el guardia no trabaja (equivale a un "franco pasivo"). Si después
+ *    operaciones lo activa para cubrir otro objetivo, ese día queda registrado
+ *    con otro código (RETEN/OPERATIONS_COVERAGE) que sí cuenta como turno real.
+ *    Por eso desde el punto de vista de la planificación, RET corta la racha.
  */
-const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
-
-/** Stand-by: cuenta como día disponible pero sin horas reales (no es un turno trabajado). */
-const STANDBY_CODES = new Set(['RET']);
+const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 
 const HOURS_BY_CODE: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, EN: 8, P: 8,
@@ -52,7 +54,6 @@ const isWorkShift = (sh: any | null | undefined): boolean => {
     const code = String(sh.code || sh.type || '').toUpperCase();
     if (!code) return false;
     if (STREAK_BREAK_CODES.has(code)) return false;
-    if (STANDBY_CODES.has(code)) return false; // RET no es turno real (sin start/end laboral)
     return shiftHours(sh) > 0;
 };
 
@@ -89,12 +90,11 @@ export const getShiftStartEndAbs = (dateStr: string, sh: any): { start: Date; en
 const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) / 3600000;
 
 /**
- * Horas y cantidad de DÍAS consecutivos disponibles para trabajar hacia atrás
- * desde `fromDateStr` (inclusive).
- *  - F / FF / FP / FT / licencias → rompen la racha.
- *  - RET → cuenta como día (sigue siendo "stand-by") pero aporta 0 horas.
- *  - Turno real → cuenta como día y suma sus horas.
- *  - Día vacío (sin asignación) → rompe la racha (no sabemos si fue franco).
+ * Horas y cantidad de DÍAS consecutivos de TRABAJO REAL hacia atrás desde
+ * `fromDateStr` (inclusive).
+ *  - F / FF / FP / FT / licencias / RET → rompen la racha.
+ *  - Turno real (M/T/N/D12/N12/etc) → cuenta como día y suma sus horas.
+ *  - Día vacío (sin asignación) → rompe la racha.
  */
 export const workStreakStatsBackward = (
     empId: string,
@@ -109,16 +109,10 @@ export const workStreakStatsBackward = (
         if (!sh || sh.isDeleted) break;
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
-        if (STANDBY_CODES.has(code)) {
-            // RET = día consumido del ciclo, 0 horas reales
-            workDays += 1;
-        } else if (shiftHours(sh) > 0) {
-            hours += shiftHours(sh);
-            workDays += 1;
-        } else {
-            // Turno raro sin horas (no franco, no RET) → cortamos por seguridad
-            break;
-        }
+        const h = shiftHours(sh);
+        if (h <= 0) break;
+        hours += h;
+        workDays += 1;
         d = addDaysStr(d, -1);
     }
     return { hours, workDays };
@@ -147,14 +141,10 @@ export const workStreakStatsForward = (
         if (!sh || sh.isDeleted) break;
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
-        if (STANDBY_CODES.has(code)) {
-            workDays += 1;
-        } else if (shiftHours(sh) > 0) {
-            hours += shiftHours(sh);
-            workDays += 1;
-        } else {
-            break;
-        }
+        const h = shiftHours(sh);
+        if (h <= 0) break;
+        hours += h;
+        workDays += 1;
         d = addDaysStr(d, 1);
     }
     return { hours, workDays };

@@ -310,6 +310,8 @@ export default function PlanificacionPage() {
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
     const [autoV2Loading, setAutoV2Loading] = useState(false);
     const [autoV2Generating, setAutoV2Generating] = useState(false);
+    /** Barra de progreso en el modal de automatización (viabilidad / generar). */
+    const [autoV2Progress, setAutoV2Progress] = useState<{ pct: number; label: string } | null>(null);
     const [autoV2Report, setAutoV2Report] = useState<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const [autoV2BudgetMode, setAutoV2BudgetMode] = useState<'cct'|'calendar'>('cct');
     const [autoV2ShowEmpDetail, setAutoV2ShowEmpDetail] = useState(false);
@@ -323,6 +325,10 @@ export default function PlanificacionPage() {
         idleEmployeeIds?: string[];
         primaryShiftByEmp?: Record<string, string | null>;
         positionGroups?: Record<string, string[]>;
+        employeeRetCount?: Record<string, number>;
+        employeeRetHoursPotential?: Record<string, number>;
+        totalRetCount?: number;
+        totalRetHoursPotential?: number;
     } | null>(null);
     const [showCapacityModal, setShowCapacityModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
@@ -2337,6 +2343,13 @@ export default function PlanificacionPage() {
         return absences;
     };
 
+    const bumpAutoV2Progress = async (pct: number, label: string) => {
+        setAutoV2Progress({ pct, label });
+        await new Promise<void>((r) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => r()));
+        });
+    };
+
     /**
      * Viabilidad del cronograma (motor COSP) antes de generar.
      */
@@ -2347,12 +2360,14 @@ export default function PlanificacionPage() {
         if (!displayedEmployees.length) { toast.error('No hay empleados en la dotación'); return; }
 
         setAutoV2Loading(true);
+        setAutoV2Progress({ pct: 4, label: 'Iniciando análisis…' });
         try {
             const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
 
             // Cargar ausencias que SOLAPAN con el mes (vacaciones, ART, licencias en curso)
             const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
+            await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
 
             // Acumular cola CCT del mes anterior (26 → fin) por empleado
@@ -2360,6 +2375,7 @@ export default function PlanificacionPage() {
             displayedEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
             const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
             const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
+            await bumpAutoV2Progress(32, 'Leyendo cola CCT (26 → fin mes anterior)…');
             const prevTailSnap  = await getDocs(query(
                 collection(db, 'turnos'),
                 where('objectiveId', '==', selectedObjective),
@@ -2381,6 +2397,8 @@ export default function PlanificacionPage() {
 
             const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
+            await bumpAutoV2Progress(52, 'Calculando viabilidad (motor COSP)…');
+            await new Promise<void>((r) => setTimeout(r, 0));
             const result = runAutoScheduleV2({
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
@@ -2403,6 +2421,8 @@ export default function PlanificacionPage() {
                 getDateKey,
             });
 
+            await bumpAutoV2Progress(100, 'Listo');
+            await new Promise<void>((r) => setTimeout(r, 150));
             setAutoV2Report(result.feasibility);
 
             if (!result.feasibility.ok) {
@@ -2418,6 +2438,7 @@ export default function PlanificacionPage() {
             console.error('[autoScheduleCOSP]', e);
         } finally {
             setAutoV2Loading(false);
+            setAutoV2Progress(null);
         }
     };
 
@@ -2428,17 +2449,20 @@ export default function PlanificacionPage() {
         if (!selectedObjective) return;
         if (!autoV2Report?.ok) { toast.error('Calculá viabilidad primero (debe dar viable)'); return; }
         setAutoV2Generating(true);
+        setAutoV2Progress({ pct: 4, label: 'Iniciando generación…' });
         try {
             const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
 
             const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
+            await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
 
             const empMonthlyInitial: Record<string,number> = {};
             displayedEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
             const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
             const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
+            await bumpAutoV2Progress(24, 'Leyendo cola CCT (26 → fin mes anterior)…');
             const prevTailSnap  = await getDocs(query(
                 collection(db, 'turnos'),
                 where('objectiveId', '==', selectedObjective),
@@ -2461,6 +2485,8 @@ export default function PlanificacionPage() {
                 const pos = empDefaultPos[`${e.id}___${selectedObjective}`];
                 if (pos) defaultPositionByEmp[e.id] = pos;
             });
+            await bumpAutoV2Progress(38, 'Generando cronograma (motor COSP, puede tardar varios segundos)…');
+            await new Promise<void>((r) => setTimeout(r, 0));
             const gen = generateScheduleV2({
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
@@ -2484,6 +2510,7 @@ export default function PlanificacionPage() {
                 getDateKey,
             });
 
+            await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');
             // Volcamos a pendingChanges respetando autoOverwrite y celdas bloqueadas
             const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
             let written = 0;
@@ -2507,7 +2534,6 @@ export default function PlanificacionPage() {
             }
             setPendingChanges(newChanges);
             setAutoGeneratedReady(true);
-            setShowAutoV2Modal(false);
             // Guardamos las stats post-generación para el panel "Capacidad CCT"
             setAutoV2GenStats({
                 employeeMonthlyHours: gen.stats.employeeMonthlyHours,
@@ -2518,8 +2544,13 @@ export default function PlanificacionPage() {
                 idleEmployeeIds: gen.stats.idleEmployeeIds,
                 primaryShiftByEmp: gen.stats.primaryShiftByEmp,
                 positionGroups: gen.stats.positionGroups,
+                employeeRetCount: gen.stats.employeeRetCount,
+                employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
+                totalRetCount: gen.stats.totalRetCount,
+                totalRetHoursPotential: gen.stats.totalRetHoursPotential,
             });
 
+            await bumpAutoV2Progress(78, 'Verificando cobertura y reglas (descansos, licencias)…');
             // ── Verificación de cobertura (slots, descansos, licencias, >200h) ──
             const verifyCtx = {
                 positions: positionStructure,
@@ -2536,6 +2567,10 @@ export default function PlanificacionPage() {
             setAutoV2Coverage(coverage);
             // Snapshot para reprocesar (cuando el usuario hace click en "Reprocesar errores")
             setAutoV2LastRun({ assignments: gen.assignments, stats: gen.stats, ctx: verifyCtx });
+
+            await bumpAutoV2Progress(100, 'Listo');
+            await new Promise<void>((r) => setTimeout(r, 180));
+            setShowAutoV2Modal(false);
 
             const uncov = coverage.coverage.uncoveredSlots > 0 ? ` · ⚠ ${coverage.coverage.uncoveredSlots} slots sin cubrir` : '';
             const over  = coverage.overHours.length > 0 ? ` · ⚠ ${coverage.overHours.length} empleados >200h ciclo` : '';
@@ -2570,6 +2605,7 @@ export default function PlanificacionPage() {
             console.error('[applyAutoScheduleCOSP]', e);
         } finally {
             setAutoV2Generating(false);
+            setAutoV2Progress(null);
         }
     };
 
@@ -4780,7 +4816,7 @@ export default function PlanificacionPage() {
 
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAutoV2Modal(false)}>
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
                         <div className="bg-white p-6 rounded-2xl shadow-2xl w-[560px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                             <h3 className="font-black text-lg mb-1 flex items-center gap-2 flex-wrap">
                                 <Wand2 size={20} className="text-amber-600 shrink-0"/>
@@ -4790,6 +4826,22 @@ export default function PlanificacionPage() {
                             <p className="text-xs text-slate-400 font-medium mb-4">
                                 Primero se calcula la <strong>viabilidad</strong> (dotación, CCT 200h, SLA). Si no cierra, ves el diagnóstico y no se modifica la grilla. Si cierra, podés <strong>generar</strong> el mes en pendientes (revisá antes de guardar).
                             </p>
+
+                            {(autoV2Loading || autoV2Generating) && (
+                                <div className="mb-4 rounded-xl bg-slate-900 px-4 py-3 text-white shadow-inner ring-1 ring-slate-700/80" role="progressbar" aria-valuenow={Math.round(autoV2Progress?.pct ?? 0)} aria-valuemin={0} aria-valuemax={100} aria-label={autoV2Progress?.label || 'Procesando'}>
+                                    <div className="flex justify-between items-center mb-2 gap-2">
+                                        <span className="text-[11px] font-black uppercase tracking-wide text-amber-300 shrink-0">Progreso</span>
+                                        <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
+                                    </div>
+                                    <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2">
+                                        <div
+                                            className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-300 transition-[width] duration-300 ease-out"
+                                            style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}
+                                        />
+                                    </div>
+                                    <p className="text-[11px] font-medium text-slate-300 leading-snug">{autoV2Progress?.label ?? 'Procesando…'}</p>
+                                </div>
+                            )}
 
                             <div className="space-y-4">
                                 <div>
@@ -5032,7 +5084,13 @@ export default function PlanificacionPage() {
                             </div>
 
                             <div className="flex gap-2 mt-5">
-                                <button onClick={() => setShowAutoV2Modal(false)} className="flex-1 py-2.5 rounded-xl text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAutoV2Modal(false)}
+                                    disabled={autoV2Loading || autoV2Generating}
+                                    title={autoV2Loading || autoV2Generating ? 'Esperá a que termine el proceso' : undefined}
+                                    className="flex-1 py-2.5 rounded-xl text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
                                     Cerrar
                                 </button>
                                 <button
