@@ -25,6 +25,7 @@ import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificac
 import { runAutoScheduleV2, generateScheduleV2 } from '@/lib/planificacion/autoScheduleEngineV2';
 import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
+import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 
 // --- CONFIGURACIÓN VISUAL ---
 const SHIFT_STYLES: any = {
@@ -327,6 +328,13 @@ export default function PlanificacionPage() {
     // Reporte de verificación de cobertura post-generación (V2)
     const [autoV2Coverage, setAutoV2Coverage] = useState<import('@/lib/planificacion/coverageVerification').CoverageVerificationReport | null>(null);
     const [showCoverageModal, setShowCoverageModal] = useState(false);
+    // Snapshot de la última generación para reprocesar errores sin volver a llamar al motor
+    const [autoV2LastRun, setAutoV2LastRun] = useState<{
+        assignments: import('@/lib/planificacion/autoScheduleEngineV2').V2Assignment[];
+        stats: import('@/lib/planificacion/autoScheduleEngineV2').V2GenerateStats;
+        ctx: import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext;
+    } | null>(null);
+    const [autoV2Fixing, setAutoV2Fixing] = useState(false);
     const [slaDebug, setSlaDebug] = useState<{ id: string; data: any } | null>(null);
     const [slaDebugLoading, setSlaDebugLoading] = useState(false);
     const [hoursMode, setHoursMode] = useState<'mes' | 'cct'>('mes');
@@ -2513,22 +2521,21 @@ export default function PlanificacionPage() {
             });
 
             // ── Verificación de cobertura (slots, descansos, licencias, >200h) ──
-            const coverage = verifyScheduleCoverage(
-                {
-                    positions: positionStructure,
-                    employees: displayedEmployees.map((e:any) => ({ id: e.id, nombre: e.nombre || e.name })),
-                    daysInMonth,
-                    empMonthlyInitial,
-                    absences,
-                    slaVendidas,
-                    autoCycles,
-                    getDayLetter,
-                    getDateKey,
-                } as any,
-                gen.assignments,
-                gen.stats,
-            );
+            const verifyCtx = {
+                positions: positionStructure,
+                employees: displayedEmployees.map((e:any) => ({ id: e.id, nombre: e.nombre || e.name })),
+                daysInMonth,
+                empMonthlyInitial,
+                absences,
+                slaVendidas,
+                autoCycles,
+                getDayLetter,
+                getDateKey,
+            } as any;
+            const coverage = verifyScheduleCoverage(verifyCtx, gen.assignments, gen.stats);
             setAutoV2Coverage(coverage);
+            // Snapshot para reprocesar (cuando el usuario hace click en "Reprocesar errores")
+            setAutoV2LastRun({ assignments: gen.assignments, stats: gen.stats, ctx: verifyCtx });
 
             const uncov = coverage.coverage.uncoveredSlots > 0 ? ` · ⚠ ${coverage.coverage.uncoveredSlots} slots sin cubrir` : '';
             const over  = coverage.overHours.length > 0 ? ` · ⚠ ${coverage.overHours.length} empleados >200h ciclo` : '';
@@ -2563,6 +2570,77 @@ export default function PlanificacionPage() {
             console.error('[applyAutoScheduleCOSP]', e);
         } finally {
             setAutoV2Generating(false);
+        }
+    };
+
+    /**
+     * Reprocesa los errores del reporte de cobertura: swap de descansos rotos
+     * contra RETs disponibles, llena slots vacantes con RETs del grupo,
+     * resuelve conflictos con licencias. No vuelve a correr el motor entero —
+     * sólo opera sobre las celdas que ya generó.
+     */
+    const reprocessAutoIssues = async () => {
+        if (!autoV2LastRun || !autoV2Coverage) {
+            toast.error('No hay una generación reciente para reprocesar.');
+            return;
+        }
+        setAutoV2Fixing(true);
+        try {
+            const result = fixScheduleIssues(
+                autoV2LastRun.ctx,
+                autoV2LastRun.assignments,
+                autoV2LastRun.stats,
+                autoV2Coverage,
+                5,
+            );
+
+            // Volcamos las nuevas asignaciones a pendingChanges
+            const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
+            let written = 0;
+            for (const a of result.assignments) {
+                const key = `${a.empId}_${a.dateStr}`;
+                if (isDateLocked(a.dateStr)) continue;
+                // Cuando overwrite está OFF, solo sobreescribimos las celdas que ya venía marcando esta automatización
+                newChanges[key] = {
+                    isTemp: true,
+                    employeeId: a.empId,
+                    objectiveId: selectedObjective,
+                    positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
+                    code: a.code,
+                    name: a.name,
+                    hours: a.hours,
+                    startTime: a.startTime,
+                    ...(a.isFranco ? { isFranco: true } : {}),
+                    ...(a.isReten ? { isReten: true } : {}),
+                };
+                written++;
+            }
+            setPendingChanges(newChanges);
+            setAutoV2Coverage(result.report);
+            setAutoV2LastRun({ ...autoV2LastRun, assignments: result.assignments });
+
+            const s = result.summary;
+            const baseMsg = `Reproceso en ${result.iterations} iteración(es). Descansos: -${s.restViolationsFixed}, licencias: -${s.licenseConflictsFixed}, slots: -${s.uncoveredFixed}.`;
+            if (result.converged) {
+                toast.success(`✓ Cobertura OK. ${baseMsg}`, { duration: 7000 });
+            } else if (s.restViolationsFixed + s.licenseConflictsFixed + s.uncoveredFixed === 0) {
+                toast.warning(
+                    `Sin progreso: ${result.report.restViolations.length} descansos, ${result.report.licenseConflicts.length} licencias y ${s.uncoveredRemaining} slots siguen sin resolverse. Revisalos a mano.`,
+                    { duration: 8000 },
+                );
+            } else {
+                toast.warning(
+                    `${baseMsg} Quedan ${result.report.restViolations.length} descansos, ${result.report.licenseConflicts.length} licencias y ${s.uncoveredRemaining} slots.`,
+                    { duration: 8000 },
+                );
+            }
+            console.info('[reprocessAutoIssues] log:', result.log);
+            void written;
+        } catch (e: any) {
+            console.error('[reprocessAutoIssues]', e);
+            toast.error('Error al reprocesar los errores.');
+        } finally {
+            setAutoV2Fixing(false);
         }
     };
 
@@ -4666,10 +4744,27 @@ export default function PlanificacionPage() {
                                 </ul>
                             </div>
 
-                            <div className="flex justify-end gap-2">
-                                <button onClick={() => setShowCoverageModal(false)} className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                                    Cerrar
-                                </button>
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="text-[11px] text-slate-500">
+                                    {autoV2Coverage.ok
+                                        ? 'Cobertura sin errores duros. Podés guardar.'
+                                        : `Se detectaron ${autoV2Coverage.uncovered.length} slots, ${autoV2Coverage.restViolations.length} descansos y ${autoV2Coverage.licenseConflicts.length} conflictos. Probá "Reprocesar" para aplicarles fixes automáticos.`}
+                                </div>
+                                <div className="flex gap-2">
+                                    {!autoV2Coverage.ok && autoV2LastRun && (
+                                        <button
+                                            onClick={reprocessAutoIssues}
+                                            disabled={autoV2Fixing}
+                                            className="px-5 py-2 rounded-xl text-sm font-black text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                            title="Intenta resolver iterativamente los errores: swap de descansos rotos contra RETs disponibles, llena slots con RETs del mismo grupo, reemplaza turnos sobre licencias."
+                                        >
+                                            {autoV2Fixing ? 'Reprocesando…' : '↻ Reprocesar errores'}
+                                        </button>
+                                    )}
+                                    <button onClick={() => setShowCoverageModal(false)} className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                                        Cerrar
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>,
