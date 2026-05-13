@@ -60,9 +60,10 @@ export async function runRestore(driveFileId: string, mode: RestoreMode): Promis
     for (let i = 0; i < docs.length; i += BATCH_SIZE) {
       const batch = db.batch();
       const chunk = docs.slice(i, i + BATCH_SIZE) as any[];
+      let written = 0;
       chunk.forEach(doc => {
         const { _id, ...fields } = doc;
-        // Convertir timestamps serializados de vuelta
+        if (!_id) return;
         const clean = deserializeFields(fields);
         const ref = db.collection(colName).doc(_id);
         if (mode === 'full') {
@@ -70,9 +71,10 @@ export async function runRestore(driveFileId: string, mode: RestoreMode): Promis
         } else {
           batch.set(ref, clean, { merge: true });
         }
+        written++;
       });
       await batch.commit();
-      docsRestored += chunk.length;
+      docsRestored += written;
     }
   }
 
