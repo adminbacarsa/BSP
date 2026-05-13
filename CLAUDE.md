@@ -210,7 +210,7 @@ powershell -ExecutionPolicy Bypass -File scripts\register-cosp-lab-scheduled-tas
 
 Modo **sin iniciar sesión** (PC encendida, usuario no logueado): `...\register-cosp-lab-scheduled-task.ps1 -AtStartupAsSystem` (SYSTEM, demora 3 min; Node en `Program Files\nodejs`, JDK 21).
 
-Diagnóstico: `npm run diagnose:lab`. Trazas siempre en **`%ProgramData%\COSP\trace.log`** (útil si falla antes de escribir en `logs\`). Quitar tarea: `npm run unregister:lab-task` (admin).
+Diagnóstico: `npm run diagnose:lab`. Trazas siempre en **`%ProgramData%\COSP\trace.log`** (útil si falla antes de escribir en `logs\`). Quitar tarea: `npm run unregister:lab-task` (admin). Instalación guiada: **`INSTALAR-TAREA-COSP-LAB.cmd`** (clic derecho → ejecutar como administrador; por defecto **SYSTEM**; con argumento **`logon`** registra al iniciar sesión del usuario).
 
 ### Primer arranque / emulador vacío
 
