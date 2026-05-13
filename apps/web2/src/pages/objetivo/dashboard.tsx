@@ -3,7 +3,7 @@ import Head from 'next/head';
 import { db, auth, storage } from '@/lib/firebase';
 import {
   collection, query, where, orderBy, onSnapshot,
-  addDoc, serverTimestamp, getDocs, getDoc, doc, Timestamp
+  addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc, Timestamp
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -13,7 +13,7 @@ import {
   Users, Siren, Bell, Send, X, Clock, CheckCircle2, Loader2,
   ChevronLeft, ChevronRight, Search, Building2, MapPin, Plus,
   Activity, Lock, Mail, Eye, EyeOff, AlertCircle, Tag, Zap,
-  UserCheck, Car, UserX
+  UserCheck, Car, UserX, ScanLine, ShieldAlert, ShieldOff, Trash2
 } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -50,6 +50,22 @@ interface PersonaEncontrada {
   tipo: 'empleado' | 'visitante' | 'vehiculo';
   autorizado: boolean;
   extra?: string;
+}
+
+interface PersonalAutorizado {
+  id: string;
+  objectiveId: string;
+  clientId: string;
+  nombre: string;
+  dni?: string;
+  legajo?: string;
+  patente?: string;
+  tipo: 'empleado' | 'vehiculo' | 'visitante';
+  cargo?: string;
+  observaciones?: string;
+  activo: boolean;
+  creadoEn?: any;
+  creadoPor?: string;
 }
 
 interface TurnoActivo {
@@ -101,6 +117,18 @@ const fmtEntryTime = (val: any) => {
 const fmtEntryDate = (val: any) => {
   const d = toDate(val);
   return d ? d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : '';
+};
+
+// Parsea el PDF417 del dorso del DNI argentino
+// Formato: @APELLIDO@NOMBRE@SEGUNDO_NOMBRE@DNI@SEXO@FECHA_NAC@...
+const parseDNIBarcode = (raw: string): { dni: string; nombre: string; apellido: string } | null => {
+  if (!raw || typeof raw !== 'string') return null;
+  const clean = raw.startsWith('@') ? raw.slice(1) : raw;
+  const parts = clean.split('@');
+  if (parts.length < 4) return null;
+  const dni = parts[3]?.trim().replace(/\D/g, '');
+  if (!dni || !/^\d{7,8}$/.test(dni)) return null;
+  return { apellido: parts[0]?.trim() || '', nombre: parts[1]?.trim() || '', dni };
 };
 
 // ─── Config tipos de entrada ──────────────────────────────────────────────────
@@ -724,12 +752,136 @@ function NuevaEntradaPanel({ onSave, onClose, empleadoNombre, objectiveId, turno
   );
 }
 
+// ─── Scanner DNI (PDF417) ─────────────────────────────────────────────────────
+
+function DNIScannerModal({ onResult, onClose }: {
+  onResult: (data: { dni: string; nombre: string; apellido: string }) => void;
+  onClose: () => void;
+}) {
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const loopRef   = useRef<any>(null);
+  const [fase, setFase] = useState<'init' | 'scan' | 'noSupport' | 'noCamera'>('init');
+
+  useEffect(() => {
+    let cancelled = false;
+    const cleanup = () => {
+      clearInterval(loopRef.current);
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+
+    const init = async () => {
+      if (!('BarcodeDetector' in window)) { setFase('noSupport'); return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        setFase('scan');
+
+        const detector = new (window as any).BarcodeDetector({ formats: ['pdf417', 'qr_code', 'code_128'] });
+        loopRef.current = setInterval(async () => {
+          if (!videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            for (const code of codes) {
+              const parsed = parseDNIBarcode(code.rawValue);
+              if (parsed?.dni) { cleanup(); onResult(parsed); return; }
+            }
+          } catch { /* continuar */ }
+        }, 350);
+      } catch { setFase('noCamera'); }
+    };
+
+    init();
+    return () => { cancelled = true; cleanup(); };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+      <div className="px-5 pt-safe pt-10 pb-4 flex items-center justify-between flex-shrink-0">
+        <div>
+          <p className="text-white font-black text-lg">Escanear DNI</p>
+          <p className="text-slate-400 text-xs mt-0.5">Código de barras del dorso del documento</p>
+        </div>
+        <button onClick={onClose} className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center active:bg-white/20">
+          <X size={20} className="text-white" />
+        </button>
+      </div>
+
+      <div className="flex-1 relative overflow-hidden">
+        <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" playsInline muted />
+
+        {fase === 'scan' && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            {/* Marco de escaneo — proporción tarjeta ID */}
+            <div className="relative" style={{ width: '85vw', maxWidth: 360, aspectRatio: '1.586' }}>
+              <div className="absolute inset-0 rounded-2xl border-2 border-white/20 bg-transparent" />
+              {/* Esquinas */}
+              {[
+                'top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl',
+                'top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl',
+                'bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl',
+                'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl',
+              ].map((cls, i) => (
+                <div key={i} className={`absolute w-10 h-10 border-indigo-400 ${cls}`} />
+              ))}
+              {/* Línea de escaneo animada */}
+              <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent rounded-full"
+                style={{ animation: 'scanLine 2.5s ease-in-out infinite', top: '50%' }} />
+            </div>
+          </div>
+        )}
+
+        {fase === 'init' && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2 size={40} className="text-indigo-400 animate-spin" />
+          </div>
+        )}
+
+        {(fase === 'noSupport' || fase === 'noCamera') && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-8 text-center bg-black/80">
+            <AlertCircle size={52} className="text-amber-400" />
+            <div>
+              <p className="text-white font-black text-lg">
+                {fase === 'noSupport' ? 'Escáner no disponible' : 'Sin acceso a cámara'}
+              </p>
+              <p className="text-slate-300 text-sm mt-2 leading-relaxed">
+                {fase === 'noSupport'
+                  ? 'Esta función requiere Chrome en Android. Ingresá el DNI manualmente.'
+                  : 'Verificá los permisos de cámara en el navegador.'}
+              </p>
+            </div>
+            <button onClick={onClose}
+              className="px-8 py-4 rounded-2xl bg-white text-slate-900 font-black text-sm active:scale-95 transition-all">
+              Ingresar manualmente
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="px-6 pb-10 pt-5 text-center flex-shrink-0">
+        {fase === 'scan' && (
+          <>
+            <p className="text-slate-300 text-sm">Apuntá al código de barras del <strong className="text-white">dorso</strong> del DNI</p>
+            <p className="text-slate-500 text-xs mt-1">El escaneo es automático</p>
+          </>
+        )}
+      </div>
+
+      <style>{`@keyframes scanLine { 0%,100%{transform:translateY(-16px);opacity:.4} 50%{transform:translateY(16px);opacity:1} }`}</style>
+    </div>
+  );
+}
+
 // ─── Control de Acceso ────────────────────────────────────────────────────────
 
-function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entries, empleadoNombre }: {
+function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entries, empleadoNombre, isAdmin }: {
   onSave: () => void; onClose: () => void; objectiveId: string;
   turno: TurnoActivo | null; objetivo: ObjetivoInfo;
-  entries: LibroEntry[]; empleadoNombre: string;
+  entries: LibroEntry[]; empleadoNombre: string; isAdmin: boolean;
 }) {
   const [modo,          setModo]          = useState<'persona' | 'vehiculo'>('persona');
   const [busqueda,      setBusqueda]      = useState('');
@@ -739,55 +891,89 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
   const [nombreManual,  setNombreManual]  = useState('');
   const [saving,        setSaving]        = useState(false);
   const [exito,         setExito]         = useState<'ingreso' | 'egreso' | null>(null);
+  const [showScanner,   setShowScanner]   = useState(false);
+  const [showGestionar, setShowGestionar] = useState(false);
+
+  // Lista de autorizados del objetivo
+  const [autorizados,   setAutorizados]   = useState<PersonalAutorizado[]>([]);
+  const [nuevoNombre,   setNuevoNombre]   = useState('');
+  const [nuevoDNI,      setNuevoDNI]      = useState('');
+  const [nuevoLegajo,   setNuevoLegajo]   = useState('');
+  const [nuevoTipo,     setNuevoTipo]     = useState<'empleado' | 'vehiculo' | 'visitante'>('empleado');
+  const [nuevoCargo,    setNuevoCargo]    = useState('');
+  const [guardandoAuth, setGuardandoAuth] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Cargar personal autorizado del objetivo
+  useEffect(() => {
+    getDocs(query(collection(db, 'personal_autorizado'), where('objectiveId', '==', objectiveId)))
+      .then(snap => setAutorizados(
+        snap.docs.map(d => ({ id: d.id, ...d.data() } as PersonalAutorizado)).filter(a => a.activo !== false)
+      )).catch(() => {});
+  }, [objectiveId]);
 
   const accesosDehoy = entries
     .filter(e => e.type === 'ingreso' || e.type === 'egreso')
-    .slice()
-    .sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
+    .slice().sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
 
-  // Determina si alguien está adentro según el último movimiento del día
-  const getEstado = (identificador: string): 'ADENTRO' | 'AFUERA' => {
-    const propios = accesosDehoy.filter(e => e.identificador === identificador);
-    if (!propios.length) return 'AFUERA';
-    return propios[0].type === 'ingreso' ? 'ADENTRO' : 'AFUERA';
+  const getEstado = (id: string): 'ADENTRO' | 'AFUERA' => {
+    const propios = accesosDehoy.filter(e => e.identificador === id);
+    return !propios.length || propios[0].type === 'egreso' ? 'AFUERA' : 'ADENTRO';
   };
 
   const resetBusqueda = () => { setEncontrado(null); setSinResultados(false); setNombreManual(''); };
 
-  const cambiarModo = (m: 'persona' | 'vehiculo') => { setModo(m); setBusqueda(''); resetBusqueda(); };
+  // Busca en la lista de autorizados del objetivo (client-side)
+  const buscarEnLista = (txt: string): PersonaEncontrada | null => {
+    const q = txt.toLowerCase().trim();
+    const found = autorizados.find(a =>
+      (a.dni    && a.dni.toLowerCase()            === q) ||
+      (a.legajo && String(a.legajo).toLowerCase() === q) ||
+      (a.patente && a.patente.toLowerCase()       === q) ||
+      (a.nombre && a.nombre.toLowerCase().includes(q))
+    );
+    if (!found) return null;
+    return {
+      docId: found.id, nombre: found.nombre,
+      identificador: found.dni || found.legajo || found.patente || txt,
+      identificadorTipo: found.dni ? 'dni' : found.legajo ? 'legajo' : found.patente ? 'patente' : 'nombre',
+      tipo: found.tipo === 'vehiculo' ? 'vehiculo' : 'empleado',
+      autorizado: true, extra: found.cargo || '',
+    };
+  };
 
   const buscar = async () => {
-    const txt = busqueda.trim();
-    if (!txt) return;
+    const txt = busqueda.trim(); if (!txt) return;
 
     if (modo === 'vehiculo') {
       const patente = txt.toUpperCase();
-      setEncontrado({ nombre: patente, identificador: patente, identificadorTipo: 'patente', tipo: 'vehiculo', autorizado: true });
-      setSinResultados(false);
-      return;
+      const enLista = autorizados.find(a => a.patente?.toUpperCase() === patente);
+      setEncontrado({ nombre: patente, identificador: patente, identificadorTipo: 'patente', tipo: 'vehiculo', autorizado: !!enLista, extra: enLista?.cargo || '' });
+      setSinResultados(false); return;
     }
 
+    // 1. Lista de autorizados del objetivo
+    const enLista = buscarEnLista(txt);
+    if (enLista) { setEncontrado(enLista); setSinResultados(false); return; }
+
+    // 2. Colección empleados (persona conocida pero no autorizada para este objetivo)
     setBuscando(true); resetBusqueda();
     try {
       const snap = await getDocs(collection(db, 'empleados'));
-      const q = txt.toLowerCase();
-      let found: PersonaEncontrada | null = null;
-
+      const q = txt.toLowerCase(); let found: PersonaEncontrada | null = null;
       for (const d of snap.docs) {
         const data = d.data();
         const nombre = [data.firstName, data.lastName].filter(Boolean).join(' ');
         const legajo = String(data.legajo || data.employeeNumber || '');
         const dni    = String(data.dni    || data.document       || '');
-
         if (legajo === q || dni === q || nombre.toLowerCase() === q || nombre.toLowerCase().includes(q)) {
-          const idTipo: PersonaEncontrada['identificadorTipo'] =
-            legajo === q ? 'legajo' : dni === q ? 'dni' : 'nombre';
           found = {
             docId: d.id, nombre: nombre || 'Empleado',
-            identificador: legajo || dni || txt, identificadorTipo: idTipo,
-            tipo: 'empleado', autorizado: true,
-            extra: data.cargo || data.position || data.sector || '',
+            identificador: legajo || dni || txt,
+            identificadorTipo: legajo === q ? 'legajo' : dni === q ? 'dni' : 'nombre',
+            tipo: 'empleado', autorizado: false,
+            extra: data.cargo || data.position || '',
           };
           break;
         }
@@ -798,56 +984,92 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
     finally { setBuscando(false); }
   };
 
+  // Resultado del scanner DNI
+  const handleScanResult = async (data: { dni: string; nombre: string; apellido: string }) => {
+    setShowScanner(false);
+    const fullName = `${data.apellido} ${data.nombre}`.trim();
+    setBusqueda(data.dni);
+    const enLista = buscarEnLista(data.dni);
+    if (enLista) { setEncontrado(enLista); setSinResultados(false); return; }
+    setBuscando(true); resetBusqueda();
+    try {
+      const snap = await getDocs(collection(db, 'empleados'));
+      let found: PersonaEncontrada | null = null;
+      for (const d of snap.docs) {
+        const emp = d.data();
+        const dni = String(emp.dni || emp.document || '');
+        if (dni === data.dni) {
+          const nombre = [emp.firstName, emp.lastName].filter(Boolean).join(' ');
+          found = { docId: d.id, nombre, identificador: data.dni, identificadorTipo: 'dni', tipo: 'empleado', autorizado: false, extra: emp.cargo || '' };
+          break;
+        }
+      }
+      if (found) setEncontrado(found);
+      else { setSinResultados(true); setNombreManual(fullName || data.dni); }
+    } catch { setSinResultados(true); }
+    finally { setBuscando(false); }
+  };
+
   const registrar = async () => {
-    const nombre      = encontrado?.nombre || nombreManual.trim();
+    const nombre = encontrado?.nombre || nombreManual.trim();
     const identificador = encontrado?.identificador || busqueda.trim();
     if (!nombre) return;
-
     const accion: 'ingreso' | 'egreso' = encontrado
-      ? (getEstado(encontrado.identificador) === 'ADENTRO' ? 'egreso' : 'ingreso')
-      : 'ingreso';
-
+      ? (getEstado(encontrado.identificador) === 'ADENTRO' ? 'egreso' : 'ingreso') : 'ingreso';
     setSaving(true);
     try {
       await addDoc(collection(db, 'libro_guardia'), {
-        objectiveId,
-        clientId:       turno?.clientId     || objetivo.clientId    || '',
-        objetivoNombre: objetivo.name       || '',
-        clientName:     objetivo.clientName || '',
-        shiftId:        turno?.id           || '',
-        employeeId:     auth.currentUser?.uid || '',
-        empleadoNombre,
-        type:           accion,
-        etiqueta:       'ACCESO',
-        gravedad:       (sinResultados && !encontrado) ? 'MEDIA' : 'BAJA',
-        text:           `${accion === 'ingreso' ? 'Ingreso' : 'Egreso'} · ${nombre}`,
-        identificador,
-        identificadorTipo: encontrado?.identificadorTipo || 'nombre',
-        personaNombre:  nombre,
-        personaId:      encontrado?.docId || '',
-        personaTipo:    encontrado?.tipo || 'visitante',
-        autorizado:     encontrado?.autorizado ?? false,
-        createdAt:      serverTimestamp(),
+        objectiveId, clientId: turno?.clientId || objetivo.clientId || '',
+        objetivoNombre: objetivo.name || '', clientName: objetivo.clientName || '',
+        shiftId: turno?.id || '', employeeId: auth.currentUser?.uid || '',
+        empleadoNombre, type: accion, etiqueta: 'ACCESO',
+        gravedad: encontrado?.autorizado ? 'BAJA' : (sinResultados ? 'MEDIA' : 'MEDIA'),
+        text: `${accion === 'ingreso' ? 'Ingreso' : 'Egreso'} · ${nombre}`,
+        identificador, identificadorTipo: encontrado?.identificadorTipo || 'nombre',
+        personaNombre: nombre, personaId: encontrado?.docId || '',
+        personaTipo: encontrado?.tipo || 'visitante', autorizado: encontrado?.autorizado ?? false,
+        createdAt: serverTimestamp(),
       });
       setExito(accion);
       setTimeout(() => { onSave(); onClose(); }, 1600);
     } catch (e: any) { alert('Error: ' + e.message); setSaving(false); }
   };
 
-  const estado     = encontrado ? getEstado(encontrado.identificador) : null;
-  const accionBtn  = estado === 'ADENTRO' ? 'egreso' : 'ingreso';
+  // Agregar a la lista de autorizados del objetivo
+  const agregarAutorizado = async (desde?: PersonaEncontrada) => {
+    const nombre = desde?.nombre || nuevoNombre.trim(); if (!nombre) return;
+    setGuardandoAuth(true);
+    try {
+      const payload: any = {
+        objectiveId, clientId: objetivo.clientId || '', nombre,
+        tipo: desde?.tipo === 'vehiculo' ? 'vehiculo' : nuevoTipo,
+        cargo: desde?.extra || nuevoCargo.trim(),
+        activo: true, creadoEn: serverTimestamp(), creadoPor: auth.currentUser?.uid || '',
+      };
+      if (desde?.identificadorTipo === 'dni')    payload.dni    = desde.identificador;
+      if (desde?.identificadorTipo === 'legajo') payload.legajo = desde.identificador;
+      if (desde?.identificadorTipo === 'patente')payload.patente= desde.identificador;
+      if (!desde && nuevoDNI.trim())    payload.dni    = nuevoDNI.trim();
+      if (!desde && nuevoLegajo.trim()) payload.legajo = nuevoLegajo.trim();
+      const ref2 = await addDoc(collection(db, 'personal_autorizado'), payload);
+      const newA: PersonalAutorizado = { id: ref2.id, ...payload };
+      setAutorizados(prev => [...prev, newA]);
+      if (desde && encontrado) setEncontrado({ ...encontrado, autorizado: true });
+      setNuevoNombre(''); setNuevoDNI(''); setNuevoLegajo(''); setNuevoCargo(''); setNuevoTipo('empleado');
+    } catch (e: any) { alert('Error: ' + e.message); }
+    finally { setGuardandoAuth(false); }
+  };
 
-  // Pantalla de éxito
-  if (exito) return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className={`flex flex-col items-center gap-4 px-10 py-10 rounded-3xl shadow-2xl ${exito === 'ingreso' ? 'bg-emerald-600' : 'bg-blue-600'}`}>
-        <CheckCircle2 size={60} className="text-white" strokeWidth={1.5} />
-        <p className="text-white font-black text-xl tracking-wide">{exito === 'ingreso' ? 'INGRESO' : 'EGRESO'} REGISTRADO</p>
-      </div>
-    </div>
-  );
+  const quitarAutorizado = async (id: string) => {
+    if (!confirm('¿Quitar de autorizados?')) return;
+    try { await deleteDoc(doc(db, 'personal_autorizado', id)); setAutorizados(prev => prev.filter(a => a.id !== id)); }
+    catch (e: any) { alert('Error: ' + e.message); }
+  };
 
-  // Cálculo de quién está adentro ahora
+  const estado    = encontrado ? getEstado(encontrado.identificador) : null;
+  const accionBtn = estado === 'ADENTRO' ? 'egreso' : 'ingreso';
+
+  // Quién está adentro ahora
   const adentroAhora: LibroEntry[] = [];
   const seen = new Set<string>();
   for (const e of [...accesosDehoy].reverse()) {
@@ -856,164 +1078,279 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
     if (e.type === 'ingreso') adentroAhora.push(e);
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm"
-      onClick={ev => { if (ev.target === ev.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-t-2xl shadow-2xl flex flex-col max-h-[94dvh]">
-
-        <div className="flex justify-center pt-3 cursor-pointer" onClick={onClose}>
-          <div className="w-10 h-1 rounded-full bg-slate-200" />
-        </div>
-
-        <div className="px-5 py-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-slate-900 font-black text-base">Control de Acceso</h3>
-            <p className="text-slate-400 text-[11px] mt-0.5">{objetivo.name}</p>
-          </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
-            <X size={17} className="text-slate-500" />
-          </button>
-        </div>
-
-        <div className="overflow-y-auto flex-1 px-5 pb-8 flex flex-col gap-5">
-
-          {/* Toggle Persona / Vehículo */}
-          <div className="grid grid-cols-2 gap-1.5 bg-slate-100 rounded-2xl p-1.5">
-            {([['persona', UserCheck, 'Persona'], ['vehiculo', Car, 'Vehículo']] as const).map(([m, Icon, lbl]) => (
-              <button key={m} onClick={() => cambiarModo(m)}
-                className={`flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black transition-all ${modo === m ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
-                <Icon size={17} /> {lbl}
-              </button>
-            ))}
-          </div>
-
-          {/* Input de búsqueda */}
-          <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-              {modo === 'persona' ? 'DNI, Legajo o Nombre' : 'Patente del vehículo'}
-            </p>
-            <div className="flex gap-2">
-              <input ref={inputRef}
-                value={busqueda}
-                onChange={e => { setBusqueda(modo === 'vehiculo' ? e.target.value.toUpperCase() : e.target.value); resetBusqueda(); }}
-                onKeyDown={e => e.key === 'Enter' && buscar()}
-                placeholder={modo === 'persona' ? 'Ej: 35123456  ·  García Juan  ·  Leg.42' : 'Ej: AB 123 CD'}
-                inputMode={modo === 'persona' ? 'text' : 'text'}
-                autoCapitalize={modo === 'vehiculo' ? 'characters' : 'words'}
-                autoComplete="off"
-                className="flex-1 px-4 py-4 rounded-2xl border-2 border-slate-200 text-base font-bold text-slate-900 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all"
-              />
-              <button onClick={buscar} disabled={buscando || !busqueda.trim()}
-                className="w-14 rounded-2xl bg-indigo-600 text-white font-black disabled:opacity-40 active:scale-95 transition-all flex items-center justify-center">
-                {buscando ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Resultado encontrado */}
-          {encontrado && (
-            <div className={`rounded-2xl border-2 p-4 ${
-              encontrado.tipo === 'vehiculo'   ? 'bg-sky-50 border-sky-200' :
-              encontrado.autorizado            ? 'bg-emerald-50 border-emerald-200' :
-                                               'bg-amber-50 border-amber-200'}`}>
-              <div className="flex items-center gap-4">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black ${
-                  encontrado.tipo === 'vehiculo' ? 'bg-sky-100 text-sky-600' :
-                  encontrado.autorizado          ? 'bg-emerald-100 text-emerald-600' :
-                                                 'bg-amber-100 text-amber-600'}`}>
-                  {encontrado.tipo === 'vehiculo' ? <Car size={26} /> : <UserCheck size={26} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-black text-slate-900 text-lg leading-tight">{encontrado.nombre}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {encontrado.tipo === 'empleado' ? `Empleado · ${encontrado.identificadorTipo.toUpperCase()}: ${encontrado.identificador}` :
-                     encontrado.tipo === 'vehiculo' ? 'Vehículo' : 'Visitante'}
-                    {encontrado.extra && ` · ${encontrado.extra}`}
-                  </p>
-                  <div className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black ${
-                    estado === 'ADENTRO'
-                      ? 'bg-red-50 border border-red-200 text-red-700'
-                      : 'bg-emerald-50 border border-emerald-200 text-emerald-700'}`}>
-                    <span className={`w-2 h-2 rounded-full ${estado === 'ADENTRO' ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                    {estado === 'ADENTRO' ? 'ADENTRO · registrar egreso' : 'AFUERA · puede ingresar'}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* No encontrado — registrar como visitante */}
-          {sinResultados && (
-            <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 flex flex-col gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <UserX size={20} className="text-amber-600" />
-                </div>
-                <div>
-                  <p className="font-black text-amber-900 text-sm">No encontrado en el sistema</p>
-                  <p className="text-xs text-amber-600">Registrar como visitante externo</p>
-                </div>
-              </div>
-              <input type="text" value={nombreManual} onChange={e => setNombreManual(e.target.value)}
-                placeholder="Nombre completo del visitante..."
-                className="w-full px-4 py-3 rounded-xl border-2 border-amber-200 bg-white text-sm font-medium text-slate-800 placeholder-slate-300 outline-none focus:border-amber-400 transition-all"
-              />
-            </div>
-          )}
-
-          {/* Botón principal de acción */}
-          {(encontrado || (sinResultados && nombreManual.trim())) && (
-            <button onClick={registrar} disabled={saving}
-              className={`w-full py-5 rounded-2xl font-black text-white text-base flex items-center justify-center gap-3 shadow-lg active:scale-[0.98] transition-all disabled:opacity-60 ${
-                (sinResultados || accionBtn === 'ingreso') ? 'bg-emerald-600 shadow-emerald-500/25' : 'bg-blue-600 shadow-blue-500/25'}`}>
-              {saving ? <Loader2 size={22} className="animate-spin" /> : (
-                <>
-                  {(sinResultados || accionBtn === 'ingreso') ? <ArrowRightCircle size={24} /> : <ArrowLeftCircle size={24} />}
-                  REGISTRAR {sinResultados ? 'INGRESO' : accionBtn.toUpperCase()}
-                </>
-              )}
-            </button>
-          )}
-
-          {/* Quién está adentro ahora */}
-          {adentroAhora.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Adentro ahora ({adentroAhora.length})</p>
-              <div className="flex flex-col gap-1.5">
-                {adentroAhora.map(e => (
-                  <div key={e.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                    <p className="text-sm font-bold text-slate-700 flex-1 truncate">{e.personaNombre || e.text}</p>
-                    <span className="text-[11px] text-slate-400 flex-shrink-0">{fmtEntryTime(e.createdAt)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Log cronológico de hoy */}
-          {accesosDehoy.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Movimientos de hoy</p>
-              <div className="flex flex-col gap-1.5">
-                {accesosDehoy.map(e => (
-                  <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${e.type === 'ingreso' ? 'bg-slate-50 border-slate-100' : 'bg-slate-50 border-slate-100'}`}>
-                    {e.type === 'ingreso'
-                      ? <ArrowRightCircle size={14} className="text-emerald-500 flex-shrink-0" />
-                      : <ArrowLeftCircle  size={14} className="text-blue-500 flex-shrink-0"    />}
-                    <p className="text-xs font-medium text-slate-600 flex-1 truncate">{e.personaNombre || e.text}</p>
-                    <span className={`text-[10px] font-black ${e.type === 'ingreso' ? 'text-emerald-600' : 'text-blue-600'}`}>
-                      {e.type === 'ingreso' ? 'ENT' : 'SAL'} {fmtEntryTime(e.createdAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-        </div>
+  if (exito) return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className={`flex flex-col items-center gap-4 px-12 py-12 rounded-3xl shadow-2xl ${exito === 'ingreso' ? 'bg-emerald-600' : 'bg-blue-600'}`}>
+        <CheckCircle2 size={64} className="text-white" strokeWidth={1.5} />
+        <p className="text-white font-black text-xl tracking-wide">{exito === 'ingreso' ? 'INGRESO' : 'EGRESO'} REGISTRADO</p>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {showScanner && <DNIScannerModal onResult={handleScanResult} onClose={() => setShowScanner(false)} />}
+
+      <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-sm"
+        onClick={ev => { if (ev.target === ev.currentTarget) onClose(); }}>
+        <div className="bg-white rounded-t-2xl shadow-2xl flex flex-col max-h-[95dvh]">
+
+          <div className="flex justify-center pt-3 cursor-pointer" onClick={onClose}>
+            <div className="w-10 h-1 rounded-full bg-slate-200" />
+          </div>
+          <div className="px-5 py-3 flex items-center justify-between flex-shrink-0">
+            <div>
+              <h3 className="text-slate-900 font-black text-base">Control de Acceso</h3>
+              <p className="text-slate-400 text-[11px] mt-0.5">{objetivo.name} · {autorizados.length} autorizados</p>
+            </div>
+            <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+              <X size={17} className="text-slate-500" />
+            </button>
+          </div>
+
+          <div className="overflow-y-auto flex-1 px-5 pb-8 flex flex-col gap-5">
+
+            {/* Modo Persona / Vehículo */}
+            <div className="grid grid-cols-2 gap-1.5 bg-slate-100 rounded-2xl p-1.5">
+              {([['persona', UserCheck, 'Persona'], ['vehiculo', Car, 'Vehículo']] as const).map(([m, Icon, lbl]) => (
+                <button key={m} onClick={() => { setModo(m); setBusqueda(''); resetBusqueda(); }}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black transition-all ${modo === m ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+                  <Icon size={17} /> {lbl}
+                </button>
+              ))}
+            </div>
+
+            {/* Input búsqueda + scan */}
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                {modo === 'persona' ? 'DNI, Legajo o Nombre' : 'Patente del vehículo'}
+              </p>
+              <div className="flex gap-2">
+                {modo === 'persona' && (
+                  <button onClick={() => setShowScanner(true)}
+                    className="w-14 rounded-2xl bg-slate-100 border border-slate-200 text-slate-600 flex items-center justify-center active:scale-95 transition-all hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600">
+                    <ScanLine size={20} />
+                  </button>
+                )}
+                <input ref={inputRef}
+                  value={busqueda}
+                  onChange={e => { setBusqueda(modo === 'vehiculo' ? e.target.value.toUpperCase() : e.target.value); resetBusqueda(); }}
+                  onKeyDown={e => e.key === 'Enter' && buscar()}
+                  placeholder={modo === 'persona' ? 'Ej: 35123456  ·  García Juan  ·  Leg.42' : 'Ej: AB 123 CD'}
+                  autoCapitalize={modo === 'vehiculo' ? 'characters' : 'words'}
+                  autoComplete="off"
+                  className="flex-1 px-4 py-4 rounded-2xl border-2 border-slate-200 text-base font-bold text-slate-900 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all"
+                />
+                <button onClick={buscar} disabled={buscando || !busqueda.trim()}
+                  className="w-14 rounded-2xl bg-indigo-600 text-white disabled:opacity-40 active:scale-95 transition-all flex items-center justify-center">
+                  {buscando ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
+                </button>
+              </div>
+              {modo === 'persona' && (
+                <p className="text-[10px] text-slate-400 mt-1.5 ml-1">
+                  Toca <ScanLine size={10} className="inline" /> para escanear el DNI con la cámara
+                </p>
+              )}
+            </div>
+
+            {/* Resultado */}
+            {encontrado && (
+              <div className="flex flex-col gap-3">
+                <div className={`rounded-2xl border-2 p-4 ${
+                  encontrado.tipo === 'vehiculo' ? 'bg-sky-50 border-sky-200' :
+                  encontrado.autorizado          ? 'bg-emerald-50 border-emerald-200' :
+                                                 'bg-amber-50 border-amber-200'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+                      encontrado.tipo === 'vehiculo' ? 'bg-sky-100' :
+                      encontrado.autorizado          ? 'bg-emerald-100' : 'bg-amber-100'}`}>
+                      {encontrado.tipo === 'vehiculo'
+                        ? <Car size={26} className="text-sky-600" />
+                        : encontrado.autorizado
+                        ? <ShieldCheck size={26} className="text-emerald-600" />
+                        : <ShieldOff size={26} className="text-amber-600" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-slate-900 text-lg leading-tight">{encontrado.nombre}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {encontrado.tipo === 'vehiculo' ? 'Vehículo' : `${encontrado.identificadorTipo.toUpperCase()}: ${encontrado.identificador}`}
+                        {encontrado.extra && ` · ${encontrado.extra}`}
+                      </p>
+                      {/* Badge autorización */}
+                      <span className={`mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black border ${
+                        encontrado.tipo === 'vehiculo'
+                          ? 'bg-sky-50 border-sky-200 text-sky-700'
+                          : encontrado.autorizado
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                        {encontrado.tipo === 'vehiculo' ? '🚗 Vehículo' :
+                         encontrado.autorizado ? '✓ Autorizado para este objetivo' : '⚠ No autorizado para este objetivo'}
+                      </span>
+                      {/* Estado adentro/afuera */}
+                      <div className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black border ml-2 ${
+                        estado === 'ADENTRO' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+                        <span className={`w-2 h-2 rounded-full ${estado === 'ADENTRO' ? 'bg-red-500 animate-pulse' : 'bg-slate-300'}`} />
+                        {estado === 'ADENTRO' ? 'ADENTRO' : 'AFUERA'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Admin: agregar a autorizados si no está en la lista */}
+                {isAdmin && !encontrado.autorizado && (
+                  <button onClick={() => agregarAutorizado(encontrado)} disabled={guardandoAuth}
+                    className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 font-bold text-sm active:scale-95 transition-all disabled:opacity-60">
+                    {guardandoAuth ? <Loader2 size={16} className="animate-spin" /> : <UserCheck size={16} />}
+                    Agregar a autorizados de este objetivo
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* No encontrado */}
+            {sinResultados && (
+              <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                    <UserX size={20} className="text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-black text-amber-900 text-sm">No registrado en el sistema</p>
+                    <p className="text-xs text-amber-600">Ingresá el nombre para registrar como visitante</p>
+                  </div>
+                </div>
+                <input type="text" value={nombreManual} onChange={e => setNombreManual(e.target.value)}
+                  placeholder="Nombre completo..."
+                  className="w-full px-4 py-3 rounded-xl border-2 border-amber-200 bg-white text-sm font-medium text-slate-800 placeholder-slate-300 outline-none focus:border-amber-400 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Botón acción principal */}
+            {(encontrado || (sinResultados && nombreManual.trim())) && (
+              <button onClick={registrar} disabled={saving}
+                className={`w-full py-5 rounded-2xl font-black text-white text-base flex items-center justify-center gap-3 shadow-lg active:scale-[0.98] transition-all disabled:opacity-60 ${
+                  (sinResultados || accionBtn === 'ingreso') ? 'bg-emerald-600 shadow-emerald-500/25' : 'bg-blue-600 shadow-blue-500/25'}`}>
+                {saving ? <Loader2 size={22} className="animate-spin" /> : (
+                  <>
+                    {(sinResultados || accionBtn === 'ingreso') ? <ArrowRightCircle size={24} /> : <ArrowLeftCircle size={24} />}
+                    REGISTRAR {sinResultados ? 'INGRESO' : accionBtn.toUpperCase()}
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Adentro ahora */}
+            {adentroAhora.length > 0 && (
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Adentro ahora · {adentroAhora.length}</p>
+                <div className="flex flex-col gap-1.5">
+                  {adentroAhora.map(e => (
+                    <div key={e.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                      <p className="text-sm font-bold text-slate-700 flex-1 truncate">{e.personaNombre || e.text}</p>
+                      <span className="text-[11px] text-slate-400">{fmtEntryTime(e.createdAt)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Movimientos del día */}
+            {accesosDehoy.length > 0 && (
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Movimientos de hoy</p>
+                <div className="flex flex-col gap-1.5">
+                  {accesosDehoy.map(e => (
+                    <div key={e.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                      {e.type === 'ingreso'
+                        ? <ArrowRightCircle size={14} className="text-emerald-500 flex-shrink-0" />
+                        : <ArrowLeftCircle  size={14} className="text-blue-500 flex-shrink-0" />}
+                      <p className="text-xs font-medium text-slate-600 flex-1 truncate">{e.personaNombre || e.text}</p>
+                      <span className={`text-[10px] font-black ${e.type === 'ingreso' ? 'text-emerald-600' : 'text-blue-600'}`}>
+                        {e.type === 'ingreso' ? 'ENT' : 'SAL'} {fmtEntryTime(e.createdAt)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Gestionar autorizados (admin) */}
+            {isAdmin && (
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                <button onClick={() => setShowGestionar(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 bg-slate-50 hover:bg-slate-100 transition-colors">
+                  <div className="flex items-center gap-2 text-slate-700 font-black text-sm">
+                    <ShieldAlert size={16} className="text-indigo-500" />
+                    Personal autorizado · {autorizados.length}
+                  </div>
+                  <ChevronRight size={16} className={`text-slate-400 transition-transform ${showGestionar ? 'rotate-90' : ''}`} />
+                </button>
+
+                {showGestionar && (
+                  <div className="px-4 pb-4 flex flex-col gap-4 pt-3">
+                    {/* Lista */}
+                    {autorizados.length === 0
+                      ? <p className="text-sm text-slate-400 text-center py-4">Sin personal autorizado aún</p>
+                      : autorizados.map(a => (
+                        <div key={a.id} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${a.tipo === 'vehiculo' ? 'bg-sky-100' : 'bg-indigo-100'}`}>
+                            {a.tipo === 'vehiculo' ? <Car size={14} className="text-sky-600" /> : <UserCheck size={14} className="text-indigo-600" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">{a.nombre}</p>
+                            <p className="text-[11px] text-slate-400">
+                              {[a.dni && `DNI: ${a.dni}`, a.legajo && `Leg: ${a.legajo}`, a.patente, a.cargo].filter(Boolean).join(' · ')}
+                            </p>
+                          </div>
+                          <button onClick={() => quitarAutorizado(a.id)}
+                            className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center flex-shrink-0 active:scale-90 transition-all">
+                            <Trash2 size={13} className="text-red-500" />
+                          </button>
+                        </div>
+                      ))
+                    }
+
+                    {/* Formulario agregar */}
+                    <div className="bg-slate-50 rounded-xl p-3 flex flex-col gap-2.5">
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Agregar nuevo</p>
+                      <div className="grid grid-cols-3 gap-1.5 bg-white rounded-xl border border-slate-200 p-1">
+                        {(['empleado', 'vehiculo', 'visitante'] as const).map(t => (
+                          <button key={t} onClick={() => setNuevoTipo(t)}
+                            className={`py-2 rounded-lg text-xs font-black transition-all capitalize ${nuevoTipo === t ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>
+                            {t === 'vehiculo' ? 'Vehículo' : t === 'visitante' ? 'Visitante' : 'Empleado'}
+                          </button>
+                        ))}
+                      </div>
+                      <input value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} placeholder="Nombre *"
+                        className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input value={nuevoTipo === 'vehiculo' ? '' : nuevoDNI} onChange={e => setNuevoDNI(e.target.value)}
+                          placeholder={nuevoTipo === 'vehiculo' ? 'Patente' : 'DNI'}
+                          className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all" />
+                        <input value={nuevoTipo === 'vehiculo' ? '' : nuevoLegajo} onChange={e => setNuevoLegajo(e.target.value)}
+                          placeholder={nuevoTipo === 'vehiculo' ? '—' : 'Legajo'}
+                          disabled={nuevoTipo === 'vehiculo'}
+                          className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all disabled:opacity-40" />
+                      </div>
+                      <input value={nuevoCargo} onChange={e => setNuevoCargo(e.target.value)} placeholder="Cargo / Sector (opcional)"
+                        className="px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder-slate-300 outline-none focus:border-indigo-400 transition-all" />
+                      <button onClick={() => agregarAutorizado()} disabled={guardandoAuth || !nuevoNombre.trim()}
+                        className="w-full py-3 rounded-xl bg-indigo-600 text-white font-black text-sm active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                        {guardandoAuth ? <Loader2 size={16} className="animate-spin" /> : <UserCheck size={16} />}
+                        Agregar autorizado
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1172,7 +1509,7 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
       {showAcceso && (
         <AccesoRapidoPanel onClose={() => setShowAcceso(false)}
           onSave={() => setShowAcceso(false)}
-          empleadoNombre={empNombre} objectiveId={objetivo.id} turno={turno} objetivo={objetivo} entries={entries} />
+          empleadoNombre={empNombre} objectiveId={objetivo.id} turno={turno} objetivo={objetivo} entries={entries} isAdmin={isAdmin} />
       )}
     </div>
   );

@@ -165,5 +165,11 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow update, delete: if isAdmin();
     }
+
+    // 13. Personal autorizado por objetivo — admins gestionan, empleados consultan
+    match /personal_autorizado/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
   }
 }
