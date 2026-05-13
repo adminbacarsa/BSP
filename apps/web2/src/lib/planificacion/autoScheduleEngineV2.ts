@@ -41,6 +41,7 @@
  */
 
 import {
+    addDaysStr,
     checkRestBetweenShifts,
     workStreakStatsBackward,
     workStreakStatsForward,
@@ -1009,8 +1010,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         positionName: string,
         inCurrentCycle: boolean,
         shiftStart?: string,
-        qty: number = 1,
-        positionDayShifts: readonly V2ShiftDef[] = [],
     ): string | null => {
         const groupIds = positionGroups[positionName] || [];
         if (groupIds.length === 0) return null;
@@ -1043,20 +1042,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (isPrimary) {
                 if (!bestPrimary || baseScore > bestPrimary.score) bestPrimary = { id: empId, score: baseScore };
             } else {
-                // Relief MUY penalizado: queremos que la rotación semanal M/T/N domine
-                // sobre la inercia. Si el primary no entra hoy, el slot quedará uncovered
-                // y se resolverá en el pase de relleno final (que ignora rotación).
-                //
-                // Guard anti-robo: si el turno esperado del empleado (expected) todavía
-                // no tiene ningún slot cubierto para hoy en este puesto, no lo usamos
-                // como relevo. Lo reservamos para su turno primario.
-                if (expected) {
-                    const expCode = expected.toUpperCase();
-                    const expInToday = positionDayShifts.some(
-                        (s) => String(s.code || '').toUpperCase() === expCode,
-                    );
-                    if (expInToday && countBillableSlot(positionName, dateStr, expCode) < qty) continue;
-                }
+                // Relief penalizado: la rotación M/T/N tiene prioridad sobre relevo.
+                // Si el primary no entra hoy, el slot se resuelve en el pase de relleno final.
                 if (!bestRelief || baseScore > bestRelief.score) bestRelief = { id: empId, score: baseScore - 300 };
             }
         }
@@ -1137,7 +1124,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
                     }
-                    const empId = pickEmployee(dateStr, sCode, sHrs, pos.positionName, inCurrentCycle, sStart, qty, dayShifts);
+                    const empId = pickEmployee(dateStr, sCode, sHrs, pos.positionName, inCurrentCycle, sStart);
                     if (!empId) {
                         uncoveredQueue.push({ dateStr, positionName: pos.positionName, sCode, sHrs, sStart, sEnd, sName, inCurrentCycle });
                         continue;
@@ -1574,6 +1561,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         if ((stL.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
                         // Simulamos liberación del highId para el check de descanso del lowId
                         if (!passesAgreementRest(lowId, dateStr, sCode, sStart, sHrs)) continue;
+
+                        // Evitar RET aislado para highId: el nuevo RET debe quedar adyacente
+                        // a otro día de descanso (F/RET). Si ambos vecinos son turno de trabajo,
+                        // el intercambio dispersaría los RETs en vez de concentrarlos.
+                        const prevDay = addDaysStr(dateStr, -1);
+                        const nextDay = addDaysStr(dateStr, 1);
+                        const isNonWork = (eid: string, ds: string): boolean => {
+                            const a = assignments.find((x) => x.empId === eid && x.dateStr === ds);
+                            if (!a) return true; // fuera del mes = no laboral
+                            const c = String(a.code || '').toUpperCase();
+                            return FRANCO_SET.has(c) || c === 'RET';
+                        };
+                        const retWouldBeIsolated = !isNonWork(highId, prevDay) && !isNonWork(highId, nextDay);
+                        if (retWouldBeIsolated) continue;
 
                         // OK: ejecutamos el swap.
                         // 1) Saco el turno del highId
