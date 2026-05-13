@@ -92,6 +92,7 @@ export interface V2ShiftDef {
     name?: string;
     hours?: number;
     startTime?: string;
+    endTime?: string;
     days?: string[]; // letras de día activas L M X J V S D
 }
 
@@ -255,10 +256,37 @@ function isFrancoCode(code: string | undefined): boolean {
     return FRANCO_SET.has(String(code || '').toUpperCase());
 }
 
+function parseShiftHourFloat(t: any): number | null {
+    if (t == null || t === '' || t === '00:00') return null;
+    if (typeof t !== 'string') return null;
+    const parts = t.split(':').map(Number);
+    const h = parts[0];
+    const m = parts[1] ?? 0;
+    if (!Number.isFinite(h)) return null;
+    return h + (m || 0) / 60;
+}
+
+/**
+ * Duración del turno en horas. Orden de prioridad:
+ *  1) `s.hours` si viene explícito y > 0.
+ *  2) Diferencia `endTime - startTime` (con overnight: si end ≤ start sumamos 24h).
+ *  3) Default por código (M/T/N=8, D12/N12=12) → 8 si el código es desconocido.
+ *
+ * Antes solo usábamos (1) y (3): los puestos con códigos custom (RO, EN, RON, PU, etc.)
+ * que solo declaran startTime/endTime caían al fallback 8h y el motor escribía
+ * asignaciones de 8h cuando el SLA pedía 10h/12h, dejando huecos de cobertura.
+ */
 function shiftHours(s: V2ShiftDef): number {
     const code = String(s.code || '').toUpperCase();
     const h = Number(s.hours);
     if (Number.isFinite(h) && h > 0) return h;
+    const start = parseShiftHourFloat(s.startTime);
+    const end = parseShiftHourFloat(s.endTime);
+    if (start !== null && end !== null) {
+        let dur = end - start;
+        if (dur <= 0) dur += 24; // turno nocturno (cruza medianoche)
+        if (dur > 0 && dur <= 24) return dur;
+    }
     return SHIFT_HRS_DEFAULT[code] ?? 8;
 }
 
@@ -574,6 +602,8 @@ export interface V2Assignment {
     name: string;
     hours: number;
     startTime: string;
+    /** Hora de fin (HH:MM). Importante para códigos custom (RO, EN, RON…) cuya duración no es 8/12h estándar. */
+    endTime?: string;
     isFranco?: boolean;
     isReten?: boolean;
 }
@@ -789,7 +819,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const weekIndexInMonth = (dateStr: string): number => {
         const d = new Date(dateStr + 'T12:00:00');
         const m = mondayOf(d);
-        return Math.max(0, Math.round((m.getTime() - baseMonday.getTime()) / (7 * 86400000)));
+        return Math.max(0, Math.floor((m.getTime() - baseMonday.getTime()) / (7 * 86400000)));
     };
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
@@ -1899,8 +1929,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const RET_POTENTIAL_HOURS = 8;
     const empRetCount: Record<string, number> = {};
     for (const a of assignments) {
-        if (a.code === 'RET' && a.employeeId) {
-            empRetCount[a.employeeId] = (empRetCount[a.employeeId] || 0) + 1;
+        if (a.code === 'RET' && a.empId) {
+            empRetCount[a.empId] = (empRetCount[a.empId] || 0) + 1;
         }
     }
     const empRetHoursPotential: Record<string, number> = {};

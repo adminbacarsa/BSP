@@ -20,16 +20,21 @@ function isJava21Plus(home) {
   if (!fs.existsSync(exe)) return false;
   const out = spawnSync(exe, ['-version'], { encoding: 'utf8' });
   const ver = `${out.stderr || out.stdout || ''}`;
-  return /version "21/.test(ver) || /version "2[2-9]/.test(ver);
+  return /version "(2[1-9]|[3-9]\d)/.test(ver);
 }
 
 function findJdk21Home() {
   if (process.env.JAVA_HOME21 && isJava21Plus(process.env.JAVA_HOME21)) return process.env.JAVA_HOME21;
   if (process.env.JAVA_HOME && isJava21Plus(process.env.JAVA_HOME)) return process.env.JAVA_HOME;
 
+  const userHome = process.env.USERPROFILE || process.env.HOME || '';
   const bases =
     process.platform === 'win32'
-      ? ['C:\\Program Files\\Eclipse Adoptium', 'C:\\Program Files\\Java']
+      ? [
+          path.join(userHome, 'AppData', 'Local', 'Programs', 'Eclipse Adoptium'),
+          'C:\\Program Files\\Eclipse Adoptium',
+          'C:\\Program Files\\Java',
+        ]
       : ['/usr/lib/jvm', '/usr/local'];
 
   for (const base of bases) {
@@ -43,8 +48,8 @@ function findJdk21Home() {
     const candidateNames = (d) => {
       if (!d.isDirectory()) return false;
       const n = d.name;
-      if (process.platform === 'win32') return /^jdk-21/i.test(n);
-      return /(^|-)21(\.|$)/.test(n) && /java|jdk|openjdk|temurin/i.test(n);
+      if (process.platform === 'win32') return /^jdk-(2[1-9]|[3-9]\d)/i.test(n);
+      return /(^|-)2[1-9](\.|$)/.test(n) && /java|jdk|openjdk|temurin/i.test(n);
     };
     const jdkDirs = entries.filter(candidateNames).map((d) => path.join(base, d.name)).sort();
     for (const dir of jdkDirs) {
