@@ -862,10 +862,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     });
 
     const assignments: V2Assignment[] = [];
+    // Techo de horas facturables en la generación: el MÁXIMO entre vendidas y demanda
+    // estructural del SLA en pantalla. Antes usábamos solo `contractedHours` cuando
+    // existía, y si la grilla (puestos × bandas × días) pedía MÁS horas que las
+    // vendidas, `billableCap` cortaba antes de llenar slots → huecos + muchos RET
+    // y el encabezado mostraba "colchón" engañoso. Si vendés menos que lo que la
+    // estructura implica, igual hay que poder cubrir la estructura (avisá en viabilidad).
+    const contractedH = feasibility.metrics.contractedHours || 0;
+    const structuralH = feasibility.metrics.structuralDemandHours || 0;
+    const mergedBillableTarget =
+        Math.max(contractedH, structuralH) ||
+        feasibility.metrics.effectiveTargetHours ||
+        0;
+
     const stats: V2GenerateStats = {
         totalAssignments: 0,
         totalBillableHours: 0,
-        targetHours: feasibility.metrics.contractedHours || feasibility.metrics.structuralDemandHours,
+        targetHours: mergedBillableTarget,
         uncoveredSlots: 0,
         employeeMonthlyHours: {},
         employeeCycleHours: { current: {}, next: {} },

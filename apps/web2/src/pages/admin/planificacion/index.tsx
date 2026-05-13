@@ -3548,7 +3548,7 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                         {retBufferHours > 0 && (
-                            <div className="text-center px-3" title="Colchón disponible: horas que se podrían cubrir promoviendo RETs a turno facturable sin pasar 200h por empleado. Estimación 8h por RET.">
+                            <div className="text-center px-3" title="Colchón teórico: suma de horas que cabrían promoviendo cada RET a ~8h facturables sin pasar 200h/mes por persona (cupo calendario). No implica que exista alguien libre en la banda correcta ni que el convenio deje ese swap: la Verificación mira slots, descansos 12h/35h y licencias.">
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Colchón</p>
                                 <p className="text-sm font-black text-emerald-600 leading-tight">{retBufferHours}h</p>
                             </div>
