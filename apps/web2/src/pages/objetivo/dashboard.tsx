@@ -13,7 +13,8 @@ import {
   Users, Siren, Bell, Send, X, Clock, CheckCircle2, Loader2,
   ChevronLeft, ChevronRight, Search, Building2, MapPin, Plus,
   Activity, Lock, Mail, Eye, EyeOff, AlertCircle, Tag, Zap,
-  UserCheck, Car, UserX, ScanLine, ShieldAlert, ShieldOff, Trash2
+  UserCheck, Car, UserX, ScanLine, ShieldAlert, ShieldOff, Trash2,
+  Upload, Download
 } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -902,8 +903,11 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
   const [nuevoTipo,     setNuevoTipo]     = useState<'empleado' | 'vehiculo' | 'visitante'>('empleado');
   const [nuevoCargo,    setNuevoCargo]    = useState('');
   const [guardandoAuth, setGuardandoAuth] = useState(false);
+  const [csvRows,       setCsvRows]       = useState<any[] | null>(null);
+  const [importando,    setImportando]    = useState(false);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef    = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // Cargar personal autorizado del objetivo
   useEffect(() => {
@@ -1036,6 +1040,62 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
   };
 
   // Agregar a la lista de autorizados del objetivo
+  const descargarPlantilla = () => {
+    const csv = 'nombre,dni,legajo,patente,tipo,cargo\nJuan García,35123456,1234,,empleado,Vigilador\nMaria López,27654321,,,empleado,Operadora\nAB 123 CD,,,,vehiculo,Camión reparto';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'plantilla_personal_autorizado.csv';
+    a.click();
+  };
+
+  const handleCSVFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) { setCsvRows([]); return; }
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+      const rows = lines.slice(1).map(line => {
+        const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+        const row: any = {};
+        headers.forEach((h, i) => { row[h] = cols[i] || ''; });
+        return {
+          nombre: row.nombre || row.name || '',
+          dni:    row.dni || row.documento || '',
+          legajo: row.legajo || row.numero || '',
+          patente:row.patente || '',
+          tipo:   (['empleado','vehiculo','visitante'].includes(row.tipo) ? row.tipo : 'empleado') as any,
+          cargo:  row.cargo || row.puesto || '',
+        };
+      }).filter(r => r.nombre.trim());
+      setCsvRows(rows);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const importarCSV = async () => {
+    if (!csvRows?.length) return;
+    setImportando(true);
+    try {
+      for (const row of csvRows) {
+        await addDoc(collection(db, 'personal_autorizado'), {
+          objectiveId, clientId: objetivo.clientId || '',
+          nombre: row.nombre, tipo: row.tipo, cargo: row.cargo,
+          ...(row.dni     && { dni: row.dni }),
+          ...(row.legajo  && { legajo: row.legajo }),
+          ...(row.patente && { patente: row.patente }),
+          activo: true, creadoEn: serverTimestamp(), creadoPor: auth.currentUser?.uid || '',
+        });
+      }
+      await getDocs(query(collection(db, 'personal_autorizado'), where('objectiveId', '==', objectiveId)))
+        .then(snap => setAutorizados(snap.docs.map(d => ({ id: d.id, ...d.data() } as PersonalAutorizado)).filter(a => a.activo !== false)));
+      setCsvRows(null);
+    } catch (e: any) { alert('Error al importar: ' + e.message); }
+    finally { setImportando(false); }
+  };
+
   const agregarAutorizado = async (desde?: PersonaEncontrada) => {
     const nombre = desde?.nombre || nuevoNombre.trim(); if (!nombre) return;
     setGuardandoAuth(true);
@@ -1341,6 +1401,53 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
                         {guardandoAuth ? <Loader2 size={16} className="animate-spin" /> : <UserCheck size={16} />}
                         Agregar autorizado
                       </button>
+
+                      {/* CSV Import */}
+                      <div className="border-t border-slate-200 pt-3">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Importar desde CSV</p>
+                        <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleCSVFile} />
+
+                        {csvRows === null ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => csvInputRef.current?.click()}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold active:scale-95 transition-all hover:bg-slate-50">
+                              <Upload size={13} /> Importar CSV
+                            </button>
+                            <button onClick={descargarPlantilla}
+                              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-500 text-xs font-bold active:scale-95 transition-all hover:bg-slate-50">
+                              <Download size={13} /> Plantilla
+                            </button>
+                          </div>
+                        ) : csvRows.length === 0 ? (
+                          <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                            <p className="text-xs font-bold text-amber-700">CSV sin registros válidos</p>
+                            <button onClick={() => setCsvRows(null)} className="text-amber-500"><X size={14} /></button>
+                          </div>
+                        ) : (
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex flex-col gap-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-black text-indigo-700">{csvRows.length} registros listos</p>
+                              <button onClick={() => setCsvRows(null)} className="text-indigo-400"><X size={14} /></button>
+                            </div>
+                            <div className="max-h-28 overflow-y-auto flex flex-col gap-1">
+                              {csvRows.slice(0, 8).map((r, i) => (
+                                <div key={i} className="flex items-center gap-2 text-[11px] text-indigo-800">
+                                  <span className="font-bold truncate flex-1">{r.nombre}</span>
+                                  {r.dni && <span className="text-indigo-500">DNI: {r.dni}</span>}
+                                  {r.legajo && <span className="text-indigo-500">Leg: {r.legajo}</span>}
+                                  {r.patente && <span className="text-indigo-500">{r.patente}</span>}
+                                </div>
+                              ))}
+                              {csvRows.length > 8 && <p className="text-[10px] text-indigo-400 font-bold">…y {csvRows.length - 8} más</p>}
+                            </div>
+                            <button onClick={importarCSV} disabled={importando}
+                              className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-black text-xs active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                              {importando ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                              Confirmar importación
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
