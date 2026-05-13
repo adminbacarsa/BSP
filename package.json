@@ -15,6 +15,7 @@
     "docs:capturas-all": "npm run docs:capturas && npm run docs:capturas-flujo",
     "dev": "npm --prefix apps/web2 run dev",
     "build": "npm --prefix apps/web2 run build",
+    "deploy": "node scripts/deploy.js",
     "start": "npm run serve:final",
     "test": "echo \"Error: Los tests se ejecutan en las subcarpetas: npm run test --workspace=functions\" && exit 1",
     "install:all": "npm install --workspaces",
