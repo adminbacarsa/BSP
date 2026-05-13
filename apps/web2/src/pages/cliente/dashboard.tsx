@@ -407,11 +407,12 @@ function AgendaTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteU
       where('objectiveId', '==', objetivo.id),
       where('fecha', '>=', desde),
       where('fecha', '<', hasta),
-      orderBy('fecha'),
-      orderBy('horaIngreso')
+      orderBy('fecha')
     );
     return onSnapshot(q, snap => {
-      setVisitas(snap.docs.map(d => ({ id: d.id, ...d.data() } as VisitaProgramada)));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as VisitaProgramada));
+      docs.sort((a, b) => a.horaIngreso.localeCompare(b.horaIngreso));
+      setVisitas(docs);
     });
   }, [objetivo.id, viewYear, viewMonth]);
 
