@@ -27,7 +27,8 @@
     "dev:local": "bash scripts/start-local.sh",
     "dev:local:backup": "bash scripts/start-local.sh",
     "backup:import": "node scripts/import-backup.js",
-    "emulators": "node scripts/run-emulators.js"
+    "emulators": "node scripts/run-emulators.js",
+    "emulators:light": "node scripts/run-emulators.js --without-functions",
   },
   "keywords": [
     "firebase",

@@ -87,7 +87,7 @@ function Start-LabCmd([string]$label, [string]$innerCmd) {
   Append-Boot "Lanzado: $label"
 }
 
-Start-LabCmd 'emulators' "`"$npm`" run emulators >> `"$logEmul`" 2>&1"
+Start-LabCmd 'emulators' "`"$npm`" run emulators:light >> `"$logEmul`" 2>&1"
 
 Append-Boot 'Esperando 127.0.0.1:8080...'
 if (-not (Wait-FirestoreEmulator 180)) {

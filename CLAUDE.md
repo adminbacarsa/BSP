@@ -201,7 +201,9 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=comtroldata
 | UI | 4000 |
 | Emulator Hub | 4400 |
 
-**Windows — lab tras reinicio (emuladores + seed + Next):** no suben solos hasta registrar la tarea **COSP Lab** (PowerShell **como administrador** desde la raíz del repo):
+**UI `http://localhost:4000` (o `:4000` desde otra PC):** abrí también el puerto **4400** en el firewall. Si el emulador de **Functions** falla en Windows (`""node"" no se reconoce`), el suite puede no levantar la UI: el arranque automático del lab usa **`npm run emulators:light`** (solo Auth + Firestore + UI). Para suite completa con Functions: **`npm run emulators`** (requiere `node` en PATH del sistema o el fix de PATH ya aplicado en `run-emulators.js`).
+
+**Windows — lab tras reinicio** (emuladores + seed + Next): no suben solos hasta registrar la tarea **COSP Lab** (PowerShell **como administrador** desde la raíz del repo):
 
 ```powershell
 npm install

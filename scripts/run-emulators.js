@@ -56,16 +56,22 @@ function findJdk21Home() {
 
 const jdkHome = findJdk21Home();
 const env = { ...process.env };
+const sep = process.platform === 'win32' ? ';' : ':';
+/** El emulador de Functions en Windows suele invocar `node` sin PATH; forzamos el mismo Node que ejecuta este script. */
+const nodeBinDir = path.dirname(process.execPath);
 
 if (jdkHome) {
   env.JAVA_HOME = jdkHome;
-  const sep = process.platform === 'win32' ? ';' : ':';
-  env.PATH = `${path.join(jdkHome, 'bin')}${sep}${env.PATH || ''}`;
+  env.PATH = `${path.join(jdkHome, 'bin')}${sep}${nodeBinDir}${sep}${env.PATH || ''}`;
   logErr(`[emulators] JAVA_HOME=${jdkHome}`);
+  logErr(`[emulators] PATH (prefijo JDK + Node)=...${nodeBinDir}`);
 } else {
   logErr('No se encontró JDK 21+. winget install EclipseAdoptium.Temurin.21.JDK o JAVA_HOME21.');
   process.exit(1);
 }
+
+const skipFunctions =
+  process.argv.includes('--without-functions') || process.env.COSP_EMULATORS_NO_FUNCTIONS === '1';
 
 const backupsDir = path.join(projectRoot, 'backups');
 const latestDir = path.join(backupsDir, 'latest');
@@ -81,6 +87,10 @@ try {
 }
 
 const emulatorArgs = ['emulators:start'];
+if (skipFunctions) {
+  emulatorArgs.push('--only', 'auth,firestore,ui');
+  logErr('[emulators] Sin Functions (--without-functions o COSP_EMULATORS_NO_FUNCTIONS=1)');
+}
 if (hasImport) {
   emulatorArgs.push('--import=./backups/latest');
   logErr('[emulators] Import backups/latest');
