@@ -183,5 +183,11 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if isAdmin();
     }
+
+    // 15. Visitas programadas — el cliente agenda sus visitas anticipadas
+    match /visitas_programadas/{visitaId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin() || isClientUser();
+    }
   }
 }

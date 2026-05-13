@@ -3,14 +3,15 @@ import Head from 'next/head';
 import { db, auth } from '@/lib/firebase';
 import {
   collection, query, where, orderBy, onSnapshot,
-  addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc
+  addDoc, deleteDoc, updateDoc, serverTimestamp, getDocs, getDoc, doc
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User, getIdTokenResult } from 'firebase/auth';
 import {
   ShieldCheck, LogOut, Building2, ChevronRight, ChevronLeft,
   UserCheck, Car, Users, Trash2, Plus, Search, Upload, Download,
   AlertCircle, Lock, Mail, Eye, EyeOff, Loader2, X, CheckCircle2,
-  ArrowRightCircle, ArrowLeftCircle
+  ArrowRightCircle, ArrowLeftCircle, CalendarDays, Clock, Ban,
+  UserPlus, Truck
 } from 'lucide-react';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -51,6 +52,23 @@ interface AccesoEntry {
   createdAt: any;
   autorizado?: boolean;
   identificador?: string;
+}
+
+interface VisitaProgramada {
+  id: string;
+  objectiveId: string;
+  clientId: string;
+  tipo: 'persona' | 'vehiculo';
+  nombre: string;
+  dni?: string;
+  patente?: string;
+  fecha: string;       // YYYY-MM-DD
+  horaIngreso: string; // HH:MM
+  horaSalida?: string;
+  motivo?: string;
+  estado: 'programada' | 'cancelada';
+  creadoEn: any;
+  creadoPor: string;
 }
 
 interface CsvRow {
@@ -349,6 +367,356 @@ function ObjetivosGrid({
   );
 }
 
+// ─── AgendaTab ────────────────────────────────────────────────────────────────
+
+const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function toYMD(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function AgendaTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteUser: ClienteUser }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [selectedDay, setSelectedDay] = useState<string>(toYMD(today));
+  const [visitas, setVisitas] = useState<VisitaProgramada[]>([]);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    tipo: 'persona' as 'persona' | 'vehiculo',
+    nombre: '',
+    dni: '',
+    patente: '',
+    horaIngreso: '',
+    horaSalida: '',
+    motivo: '',
+  });
+
+  // Cargar visitas del mes visible + mes siguiente (rango amplio)
+  useEffect(() => {
+    const desde = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-01`;
+    const nextMonth = viewMonth === 11 ? 0 : viewMonth + 1;
+    const nextYear = viewMonth === 11 ? viewYear + 1 : viewYear;
+    const hasta = `${nextYear}-${String(nextMonth+1).padStart(2,'0')}-01`;
+    const q = query(
+      collection(db, 'visitas_programadas'),
+      where('objectiveId', '==', objetivo.id),
+      where('fecha', '>=', desde),
+      where('fecha', '<', hasta),
+      orderBy('fecha'),
+      orderBy('horaIngreso')
+    );
+    return onSnapshot(q, snap => {
+      setVisitas(snap.docs.map(d => ({ id: d.id, ...d.data() } as VisitaProgramada)));
+    });
+  }, [objetivo.id, viewYear, viewMonth]);
+
+  // Días del calendario
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const visitasByDay = visitas.reduce<Record<string, VisitaProgramada[]>>((acc, v) => {
+    (acc[v.fecha] = acc[v.fecha] || []).push(v);
+    return acc;
+  }, {});
+
+  const selectedVisitas = visitasByDay[selectedDay] || [];
+  const todayYMD = toYMD(today);
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
+    else setViewMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
+    else setViewMonth(m => m + 1);
+  };
+
+  const handleAdd = async () => {
+    if (!form.nombre.trim() || !form.horaIngreso) return;
+    if (form.tipo === 'vehiculo' && !form.patente.trim()) return;
+    setSaving(true);
+    try {
+      await addDoc(collection(db, 'visitas_programadas'), {
+        objectiveId: objetivo.id,
+        clientId: clienteUser.clientId,
+        tipo: form.tipo,
+        nombre: form.nombre.trim(),
+        dni: form.dni.trim() || null,
+        patente: form.patente.trim().toUpperCase() || null,
+        fecha: selectedDay,
+        horaIngreso: form.horaIngreso,
+        horaSalida: form.horaSalida || null,
+        motivo: form.motivo.trim() || null,
+        estado: 'programada',
+        creadoEn: serverTimestamp(),
+        creadoPor: clienteUser.uid,
+      });
+      setForm({ tipo: 'persona', nombre: '', dni: '', patente: '', horaIngreso: '', horaSalida: '', motivo: '' });
+      setFormOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    if (!confirm('¿Cancelar esta visita?')) return;
+    setCancelingId(id);
+    try {
+      await updateDoc(doc(db, 'visitas_programadas', id), { estado: 'cancelada' });
+    } finally {
+      setCancelingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('¿Eliminar esta visita?')) return;
+    setCancelingId(id);
+    try {
+      await deleteDoc(doc(db, 'visitas_programadas', id));
+    } finally {
+      setCancelingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Calendario */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+        {/* Header mes */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <button onClick={prevMonth} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+            <ChevronLeft size={16} className="text-slate-600" />
+          </button>
+          <p className="font-black text-slate-800 text-sm uppercase tracking-wide">
+            {MESES[viewMonth]} {viewYear}
+          </p>
+          <button onClick={nextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+            <ChevronRight size={16} className="text-slate-600" />
+          </button>
+        </div>
+
+        {/* Días de la semana */}
+        <div className="grid grid-cols-7 border-b border-slate-100">
+          {DIAS.map(d => (
+            <div key={d} className="py-2 text-center text-[10px] font-black text-slate-400 uppercase">{d}</div>
+          ))}
+        </div>
+
+        {/* Celdas */}
+        <div className="grid grid-cols-7">
+          {cells.map((day, idx) => {
+            if (!day) return <div key={idx} className="h-10" />;
+            const ymd = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+            const isToday = ymd === todayYMD;
+            const isSelected = ymd === selectedDay;
+            const dayVisitas = visitasByDay[ymd] || [];
+            const programadas = dayVisitas.filter(v => v.estado === 'programada');
+            return (
+              <button
+                key={idx}
+                onClick={() => setSelectedDay(ymd)}
+                className={`h-10 flex flex-col items-center justify-center relative transition-colors ${
+                  isSelected ? 'bg-indigo-600' :
+                  isToday ? 'bg-indigo-50' :
+                  'hover:bg-slate-50'
+                }`}
+              >
+                <span className={`text-xs font-bold ${isSelected ? 'text-white' : isToday ? 'text-indigo-600' : 'text-slate-700'}`}>
+                  {day}
+                </span>
+                {programadas.length > 0 && (
+                  <div className="flex gap-0.5 mt-0.5">
+                    {programadas.slice(0,3).map((_, i) => (
+                      <div key={i} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white/70' : 'bg-indigo-400'}`} />
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Panel del día seleccionado */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CalendarDays size={14} className="text-slate-500" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-wide">
+              {new Date(selectedDay + 'T00:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </p>
+            {selectedVisitas.filter(v => v.estado === 'programada').length > 0 && (
+              <span className="bg-indigo-100 text-indigo-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                {selectedVisitas.filter(v => v.estado === 'programada').length}
+              </span>
+            )}
+          </div>
+          {!formOpen && (
+            <button
+              onClick={() => setFormOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
+            >
+              <Plus size={12} /> Agregar visita
+            </button>
+          )}
+        </div>
+
+        {/* Formulario nueva visita */}
+        {formOpen && (
+          <div className="border border-indigo-200 bg-indigo-50/40 rounded-2xl p-4 space-y-3">
+            <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wider">Nueva visita — {selectedDay}</p>
+
+            {/* Tipo */}
+            <div className="grid grid-cols-2 gap-2">
+              {(['persona', 'vehiculo'] as const).map(t => (
+                <button key={t} type="button"
+                  onClick={() => setForm(f => ({ ...f, tipo: t }))}
+                  className={`py-2.5 rounded-xl text-[10px] font-black uppercase border flex items-center justify-center gap-1.5 transition-colors ${
+                    form.tipo === t ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  {t === 'persona' ? <UserPlus size={13} /> : <Truck size={13} />}
+                  {t === 'persona' ? 'Persona' : 'Vehículo'}
+                </button>
+              ))}
+            </div>
+
+            {/* Nombre */}
+            <input
+              value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
+              placeholder={form.tipo === 'vehiculo' ? 'Nombre del conductor / empresa *' : 'Nombre completo *'}
+              className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              {form.tipo === 'persona' ? (
+                <input
+                  value={form.dni} onChange={e => setForm(f => ({ ...f, dni: e.target.value }))}
+                  placeholder="DNI (opcional)"
+                  className="p-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              ) : (
+                <input
+                  value={form.patente} onChange={e => setForm(f => ({ ...f, patente: e.target.value.toUpperCase() }))}
+                  placeholder="Patente *"
+                  className="p-2.5 border border-slate-200 rounded-xl text-sm font-mono font-bold bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 uppercase"
+                />
+              )}
+              <input
+                value={form.motivo} onChange={e => setForm(f => ({ ...f, motivo: e.target.value }))}
+                placeholder="Motivo (opcional)"
+                className="p-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Hora ingreso *</label>
+                <input
+                  type="time" value={form.horaIngreso} onChange={e => setForm(f => ({ ...f, horaIngreso: e.target.value }))}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Hora salida</label>
+                <input
+                  type="time" value={form.horaSalida} onChange={e => setForm(f => ({ ...f, horaSalida: e.target.value }))}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleAdd} disabled={saving || !form.nombre.trim() || !form.horaIngreso || (form.tipo === 'vehiculo' && !form.patente.trim())}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Guardar visita
+              </button>
+              <button onClick={() => setFormOpen(false)}
+                className="bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 transition-colors">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de visitas del día */}
+        {selectedVisitas.length === 0 ? (
+          <div className="text-center py-8 text-slate-400">
+            <CalendarDays size={28} className="mx-auto mb-2 opacity-30" />
+            <p className="text-xs font-bold">Sin visitas programadas</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {selectedVisitas.map(v => (
+              <div key={v.id} className={`border rounded-2xl p-4 transition-colors ${
+                v.estado === 'cancelada' ? 'border-slate-100 bg-slate-50 opacity-60' : 'border-slate-200 bg-white'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    v.tipo === 'vehiculo' ? 'bg-amber-50 text-amber-600' : 'bg-indigo-50 text-indigo-600'
+                  }`}>
+                    {v.tipo === 'vehiculo' ? <Truck size={16} /> : <UserPlus size={16} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-black text-slate-800 text-sm">{v.nombre}</p>
+                      {v.estado === 'cancelada' && (
+                        <span className="text-[10px] font-black text-rose-500 bg-rose-50 px-2 py-0.5 rounded-full">Cancelada</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                      {v.dni && <span className="text-[11px] text-slate-500 font-medium">DNI {v.dni}</span>}
+                      {v.patente && (
+                        <span className="text-[11px] font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded font-mono tracking-widest">
+                          {v.patente}
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                        <Clock size={10} /> {v.horaIngreso}{v.horaSalida ? ` – ${v.horaSalida}` : ''}
+                      </span>
+                      {v.motivo && <span className="text-[11px] text-slate-500 font-medium">{v.motivo}</span>}
+                    </div>
+                  </div>
+                  {v.estado === 'programada' && (
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button
+                        title="Cancelar visita"
+                        onClick={() => handleCancel(v.id)} disabled={cancelingId === v.id}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                      >
+                        {cancelingId === v.id ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />}
+                      </button>
+                      <button
+                        title="Eliminar"
+                        onClick={() => handleDelete(v.id)} disabled={cancelingId === v.id}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── GestionObjetivoScreen ────────────────────────────────────────────────────
 
 function GestionObjetivoScreen({
@@ -358,7 +726,25 @@ function GestionObjetivoScreen({
   clienteUser: ClienteUser;
   onBack: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<'personal' | 'accesos'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'accesos' | 'agenda'>('personal');
+  const [accesosHoy, setAccesosHoy] = useState(0);
+
+  useEffect(() => {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const q = query(
+      collection(db, 'libro_guardia'),
+      where('objectiveId', '==', objetivo.id),
+      where('type', 'in', ['ingreso', 'egreso'])
+    );
+    return onSnapshot(q, snap => {
+      setAccesosHoy(snap.docs.filter(d => {
+        const t = d.data().createdAt;
+        if (!t) return false;
+        const dt = t.toDate ? t.toDate() : new Date(t.seconds * 1000);
+        return dt >= hoy;
+      }).length);
+    });
+  }, [objetivo.id]);
 
   const [personal, setPersonal] = useState<PersonalAutorizado[]>([]);
   const [accesos, setAccesos] = useState<AccesoEntry[]>([]);
@@ -508,14 +894,36 @@ function GestionObjetivoScreen({
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6">
+        {/* Stats bar */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center">
+            <p className="text-2xl font-black text-indigo-600">{personal.length}</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">Autorizados</p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center">
+            <p className="text-2xl font-black text-emerald-600">{accesosHoy}</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">Accesos hoy</p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('agenda')}>
+            <p className="text-2xl font-black text-violet-600">
+              <CalendarDays size={22} className="inline" />
+            </p>
+            <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">Agenda</p>
+          </div>
+        </div>
+
         <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
-          {(['personal', 'accesos'] as const).map(tab => (
+          {([
+            { key: 'personal', label: 'Personal' },
+            { key: 'accesos', label: 'Accesos hoy' },
+            { key: 'agenda', label: 'Agenda' },
+          ] as const).map(({ key, label }) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${activeTab === tab ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${activeTab === key ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              {tab === 'personal' ? 'Personal Autorizado' : 'Accesos Hoy'}
+              {label}
             </button>
           ))}
         </div>
@@ -745,6 +1153,11 @@ function GestionObjetivoScreen({
               </div>
             )}
           </div>
+        )}
+
+        {/* ── Tab Agenda ── */}
+        {activeTab === 'agenda' && (
+          <AgendaTab objetivo={objetivo} clienteUser={clienteUser} />
         )}
       </div>
     </div>
