@@ -1222,6 +1222,149 @@ export default function CRMPage() {
                   </button>
                 )}
               </div>
+
+              {/* Acceso Portal Cliente */}
+              <div className="bg-white p-5 rounded-[2rem] border shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={14} className="text-indigo-500" />
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Portal Cliente</p>
+                  </div>
+                  {!portalUserMap[selectedClient?.id] && !portalFormOpen && (
+                    <button
+                      onClick={() => {
+                        setPortalForm({ nombre: '', email: '' });
+                        setPortalObjectiveIds([]);
+                        setPortalFormOpen(true);
+                        setPortalError('');
+                        loadPortalUserForClient(selectedClient.id);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
+                    >
+                      <UserPlus size={12} /> Crear
+                    </button>
+                  )}
+                </div>
+
+                {portalUserMap[selectedClient?.id] ? (
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                      <ShieldCheck size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-emerald-700 truncate">{portalUserMap[selectedClient.id].nombre}</p>
+                        <p className="text-[10px] text-emerald-600 font-medium truncate">{portalUserMap[selectedClient.id].email}</p>
+                        {portalUserMap[selectedClient.id].portalInvite?.sentAt && (
+                          <p className="text-[10px] text-emerald-500 font-medium mt-0.5">
+                            Enviado {portalUserMap[selectedClient.id].portalInvite.sentAt?.toDate?.()?.toLocaleDateString?.('es-AR') || ''}
+                          </p>
+                        )}
+                        {(portalUserMap[selectedClient.id].objectiveIds?.length ?? 0) > 0 && (
+                          <p className="text-[10px] text-emerald-500 font-medium">
+                            {portalUserMap[selectedClient.id].objectiveIds.length} objetivo{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {!portalFormOpen && (
+                      <button
+                        onClick={() => {
+                          const pu = portalUserMap[selectedClient.id];
+                          setPortalForm({ nombre: pu.nombre || '', email: pu.email || '' });
+                          setPortalObjectiveIds(pu.objectiveIds || []);
+                          setPortalFormOpen(true);
+                          setPortalError('');
+                        }}
+                        className="w-full flex items-center justify-center gap-1 px-3 py-2 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase transition-colors"
+                      >
+                        <Send size={12} /> Reenviar acceso
+                      </button>
+                    )}
+                  </div>
+                ) : portalUserMap[selectedClient?.id] === null && !portalFormOpen ? (
+                  <p className="text-[10px] text-slate-400 font-medium">Sin acceso creado.</p>
+                ) : !portalFormOpen ? (
+                  <p className="text-[10px] text-slate-400 font-medium">Verificando...</p>
+                ) : null}
+
+                {portalFormOpen && (
+                  <div className="space-y-2">
+                    {portalError && (
+                      <div className="flex items-center gap-1.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-bold text-rose-600">
+                        <AlertCircle size={12} /> {portalError}
+                      </div>
+                    )}
+                    <input
+                      value={portalForm.nombre} onChange={e => setPortalForm(f => ({ ...f, nombre: e.target.value }))}
+                      placeholder="Nombre del contacto *"
+                      className="w-full p-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                    <div className="relative">
+                      <Mail size={13} className="absolute left-3 top-2.5 text-slate-400" />
+                      <input
+                        type="email" value={portalForm.email} onChange={e => setPortalForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder="Email *"
+                        className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={handleCreatePortalUser} disabled={portalSaving}
+                        className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
+                      >
+                        {portalSaving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Enviar
+                      </button>
+                      <button
+                        onClick={() => { setPortalFormOpen(false); setPortalError(''); }}
+                        className="flex-1 border border-slate-200 hover:bg-slate-50 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+
+                    {/* Selector de objetivos — chips toggleables */}
+                    {(selectedClient?.objetivos?.length ?? 0) > 0 && (
+                      <div className="border border-slate-200 rounded-xl p-3">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">
+                          Objetivos{' '}
+                          <span className="text-slate-400 font-medium normal-case tracking-normal">
+                            {portalObjectiveIds.length === 0 ? '(todos)' : `(${portalObjectiveIds.length} sel.)`}
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                          {selectedClient.objetivos.filter((o: any) => o.id && o.name).map((o: any) => {
+                            const sel = portalObjectiveIds.includes(o.id);
+                            return (
+                              <button
+                                key={o.id}
+                                type="button"
+                                onClick={() => setPortalObjectiveIds(prev =>
+                                  sel ? prev.filter(id => id !== o.id) : [...prev, o.id]
+                                )}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
+                                  sel
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                                }`}
+                              >
+                                {o.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {portalObjectiveIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPortalObjectiveIds([])}
+                            className="mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline transition-colors"
+                          >
+                            Limpiar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden flex flex-col min-h-[600px]">
@@ -2215,150 +2358,6 @@ export default function CRMPage() {
                       </div>
                     )}
 
-                    {/* Acceso Portal Cliente */}
-                    <div className="border border-slate-200 rounded-2xl p-4 space-y-3 bg-slate-50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <ShieldCheck size={14} className="text-indigo-500" />
-                          <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Acceso Portal Cliente</p>
-                        </div>
-                        {!portalUserMap[selectedClient?.id] && !portalFormOpen && (
-                          <button
-                            onClick={() => {
-                              setPortalForm({ nombre: '', email: '' });
-                              setPortalObjectiveIds([]);
-                              setPortalFormOpen(true);
-                              setPortalError('');
-                              loadPortalUserForClient(selectedClient.id);
-                            }}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
-                          >
-                            <UserPlus size={12} /> Crear acceso
-                          </button>
-                        )}
-                      </div>
-
-                      {portalUserMap[selectedClient?.id] ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                            <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-black text-emerald-700">{portalUserMap[selectedClient.id].nombre}</p>
-                              <p className="text-[10px] text-emerald-600 font-medium">{portalUserMap[selectedClient.id].email}</p>
-                              {portalUserMap[selectedClient.id].portalInvite?.sentAt && (
-                                <p className="text-[10px] text-emerald-500 font-medium mt-0.5">
-                                  Acceso enviado {portalUserMap[selectedClient.id].portalInvite.sentAt?.toDate?.()?.toLocaleDateString?.('es-AR') || ''}
-                                </p>
-                              )}
-                              {(portalUserMap[selectedClient.id].objectiveIds?.length ?? 0) > 0 && (
-                                <p className="text-[10px] text-emerald-500 font-medium">
-                                  {portalUserMap[selectedClient.id].objectiveIds.length} objetivo{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''} asignado{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          {!portalFormOpen && (
-                            <button
-                              onClick={() => {
-                                const pu = portalUserMap[selectedClient.id];
-                                setPortalForm({ nombre: pu.nombre || '', email: pu.email || '' });
-                                setPortalObjectiveIds(pu.objectiveIds || []);
-                                setPortalFormOpen(true);
-                                setPortalError('');
-                              }}
-                              className="flex items-center gap-1 px-3 py-1.5 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase transition-colors"
-                            >
-                              <Send size={12} /> Reenviar acceso
-                            </button>
-                          )}
-                        </div>
-                      ) : portalUserMap[selectedClient?.id] === null && !portalFormOpen ? (
-                        <p className="text-[10px] text-slate-400 font-bold">Sin usuario de portal asignado. Creá un acceso para que el cliente pueda gestionar su personal autorizado.</p>
-                      ) : !portalFormOpen ? (
-                        <p className="text-[10px] text-slate-400 font-medium">Verificando...</p>
-                      ) : null}
-
-                      {portalFormOpen && (
-                        <div className="space-y-2">
-                          {portalError && (
-                            <div className="flex items-center gap-1.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-bold text-rose-600">
-                              <AlertCircle size={12} /> {portalError}
-                            </div>
-                          )}
-                          <input
-                            value={portalForm.nombre} onChange={e => setPortalForm(f => ({ ...f, nombre: e.target.value }))}
-                            placeholder="Nombre del contacto *"
-                            className="w-full p-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                          />
-                          <div className="relative">
-                            <Mail size={13} className="absolute left-3 top-2.5 text-slate-400" />
-                            <input
-                              type="email" value={portalForm.email} onChange={e => setPortalForm(f => ({ ...f, email: e.target.value }))}
-                              placeholder="Email *"
-                              className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                            />
-                          </div>
-
-                          {/* Botones — siempre visibles, antes del selector */}
-                          <div className="flex gap-2 pt-1">
-                            <button
-                              onClick={handleCreatePortalUser} disabled={portalSaving}
-                              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
-                            >
-                              {portalSaving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Enviar acceso
-                            </button>
-                            <button
-                              onClick={() => { setPortalFormOpen(false); setPortalError(''); }}
-                              className="bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 transition-colors"
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-
-                          {/* Selector de objetivos — chips toggleables */}
-                          {(selectedClient?.objetivos?.length ?? 0) > 0 && (
-                            <div className="border border-slate-200 rounded-xl p-3 bg-white">
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2.5">
-                                Restringir a objetivos{' '}
-                                <span className="text-slate-400 font-medium normal-case tracking-normal">
-                                  {portalObjectiveIds.length === 0 ? '(acceso a todos)' : `(${portalObjectiveIds.length} seleccionado${portalObjectiveIds.length !== 1 ? 's' : ''})`}
-                                </span>
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {selectedClient.objetivos.filter((o: any) => o.id && o.name).map((o: any) => {
-                                  const sel = portalObjectiveIds.includes(o.id);
-                                  return (
-                                    <button
-                                      key={o.id}
-                                      type="button"
-                                      onClick={() => setPortalObjectiveIds(prev =>
-                                        sel ? prev.filter(id => id !== o.id) : [...prev, o.id]
-                                      )}
-                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
-                                        sel
-                                          ? 'bg-indigo-600 text-white border-indigo-600'
-                                          : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
-                                      }`}
-                                    >
-                                      {o.name}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {portalObjectiveIds.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setPortalObjectiveIds([])}
-                                  className="mt-2 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline transition-colors"
-                                >
-                                  Limpiar selección
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
 
