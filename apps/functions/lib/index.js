@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.onTurnoWrite = exports.onNovedadCreated = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
@@ -403,7 +403,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
             lastName,
             email,
             role,
-            empresaId: empresaId || 'bacarsa',
+            empresaId: empresaId ?? 'bacarsa',
             status: 'ACTIVE',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -706,10 +706,160 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     }
     return { success: true, results };
 });
+function buildClientPortalEmailHtml(resetLink, clientName) {
+    return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:40px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
+            <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes · COSP</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px 40px 32px;">
+            <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Clientes de COSP</strong> para gestionar el personal autorizado de <strong>${clientName}</strong>.</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Hacé clic en el botón de abajo para crear tu contraseña y acceder al portal:</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
+              <tr>
+                <td style="background:#4f46e5;border-radius:8px;">
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÑA</a>
+                </td>
+              </tr>
+            </table>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.</p>
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
+              <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+function buildClientPortalEmailText(resetLink, clientName) {
+    return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Clientes de COSP para gestionar el personal autorizado de ${clientName}.
+
+Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
+
+${resetLink}
+
+Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.
+
+Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
+
+Saludos,
+Equipo Operativo - Bacar sa. Seguridad Privada`;
+}
+exports.createClientPortalAccess = functions.https.onCall(async (data, context) => {
+    const callerAuth = context.auth;
+    if (!callerAuth) {
+        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+    }
+    const tokenRole = callerAuth.token.role || '';
+    let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
+    if (!hasAccess) {
+        try {
+            const sysDoc = await admin.firestore().collection('system_users').doc(callerAuth.uid).get();
+            if (sysDoc.exists) {
+                const fsRole = sysDoc.data()?.role || '';
+                hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === fsRole.toLowerCase());
+            }
+        }
+        catch (_) { }
+    }
+    if (!hasAccess) {
+        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+    }
+    const { clientId, clientName, nombre, email, objectiveIds } = data;
+    if (!clientId || !clientName || !nombre || !email) {
+        throw new functions.https.HttpsError('invalid-argument', 'Se requieren clientId, clientName, nombre y email.');
+    }
+    const gmailUser = process.env.GMAIL_USER || '';
+    const gmailPass = process.env.GMAIL_PASS || '';
+    if (!gmailUser || !gmailPass) {
+        throw new functions.https.HttpsError('failed-precondition', 'Servicio de email no configurado. Definir GMAIL_USER y GMAIL_PASS en apps/functions/.env y redesplegar.');
+    }
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: gmailUser, pass: gmailPass },
+    });
+    const db = admin.firestore();
+    const normalizedEmail = email.trim().toLowerCase();
+    let uid;
+    let alreadyExisted = false;
+    try {
+        const existing = await admin.auth().getUserByEmail(normalizedEmail);
+        uid = existing.uid;
+        alreadyExisted = true;
+    }
+    catch (e) {
+        if (e.code === 'auth/user-not-found') {
+            const tempPass = Math.random().toString(36).slice(2, 14) + Math.random().toString(36).slice(2, 6).toUpperCase();
+            const newUser = await admin.auth().createUser({ email: normalizedEmail, password: tempPass, displayName: nombre });
+            await admin.auth().setCustomUserClaims(newUser.uid, { role: 'client', type: 'client_user' });
+            uid = newUser.uid;
+        }
+        else {
+            throw e;
+        }
+    }
+    const resetLink = await admin.auth().generatePasswordResetLink(normalizedEmail, {
+        url: 'https://comtroldata.web.app/cliente/dashboard',
+    });
+    await transporter.sendMail({
+        from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
+        to: normalizedEmail,
+        subject: 'Acceso al Portal de Clientes - COSP',
+        html: buildClientPortalEmailHtml(resetLink, clientName),
+        text: buildClientPortalEmailText(resetLink, clientName),
+    });
+    const existingSnap = await db.collection('client_users').where('uid', '==', uid).get();
+    const clientUserData = {
+        uid,
+        clientId,
+        clientName,
+        nombre: nombre.trim(),
+        email: normalizedEmail,
+        activo: true,
+        objectiveIds: objectiveIds || [],
+        portalInvite: {
+            sent: true,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            email: normalizedEmail,
+            sentBy: callerAuth.uid,
+        },
+    };
+    if (!existingSnap.empty) {
+        await existingSnap.docs[0].ref.update(clientUserData);
+    }
+    else {
+        await db.collection('client_users').add({
+            ...clientUserData,
+            creadoEn: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+    return { success: true, alreadyExisted, email: normalizedEmail };
+});
 var onNovedadCreated_1 = require("./notifications/onNovedadCreated");
 Object.defineProperty(exports, "onNovedadCreated", { enumerable: true, get: function () { return onNovedadCreated_1.onNovedadCreated; } });
 var onTurnoWrite_1 = require("./notifications/onTurnoWrite");
 Object.defineProperty(exports, "onTurnoWrite", { enumerable: true, get: function () { return onTurnoWrite_1.onTurnoWrite; } });
+var handler_1 = require("./payroll-api/handler");
+Object.defineProperty(exports, "payrollApi", { enumerable: true, get: function () { return handler_1.payrollApi; } });
 exports.sendTestNotification = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Login required');
@@ -1179,13 +1329,13 @@ exports.restoreBackup = functions
     if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
         throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
     }
-    const { driveFileId, mode } = data;
+    const { driveFileId, mode, jobId } = data;
     if (!driveFileId)
         throw new functions.https.HttpsError('invalid-argument', 'driveFileId requerido');
     if (!['merge', 'full'].includes(mode))
         throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
     try {
-        return await (0, restore_service_1.runRestore)(driveFileId, mode);
+        return await (0, restore_service_1.runRestore)(driveFileId, mode, jobId);
     }
     catch (e) {
         throw new functions.https.HttpsError('internal', e?.message || 'Error al restaurar');

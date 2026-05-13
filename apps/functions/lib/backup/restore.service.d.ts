@@ -7,4 +7,4 @@ export interface RestoreResult {
     docsDeleted: number;
     durationMs: number;
 }
-export declare function runRestore(driveFileId: string, mode: RestoreMode): Promise<RestoreResult>;
+export declare function runRestore(driveFileId: string, mode: RestoreMode, jobId?: string): Promise<RestoreResult>;

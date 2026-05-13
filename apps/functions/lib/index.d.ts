@@ -17,8 +17,10 @@ export declare const requestCheckIn: functions.HttpsFunction & functions.Runnabl
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
+export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
+export { payrollApi } from './payroll-api/handler';
 export declare const sendTestNotification: functions.HttpsFunction & functions.Runnable<any>;
 export declare const autoCompletarTurnos: functions.CloudFunction<unknown>;
 export declare const detectarAusencias: functions.CloudFunction<unknown>;

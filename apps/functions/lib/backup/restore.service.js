@@ -2,8 +2,15 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runRestore = runRestore;
 const admin = require("firebase-admin");
-async function runRestore(driveFileId, mode) {
+async function runRestore(driveFileId, mode, jobId) {
     const t0 = Date.now();
+    const db = admin.firestore();
+    const setJob = (data) => {
+        if (!jobId)
+            return Promise.resolve();
+        return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
+    };
+    await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
     const { google } = await Promise.resolve().then(() => require('googleapis'));
     const auth = new google.auth.GoogleAuth({
         scopes: ['https://www.googleapis.com/auth/drive.readonly'],
@@ -19,14 +26,17 @@ async function runRestore(driveFileId, mode) {
     const raw = fileRes.data;
     const payload = JSON.parse(raw);
     const { _meta, ...collections } = payload;
-    const db = admin.firestore();
+    const SKIP_DELETE = new Set(['system_backups', 'audit_logs', 'restore_jobs']);
+    const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && docs.length > 0);
+    const total = colEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
+    await setJob({ phase: 'Preparando restauración…', total });
     let docsRestored = 0;
     let docsDeleted = 0;
     const BATCH_SIZE = 400;
-    for (const [colName, docs] of Object.entries(collections)) {
-        if (!Array.isArray(docs) || docs.length === 0)
-            continue;
-        if (mode === 'full') {
+    for (let ci = 0; ci < colEntries.length; ci++) {
+        const [colName, docs] = colEntries[ci];
+        await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${colEntries.length})…`, docsRestored });
+        if (mode === 'full' && !SKIP_DELETE.has(colName)) {
             const existing = await db.collection(colName).listDocuments();
             for (let i = 0; i < existing.length; i += BATCH_SIZE) {
                 const batch = db.batch();
@@ -38,8 +48,11 @@ async function runRestore(driveFileId, mode) {
         for (let i = 0; i < docs.length; i += BATCH_SIZE) {
             const batch = db.batch();
             const chunk = docs.slice(i, i + BATCH_SIZE);
+            let written = 0;
             chunk.forEach(doc => {
                 const { _id, ...fields } = doc;
+                if (!_id)
+                    return;
                 const clean = deserializeFields(fields);
                 const ref = db.collection(colName).doc(_id);
                 if (mode === 'full') {
@@ -48,11 +61,13 @@ async function runRestore(driveFileId, mode) {
                 else {
                     batch.set(ref, clean, { merge: true });
                 }
+                written++;
             });
             await batch.commit();
-            docsRestored += chunk.length;
+            docsRestored += written;
         }
     }
+    await setJob({ status: 'done', phase: 'Completado', docsRestored, total });
     await db.collection('audit_logs').add({
         action: 'RESTORE_BACKUP',
         module: 'SISTEMA',
