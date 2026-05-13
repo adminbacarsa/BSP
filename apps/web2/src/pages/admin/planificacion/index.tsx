@@ -3036,7 +3036,17 @@ export default function PlanificacionPage() {
                             let dailyTarget = 24;
                             if (coverageType !== '24hs') {
                                 const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
-                                const sum = shiftsArr.reduce((a: number, s: any) => a + (Number(s.hours) || 8), 0);
+                                const sum = shiftsArr.reduce((a: number, s: any) => {
+                                    const h = Number(s.hours);
+                                    if (h > 0) return a + h;
+                                    if (s.startTime && s.endTime) {
+                                        const parseH = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh + (mm || 0) / 60; };
+                                        let dur = parseH(s.endTime) - parseH(s.startTime);
+                                        if (dur <= 0) dur += 24;
+                                        if (dur > 0 && dur <= 24) return a + dur;
+                                    }
+                                    return a + 8;
+                                }, 0);
                                 dailyTarget = sum > 0 ? sum : 8;
                             }
                             let hoursForPos = 0;
