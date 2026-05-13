@@ -20,8 +20,8 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword } from 'firebase/auth';
-import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
@@ -34,14 +34,11 @@ import {
   Copy,
   Edit2,
   ExternalLink,
-  Eye,
-  EyeOff,
   FileText,
   Globe,
   Grid3x3,
   LayoutList,
   Loader2,
-  Lock,
   Mail,
   MapPin,
   Navigation,
@@ -245,8 +242,8 @@ export default function CRMPage() {
   // --- PORTAL CLIENTE ---
   const [portalUserMap, setPortalUserMap] = useState<Record<string, any>>({});
   const [portalFormOpen, setPortalFormOpen] = useState(false);
-  const [portalForm, setPortalForm] = useState({ nombre: '', email: '', password: '' });
-  const [portalFormShowPass, setPortalFormShowPass] = useState(false);
+  const [portalForm, setPortalForm] = useState({ nombre: '', email: '' });
+  const [portalObjectiveIds, setPortalObjectiveIds] = useState<string[]>([]);
   const [portalSaving, setPortalSaving] = useState(false);
   const [portalError, setPortalError] = useState('');
 
@@ -292,37 +289,31 @@ export default function CRMPage() {
 
   const handleCreatePortalUser = async () => {
     if (!selectedClient?.id) return;
-    if (!portalForm.email.trim() || !portalForm.password.trim() || !portalForm.nombre.trim()) {
-      setPortalError('Completá todos los campos.');
+    if (!portalForm.email.trim() || !portalForm.nombre.trim()) {
+      setPortalError('Completá nombre y email.');
       return;
     }
     setPortalSaving(true);
     setPortalError('');
     try {
-      const secondaryApp = getApps().find(a => a.name === 'secondary') || initializeApp(
-        { apiKey: firebaseApp.options.apiKey, authDomain: firebaseApp.options.authDomain, projectId: firebaseApp.options.projectId },
-        'secondary'
-      );
-      const secondaryAuth = getAuth(secondaryApp);
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, portalForm.email.trim(), portalForm.password.trim());
-      await addDoc(collection(db, 'client_users'), {
-        uid: cred.user.uid,
+      const fn = httpsCallable(getFunctions(), 'createClientPortalAccess');
+      await fn({
         clientId: selectedClient.id,
         clientName: selectedClient.name,
         nombre: portalForm.nombre.trim(),
         email: portalForm.email.trim(),
-        activo: true,
-        creadoEn: serverTimestamp(),
+        objectiveIds: portalObjectiveIds,
       });
-      await secondaryAuth.signOut();
-      setPortalForm({ nombre: '', email: '', password: '' });
+      setPortalForm({ nombre: '', email: '' });
+      setPortalObjectiveIds([]);
       setPortalFormOpen(false);
-      toast.success('Usuario de portal creado');
+      toast.success('Acceso enviado por email al cliente');
       loadPortalUserForClient(selectedClient.id);
     } catch (e: any) {
-      if (e.code === 'auth/email-already-in-use') setPortalError('El email ya está en uso.');
-      else if (e.code === 'auth/weak-password') setPortalError('La contraseña debe tener al menos 6 caracteres.');
-      else setPortalError('Error al crear usuario. Intentá nuevamente.');
+      const msg = e?.message || '';
+      if (msg.includes('email-already-in-use')) setPortalError('El email ya tiene una cuenta. El acceso fue reenviado.');
+      else if (msg.includes('no configurado')) setPortalError('Servicio de email no configurado en el servidor.');
+      else setPortalError('Error al crear acceso. Intentá nuevamente.');
     } finally {
       setPortalSaving(false);
     }
@@ -2233,7 +2224,13 @@ export default function CRMPage() {
                         </div>
                         {!portalUserMap[selectedClient?.id] && !portalFormOpen && (
                           <button
-                            onClick={() => { setPortalFormOpen(true); setPortalError(''); loadPortalUserForClient(selectedClient.id); }}
+                            onClick={() => {
+                              setPortalForm({ nombre: '', email: '' });
+                              setPortalObjectiveIds([]);
+                              setPortalFormOpen(true);
+                              setPortalError('');
+                              loadPortalUserForClient(selectedClient.id);
+                            }}
                             className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase transition-colors"
                           >
                             <UserPlus size={12} /> Crear acceso
@@ -2242,12 +2239,38 @@ export default function CRMPage() {
                       </div>
 
                       {portalUserMap[selectedClient?.id] ? (
-                        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                          <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
-                          <div>
-                            <p className="text-xs font-black text-emerald-700">{portalUserMap[selectedClient.id].nombre}</p>
-                            <p className="text-[10px] text-emerald-600 font-medium">{portalUserMap[selectedClient.id].email}</p>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                            <ShieldCheck size={14} className="text-emerald-600 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-emerald-700">{portalUserMap[selectedClient.id].nombre}</p>
+                              <p className="text-[10px] text-emerald-600 font-medium">{portalUserMap[selectedClient.id].email}</p>
+                              {portalUserMap[selectedClient.id].portalInvite?.sentAt && (
+                                <p className="text-[10px] text-emerald-500 font-medium mt-0.5">
+                                  Acceso enviado {portalUserMap[selectedClient.id].portalInvite.sentAt?.toDate?.()?.toLocaleDateString?.('es-AR') || ''}
+                                </p>
+                              )}
+                              {(portalUserMap[selectedClient.id].objectiveIds?.length ?? 0) > 0 && (
+                                <p className="text-[10px] text-emerald-500 font-medium">
+                                  {portalUserMap[selectedClient.id].objectiveIds.length} objetivo{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''} asignado{portalUserMap[selectedClient.id].objectiveIds.length !== 1 ? 's' : ''}
+                                </p>
+                              )}
+                            </div>
                           </div>
+                          {!portalFormOpen && (
+                            <button
+                              onClick={() => {
+                                const pu = portalUserMap[selectedClient.id];
+                                setPortalForm({ nombre: pu.nombre || '', email: pu.email || '' });
+                                setPortalObjectiveIds(pu.objectiveIds || []);
+                                setPortalFormOpen(true);
+                                setPortalError('');
+                              }}
+                              className="flex items-center gap-1 px-3 py-1.5 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase transition-colors"
+                            >
+                              <Send size={12} /> Reenviar acceso
+                            </button>
+                          )}
                         </div>
                       ) : portalUserMap[selectedClient?.id] === null && !portalFormOpen ? (
                         <p className="text-[10px] text-slate-400 font-bold">Sin usuario de portal asignado. Creá un acceso para que el cliente pueda gestionar su personal autorizado.</p>
@@ -2275,23 +2298,37 @@ export default function CRMPage() {
                               className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
                             />
                           </div>
-                          <div className="relative">
-                            <Lock size={13} className="absolute left-3 top-2.5 text-slate-400" />
-                            <input
-                              type={portalFormShowPass ? 'text' : 'password'} value={portalForm.password} onChange={e => setPortalForm(f => ({ ...f, password: e.target.value }))}
-                              placeholder="Contraseña (mín. 6 caracteres) *"
-                              className="w-full pl-8 pr-8 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                            />
-                            <button type="button" onClick={() => setPortalFormShowPass(p => !p)} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
-                              {portalFormShowPass ? <EyeOff size={13} /> : <Eye size={13} />}
-                            </button>
-                          </div>
+
+                          {/* Selector de objetivos */}
+                          {(selectedClient?.objetivos?.length ?? 0) > 0 && (
+                            <div className="border border-slate-200 rounded-xl p-3 bg-white space-y-1.5">
+                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2">
+                                Objetivos con acceso <span className="text-slate-300 font-medium normal-case">(vacío = todos)</span>
+                              </p>
+                              {selectedClient.objetivos.filter((o: any) => o.id && o.name).map((o: any) => (
+                                <label key={o.id} className="flex items-center gap-2 cursor-pointer group">
+                                  <input
+                                    type="checkbox"
+                                    checked={portalObjectiveIds.includes(o.id)}
+                                    onChange={e => setPortalObjectiveIds(prev =>
+                                      e.target.checked ? [...prev, o.id] : prev.filter(id => id !== o.id)
+                                    )}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                  />
+                                  <span className="text-xs font-medium text-slate-700 group-hover:text-slate-900 transition-colors uppercase truncate">
+                                    {o.name}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+
                           <div className="flex gap-2">
                             <button
                               onClick={handleCreatePortalUser} disabled={portalSaving}
                               className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
                             >
-                              {portalSaving ? <Loader2 size={12} className="animate-spin" /> : null} Crear usuario
+                              {portalSaving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Enviar acceso
                             </button>
                             <button
                               onClick={() => { setPortalFormOpen(false); setPortalError(''); }}

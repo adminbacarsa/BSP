@@ -21,6 +21,7 @@ interface ClienteUser {
   clientName: string;
   nombre: string;
   email: string;
+  objectiveIds?: string[];
 }
 
 interface ObjetivoInfo {
@@ -771,9 +772,12 @@ export default function ClientePortal() {
         const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
         if (!clientSnap.exists()) { setAuthState('sin_acceso'); return; }
         const clientData = clientSnap.data() as any;
-        const obs: ObjetivoInfo[] = (clientData.objetivos || [])
+        let obs: ObjetivoInfo[] = (clientData.objetivos || [])
           .filter((o: any) => o.id && o.name)
           .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
+        if (cu.objectiveIds && cu.objectiveIds.length > 0) {
+          obs = obs.filter(o => cu.objectiveIds!.includes(o.id));
+        }
         setObjetivos(obs);
         setAuthState('ok');
       } catch (e) {
@@ -794,9 +798,12 @@ export default function ClientePortal() {
       const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
       if (!clientSnap.exists()) { setAuthState('sin_acceso'); return; }
       const clientData = clientSnap.data() as any;
-      const obs: ObjetivoInfo[] = (clientData.objetivos || [])
+      let obs: ObjetivoInfo[] = (clientData.objetivos || [])
         .filter((o: any) => o.id && o.name)
         .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
+      if (cu.objectiveIds && cu.objectiveIds.length > 0) {
+        obs = obs.filter(o => cu.objectiveIds!.includes(o.id));
+      }
       setObjetivos(obs);
       setAuthState('ok');
     } catch (e) {
