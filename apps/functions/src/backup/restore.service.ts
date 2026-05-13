@@ -44,6 +44,9 @@ export async function runRestore(driveFileId: string, mode: RestoreMode, jobId?:
   const payload = JSON.parse(raw);
   const { _meta, ...collections } = payload;
 
+  // Colecciones operativas que nunca se borran en full restore
+  const SKIP_DELETE = new Set(['system_backups', 'audit_logs', 'restore_jobs']);
+
   const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && (docs as any[]).length > 0) as [string, any[]][];
   const total = colEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
 
@@ -59,8 +62,8 @@ export async function runRestore(driveFileId: string, mode: RestoreMode, jobId?:
 
     await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${colEntries.length})…`, docsRestored });
 
-    // Full restore: borrar todos los docs actuales de la colección
-    if (mode === 'full') {
+    // Full restore: borrar docs actuales, excepto colecciones operativas del sistema
+    if (mode === 'full' && !SKIP_DELETE.has(colName)) {
       const existing = await db.collection(colName).listDocuments();
       for (let i = 0; i < existing.length; i += BATCH_SIZE) {
         const batch = db.batch();
