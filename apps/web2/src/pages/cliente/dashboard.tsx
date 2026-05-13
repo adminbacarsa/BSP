@@ -5,7 +5,7 @@ import {
   collection, query, where, orderBy, onSnapshot,
   addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc
 } from 'firebase/firestore';
-import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User, getIdTokenResult } from 'firebase/auth';
 import {
   ShieldCheck, LogOut, Building2, ChevronRight, ChevronLeft,
   UserCheck, Car, Users, Trash2, Plus, Search, Upload, Download,
@@ -751,35 +751,172 @@ function GestionObjetivoScreen({
   );
 }
 
+// ─── AdminClientSelectorScreen ────────────────────────────────────────────────
+
+function AdminClientSelectorScreen({
+  user, onSelect, onSignOut
+}: {
+  user: User;
+  onSelect: (cu: ClienteUser, obs: ObjetivoInfo[]) => void;
+  onSignOut: () => void;
+}) {
+  const [clients, setClients] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    getDocs(query(collection(db, 'clients'), orderBy('name')))
+      .then(snap => setClients(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = clients.filter(c =>
+    !search || (c.name || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const handleSelect = (c: any) => {
+    const obs: ObjetivoInfo[] = (c.objetivos || [])
+      .filter((o: any) => o.id && o.name)
+      .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
+    const cu: ClienteUser = {
+      uid: user.uid,
+      clientId: c.id,
+      clientName: c.name,
+      nombre: user.displayName || user.email || 'Administrador',
+      email: user.email || '',
+    };
+    onSelect(cu, obs);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center">
+            <ShieldCheck size={18} className="text-white" />
+          </div>
+          <div>
+            <p className="font-black text-slate-900 text-sm leading-tight">Portal de Clientes</p>
+            <p className="text-[11px] text-amber-600 font-black">MODO ADMINISTRADOR</p>
+          </div>
+        </div>
+        <button onClick={onSignOut} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-700 text-xs font-bold transition-colors p-2">
+          <LogOut size={16} /> Salir
+        </button>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-black text-slate-900">Seleccioná un cliente</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">Acceso de administrador — podés ver cualquier cliente</p>
+        </div>
+
+        <div className="relative mb-4">
+          <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar cliente..."
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-indigo-400" /></div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 text-slate-400">
+            <Building2 size={40} className="mx-auto mb-3 opacity-30" />
+            <p className="font-bold text-sm">Sin resultados</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {filtered.map(c => (
+              <button key={c.id} onClick={() => handleSelect(c)}
+                className="flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 hover:shadow-sm transition-all text-left group"
+              >
+                <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-100 transition-colors">
+                  <Building2 size={20} className="text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-slate-800 text-sm uppercase truncate">{c.name}</p>
+                  <p className="text-[11px] font-bold text-slate-400 mt-0.5">
+                    {(c.objetivos || []).length} objetivo{(c.objetivos || []).length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ChevronRight size={18} className="text-slate-300 group-hover:text-indigo-400 flex-shrink-0 transition-colors" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+const ADMIN_ROLES = ['admin', 'superadmin', 'Admin', 'SuperAdmin', 'ADMIN', 'SUPERADMIN',
+  'Manager', 'MANAGER', 'Scheduler', 'SCHEDULER', 'Supervisor', 'SUPERVISOR',
+  'Operator', 'OPERATOR', 'HR_Manager', 'HR_MANAGER'];
+
+async function resolveAuthUser(user: User): Promise<'client' | 'admin' | 'none'> {
+  // 1. ¿Es usuario de portal cliente?
+  const cuSnap = await getDoc(doc(db, 'client_users', user.uid));
+  if (cuSnap.exists()) return 'client';
+
+  // 2. ¿Tiene claim de admin?
+  const tokenResult = await getIdTokenResult(user);
+  const role = (tokenResult.claims.role as string) || '';
+  if (ADMIN_ROLES.includes(role)) return 'admin';
+
+  // 3. ¿Existe en system_users?
+  const sysSnap = await getDoc(doc(db, 'system_users', user.uid));
+  if (sysSnap.exists()) return 'admin';
+
+  return 'none';
+}
+
 export default function ClientePortal() {
-  const [authState, setAuthState] = useState<'loading' | 'unauth' | 'checking' | 'sin_acceso' | 'ok'>('loading');
+  const [authState, setAuthState] = useState<'loading' | 'unauth' | 'checking' | 'sin_acceso' | 'ok' | 'admin_select'>('loading');
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const [clienteUser, setClienteUser] = useState<ClienteUser | null>(null);
   const [objetivos, setObjetivos] = useState<ObjetivoInfo[]>([]);
   const [selectedObjetivo, setSelectedObjetivo] = useState<ObjetivoInfo | null>(null);
 
+  const resolveClientUser = async (user: User) => {
+    const snap = await getDoc(doc(db, 'client_users', user.uid));
+    if (!snap.exists()) return false;
+    const cu = { uid: user.uid, ...snap.data() } as ClienteUser;
+
+    const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
+    if (!clientSnap.exists()) return false;
+    const clientData = clientSnap.data() as any;
+    let obs: ObjetivoInfo[] = (clientData.objetivos || [])
+      .filter((o: any) => o.id && o.name)
+      .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
+    if (cu.objectiveIds && cu.objectiveIds.length > 0) {
+      obs = obs.filter(o => cu.objectiveIds!.includes(o.id));
+    }
+    setClienteUser(cu);
+    setObjetivos(obs);
+    return true;
+  };
+
   useEffect(() => {
     return onAuthStateChanged(auth, async (user) => {
       if (!user) { setAuthState('unauth'); return; }
+      setAuthUser(user);
       setAuthState('checking');
       try {
-        const snap = await getDoc(doc(db, 'client_users', user.uid));
-        if (!snap.exists()) { setAuthState('sin_acceso'); return; }
-        const cu = { uid: user.uid, ...snap.data() } as ClienteUser;
-        setClienteUser(cu);
-
-        const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
-        if (!clientSnap.exists()) { setAuthState('sin_acceso'); return; }
-        const clientData = clientSnap.data() as any;
-        let obs: ObjetivoInfo[] = (clientData.objetivos || [])
-          .filter((o: any) => o.id && o.name)
-          .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
-        if (cu.objectiveIds && cu.objectiveIds.length > 0) {
-          obs = obs.filter(o => cu.objectiveIds!.includes(o.id));
+        const kind = await resolveAuthUser(user);
+        if (kind === 'client') {
+          await resolveClientUser(user);
+          setAuthState('ok');
+        } else if (kind === 'admin') {
+          setAuthState('admin_select');
+        } else {
+          setAuthState('sin_acceso');
         }
-        setObjetivos(obs);
-        setAuthState('ok');
       } catch (e) {
         console.error(e);
         setAuthState('sin_acceso');
@@ -788,24 +925,18 @@ export default function ClientePortal() {
   }, []);
 
   const handleLogin = async (user: User) => {
+    setAuthUser(user);
     setAuthState('checking');
     try {
-      const snap = await getDoc(doc(db, 'client_users', user.uid));
-      if (!snap.exists()) { setAuthState('sin_acceso'); return; }
-      const cu = { uid: user.uid, ...snap.data() } as ClienteUser;
-      setClienteUser(cu);
-
-      const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
-      if (!clientSnap.exists()) { setAuthState('sin_acceso'); return; }
-      const clientData = clientSnap.data() as any;
-      let obs: ObjetivoInfo[] = (clientData.objetivos || [])
-        .filter((o: any) => o.id && o.name)
-        .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
-      if (cu.objectiveIds && cu.objectiveIds.length > 0) {
-        obs = obs.filter(o => cu.objectiveIds!.includes(o.id));
+      const kind = await resolveAuthUser(user);
+      if (kind === 'client') {
+        await resolveClientUser(user);
+        setAuthState('ok');
+      } else if (kind === 'admin') {
+        setAuthState('admin_select');
+      } else {
+        setAuthState('sin_acceso');
       }
-      setObjetivos(obs);
-      setAuthState('ok');
     } catch (e) {
       console.error(e);
       setAuthState('sin_acceso');
@@ -814,6 +945,7 @@ export default function ClientePortal() {
 
   const handleSignOut = async () => {
     await signOut(auth);
+    setAuthUser(null);
     setClienteUser(null);
     setObjetivos([]);
     setSelectedObjetivo(null);
@@ -842,6 +974,23 @@ export default function ClientePortal() {
       <>
         <Head><title>Sin acceso — COSP</title></Head>
         <SinAccesoScreen onSignOut={handleSignOut} />
+      </>
+    );
+  }
+
+  if (authState === 'admin_select' && authUser) {
+    return (
+      <>
+        <Head><title>Portal de Clientes — Admin</title></Head>
+        <AdminClientSelectorScreen
+          user={authUser}
+          onSelect={(cu, obs) => {
+            setClienteUser(cu);
+            setObjetivos(obs);
+            setAuthState('ok');
+          }}
+          onSignOut={handleSignOut}
+        />
       </>
     );
   }
