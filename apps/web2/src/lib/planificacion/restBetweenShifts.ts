@@ -1,17 +1,16 @@
 /**
  * Descansos entre turnos (SUVICO y convenios con campos opcionales).
  * - Mínimo entre turnos laborales: 12 h (configurable).
- * - Tras ≥48 h trabajadas en racha consecutiva, o ≥N días laborales consecutivos (p. ej. 6):
- *   35 h desde el fin del último turno hasta el inicio del siguiente (F/RET/licencias
- *   cuentan en el calendario hacia esas 35 h; no alcanza con “un día calendario” suelto).
+ * - Tras ≥48 h trabajadas en racha consecutiva (con descansos de 12 h entre medio):
+ *   35 h desde el fin del último turno hasta el inicio del siguiente.
+ * - El campo opcional `longRestAfterConsecutiveWorkDays` permite a otros convenios
+ *   exigir el descanso largo también por días seguidos, pero SUVICO no lo usa.
  */
 import { getDateKey } from './utils';
 
 const DEFAULT_MIN_REST = 12;
 const DEFAULT_STREAK_THRESHOLD = 48;
 const DEFAULT_LONG_REST = 35;
-/** Días consecutivos con turno laboral que disparan el descanso extendido (además del umbral en horas). */
-const DEFAULT_STREAK_WORK_DAYS = 6;
 
 /** Rompen la racha de trabajo consecutivo (no suman a las 48 h). RET no suma pero tampoco cierra racha legal → lo tratamos como corte de racha. */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
@@ -174,11 +173,12 @@ export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRe
     if (d !== undefined) custom.longRestAfterConsecutiveWorkDays = d;
     if (Object.keys(custom).length > 0) return custom;
     if (name.includes('suvico') || String(r?.name || '').toLowerCase().includes('suvico') || r.suvicoRestRules) {
+        // CCT 422/05 SUVICO: 12h entre turnos; 35h cuando se acumularon 48h de trabajo
+        // (con descansos de 12h entre medio). El motor compara HORAS, no días.
         return {
             minRestBetweenShiftsHours: DEFAULT_MIN_REST,
             longRestAfterWorkedHours: DEFAULT_STREAK_THRESHOLD,
             minLongRestHours: DEFAULT_LONG_REST,
-            longRestAfterConsecutiveWorkDays: DEFAULT_STREAK_WORK_DAYS,
         };
     }
     return null;

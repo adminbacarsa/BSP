@@ -31,7 +31,6 @@ const VERIFY_REST_CFG: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
     longRestAfterWorkedHours: 48,
     minLongRestHours: 35,
-    longRestAfterConsecutiveWorkDays: 6,
 };
 
 export interface UncoveredSlot {

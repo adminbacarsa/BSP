@@ -57,12 +57,11 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
-/** Alineado a `checkRestBetweenShifts`: 12 h entre turnos, 35 h tras 48 h y/o 6 días laborales seguidos. */
+/** Alineado a `checkRestBetweenShifts`: 12 h entre turnos; 35 h cuando se acumulan 48 h de trabajo. */
 const V2_AGREEMENT_REST: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
     longRestAfterWorkedHours: 48,
     minLongRestHours: 35,
-    longRestAfterConsecutiveWorkDays: 6,
 };
 
 /** Tope target promedio por empleado / mes (CCT 422/05 ≈ 192h). */

@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>API de Liquidación COSP — Manual del Integrador</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    color: #1f2937;
+    font-size: 11pt;
+    line-height: 1.45;
+    background: #f7f8fa;
+  }
+  .page {
+    background: white;
+    padding: 26mm 22mm;
+    max-width: 210mm;
+    margin: 12mm auto;
+    box-shadow: 0 6px 28px rgba(0,0,0,.08);
+    border-radius: 6px;
+  }
+  h1, h2, h3 { color: #0f172a; }
+  h1 {
+    font-size: 24pt; margin: 0 0 6pt; border-bottom: 3px solid #2563eb;
+    padding-bottom: 8pt;
+  }
+  h2 {
+    font-size: 15pt; margin: 24pt 0 8pt;
+    border-left: 4px solid #2563eb; padding-left: 10pt;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12pt; margin: 14pt 0 6pt; color: #1d4ed8; page-break-after: avoid; }
+  p { margin: 6pt 0; }
+  ul, ol { margin: 6pt 0 6pt 18pt; padding: 0; }
+  li { margin: 2pt 0; }
+  code { font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace; font-size: 9.5pt; background: #eef2ff; padding: 1px 5px; border-radius: 3px; color: #1e3a8a; }
+  pre {
+    background: #0f172a; color: #e2e8f0;
+    padding: 12pt; border-radius: 6px;
+    font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 9pt; line-height: 1.45;
+    overflow-x: auto; page-break-inside: avoid;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  table {
+    border-collapse: collapse; width: 100%;
+    font-size: 10pt; margin: 8pt 0;
+    page-break-inside: avoid;
+  }
+  th, td { border: 1px solid #d1d5db; padding: 6pt 8pt; vertical-align: top; }
+  th { background: #eff6ff; color: #1e3a8a; text-align: left; }
+  tr:nth-child(2n) td { background: #f9fafb; }
+  blockquote {
+    margin: 8pt 0; padding: 8pt 14pt;
+    background: #fef3c7; border-left: 4px solid #d97706;
+    font-size: 10.5pt; border-radius: 0 4px 4px 0;
+  }
+  .tag {
+    display: inline-block; padding: 1px 7px; border-radius: 999px;
+    font-size: 8.5pt; font-weight: 600; margin-right: 4pt; text-transform: uppercase;
+  }
+  .tag-get  { background: #dcfce7; color: #166534; }
+  .tag-post { background: #dbeafe; color: #1e40af; }
+  .meta {
+    color: #64748b; font-size: 10pt; margin: 0 0 18pt;
+  }
+  hr {
+    border: 0; border-top: 1px dashed #cbd5e1; margin: 18pt 0;
+  }
+  .page-break { page-break-before: always; }
+  @media print {
+    body { background: white; font-size: 10.5pt; }
+    .page { box-shadow: none; margin: 0; padding: 0; max-width: none; }
+    .no-print { display: none !important; }
+    h1, h2, h3 { page-break-after: avoid; }
+    pre, table, blockquote { page-break-inside: avoid; }
+  }
+  .print-hint {
+    position: fixed; right: 12px; bottom: 12px;
+    background: #2563eb; color: white; padding: 10px 14px;
+    border-radius: 6px; font-size: 11pt; box-shadow: 0 4px 12px rgba(0,0,0,.2);
+    cursor: pointer; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div class="no-print print-hint" onclick="window.print()">🖨️ Guardar como PDF (Ctrl+P)</div>
+<div class="page">
+
+<h1>API de Liquidación COSP</h1>
+<p class="meta">Manual del Integrador · CCT 422/05 SUVICO · Versión <code>v1</code></p>
+
+<blockquote>
+Documento de referencia para el sistema interno de liquidación de sueldos
+que va a consumir los datos de horas y novedades RRHH desde COSP.
+</blockquote>
+
+<h2>1. Qué entrega esta API</h2>
+<p>Por cada <strong>ciclo CCT 422/05</strong> (del 26 al 25), un JSON con una
+fila por empleado conteniendo:</p>
+<ul>
+  <li>Horas teóricas y horas <strong>reales</strong> (fichada) trabajadas.</li>
+  <li>Horas diurnas y nocturnas (corte 21:00–06:00).</li>
+  <li>Horas al <strong>100 %</strong> (Franco Trabajado — FT).</li>
+  <li><strong>Plus Feriado</strong> (horas reales en fechas marcadas como feriado).</li>
+  <li><strong>Liquidación 200 hs</strong>: simples + al 50 %; FT y feriados se pagan aparte.</li>
+  <li><strong>Novedades RRHH</strong>: días de vacaciones, licencia, ART, enfermedad, permiso gremial, injustificada.</li>
+  <li><code>warnings[]</code> con turnos sin fichada y casos a revisar manualmente.</li>
+</ul>
+<p>Es el mismo cálculo que muestra la pantalla
+<em>Reportes → Detalle de horas</em> en el panel COSP.</p>
+
+<h2>2. Datos que recibe el integrador</h2>
+<table>
+  <tr><th>Dato</th><th>Ejemplo</th></tr>
+  <tr><td>Base URL</td><td><code>https://us-central1-comtroldata.cloudfunctions.net/payrollApi</code></td></tr>
+  <tr><td>API Key</td><td><code>csp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</code> (se entrega una sola vez)</td></tr>
+  <tr><td>Scopes</td><td><code>payroll.read</code>, <code>payroll.close</code></td></tr>
+</table>
+<blockquote>
+<strong>Guardá la clave en un manager de secretos.</strong> En la base solo
+queda el hash; si se pierde hay que emitir una nueva.
+</blockquote>
+<p>Si tu servidor tiene IP fija, pediles que la restrinjan al rango/IP
+correspondiente (<code>ipAllowlist</code>).</p>
+
+<h2>3. Autenticación</h2>
+<p>Todos los endpoints (menos <code>/health</code>) requieren el header:</p>
+<pre><code>X-API-Key: csp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</code></pre>
+<p>Si la clave es inválida, está revocada o la IP no está autorizada, la API
+responde <strong>401</strong> o <strong>403</strong>:</p>
+<pre><code>{ "error": { "code": "invalid_api_key", "message": "API Key inválida o revocada." } }</code></pre>
+
+<h2>4. Concepto de ciclo</h2>
+<p>Liquidamos siempre por ciclo <strong>CCT 422/05 SUVICO</strong>: del
+<strong>día 26</strong> del mes anterior al <strong>día 25</strong> del mes
+objetivo.</p>
+<ul>
+  <li><code>cycleId</code> = <code>YYYY-MM</code> del mes en que cae el corte (día 25).</li>
+  <li><code>2026-05</code> → 2026-04-26 al 2026-05-25</li>
+  <li><code>2026-06</code> → 2026-05-26 al 2026-06-25</li>
+</ul>
+<p>Cuando se <strong>cierra</strong> con <code>POST .../close</code>, los
+turnos y ausencias del período quedan marcados como
+<code>payrollLockedAt</code> y dejan de editarse desde el panel.</p>
+
+<div class="page-break"></div>
+
+<h2>5. Endpoints</h2>
+
+<h3><span class="tag tag-get">GET</span> /v1/payroll/health</h3>
+<p>No requiere API Key. Chequeo de disponibilidad.</p>
+<pre><code>GET /v1/payroll/health
+→ 200 { "status": "ok", "time": "2026-05-13T11:50:00.000Z" }</code></pre>
+
+<h3><span class="tag tag-get">GET</span> /v1/payroll/cycles?count=12</h3>
+<p>Últimos N ciclos (default 12) y su estado de cierre.</p>
+<pre><code>curl -H "X-API-Key: $KEY" "$BASE/v1/payroll/cycles?count=6"</code></pre>
+<pre><code>{
+  "cycles": [
+    {
+      "cycleId": "2026-05",
+      "cycleStart": "2026-04-26",
+      "cycleEnd": "2026-05-25",
+      "cctVersion": "422/05",
+      "lockedAt": null,
+      "lockedBy": null
+    },
+    {
+      "cycleId": "2026-04",
+      "cycleStart": "2026-03-26",
+      "cycleEnd": "2026-04-25",
+      "cctVersion": "422/05",
+      "lockedAt": "2026-04-26T14:02:00.000Z",
+      "lockedBy": "integraciones_api/abc"
+    }
+  ]
+}</code></pre>
+
+<h3><span class="tag tag-get">GET</span> /v1/payroll/liquidacion</h3>
+<p><strong>Endpoint principal.</strong> Acumulado por empleado para el ciclo.</p>
+<table>
+  <tr><th>Param</th><th>Default</th><th>Descripción</th></tr>
+  <tr><td><code>cycleId</code></td><td>obligatorio</td><td><code>YYYY-MM</code>. Ej. <code>2026-05</code>.</td></tr>
+  <tr><td><code>clientId</code></td><td>—</td><td>Filtra por cliente (opcional).</td></tr>
+  <tr><td><code>page</code></td><td>1</td><td>Paginación.</td></tr>
+  <tr><td><code>pageSize</code></td><td>100 (máx 500)</td><td>Paginación.</td></tr>
+</table>
+<pre><code>curl -H "X-API-Key: $KEY" \
+  "$BASE/v1/payroll/liquidacion?cycleId=2026-05&amp;pageSize=200"</code></pre>
+
+<p><strong>Respuesta (resumida a 1 empleado):</strong></p>
+<pre><code>{
+  "cycleId": "2026-05",
+  "cycleStart": "2026-04-26",
+  "cycleEnd": "2026-05-25",
+  "cctVersion": "422/05",
+  "generatedAt": "2026-05-13T11:50:00.000Z",
+  "lockedAt": null,
+  "empresaId": "bacarsa",
+  "items": [
+    {
+      "employee": {
+        "id": "abc123",
+        "dni": "30111222",
+        "cuil": "20-30111222-3",
+        "fileNumber": "L-0142",
+        "fullName": "Kasianchuk, Gustavo Facundo",
+        "laborAgreement": "SUVICO"
+      },
+      "acumulado": {
+        "hsTeoricas": 192.0,
+        "hsReales": 188.5,
+        "diurnas": 144.0,
+        "nocturnas": 44.5,
+        "al50": 0.0,
+        "al100FT": 12.0,
+        "plusFeriado": 8.0
+      },
+      "liquidacion200": {
+        "bolsa": 176.5,
+        "hsSimples": 176.5,
+        "al50": 0.0,
+        "nota": "FT y Feriados se pagan aparte."
+      },
+      "pagaAparte": {
+        "francoTrabajado100": 12.0,
+        "plusFeriado": 8.0
+      },
+      "novedadesRRHH": {
+        "vacacionesDias": 0,
+        "enfermedadDias": 2,
+        "art": 0,
+        "licenciaEspecialDias": 0,
+        "permisoGremialDias": 0,
+        "injustificadaDias": 1
+      },
+      "turnosCount": 22,
+      "turnosConFichada": 21,
+      "warnings": [
+        "Turno 7d8a (M 2026-05-04) sin fichada — no suma a Hs Reales."
+      ]
+    }
+  ],
+  "pagination": { "page": 1, "pageSize": 200, "total": 142 }
+}</code></pre>
+
+<h3>Significado de cada campo</h3>
+<table>
+  <tr><th>Campo</th><th>Significado</th></tr>
+  <tr><td><code>hsTeoricas</code></td><td>Horas planificadas. Control vs <code>hsReales</code>.</td></tr>
+  <tr><td><code>hsReales</code></td><td>Horas con fichada. <strong>Es lo que se liquida.</strong></td></tr>
+  <tr><td><code>diurnas</code> / <code>nocturnas</code></td><td>Sobre <code>hsReales</code>. Corte 21:00–06:00.</td></tr>
+  <tr><td><code>al100FT</code></td><td>Franco Trabajado. Va a <code>pagaAparte.francoTrabajado100</code>.</td></tr>
+  <tr><td><code>plusFeriado</code></td><td>Horas reales en feriado. Paga aparte.</td></tr>
+  <tr><td><code>liquidacion200.hsSimples</code></td><td><code>min(bolsa, 200)</code>.</td></tr>
+  <tr><td><code>liquidacion200.al50</code></td><td><code>max(0, bolsa − 200)</code>.</td></tr>
+  <tr><td><code>novedadesRRHH</code></td><td>Días dentro del ciclo.</td></tr>
+  <tr><td><code>warnings</code></td><td>Inconsistencias a revisar.</td></tr>
+</table>
+<blockquote>
+<strong>Fórmula clave:</strong> <code>bolsa = hsReales − al100FT</code>. FT
+y feriado <strong>no entran</strong> a la bolsa de las 200 hs.
+</blockquote>
+
+<div class="page-break"></div>
+
+<h3><span class="tag tag-post">POST</span> /v1/payroll/liquidacion/:cycleId/close</h3>
+<p>Cierra el ciclo. Requiere scope <code>payroll.close</code>. Después del
+cierre los documentos del período quedan estampados con
+<code>payrollLockedAt</code>.</p>
+<p>Recomendado mandar <code>Idempotency-Key</code> único por intento.</p>
+<pre><code>curl -X POST \
+  -H "X-API-Key: $KEY" \
+  -H "Idempotency-Key: 2026-05-cierre-01" \
+  "$BASE/v1/payroll/liquidacion/2026-05/close"</code></pre>
+<pre><code>{
+  "success": true,
+  "snapshot": {
+    "cycleId": "2026-05",
+    "lockedAt": "2026-05-26T13:10:23.000Z",
+    "items": [ /* mismo formato que el GET */ ]
+  }
+}</code></pre>
+<p>Si ya estaba cerrado:</p>
+<pre><code>{
+  "error": {
+    "code": "cycle_already_locked",
+    "message": "El ciclo 2026-05 ya fue cerrado.",
+    "lockedAt": "2026-05-26T13:10:23.000Z",
+    "lockedBy": "integraciones_api/abc"
+  }
+}</code></pre>
+
+<h2>6. Códigos de respuesta</h2>
+<table>
+  <tr><th>Status</th><th>Cuándo</th><th>Acción</th></tr>
+  <tr><td><code>200</code></td><td>OK</td><td>—</td></tr>
+  <tr><td><code>400</code> <code>invalid_cycle</code></td><td>cycleId mal formado</td><td>Usar <code>YYYY-MM</code>.</td></tr>
+  <tr><td><code>401</code> <code>missing_api_key</code></td><td>Falta header</td><td>Agregar <code>X-API-Key</code>.</td></tr>
+  <tr><td><code>401</code> <code>invalid_api_key</code></td><td>Clave inválida o revocada</td><td>Pedir reemisión.</td></tr>
+  <tr><td><code>403</code> <code>ip_not_allowed</code></td><td>IP fuera de allowlist</td><td>Avisar a COSP.</td></tr>
+  <tr><td><code>403</code> <code>missing_scope</code></td><td>Scope insuficiente</td><td>Solicitar el scope.</td></tr>
+  <tr><td><code>404</code> <code>not_found</code></td><td>Ruta inexistente</td><td>Revisar URL.</td></tr>
+  <tr><td><code>409</code> <code>cycle_already_locked</code></td><td>Ciclo ya cerrado</td><td>Solo <code>GET</code>.</td></tr>
+  <tr><td><code>500</code> <code>internal_error</code></td><td>Bug del servidor</td><td>Reintentar / contactar.</td></tr>
+</table>
+
+<h2>7. Flujo mensual recomendado</h2>
+<ol>
+  <li><strong>Día 25 al mediodía</strong> — <code>GET /cycles?count=3</code> para identificar el ciclo.</li>
+  <li><strong>Día 25 al cierre</strong> — <code>GET /liquidacion?cycleId=2026-05</code>. Revisar <code>warnings</code> con operaciones.</li>
+  <li>Operaciones corrige fichadas pendientes. Reintentar el GET hasta que los warnings estén controlados.</li>
+  <li><strong>Día 26</strong> — <code>POST /liquidacion/2026-05/close</code> con <code>Idempotency-Key</code>. Guardar el <code>snapshot</code> oficial.</li>
+  <li>El sistema interno importa el snapshot y procesa la nómina.</li>
+</ol>
+
+<h2>8. Ejemplos por lenguaje</h2>
+
+<h3>Node.js (18+)</h3>
+<pre><code>const API = 'https://us-central1-comtroldata.cloudfunctions.net/payrollApi';
+const KEY = process.env.COSP_API_KEY;
+
+async function getLiquidacion(cycleId) {
+  const r = await fetch(
+    `${API}/v1/payroll/liquidacion?cycleId=${cycleId}&amp;pageSize=500`,
+    { headers: { 'X-API-Key': KEY } },
+  );
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function closeCycle(cycleId) {
+  const r = await fetch(
+    `${API}/v1/payroll/liquidacion/${cycleId}/close`,
+    {
+      method: 'POST',
+      headers: {
+        'X-API-Key': KEY,
+        'Idempotency-Key': `${cycleId}-${Date.now()}`,
+      },
+    },
+  );
+  return r.json();
+}</code></pre>
+
+<h3>Python</h3>
+<pre><code>import os, requests
+
+API = "https://us-central1-comtroldata.cloudfunctions.net/payrollApi"
+KEY = os.environ["COSP_API_KEY"]
+
+def get_liquidacion(cycle_id):
+    r = requests.get(
+        f"{API}/v1/payroll/liquidacion",
+        params={"cycleId": cycle_id, "pageSize": 500},
+        headers={"X-API-Key": KEY},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()
+
+def close_cycle(cycle_id, idem_key):
+    r = requests.post(
+        f"{API}/v1/payroll/liquidacion/{cycle_id}/close",
+        headers={"X-API-Key": KEY, "Idempotency-Key": idem_key},
+        timeout=120,
+    )
+    return r.json()</code></pre>
+
+<h3>PowerShell</h3>
+<pre><code>$KEY = "csp_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+$URL = "https://us-central1-comtroldata.cloudfunctions.net/payrollApi/v1/payroll/liquidacion?cycleId=2026-05"
+Invoke-RestMethod -Uri $URL -Headers @{ "X-API-Key" = $KEY } | ConvertTo-Json -Depth 8</code></pre>
+
+<h2>9. Buenas prácticas</h2>
+<ul>
+  <li><strong>No persistas la API Key en el repo.</strong> Variables de entorno o secret manager.</li>
+  <li><strong>Llamá una vez por día</strong> y cacheá hasta decidir el cierre.</li>
+  <li><strong>Idempotencia</strong> en <code>POST close</code>: siempre <code>Idempotency-Key</code>.</li>
+  <li><strong>Conciliá <code>warnings</code></strong> antes de cerrar. Una vez cerrado el ciclo no se editan turnos sin reabrirlo.</li>
+  <li><strong>Verificá <code>pagination.total</code></strong>: si tu request superó <code>pageSize</code>, pedí más páginas.</li>
+</ul>
+
+<h2>10. Troubleshooting</h2>
+<table>
+  <tr><th>Síntoma</th><th>Causa más probable</th></tr>
+  <tr><td><code>401 missing_api_key</code></td><td>Falta el header <code>X-API-Key</code>.</td></tr>
+  <tr><td><code>401 invalid_api_key</code></td><td>Clave mal copiada o revocada.</td></tr>
+  <tr><td><code>403 ip_not_allowed</code></td><td>Tu servidor cambió de IP. Mandar la nueva.</td></tr>
+  <tr><td><code>hsReales</code> muy por debajo de <code>hsTeoricas</code></td><td>Fichadas pendientes; revisar <code>warnings</code>.</td></tr>
+  <tr><td><code>pagination.total</code> bajo</td><td>Filtro <code>clientId</code> o empleados sin <code>empresaId</code>.</td></tr>
+  <tr><td>Empleado no aparece</td><td>Empleado sin <code>empresaId</code> o sin turnos efectivos en el ciclo.</td></tr>
+</table>
+
+<h2>11. Versionado</h2>
+<ul>
+  <li>Versionado por path: <code>/v1/...</code>. Cambios incompatibles → <code>/v2/...</code> con <code>/v1/</code> activa al menos 90 días.</li>
+  <li><code>cctVersion</code> indica el convenio aplicado. Hoy: <code>"422/05"</code>.</li>
+</ul>
+
+<h2>12. Contacto</h2>
+<p>Equipo COSP — <code>operaciones@comtroldata</code> · Servicio: Bacar S.A. Seguridad Privada.</p>
+
+<hr />
+<p class="meta">Documento generado para uso interno y de integradores. Versión <strong>1.0</strong>.</p>
+
+</div>
+<script>
+  document.title = 'API Liquidación COSP - Manual';
+</script>
+</body>
+</html>
