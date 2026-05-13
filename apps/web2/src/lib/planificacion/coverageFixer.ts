@@ -24,6 +24,7 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
+import { pickRepresentativeCycle } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 
@@ -31,11 +32,16 @@ const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 }
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 
-const FIX_REST_CFG: AgreementRestConfig = {
+const FIX_REST_BASE: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
     longRestAfterWorkedHours: 48,
     minLongRestHours: 35,
 };
+
+function makeFixRestCfg(ctx: V2EngineContext): AgreementRestConfig {
+    const { cL } = pickRepresentativeCycle(ctx.autoCycles || []);
+    return { ...FIX_REST_BASE, maxConsecutiveWorkDays: cL };
+}
 
 export interface FixerLogEntry {
     iteration: number;
@@ -94,6 +100,7 @@ function canTakeShift(
     shiftCode: string,
     assignments: V2Assignment[],
     ctx: V2EngineContext,
+    cfg: AgreementRestConfig,
 ): boolean {
     const code = String(shiftCode || '').toUpperCase();
     // No puede si está con licencia activa
@@ -105,7 +112,7 @@ function canTakeShift(
         targetDateStr: dateStr,
         proposed: { code, startTime: startResolved, hours: hrs },
         getShift: makeGetShift(assignments, ctx.absences),
-        cfg: FIX_REST_CFG,
+        cfg,
     });
     return violation === null;
 }
@@ -165,6 +172,7 @@ function fixRestViolation(
     byKey: Map<string, V2Assignment>,
     ctx: V2EngineContext,
     stats: V2GenerateStats,
+    cfg: AgreementRestConfig,
     log: FixerLogEntry[],
     iteration: number,
 ): 'swapped' | 'demoted' | 'skipped' {
@@ -190,7 +198,7 @@ function fixRestViolation(
         setAsShift(other, shiftCode, positionName);
         setAsRet(mine);
 
-        const okOther = canTakeShift(otherId, dateStr, shiftCode, assignments, ctx);
+        const okOther = canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg);
         if (okOther) {
             log.push({
                 iteration,
@@ -228,6 +236,7 @@ function fixLicenseConflict(
     byKey: Map<string, V2Assignment>,
     ctx: V2EngineContext,
     stats: V2GenerateStats,
+    cfg: AgreementRestConfig,
     log: FixerLogEntry[],
     iteration: number,
 ): void {
@@ -254,7 +263,7 @@ function fixLicenseConflict(
         if (!other) continue;
         const c = String(other.code || '').toUpperCase();
         if (c !== 'RET' && !FRANCO_CODES.has(c)) continue;
-        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx)) continue;
+        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) continue;
         setAsShift(other, shiftCode, positionName);
         log.push({
             iteration,
@@ -277,6 +286,7 @@ function fixUncoveredSlot(
     byKey: Map<string, V2Assignment>,
     ctx: V2EngineContext,
     stats: V2GenerateStats,
+    cfg: AgreementRestConfig,
     log: FixerLogEntry[],
     iteration: number,
 ): number {
@@ -288,7 +298,7 @@ function fixUncoveredSlot(
         if (!other) continue;
         const c = String(other.code || '').toUpperCase();
         if (c !== 'RET' && !FRANCO_CODES.has(c)) continue;
-        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx)) continue;
+        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) continue;
         setAsShift(other, shiftCode, positionName);
         filled++;
         log.push({
@@ -317,6 +327,7 @@ export function fixScheduleIssues(
     const current: V2Assignment[] = assignments.map((a) => ({ ...a }));
     let report = initialReport;
     const log: FixerLogEntry[] = [];
+    const cfg = makeFixRestCfg(ctx);
 
     const initial = {
         rest: initialReport.restViolations.length,
@@ -340,15 +351,15 @@ export function fixScheduleIssues(
         for (const lc of report.licenseConflicts) {
             fixLicenseConflict(
                 lc.empId, lc.dateStr, lc.shiftCode, lc.absenceCode,
-                current, byKey, ctx, stats, log, iter,
+                current, byKey, ctx, stats, cfg, log, iter,
             );
         }
 
-        // 2. Descansos rotos
+        // 2. Descansos rotos (incluye violaciones de ciclo: más de cL días seguidos)
         for (const rv of report.restViolations) {
             fixRestViolation(
                 rv.empId, rv.dateStr, rv.shiftCode,
-                current, byKey, ctx, stats, log, iter,
+                current, byKey, ctx, stats, cfg, log, iter,
             );
         }
 
@@ -358,7 +369,7 @@ export function fixScheduleIssues(
             if (missing <= 0) continue;
             fixUncoveredSlot(
                 u.positionName, u.dateStr, u.shiftCode, missing,
-                current, byKey, ctx, stats, log, iter,
+                current, byKey, ctx, stats, cfg, log, iter,
             );
         }
 

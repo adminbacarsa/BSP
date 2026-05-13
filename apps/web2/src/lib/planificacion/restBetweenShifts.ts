@@ -150,6 +150,12 @@ export type AgreementRestConfig = {
     minLongRestHours?: number;
     /** Si está definido (>0), tras esta cantidad de días seguidos con turno laboral también exige `minLongRestHours`. */
     longRestAfterConsecutiveWorkDays?: number;
+    /**
+     * BLOQUEO duro de ciclo: si está definido (>0), no se permite que la racha de
+     * trabajo (incluyendo el turno propuesto) supere este número de días.
+     * Pensado para usar `cL` del ciclo elegido (6+2 → 6, 4+2 → 4, etc.).
+     */
+    maxConsecutiveWorkDays?: number;
 };
 
 export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRestConfig | null => {
@@ -236,6 +242,19 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
         const gap2 = hoursBetween(seNew.end, next.start);
         if (gap2 + 1e-6 < needAfter) {
             return `Convenio: descanso insuficiente respecto al turno siguiente (${gap2.toFixed(1)}h < ${needAfter}h; racha que termina este día ~${streakEndingAtProposed.hours}h / ${streakEndingAtProposed.workDays}d).`;
+        }
+    }
+
+    // ── BLOQUEO DURO DEL CICLO ────────────────────────────────────────────
+    // Independiente del descanso largo: si la racha (incluyendo el propuesto)
+    // supera maxConsecutiveWorkDays, bloqueamos. Esto refleja el límite del
+    // ciclo elegido (6+2 → 6 días seguidos, 4+2 → 4, etc.).
+    const maxConsRaw = p.cfg.maxConsecutiveWorkDays;
+    if (Number.isFinite(maxConsRaw!) && (maxConsRaw as number) > 0) {
+        const maxCons = maxConsRaw as number;
+        const streakWithProposed = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
+        if (streakWithProposed.workDays > maxCons) {
+            return `Ciclo: ${streakWithProposed.workDays} días seguidos de trabajo (máximo permitido por el ciclo: ${maxCons}).`;
         }
     }
 

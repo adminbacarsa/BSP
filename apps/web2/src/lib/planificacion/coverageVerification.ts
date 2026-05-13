@@ -16,7 +16,7 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, pickRepresentativeCycle } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -27,7 +27,8 @@ const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:0
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // 0=Dom, 1=Lun...
 
-const VERIFY_REST_CFG: AgreementRestConfig = {
+/** Base SUVICO; en cada verificación le agregamos `maxConsecutiveWorkDays = cL` del ciclo elegido. */
+const VERIFY_REST_BASE: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
     longRestAfterWorkedHours: 48,
     minLongRestHours: 35,
@@ -157,6 +158,13 @@ export function verifyScheduleCoverage(
     const demand = buildDemandSlots(ctx);
     const totalSlots = demand.reduce((s, d) => s + d.qty, 0);
     const bandsExpected = Array.from(new Set(demand.map((d) => d.shiftCode))).sort();
+
+    // Tope HARD de días seguidos según el ciclo elegido (6+2 → 6, 4+2 → 4, etc.)
+    const { cL: maxConsDays } = pickRepresentativeCycle(ctx.autoCycles || []);
+    const VERIFY_REST_CFG: AgreementRestConfig = {
+        ...VERIFY_REST_BASE,
+        maxConsecutiveWorkDays: maxConsDays,
+    };
 
     // 2. Index de asignaciones reales por slot
     const assignKey = (a: V2Assignment) => `${a.dateStr}__${a.positionName}__${String(a.code || '').toUpperCase()}`;

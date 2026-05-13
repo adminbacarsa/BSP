@@ -57,8 +57,13 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
-/** Alineado a `checkRestBetweenShifts`: 12 h entre turnos; 35 h cuando se acumulan 48 h de trabajo. */
-const V2_AGREEMENT_REST: AgreementRestConfig = {
+/**
+ * Reglas base de descanso (sin tope de ciclo).
+ * El tope `maxConsecutiveWorkDays` se setea dinámicamente con `cL` del ciclo elegido
+ * dentro de `generateScheduleV2` (6+2 → 6, 4+2 → 4, etc.) para que el motor
+ * respete EXACTO el ciclo y nunca produzca rachas mayores.
+ */
+const V2_AGREEMENT_REST_BASE: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
     longRestAfterWorkedHours: 48,
     minLongRestHours: 35,
@@ -230,7 +235,7 @@ export interface V2EngineResult {
 }
 
 /** Devuelve [cL, cF] del ciclo "más representativo" elegido por el usuario. */
-function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL: number; cF: number } {
+export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL: number; cF: number } {
     const ordered = ['6+1', '6+2', '5+1', '4+2'];
     for (const key of ordered) {
         if (autoCycles.includes(key)) {
@@ -623,6 +628,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleLen = cL + cF; // p.ej. 6+1 → 7
     const defaultPos = ctx.defaultPositionByEmp || {};
+
+    // Config de descanso dinámico: agrega el tope HARD de días seguidos según el ciclo.
+    const V2_AGREEMENT_REST: AgreementRestConfig = {
+        ...V2_AGREEMENT_REST_BASE,
+        maxConsecutiveWorkDays: cL,
+    };
 
     // Pre-cálculo: distancia, preferencia y ausentismo (un solo cálculo por empleado).
     // Se usa para ordenar el matching empleado→puesto.
