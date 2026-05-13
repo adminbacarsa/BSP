@@ -199,15 +199,32 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=comtroldata
 | Auth | 9099 |
 | Functions | 5001 |
 | UI | 4000 |
+| Emulator Hub | 4400 |
+
+**UI `http://localhost:4000` (o `:4000` desde otra PC):** abrí también el puerto **4400** en el firewall. Si el emulador de **Functions** falla en Windows (`""node"" no se reconoce`), el suite puede no levantar la UI: el arranque automático del lab usa **`npm run emulators:light`** (solo Auth + Firestore + UI). Para suite completa con Functions: **`npm run emulators`** (requiere `node` en PATH del sistema o el fix de PATH ya aplicado en `run-emulators.js`).
+
+**Windows — lab tras reinicio** (emuladores + seed + Next): no suben solos hasta registrar la tarea **COSP Lab** (PowerShell **como administrador** desde la raíz del repo):
+
+```powershell
+npm install
+powershell -ExecutionPolicy Bypass -File scripts\register-cosp-lab-scheduled-task.ps1
+```
+
+Modo **sin iniciar sesión** (PC encendida, usuario no logueado): `...\register-cosp-lab-scheduled-task.ps1 -AtStartupAsSystem` (SYSTEM, demora 3 min; Node en `Program Files\nodejs`, JDK 21).
+
+Diagnóstico: `npm run diagnose:lab`. Trazas siempre en **`%ProgramData%\COSP\trace.log`** (útil si falla antes de escribir en `logs\`). Quitar tarea: `npm run unregister:lab-task` (admin). Instalación guiada: **`INSTALAR-TAREA-COSP-LAB.cmd`** (clic derecho → ejecutar como administrador; por defecto **SYSTEM**; con argumento **`logon`** registra al iniciar sesión del usuario).
 
 ### Primer arranque / emulador vacío
 
-Si el emulador no tiene datos (usuarios, colecciones), correr con los emuladores activos:
+Con emuladores activos, admin + guardia de prueba:
+
 ```bash
-node scripts/seed-admin.js
+npm run seed
 ```
-Crea: usuario SUPERADMIN en Auth + `system_users` + `roles/SUPERADMIN` + `empresas/bacarsa`.
-Credenciales: `admin@bacarsa.com.ar` / `admin1234`
+
+(Mismo comando que `npm run seed:lab`.) Equivale a `node scripts/seed-admin.js` + `node scripts/seed-empleado.js` (`admin@bacarsa.com.ar` / `admin1234`, `guardia@bacarsa.com.ar` / `guardia1234`). `seed-lab.js` espera a que **8080 y 9099** acepten conexión (evita sembrar antes de que Auth esté listo). Solo admin: `node scripts/seed-admin.js`.
+
+**Front en :3000 “viejo”:** el dev server es `next dev` (`npm run dev` desde la raíz). Pará el proceso, borrá `apps/web2/.next`, volvé a `npm run dev` y en el navegador recarga forzada (Ctrl+F5). Si en :3000 corre **otra app** u otro clon de repo, cerrá ese proceso o cambiá el puerto en `apps/web2/package.json` (`next dev -p`).
 
 ---
 
@@ -232,8 +249,8 @@ DESARROLLO (Notebook)
 
 TESTING (N8N — sincronizar desde Notebook)
   4. git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
-  5. En N8N: firebase emulators:start
-  6. En N8N: cd apps/web2 && npm run dev -- -H 0.0.0.0
+  5. En N8N: `npm install` y `npm run emulators`
+  6. En N8N: `npm run dev` (Next en 0.0.0.0:3000)
   7. Testers acceden a http://192.168.0.8:3000
 
 PRODUCCIÓN (Notebook)
