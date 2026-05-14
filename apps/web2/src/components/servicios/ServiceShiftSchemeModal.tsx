@@ -57,12 +57,6 @@ export function ServiceShiftSchemeModal({ open, onClose, service }: ServiceShift
                 </div>
 
                 <div className="p-4 space-y-4 text-[11px]">
-                    <p className="font-bold text-slate-600 dark:text-slate-400 leading-snug">
-                        Vista <strong>sólo operativa</strong>: encaje de la <strong>SLA vendida</strong> (puestos y hs) con rotación{' '}
-                        <strong>6×2 / 6×1 / 4×2</strong>, y si los <strong>bloques custom (9 h, 10 h, etc.)</strong> convienen frente a marcos{' '}
-                        <strong>8 h / 12 h</strong> CCT. Sin costos.
-                    </p>
-
                     <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 px-3 py-2.5">
                         <p className="text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-300 mb-1">Sugerencia principal</p>
                         <p className="text-lg font-black text-indigo-800 dark:text-indigo-100">{schemeBadge(advice.primaryScheme)}</p>
