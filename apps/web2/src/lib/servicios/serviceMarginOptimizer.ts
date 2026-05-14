@@ -28,6 +28,10 @@ export interface ServiceMarginVariables {
 
 export interface SchemeMarginRow {
     scheme: WorkScheme;
+    /** Cabezas usadas en el cálculo (manual o sugeridas). */
+    headcountUsed: number;
+    /** Sugerencia automática ceil(SLA / hs promedio esquema). */
+    suggestedHeadcount: number;
     /** Cabezas mínimas para cubrir el SLA al ritmo medio de facturación del esquema. */
     employeesNeeded: number;
     /** max(0, N×192 − SLA): holgura operativa sin disparar extras por tope 192. */
@@ -84,42 +88,68 @@ function effectiveOvertimeMultiplier(scheme: WorkScheme, v: ServiceMarginVariabl
     return v.overtime50Multiplier;
 }
 
+function buildSchemeRow(
+    scheme: WorkScheme,
+    v: ServiceMarginVariables,
+    sla: number,
+    revenueARS: number,
+    normalHourCostARS: number,
+    headcountOverride: number | undefined,
+): SchemeMarginRow {
+    const avgBillable = Math.max(1, v.averageBillableHoursPerEmployeeByScheme[scheme] || 192);
+    const suggestedHeadcount = sla <= 0 ? 0 : Math.ceil(sla / avgBillable);
+    const headcountUsed =
+        headcountOverride != null && Number.isFinite(headcountOverride)
+            ? Math.max(0, Math.floor(headcountOverride))
+            : suggestedHeadcount;
+    const capacityNormal = headcountUsed * v.maxNormalHoursPerEmployee;
+    const overtimeHours = Math.max(0, sla - capacityNormal);
+    const reserveHours = Math.max(0, capacityNormal - sla);
+    const otMult = effectiveOvertimeMultiplier(scheme, v);
+    const marginalOvertimeCostPerHourARS = normalHourCostARS * otMult;
+    const overtimeCostARS = overtimeHours * marginalOvertimeCostPerHourARS;
+    const baseLaborARS = headcountUsed * v.baseEmployeeCostMonthlyARS;
+    const totalLaborARS = baseLaborARS + overtimeCostARS;
+    const grossMarginARS = revenueARS - totalLaborARS;
+    const marginPct = revenueARS > 1e-6 ? (grossMarginARS / revenueARS) * 100 : 0;
+    const losesMoneyOnOvertime = marginalOvertimeCostPerHourARS > v.sellingPricePerHour + 1e-6;
+    return {
+        scheme,
+        headcountUsed,
+        suggestedHeadcount,
+        employeesNeeded: suggestedHeadcount,
+        reserveHours,
+        overtimeHours,
+        baseLaborARS,
+        overtimeCostARS,
+        totalLaborARS,
+        revenueARS,
+        grossMarginARS,
+        marginPct,
+        marginalOvertimeCostPerHourARS,
+        losesMoneyOnOvertime,
+    };
+}
+
 /**
  * Evalúa los tres esquemas para un mismo SLA mensual y mismas variables económicas.
+ * `headcounts`: si se pasa un número para un esquema, se usa como dotación fija (p. ej. 15 en 4×2 vs 18 en 6×2).
  */
-export function evaluateServiceMargin(v: ServiceMarginVariables): ServiceMarginEvaluation {
+export function evaluateServiceMargin(
+    v: ServiceMarginVariables,
+    headcounts?: Partial<Record<WorkScheme, number | null | undefined>>,
+): ServiceMarginEvaluation {
     const sla = Math.max(0, Number(v.totalSlaHours) || 0);
     const revenueARS = sla * v.sellingPricePerHour;
     const normalHourCostARS = v.baseEmployeeCostMonthlyARS / Math.max(1, v.maxNormalHoursPerEmployee);
 
     const rows: SchemeMarginRow[] = WORK_SCHEME_ORDER.map((scheme) => {
-        const avgBillable = Math.max(1, v.averageBillableHoursPerEmployeeByScheme[scheme] || 192);
-        const employeesNeeded = sla <= 0 ? 0 : Math.ceil(sla / avgBillable);
-        const capacityNormal = employeesNeeded * v.maxNormalHoursPerEmployee;
-        const overtimeHours = Math.max(0, sla - capacityNormal);
-        const reserveHours = Math.max(0, capacityNormal - sla);
-        const otMult = effectiveOvertimeMultiplier(scheme, v);
-        const marginalOvertimeCostPerHourARS = normalHourCostARS * otMult;
-        const overtimeCostARS = overtimeHours * marginalOvertimeCostPerHourARS;
-        const baseLaborARS = employeesNeeded * v.baseEmployeeCostMonthlyARS;
-        const totalLaborARS = baseLaborARS + overtimeCostARS;
-        const grossMarginARS = revenueARS - totalLaborARS;
-        const marginPct = revenueARS > 1e-6 ? (grossMarginARS / revenueARS) * 100 : 0;
-        const losesMoneyOnOvertime = marginalOvertimeCostPerHourARS > v.sellingPricePerHour + 1e-6;
-        return {
-            scheme,
-            employeesNeeded,
-            reserveHours,
-            overtimeHours,
-            baseLaborARS,
-            overtimeCostARS,
-            totalLaborARS,
-            revenueARS,
-            grossMarginARS,
-            marginPct,
-            marginalOvertimeCostPerHourARS,
-            losesMoneyOnOvertime,
-        };
+        const raw = headcounts?.[scheme];
+        const override =
+            raw === undefined || raw === null || !Number.isFinite(Number(raw))
+                ? undefined
+                : Math.floor(Number(raw));
+        return buildSchemeRow(scheme, v, sla, revenueARS, normalHourCostARS, override);
     });
 
     const winnerByMargin =
@@ -164,4 +194,44 @@ export function evaluateServiceMargin(v: ServiceMarginVariables): ServiceMarginE
 
 export function formatARS(n: number): string {
     return Math.round(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+}
+
+/** Resumen rápido para icono en tarjeta de servicio (viabilidad orientativa). */
+export function marginEvaluationIconMeta(ev: ServiceMarginEvaluation): {
+    tone: 'emerald' | 'amber' | 'rose' | 'slate';
+    shortLabel: string;
+    hint: string;
+} {
+    const sla = ev.variables.totalSlaHours;
+    if (!Number.isFinite(sla) || sla <= 0) {
+        return { tone: 'slate', shortLabel: '—', hint: 'Sin horas SLA en el mes seleccionado del listado' };
+    }
+    const best = ev.rows.reduce((a, b) => (b.grossMarginARS > a.grossMarginARS ? b : a));
+    const anyNegative = ev.rows.some((r) => r.grossMarginARS < 0);
+    if (best.grossMarginARS < 0) {
+        return {
+            tone: 'rose',
+            shortLabel: 'Riesgo',
+            hint: `Incluso el mejor esquema (${best.scheme}) deja margen negativo con la dotación indicada.`,
+        };
+    }
+    if (best.losesMoneyOnOvertime && best.overtimeHours > 0) {
+        return {
+            tone: 'amber',
+            shortLabel: 'Extras',
+            hint: `En ${best.scheme} las horas extra modeladas tienen costo marginal alto vs precio hora.`,
+        };
+    }
+    if (anyNegative) {
+        return {
+            tone: 'amber',
+            shortLabel: 'Mixto',
+            hint: 'Algún esquema pierde margen con la dotación actual; otro es favorable.',
+        };
+    }
+    return {
+        tone: 'emerald',
+        shortLabel: 'OK',
+        hint: `Mejor margen: ${best.scheme}. Más reserva operativa: ${ev.winnerByOperationalSafety}.`,
+    };
 }

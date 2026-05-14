@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant } from '@/services/slaService'; 
@@ -12,7 +12,8 @@ import {
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
   Clock, Layers
 } from 'lucide-react';
-import { ServiceMarginAnalyzer } from '@/components/servicios/ServiceMarginAnalyzer';
+import { ServiceMarginPerServiceModal } from '@/components/servicios/ServiceMarginPerServiceModal';
+import { ServiceMarginViabilityIcon } from '@/components/servicios/ServiceMarginViabilityIcon';
 
 // --- 1. MODELO DE DATOS ---
 
@@ -776,6 +777,12 @@ export default function ServiciosSLAPage() {
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [marginModal, setMarginModal] = useState<{
+    open: boolean;
+    title: string;
+    subtitle: string;
+    slaHours: number;
+  }>({ open: false, title: '', subtitle: '', slaHours: 0 });
 
   const toggleGroup = (key: string) =>
     setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -849,6 +856,29 @@ export default function ServiciosSLAPage() {
   const kpiPrevMonth = () => { if (kpiMonth === 0) { setKpiMonth(11); setKpiYear(y => y - 1); } else setKpiMonth(m => m - 1); };
   const kpiNextMonth = () => { if (kpiMonth === 11) { setKpiMonth(0);  setKpiYear(y => y + 1); } else setKpiMonth(m => m + 1); };
 
+  const getServiceHoursForKpiMonth = useCallback(
+    (srv: ServiceSLA & { id: string }) => {
+      if (!srv.startDate || !srv.endDate || !srv.positions?.length) return 0;
+      const y = kpiYear;
+      const m = kpiMonth;
+      const mStart = new Date(y, m, 1);
+      const mEnd = new Date(y, m + 1, 0);
+      const sStart = new Date(srv.startDate + 'T00:00:00');
+      const sEnd = new Date(srv.endDate + 'T00:00:00');
+      if (sStart > mEnd || sEnd < mStart) return 0;
+      const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
+      let hours = 0;
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb, idx) => {
+        const ref = new Date(srv.startDate + 'T00:00:00');
+        const dd = new Date(ref.getFullYear(), ref.getMonth() + idx, 1);
+        const msk = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}`;
+        if (msk === sk) hours += mb.totalHours;
+      });
+      return Math.round(hours);
+    },
+    [kpiYear, kpiMonth],
+  );
+
   return (
     <DashboardLayout>
       {view === 'list' && (
@@ -910,8 +940,6 @@ export default function ServiciosSLAPage() {
               ))}
             </div>
           </div>
-
-          <ServiceMarginAnalyzer initialSlaHours={kpiCurrent.hours} />
 
           {/* Contador */}
           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
@@ -993,9 +1021,31 @@ export default function ServiciosSLAPage() {
                                     {srv.status === 'active' ? 'Activo' : 'Inactivo'}
                                   </span>
                                 </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-base font-black text-indigo-600 dark:text-indigo-400">{total}<span className="text-[9px] font-bold ml-0.5">hs</span></span>
-                                  <div className="flex gap-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="text-base font-black text-indigo-600 dark:text-indigo-400 tabular-nums leading-tight">
+                                        {getServiceHoursForKpiMonth(srv)}
+                                        <span className="text-[9px] font-bold ml-0.5">h</span>
+                                        <span className="text-[8px] font-black text-slate-400 uppercase ml-1">mes</span>
+                                      </span>
+                                      <span className="text-[8px] font-bold text-slate-400 tabular-nums truncate" title="Horas acumuladas en todo el contrato">
+                                        Total contrato: {total} h
+                                      </span>
+                                    </div>
+                                    <ServiceMarginViabilityIcon
+                                      slaHours={getServiceHoursForKpiMonth(srv)}
+                                      onOpen={() =>
+                                        setMarginModal({
+                                          open: true,
+                                          title: `${srv.clientName || 'Cliente'} — ${srv.objectiveName || 'Objetivo'}`,
+                                          subtitle: `Contrato ${srv.startDate} → ${srv.endDate}`,
+                                          slaHours: getServiceHoursForKpiMonth(srv),
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div className="flex gap-1 shrink-0">
                                     <button onClick={() => { handleNewVersion(srv); }} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
                                       <Copy size={11}/>
                                     </button>
@@ -1023,6 +1073,15 @@ export default function ServiciosSLAPage() {
               })}
             </div>
           )}
+
+          <ServiceMarginPerServiceModal
+            open={marginModal.open}
+            onClose={() => setMarginModal((x) => ({ ...x, open: false }))}
+            title={marginModal.title}
+            subtitle={marginModal.subtitle || undefined}
+            slaHours={marginModal.slaHours}
+            kpiMonthLabel={kpiCurrent.label}
+          />
         </div>
       )}
 
