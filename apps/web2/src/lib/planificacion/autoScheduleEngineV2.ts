@@ -986,11 +986,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Ciclo por empleado: D12/N12 → 4+2 (cycleLen=6, cL=4); M/T/N → ciclo 8h global.
     const empCycleLen: Record<string, number> = {};
     const empCL_map: Record<string, number> = {};
-    // Rotación POR CICLO: la banda avanza cada vez que completa un ciclo completo.
-    // Patrón resultante: MMMMMM FF TTTTTT FF NNNNNN FF MMMMMM …
-    // La transición N→M genera 0h de descanso (N termina 06:00, M empieza 06:00 mismo día).
-    // Eso bloquea al empleado el primer día del nuevo ciclo → el fallback le da F (franco
-    // de ajuste, ciclo corto 5+1) en lugar de RET, y retoma M al día siguiente con 24h de gap.
+    // Rotación POR CICLO alineada al offset personal del empleado.
+    // El offset es el mismo que define los días de trabajo/franco: (di + offset) % cycleLen < cL.
+    // Así la banda cambia exactamente al inicio de cada nuevo bloque de trabajo, nunca a mitad.
+    // Patrón resultante: NNNNNN FF MMMMMM FF TTTTTT FF …
+    // La transición N→M tiene 48h de descanso (2 francos entre medio) → CCT 12h OK, sin F extra.
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
@@ -998,7 +998,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (ring.length === 1) return ring[0];
         const eCycleLen = empCycleLen[empId] ?? cycleLen;
         const di = parseInt(dateStr.split('-')[2], 10) - 1;
-        const cycleNum = Math.floor(di / eCycleLen);
+        const empOffset = (empGroupIdx[empId] ?? 0) % eCycleLen;
+        const cycleNum = Math.floor((di + empOffset) / eCycleLen);
         return ring[(slot + cycleNum) % ring.length];
     };
 
@@ -1387,15 +1388,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             // Esto evita que esos días aparezcan como "retén" cuando el empleado simplemente
             // está cumpliendo el descanso mínimo CCT entre N y el próximo turno diurno.
             // En cualquier otro caso (todos los slots cubiertos, empleado ocioso) → RET normal.
-            const lastCode = (st.lastShiftCode || '').toUpperCase();
-            const isPostNightConstraint = (lastCode === 'N' || lastCode === 'N12') && isWorkDayInCycle;
-            // Día de ciclo-trabajo sin turno asignado:
-            //   - post-noche (N→M/T) → F (descanso CCT, fuerza mayor aprobada)
-            //   - cualquier otro caso → RET (empleado disponible, cuenta para horas mínimas)
-            // Día de ciclo-franco → F siempre.
-            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
-                ? (isPostNightConstraint ? 'F' : 'RET')
-                : 'F';
+            // Día de ciclo-trabajo sin turno asignado → RET (empleado disponible, suma a horas mínimas).
+            // Día de ciclo-franco (el "2" del 6+2) → F.
+            // No hay excepciones por post-noche: los 2 francos del ciclo ya proveen 48h de descanso.
+            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
