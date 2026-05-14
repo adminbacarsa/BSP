@@ -234,6 +234,14 @@ export interface V2FeasibilityReport {
         idleEmployeesList?: Array<{ id: string; nombre?: string }>;
         /** Total de asignaciones (slots) a cubrir en el mes: Σ por puesto qty × bandas × días activos. */
         totalSlotsAll: number;
+        /** Comparativa de personas necesarias y buffer por esquema de ciclo (4+2, 5+1, 6+1, 6+2). */
+        cycleComparison: Array<{
+            cycleKey: string;
+            structuralPeakPeople: number;
+            hrsPerPerson: number;
+            bufferHours: number;
+            retEstimate: number;
+        }>;
     };
     perPosition: V2PositionDemand[];
     perEmployee: V2EmployeeOffer[];
@@ -633,6 +641,26 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             idleEmployees: idleCount,
             idleEmployeesList,
             totalSlotsAll: perPosition.reduce((s, p) => s + p.totalSlots, 0),
+            cycleComparison: Object.entries(CYCLE_MAP).map(([ck, [cLc, cFc]]) => {
+                const f = (cLc + cFc) / cLc;
+                const avgHrs = CYCLE_SHIFT_DEFAULT[ck] ?? 8;
+                const spp = ctx.positions.reduce((s, _pos, idx) => {
+                    const p = perPosition[idx];
+                    if (!p) return s;
+                    const isLim = p.activeDays < ctx.daysInMonth.length;
+                    return s + Math.ceil(p.peakConcurrent * (isLim ? 1 : f));
+                }, 0);
+                const workDays = Math.floor((cLc / (cLc + cFc)) * ctx.daysInMonth.length);
+                const hrsPerPerson = Math.min(HARD_MAX_HOURS, workDays * avgHrs);
+                const buffer = spp * hrsPerPerson - structuralDemandHours;
+                return {
+                    cycleKey: ck,
+                    structuralPeakPeople: spp,
+                    hrsPerPerson,
+                    bufferHours: Math.round(buffer),
+                    retEstimate: Math.max(0, Math.floor(buffer / avgHrs)),
+                };
+            }),
         },
         perPosition,
         perEmployee,
@@ -832,9 +860,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // reciben RETs salpicados a lo largo del mes en vez de tener un patrón
     // limpio de F/RET. La solución: sacarlos del grupo y marcarlos como
     // empAssignedTo = null (ociosos) antes de asignar cualquier turno.
-    // Solo aplica a empleados sin puesto fijo (defaultPos) en ese puesto.
+    // Usamos peakConcurrent (pico real simultáneo, sin factor de ciclo) para
+    // que los empleados adicionales queden como relevos puros (4 en vez de 2).
+    const peakConcurrentByPos: Record<string, number> = {};
+    feasibility.perPosition.forEach((p) => { peakConcurrentByPos[p.positionName] = p.peakConcurrent; });
     for (const posName of Object.keys(positionGroups)) {
-        const need = Math.max(1, positionNeed[posName] || 1);
+        const need = Math.max(1, peakConcurrentByPos[posName] ?? positionNeed[posName] ?? 1);
         const group = positionGroups[posName];
         if (group.length <= need) continue;
         // Ordenar por score ascendente: los de menor prioridad (más lejos, más ausencias)
@@ -879,29 +910,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const empGroupIdx: Record<string, number> = {};
     const shiftRingByPosition: Record<string, string[]> = {};
     const empRotationSlot: Record<string, number> = {};
-    // Índice de semana ISO alineado a LUNES: dos días en la misma semana ISO
-    // siempre devuelven el mismo número. Antes contábamos a partir del día 1
-    // del mes, así que la "semana 0" arrancaba un miércoles cualquiera y el
-    // corte mid-semana producía rotaciones raras.
-    const monthStart = ctx.daysInMonth[0] ?? new Date();
-    const mondayOf = (d: Date): Date => {
-        const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        const day = (x.getDay() + 6) % 7; // 0=Mon ... 6=Sun
-        x.setDate(x.getDate() - day);
-        return x;
-    };
-    const baseMonday = mondayOf(monthStart);
-    const weekIndexInMonth = (dateStr: string): number => {
-        const d = new Date(dateStr + 'T12:00:00');
-        const m = mondayOf(d);
-        return Math.max(0, Math.floor((m.getTime() - baseMonday.getTime()) / (7 * 86400000)));
-    };
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
+        void dateStr; // banda fija todo el mes: no rotar por semana
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
-        const wk = weekIndexInMonth(dateStr);
-        return ring[(slot + wk) % ring.length];
+        return ring[slot % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
@@ -1262,10 +1276,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 empAssignedTo[best.id] = slot.positionName;
                 (positionGroups[slot.positionName] ||= []).push(best.id);
                 const ring = shiftRingByPosition[slot.positionName] || [];
-                const wk = weekIndexInMonth(slot.dateStr);
                 const ix = ring.indexOf(slot.sCode);
                 if (ring.length > 0 && ix >= 0) {
-                    empRotationSlot[best.id] = ((ix - wk) % ring.length + ring.length) % ring.length;
+                    empRotationSlot[best.id] = ix; // banda fija, sin ajuste por semana
                 }
                 empPrimaryShift[best.id] = slot.sCode;
                 // Si el puesto tiene días limitados (ej. RON L-V), alineamos los días
@@ -1304,7 +1317,13 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             // Salvaguarda: owner de puesto limitado en día NO operativo del puesto → F.
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
-            const fallbackCode = isWorkDayInCycle ? 'RET' : 'F';
+            // RET solo si la activación potencial no excedería 200h en el ciclo.
+            const inCurrentCycleDay = day.getDate() <= cutoffDay;
+            const usedInCycle = inCurrentCycleDay ? st.cycleCurrentUsed : st.cycleNextUsed;
+            const primaryCode = (empPrimaryShift[emp.id] || 'M').toUpperCase();
+            const retActivationHrs = SHIFT_HRS_DEFAULT[primaryCode] ?? 8;
+            const retFitsInCycle = usedInCycle + retActivationHrs <= HARD_MAX_HOURS;
+            const fallbackCode = isWorkDayInCycle && retFitsInCycle ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,

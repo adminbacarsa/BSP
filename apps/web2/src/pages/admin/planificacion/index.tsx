@@ -4974,6 +4974,41 @@ export default function PlanificacionPage() {
                                             <span className="font-black text-indigo-700">Turnos a cubrir: <span>{autoV2Report.metrics.totalSlotsAll}</span></span>
                                         </div>
 
+                                        {autoV2Report.metrics.cycleComparison && autoV2Report.metrics.cycleComparison.length > 0 && (
+                                            <div className="mb-3">
+                                                <div className="text-[10px] font-black uppercase text-slate-600 mb-1">Dotación por esquema de ciclo</div>
+                                                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                                                    <table className="w-full text-[10px]">
+                                                        <thead className="bg-slate-100">
+                                                            <tr className="text-slate-600">
+                                                                <th className="text-left px-2 py-1 font-black">Ciclo</th>
+                                                                <th className="text-right px-2 py-1 font-black">Personas</th>
+                                                                <th className="text-right px-2 py-1 font-black">Hs/persona</th>
+                                                                <th className="text-right px-2 py-1 font-black">Colchón</th>
+                                                                <th className="text-right px-2 py-1 font-black">RETs est.</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white">
+                                                            {autoV2Report.metrics.cycleComparison.map(c => {
+                                                                const isSelected = autoV2Report.metrics.cycleUsed === c.cycleKey;
+                                                                const bufferOk = c.bufferHours >= 0;
+                                                                return (
+                                                                    <tr key={c.cycleKey} className={`border-t border-slate-100 ${isSelected ? 'bg-indigo-50' : ''}`}>
+                                                                        <td className={`px-2 py-0.5 font-black ${isSelected ? 'text-indigo-700' : 'text-slate-700'}`}>{c.cycleKey}{isSelected ? ' ✓' : ''}</td>
+                                                                        <td className="text-right px-2 py-0.5 font-bold text-slate-800">{c.structuralPeakPeople}</td>
+                                                                        <td className="text-right px-2 py-0.5 text-slate-600">{c.hrsPerPerson}h</td>
+                                                                        <td className={`text-right px-2 py-0.5 font-bold ${bufferOk ? 'text-emerald-700' : 'text-rose-700'}`}>{c.bufferHours >= 0 ? '+' : ''}{c.bufferHours}h</td>
+                                                                        <td className="text-right px-2 py-0.5 text-slate-600">{c.retEstimate}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div className="text-[9px] text-slate-400 mt-0.5">Personas = pico simultáneo × factor ciclo. Colchón = capacidad − demanda estructural. RETs est. = colchón / hs turno.</div>
+                                            </div>
+                                        )}
+
                                         {autoV2Report.warnings && autoV2Report.warnings.length > 0 && (
                                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">
                                                 <div className="text-[10px] font-black uppercase text-amber-800 mb-1">Avisos (no bloquean)</div>
