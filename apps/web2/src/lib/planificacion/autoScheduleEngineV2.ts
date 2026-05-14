@@ -436,11 +436,15 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         // RET activable del colchón global (3456h disponibles vs 3298h contratadas = 158h buffer).
         const isLimitedSchedule = activeDays < ctx.daysInMonth.length;
         const factorForPosition = isLimitedSchedule ? 1 : cycleFactor;
-        const peopleByHours = (!isLimitedSchedule && monthHours > 0)
-            ? Math.ceil((monthHours / TARGET_AVG_HOURS) * factorForPosition)
+        // Personas = (slots/día) × factorCiclo
+        // slots/día = totalSlots / activeDays
+        // NO usar monthHours / TARGET_AVG_HOURS × factor: ese cálculo sobre-estima (dobla el factor).
+        // Ejemplo 24h qty=4: totalSlots=360, activeDays=30, factor=8/6 → ceil(12 × 1.33) = 16 ✓
+        const peopleBySlots = activeDays > 0
+            ? Math.ceil((totalSlots / activeDays) * factorForPosition)
             : 0;
         const peopleByPeak = Math.ceil(peakConcurrent * factorForPosition);
-        const peopleNeededWithCycle = Math.max(peopleByHours, peopleByPeak);
+        const peopleNeededWithCycle = Math.max(peopleBySlots, peopleByPeak);
         return {
             positionName: pos.positionName,
             monthHours,
@@ -987,9 +991,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const empCycleLen: Record<string, number> = {};
     const empCL_map: Record<string, number> = {};
     // Rotación POR CICLO alineada al offset personal del empleado.
-    // El offset es el mismo que define los días de trabajo/franco: (di + offset) % cycleLen < cL.
-    // Así la banda cambia exactamente al inicio de cada nuevo bloque de trabajo, nunca a mitad.
-    // Patrón resultante: secuencias de códigos según `shiftRingByPosition` y el índice de ciclo.
+    // Dirección DESCENDENTE: N→T→M→N (slot decrementa con cada ciclo).
+    // Así N nunca va directo a M; siempre pasa por T primero.
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
@@ -999,7 +1002,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const di = parseInt(dateStr.split('-')[2], 10) - 1;
         const empOffset = (empGroupIdx[empId] ?? 0) % eCycleLen;
         const cycleNum = Math.floor((di + empOffset) / eCycleLen);
-        return ring[(slot + cycleNum) % ring.length];
+        // Rotación descendente: (slot - cycleNum) mod len
+        return ring[((slot - cycleNum) % ring.length + ring.length) % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
@@ -1381,9 +1385,18 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
             const assignedPosForFallback = empAssignedTo[emp.id];
-            // Día de ciclo-trabajo sin turno asignado → RET (empleado disponible).
-            // Día de ciclo-franco o sin puesto / puesto inactivo ese día → F.
-            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
+            // En 6+1, el único franco entre bloques da ~32h de descanso.
+            // Tras 48h de racha (bloque N/T/M completo), el CCT exige 35h → 32h < 35h → violación.
+            // Al detectar esa situación damos F extra (el empleado descansa; retoma al día siguiente).
+            const lastCode = (st.lastShiftCode || '').toUpperCase();
+            const isPostStreakShortCycle = cF === 1 && (lastCode === 'N' || lastCode === 'N12');
+            // Día de ciclo-trabajo sin turno:
+            //   - post-noche en 6+1 → F (descanso CCT 35h no cubierto con 1 solo franco)
+            //   - cualquier otro → RET (stand-by; si llegan a 200h igual acumulan desde otros objetivos)
+            // Día de ciclo-franco o empleado sin puesto → F siempre.
+            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
+                ? (isPostStreakShortCycle ? 'F' : 'RET')
+                : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
