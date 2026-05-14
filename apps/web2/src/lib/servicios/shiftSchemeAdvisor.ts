@@ -21,6 +21,13 @@ export interface SoldShiftHourAnalysis {
     treatment: string;
 }
 
+/** Serie diaria de Σ hs cobertura (muestreo; para gráficos en UI). */
+export interface CoverageDayPoint {
+    /** Etiqueta corta (ej. 14/05). */
+    label: string;
+    hs: number;
+}
+
 export interface ShiftSchemeAdvice {
     positionSummaries: string[];
     /** Máx. Σ (hs puesto × cantidad) en un día del muestreo. */
@@ -39,6 +46,8 @@ export interface ShiftSchemeAdvice {
     }>;
     primaryScheme: RotationSchemeId;
     primaryReason: string;
+    /** Hasta ~30 puntos espaciados sobre el rango muestreado (máx. 90 días). */
+    coverageByDay: CoverageDayPoint[];
 }
 
 function parseYmd(s: string): Date | null {
@@ -80,6 +89,22 @@ const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
 function dayLetterFromDate(day: Date): string {
     return DAY_LETTERS[day.getDay()];
+}
+
+function formatDayLabel(d: Date): string {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}`;
+}
+
+function downsampleEvenly<T>(arr: T[], max: number): T[] {
+    if (arr.length <= max) return arr;
+    const out: T[] = [];
+    const last = arr.length - 1;
+    for (let i = 0; i < max; i++) {
+        out.push(arr[Math.round((i * last) / (max - 1))]);
+    }
+    return out;
 }
 
 function positionActiveOnLetter(pos: ServicePosition, letter: string): boolean {
@@ -237,9 +262,11 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
     let peakConcurrent = 0;
     let weekdaySum = 0;
     let weekdayCount = 0;
+    const coverageRaw: CoverageDayPoint[] = [];
 
     for (const day of sample) {
         const th = totalCoverageHoursOnDay(srv, day);
+        coverageRaw.push({ label: formatDayLabel(day), hs: Math.round(th * 10) / 10 });
         peakDaily = Math.max(peakDaily, th);
         peakConcurrent = Math.max(peakConcurrent, requiredConcurrentPaxForServiceDay(srv, day));
         const dow = day.getDay();
@@ -248,6 +275,8 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
             weekdayCount++;
         }
     }
+
+    const coverageByDay = downsampleEvenly(coverageRaw, 30);
 
     const avgWeekday = weekdayCount > 0 ? weekdaySum / weekdayCount : peakDaily;
 
@@ -337,6 +366,7 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
         schemes,
         primaryScheme: primary,
         primaryReason,
+        coverageByDay,
     };
 }
 
@@ -355,5 +385,6 @@ function emptyAdvice(issues: string[], positionSummaries: string[]): ShiftScheme
         primaryScheme: '6x2',
         primaryReason: 'Sin datos suficientes.',
         soldShiftAnalyses: [],
+        coverageByDay: [],
     };
 }
