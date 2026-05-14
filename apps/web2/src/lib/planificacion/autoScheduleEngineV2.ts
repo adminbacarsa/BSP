@@ -574,6 +574,19 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         );
     }
 
+    // Verificación estructural por ciclo: ¿alcanza la dotación para cubrir TODOS los puestos
+    // con el ciclo elegido? Si no, es imposible matemáticamente; si justo cierra, cualquier
+    // ausencia o RET genera un hueco.
+    if (peopleNeededForStructure > peopleAvailable) {
+        reasons.push(
+            `Ciclo ${cycleKey} inviable con esta dotación: cubrir todos los puestos necesita ~${peopleNeededForStructure} personas (qty × ciclo) pero hay ${peopleAvailable}. Elegir otro ciclo (4+2 necesita menos) o agregar personas.`
+        );
+    } else if (peopleAvailable - peopleNeededForStructure < 2) {
+        warnings.push(
+            `Margen muy ajustado con ciclo ${cycleKey}: se necesitan ${peopleNeededForStructure} personas para cubrir todos los puestos y hay ${peopleAvailable} (colchón de ${peopleAvailable - peopleNeededForStructure}). Cualquier ausencia o RET puede generar slots vacíos.`
+        );
+    }
+
     return {
         ok: reasons.length === 0,
         reasons,
@@ -1572,6 +1585,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         if ((stL.weekHours[wkKey] || 0) + sHrs > WEEKLY_SOFT_CAP) continue;
                         // Simulamos liberación del highId para el check de descanso del lowId
                         if (!passesAgreementRest(lowId, dateStr, sCode, sStart, sHrs)) continue;
+
+                        // No swapear si retira al único(s) que cubren el qty mínimo del puesto ese día.
+                        // Contar cuántas personas (excepto highId) ya tienen ese turno en ese slot.
+                        const posQty = Math.max(1, Number(ctx.positions.find(p => p.positionName === posName)?.qty) || 1);
+                        const alreadyCovering = assignments.filter(
+                            (a) => a.positionName === posName && a.dateStr === dateStr &&
+                                String(a.code || '').toUpperCase() === sCode && a.empId !== highId
+                        ).length;
+                        if (alreadyCovering < posQty) continue; // el swap bajaría cobertura bajo qty
 
                         // Evitar RET aislado para highId: el nuevo RET debe quedar adyacente
                         // a otro día de descanso (F/RET). Si ambos vecinos son turno de trabajo,

@@ -156,7 +156,7 @@ const findPrevWorkBoundary = (
     getShift: (eid: string, ds: string) => any | null
 ): { dateStr: string; shift: any; end: Date } | null => {
     let d = addDaysStr(beforeDateStr, -1);
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 40; i++) {
         const sh = getShift(empId, d);
         if (isWorkShift(sh)) {
             const se = getShiftStartEndAbs(d, sh!);
@@ -174,7 +174,7 @@ const findNextWorkBoundary = (
     getShift: (eid: string, ds: string) => any | null
 ): { dateStr: string; shift: any; start: Date } | null => {
     let d = addDaysStr(afterDateStr, 1);
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 40; i++) {
         const sh = getShift(empId, d);
         if (isWorkShift(sh)) {
             const se = getShiftStartEndAbs(d, sh!);
