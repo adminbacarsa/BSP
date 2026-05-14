@@ -436,6 +436,16 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
     const structuralDemandHours = perPosition.reduce((s, p) => s + p.monthHours, 0);
     const peakConcurrent = perPosition.reduce((s, p) => s + p.peakConcurrent, 0);
     const peopleNeededForStructure = perPosition.reduce((s, p) => s + p.peopleNeededWithCycle, 0);
+    // Dotación estructural basada solo en pico concurrente × factor de ciclo (sin inflar con TARGET_AVG_HOURS).
+    // peopleNeededForStructure usa max(horas, pico) y puede sobreestimar con 8h shifts; esta métrica
+    // es la correcta para saber si el ciclo cierra matemáticamente con la dotación disponible.
+    const structuralPeakPeople = ctx.positions.reduce((s, pos, idx) => {
+        const p = perPosition[idx];
+        if (!p) return s;
+        const isLimited = p.activeDays < ctx.daysInMonth.length;
+        const factor = isLimited ? 1 : cycleFactor;
+        return s + Math.ceil(p.peakConcurrent * factor);
+    }, 0);
 
     const contractedHours = Math.max(0, ctx.slaVendidas || 0);
     /** Si hay horas vendidas, ese es el verdadero objetivo de planificación. Si no, la estructura. */
@@ -577,13 +587,13 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
     // Verificación estructural por ciclo: ¿alcanza la dotación para cubrir TODOS los puestos
     // con el ciclo elegido? Si no, es imposible matemáticamente; si justo cierra, cualquier
     // ausencia o RET genera un hueco.
-    if (peopleNeededForStructure > peopleAvailable) {
+    if (structuralPeakPeople > peopleAvailable) {
         reasons.push(
-            `Ciclo ${cycleKey} inviable con esta dotación: cubrir todos los puestos necesita ~${peopleNeededForStructure} personas (qty × ciclo) pero hay ${peopleAvailable}. Elegir otro ciclo (4+2 necesita menos) o agregar personas.`
+            `Ciclo ${cycleKey} inviable con esta dotación: cubrir todos los puestos en simultáneo requiere ~${structuralPeakPeople} personas (pico × factor ${cycleKey}) pero hay ${peopleAvailable}. Elegir otro ciclo (4+2 necesita menos) o agregar personas.`
         );
-    } else if (peopleAvailable - peopleNeededForStructure < 2) {
+    } else if (peopleAvailable - structuralPeakPeople < 2) {
         warnings.push(
-            `Margen muy ajustado con ciclo ${cycleKey}: se necesitan ${peopleNeededForStructure} personas para cubrir todos los puestos y hay ${peopleAvailable} (colchón de ${peopleAvailable - peopleNeededForStructure}). Cualquier ausencia o RET puede generar slots vacíos.`
+            `Margen muy ajustado con ciclo ${cycleKey}: se necesitan ${structuralPeakPeople} personas para cubrir todos los puestos y hay ${peopleAvailable} (colchón de ${peopleAvailable - structuralPeakPeople}). Cualquier ausencia o RET puede generar slots vacíos.`
         );
     }
 
