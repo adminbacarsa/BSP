@@ -989,16 +989,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Ciclo por empleado: D12/N12 → 4+2 (cycleLen=6, cL=4); M/T/N → ciclo 8h global.
     const empCycleLen: Record<string, number> = {};
     const empCL_map: Record<string, number> = {};
-    // Bandas FIJAS todo el mes: cada empleado trabaja siempre su mismo turno (M, T o N).
-    // La rotación M→T→N entre ciclos genera transiciones con 0h de descanso
-    // (N termina 06:00, M empieza 06:00; M termina 14:00, T empieza 14:00; etc.)
-    // que bloquean al empleado el primer día del nuevo ciclo y crean huecos de cobertura.
-    // Con banda fija el descanso entre turnos iguales siempre es ≥16h.
-    const expectedShiftForDay = (empId: string, _dateStr: string, posName: string): string | null => {
+    // Rotación POR CICLO: la banda avanza cada vez que completa un ciclo completo.
+    // Patrón resultante: MMMMMM FF TTTTTT FF NNNNNN FF MMMMMM …
+    // La transición N→M genera 0h de descanso (N termina 06:00, M empieza 06:00 mismo día).
+    // Eso bloquea al empleado el primer día del nuevo ciclo → el fallback le da F (franco
+    // de ajuste, ciclo corto 5+1) en lugar de RET, y retoma M al día siguiente con 24h de gap.
+    const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
-        return ring[slot % ring.length];
+        if (ring.length === 1) return ring[0];
+        const eCycleLen = empCycleLen[empId] ?? cycleLen;
+        const di = parseInt(dateStr.split('-')[2], 10) - 1;
+        const cycleNum = Math.floor(di / eCycleLen);
+        return ring[(slot + cycleNum) % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
