@@ -399,18 +399,21 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             }
         });
         // Dotación realista: cabezas necesarias para cubrir las horas mensuales del puesto
-        // sumando el sobrecosto del ciclo (francos). Antes solo usábamos el pico simultáneo,
-        // lo que subestimaba feo a los puestos 24/7 (M+T+N).
-        // Si el puesto NO opera todos los días de la semana (ej. EN/RON L-V), el descanso
-        // ya está incorporado: S/D son francos "naturales". No aplicamos cycleFactor en
-        // ese caso para no inflar la dotación.
-        // Para puestos limitados (L-V) usamos HARD_MAX_HOURS (200h) como divisor porque
-        // es el tope CCT real; con TARGET_AVG_HOURS (192h) se infla la dotación necesaria
-        // (ej. 198h daría 2 personas cuando 1 alcanza, ya que 198 < 200).
+        // sumando el sobrecosto del ciclo (francos).
+        //
+        // Puestos 24/7 (ej. PUESTO 1, M+T+N): el ciclo genera francos → se necesita más
+        // gente que la que está en servicio simultáneamente. Usamos cycleFactor y TARGET_AVG_HOURS.
+        //
+        // Puestos limitados (L-V): el descanso natural S/D ya es el "franco". NO aplicamos
+        // cycleFactor ni inflamos por horas: 1 persona cubre 1 puesto L-V aunque el total de
+        // horas supere TARGET_AVG_HOURS (el tope CCT de 200h se maneja en la asignación).
+        // Si el guardia llega a 200h antes de fin de mes, los días restantes quedan como
+        // RET activable del colchón global (3456h disponibles vs 3298h contratadas = 158h buffer).
         const isLimitedSchedule = activeDays < ctx.daysInMonth.length;
         const factorForPosition = isLimitedSchedule ? 1 : cycleFactor;
-        const hoursRef = isLimitedSchedule ? HARD_MAX_HOURS : TARGET_AVG_HOURS;
-        const peopleByHours = monthHours > 0 ? Math.ceil((monthHours / hoursRef) * factorForPosition) : 0;
+        const peopleByHours = (!isLimitedSchedule && monthHours > 0)
+            ? Math.ceil((monthHours / TARGET_AVG_HOURS) * factorForPosition)
+            : 0;
         const peopleByPeak = Math.ceil(peakConcurrent * factorForPosition);
         const peopleNeededWithCycle = Math.max(peopleByHours, peopleByPeak);
         return {
