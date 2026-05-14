@@ -982,11 +982,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (ring.length === 1 || !shouldRotate) return ring[slot % ring.length];
         // Rotación POR CICLO: la banda avanza cada vez que completa un ciclo completo.
         // Patrón resultante: MMMMMM FF TTTTTT FF NNNNNN FF MMMMMM …
-        // cycleNum = cuántos ciclos completos han pasado para este empleado.
+        // cycleNum = cuántos ciclos completos han pasado desde el día 1 del mes.
+        // IMPORTANTE: NO usar `offset` aquí — el offset es solo para escalonar los
+        // días-franco en cycleWorkDays, no debe modificar cuándo rota la banda.
         const eCycleLen = empCycleLen[empId] ?? cycleLen;
-        const offset = empGroupIdx[empId] ?? 0;
         const di = parseInt(dateStr.split('-')[2], 10) - 1; // 0-based desde día 1 del mes
-        const cycleNum = Math.floor((di + offset) / eCycleLen);
+        const cycleNum = Math.floor(di / eCycleLen);
         return ring[(slot + cycleNum) % ring.length];
     };
 

@@ -168,7 +168,10 @@ const getDefaultStyle = (code: string) => SHIFT_STYLES[code] || 'bg-slate-100 te
 
 const formatTime = (dateInput: any) => {
     if (!dateInput) return '--:--';
+    // String "HH:MM" — retornar directamente (new Date("HH:MM") → Invalid Date)
+    if (typeof dateInput === 'string' && /^\d{1,2}:\d{2}$/.test(dateInput.trim())) return dateInput.trim();
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
+    if (isNaN(d.getTime())) return '--:--';
     return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 };
 
