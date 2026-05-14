@@ -14,14 +14,11 @@ const DEFAULT_STREAK_THRESHOLD = SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST;
 const DEFAULT_LONG_REST = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
 
 /**
- * Códigos que ROMPEN la racha de trabajo consecutivo.
- * Incluye:
- *  - Francos reales (F, FF, FP, FT) y licencias (V, L, A, E, AA, PG).
- *  - RET (retén): stand-by planificado — **no suma horas liquidables** (`SHIFT_HOURS_LOOKUP.RET = 0`).
- *    Sigue en STREAK_BREAK_CODES porque **no extiende** la racha de trabajo CCT (no es turno
- *    efectivo a la espera del descanso de 35h); la activación real se modela aparte en operaciones.
+ * Códigos que ROMPEN la racha de trabajo consecutivo (francos reales y licencias).
+ * RET (retén) NO está aquí: no es un franco — el empleado sigue disponible/comprometido.
+ * En workStreakStatsBackward/Forward los turnos RET se saltean sin contar ni cortar.
  */
-const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
+const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
 
 const HOURS_BY_CODE: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8,
@@ -95,7 +92,8 @@ const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) /
 /**
  * Horas y cantidad de DÍAS consecutivos de TRABAJO REAL hacia atrás desde
  * `fromDateStr` (inclusive).
- *  - F / FF / FP / FT / licencias / RET → rompen la racha.
+ *  - F / FF / FP / FT / licencias → rompen la racha.
+ *  - RET (retén): NO rompe la racha — se saltea y se sigue leyendo.
  *  - Turno real (M/T/N/D12/N12/etc) → cuenta como día y suma sus horas.
  *  - Día vacío (sin asignación) → rompe la racha.
  */
@@ -113,7 +111,11 @@ export const workStreakStatsBackward = (
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
         const h = shiftHours(sh);
-        if (h <= 0) break;
+        if (h <= 0) {
+            // 0h pero no franco real (ej. RET): transparente, seguir buscando
+            d = addDaysStr(d, -1);
+            continue;
+        }
         hours += h;
         workDays += 1;
         d = addDaysStr(d, -1);
@@ -145,7 +147,11 @@ export const workStreakStatsForward = (
         const code = String(sh.code || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
         const h = shiftHours(sh);
-        if (h <= 0) break;
+        if (h <= 0) {
+            // 0h pero no franco real (ej. RET): transparente, seguir buscando
+            d = addDaysStr(d, 1);
+            continue;
+        }
         hours += h;
         workDays += 1;
         d = addDaysStr(d, 1);
