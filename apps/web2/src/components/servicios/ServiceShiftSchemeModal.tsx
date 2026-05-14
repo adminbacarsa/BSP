@@ -375,6 +375,63 @@ export function ServiceShiftSchemeModal({ open, onClose, service }: ServiceShift
                         </div>
 
                         <div className="space-y-4 order-1 xl:order-2 text-[11px] min-w-0">
+                            {advice.coverComplexity.score > 0 ? (
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-600 bg-gradient-to-br from-slate-50 to-slate-100/80 dark:from-slate-800/80 dark:to-slate-900/60 px-3 py-2.5">
+                                    <p className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wide">
+                                        Complejidad para cubrirlo
+                                    </p>
+                                    <div className="flex items-baseline gap-2 mt-1">
+                                        <span
+                                            className={`text-3xl font-black tabular-nums leading-none ${
+                                                advice.coverComplexity.score <= 3
+                                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                                    : advice.coverComplexity.score <= 6
+                                                      ? 'text-amber-600 dark:text-amber-400'
+                                                      : 'text-rose-600 dark:text-rose-400'
+                                            }`}
+                                        >
+                                            {advice.coverComplexity.score}
+                                        </span>
+                                        <span className="text-sm font-black text-slate-400 dark:text-slate-500">/10</span>
+                                        <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 ml-auto">
+                                            {advice.coverComplexity.label}
+                                        </span>
+                                    </div>
+                                    <p className="text-[9px] font-bold text-slate-500 dark:text-slate-400 mt-1.5 leading-snug">
+                                        1 = muy sencillo (p. ej. todo 24 h homogéneo), 10 = muy exigente de sostener en planificación.
+                                    </p>
+                                    <div className="flex gap-1 mt-2" role="img" aria-label={`Complejidad ${advice.coverComplexity.score} de 10`}>
+                                        {Array.from({ length: 10 }, (_, i) => {
+                                            const on = i < advice.coverComplexity.score;
+                                            const tier =
+                                                advice.coverComplexity.score <= 3
+                                                    ? 'bg-emerald-500'
+                                                    : advice.coverComplexity.score <= 6
+                                                      ? 'bg-amber-500'
+                                                      : 'bg-rose-500';
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    className={`h-2 flex-1 rounded-sm ${on ? tier : 'bg-slate-200 dark:bg-slate-700'}`}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                    <ul className="mt-2 space-y-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 leading-snug">
+                                        {advice.coverComplexity.reasons.map((r, i) => (
+                                            <li key={i} className="flex gap-1.5">
+                                                <span className="text-slate-400 shrink-0">·</span>
+                                                <span>{r}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-3 py-2 text-[10px] font-bold text-slate-400">
+                                    Complejidad sin evaluar: revisá fechas y puestos del contrato.
+                                </div>
+                            )}
+
                             <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 px-3 py-2.5">
                                 <p className="text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-300 mb-1">Sugerencia principal</p>
                                 <p className="text-lg font-black text-indigo-800 dark:text-indigo-100">{schemeBadge(advice.primaryScheme)}</p>

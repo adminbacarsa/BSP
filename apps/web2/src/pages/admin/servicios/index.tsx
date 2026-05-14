@@ -1099,18 +1099,23 @@ export default function ServiciosSLAPage() {
                                         Total contrato: {total} h
                                       </span>
                                     </div>
-                                    <ServiceShiftSchemeIcon
-                                      hasIssues={(() => {
-                                          const a = analyzeShiftSchemesForService(srv);
-                                          return a.issues.length > 0 || a.soldShiftAnalyses.length > 0;
-                                      })()}
-                                      onOpen={() =>
-                                        setShiftModal({
-                                          open: true,
-                                          service: srv,
-                                        })
-                                      }
-                                    />
+                                    {(() => {
+                                      const shiftAdvice = analyzeShiftSchemesForService(srv);
+                                      return (
+                                        <ServiceShiftSchemeIcon
+                                          hasIssues={
+                                            shiftAdvice.issues.length > 0 || shiftAdvice.soldShiftAnalyses.length > 0
+                                          }
+                                          complexityScore={shiftAdvice.coverComplexity.score}
+                                          onOpen={() =>
+                                            setShiftModal({
+                                              open: true,
+                                              service: srv,
+                                            })
+                                          }
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                   <div className="flex gap-1 shrink-0">
                                     <button onClick={() => { handleNewVersion(srv); }} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">

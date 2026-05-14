@@ -28,6 +28,17 @@ export interface CoverageDayPoint {
     hs: number;
 }
 
+/**
+ * Complejidad para cubrir el servicio (planificación operativa), 1–10.
+ * 1 = muy sencillo (p. ej. todo 24 h homogéneo), 10 = muy exigente.
+ */
+export interface CoverComplexityRating {
+    /** 1–10 operativo; 0 = no se pudo evaluar. */
+    score: number;
+    label: string;
+    reasons: string[];
+}
+
 export interface ShiftSchemeAdvice {
     positionSummaries: string[];
     /** Máx. Σ (hs puesto × cantidad) en un día del muestreo. */
@@ -48,6 +59,7 @@ export interface ShiftSchemeAdvice {
     primaryReason: string;
     /** Hasta ~30 puntos espaciados sobre el rango muestreado (máx. 90 días). */
     coverageByDay: CoverageDayPoint[];
+    coverComplexity: CoverComplexityRating;
 }
 
 function parseYmd(s: string): Date | null {
@@ -227,6 +239,122 @@ function has12hNocturno(positions: ServicePosition[]): boolean {
     return (positions || []).some((p) => p.coverageType === '12hs_nocturno');
 }
 
+function clampCoverScore(n: number): number {
+    return Math.max(1, Math.min(10, Math.round(n)));
+}
+
+function coverComplexityLabel(score: number): string {
+    if (score <= 2) return 'Muy baja';
+    if (score <= 4) return 'Baja';
+    if (score <= 6) return 'Media';
+    if (score <= 8) return 'Alta';
+    return 'Muy alta';
+}
+
+/**
+ * Heurística orientativa: homogeneidad 24 h baja la nota; custom, picos y pax en paralelo la suben.
+ */
+function buildCoverComplexityRating(
+    positions: ServicePosition[],
+    peakDaily: number,
+    peakConcurrent: number,
+    soldShiftAnalyses: SoldShiftHourAnalysis[],
+    issues: string[],
+): CoverComplexityRating {
+    const n = positions.length;
+    let s = 5;
+    const reasons: string[] = [];
+
+    const types = new Set(positions.map((p) => p.coverageType));
+    const all24 = n > 0 && positions.every((p) => p.coverageType === '24hs');
+    const customPositions = positions.filter((p) => p.coverageType === 'custom');
+    const customCount = customPositions.length;
+    const maxBlocksOnePos = Math.max(0, ...customPositions.map((p) => (p.allowedShiftTypes || []).length));
+
+    const structuralIssues = issues.filter((t) => !t.includes('Hay bloques custom fuera de 8h/12h CCT'));
+
+    if (all24) {
+        s -= 3.5;
+        reasons.push('Todo 24 h homogéneo: patrón clásico (M/T/N o D12/N12) y suele ser lo más directo de cubrir.');
+    } else if (types.size === 1 && (types.has('12hs_diurno') || types.has('12hs_nocturno'))) {
+        s -= 2;
+        reasons.push('Un solo tipo en franja 12 h: menos reglas que un mix o custom.');
+    }
+
+    if (customCount > 0) {
+        s += 1 + Math.min(2, customCount - 1) * 0.75;
+        reasons.push(`${customCount} puesto(s) custom: más combinaciones por día y por bloque.`);
+    }
+
+    if (maxBlocksOnePos >= 3) {
+        s += 1.25;
+        reasons.push('Varios bloques custom en un mismo puesto: más riesgo de solapes y excepciones.');
+    }
+
+    if (soldShiftAnalyses.length > 0) {
+        s += Math.min(3, 1.25 + soldShiftAnalyses.length * 0.45);
+        reasons.push('Hs vendidas fuera de 8/12 h CCT: encadenar descansos y rotación suele costar más.');
+    }
+
+    if (peakConcurrent >= 8) {
+        s += 2;
+        reasons.push(`Pico de ${peakConcurrent} personas en paralelo: más coordinación y vacantes visibles.`);
+    } else if (peakConcurrent >= 4) {
+        s += 1.25;
+        reasons.push(`Hasta ${peakConcurrent} personas en paralelo en el pico del muestreo.`);
+    } else if (peakConcurrent >= 2) {
+        s += 0.35;
+    }
+
+    if (peakDaily >= 80) {
+        s += 2;
+        reasons.push(`Pico diario muy alto (${Math.round(peakDaily)} hs efectivas): densidad fuerte.`);
+    } else if (peakDaily >= 48) {
+        s += 1.25;
+        reasons.push(`Pico diario elevado (${Math.round(peakDaily)} hs): conviene validar solapes y refuerzos.`);
+    } else if (peakDaily >= 32) {
+        s += 0.5;
+    }
+
+    if (n >= 8) {
+        s += 1.5;
+        reasons.push('Muchos puestos declarados: más aristas entre coberturas y reemplazos.');
+    } else if (n >= 4) {
+        s += 0.75;
+    }
+
+    if (types.size >= 3) {
+        s += 1;
+        reasons.push('Mezcla de varios tipos de cobertura (24 h, 12 h, custom…): más casos borde.');
+    } else if (types.size === 2 && !all24) {
+        s += 0.35;
+    }
+
+    if (structuralIssues.length > 0) {
+        s += Math.min(2, structuralIssues.length * 0.55);
+        reasons.push('Hay advertencias de coherencia en el modelo (fechas, solapes, etc.).');
+    }
+
+    if (n === 1 && customCount === 0 && peakConcurrent <= 1 && peakDaily < 20) {
+        s -= 1.25;
+        if (reasons.length === 0) {
+            reasons.push('Poca dotación y demanda acotada: en general más simple de sostener.');
+        }
+    }
+
+    const score = clampCoverScore(s);
+    const uniq: string[] = [];
+    for (const r of reasons) {
+        if (!uniq.includes(r)) uniq.push(r);
+    }
+    const finalReasons = uniq.slice(0, 4);
+    if (finalReasons.length === 0) {
+        finalReasons.push('Complejidad acorde a la carga diaria y tipos de puesto modelados.');
+    }
+
+    return { score, label: coverComplexityLabel(score), reasons: finalReasons };
+}
+
 export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions'>): ShiftSchemeAdvice {
     const positions = srv.positions || [];
     const issues: string[] = [];
@@ -356,6 +484,8 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
         }
     }
 
+    const coverComplexity = buildCoverComplexityRating(positions, peakDaily, peakConcurrent, soldShiftAnalyses, issues);
+
     return {
         positionSummaries,
         peakDailyCoverageHs: Math.round(peakDaily * 10) / 10,
@@ -367,6 +497,7 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
         primaryScheme: primary,
         primaryReason,
         coverageByDay,
+        coverComplexity,
     };
 }
 
@@ -386,5 +517,10 @@ function emptyAdvice(issues: string[], positionSummaries: string[]): ShiftScheme
         primaryReason: 'Sin datos suficientes.',
         soldShiftAnalyses: [],
         coverageByDay: [],
+        coverComplexity: {
+            score: 0,
+            label: 'Sin evaluar',
+            reasons: ['Completá fechas y puestos del contrato para obtener una calificación.'],
+        },
     };
 }
