@@ -328,24 +328,28 @@ function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string): V2ShiftDef[] 
 
 
 /**
- * Modalidades de cobertura del puesto un día:
- *  - M/T/N (8h) y D12/N12 (12h) son ALTERNATIVAS para cubrir 24h (no se suman).
- *  - Regla: SIEMPRE preferimos bandas de 8h (M/T/N). D12/N12 solo si el SLA no tiene
- *    bandas de 8h configuradas para ese día. Esto vale para todos los ciclos (4+2, 5+1,
- *    6+1, 6+2) — el ciclo define el patrón de trabajo/franco, no la duración del turno.
+ * Bandas activas del puesto para un día, filtradas según el ciclo elegido:
+ *  - 4+2 → 48h/4días = 12h/turno → preferir D12/N12
+ *  - 6+x / 5+1 → 48h/6-5días = 8h/turno → preferir M/T/N
+ * Fallback: si el SLA no tiene bandas del tipo preferido, se usan las disponibles.
  */
 export function effectiveShiftsForPositionDay(
     pos: V2PositionDef,
     dayLetter: string,
     autoCycles?: string[]
 ): V2ShiftDef[] {
-    void autoCycles; // ya no se usa para discriminar 8h vs 12h
     if (!positionIsActiveOn(pos, dayLetter)) return [];
     const dayShifts = shiftsActiveOnDay(pos, dayLetter);
     if (dayShifts.length === 0) return [];
+    const { key: cycleKey } = pickRepresentativeCycle(autoCycles || []);
+    if (cycleKey === '4+2') {
+        const bands12 = dayShifts.filter((s) => shiftHours(s) >= 12);
+        if (bands12.length > 0) return bands12;
+        return dayShifts;
+    }
     const bands8 = dayShifts.filter((s) => shiftHours(s) < 12);
     if (bands8.length > 0) return bands8;
-    return dayShifts; // fallback: si el SLA solo tiene D12/N12, los usamos
+    return dayShifts;
 }
 
 function is24hsCoverage(pos: V2PositionDef): boolean {
