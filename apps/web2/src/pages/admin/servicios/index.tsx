@@ -24,6 +24,21 @@ const SHIFT_VARIANTS_DB: Record<string, ShiftVariant> = {
     'N12': { code: 'N12', name: 'Nocturno 12h', startTime: '19:00', endTime: '07:00', hours: 12 }, // Incluye 9h nocturnas (21-06)
 };
 
+function parseHm(t: string): number {
+  const s = (t || '00:00').slice(0, 5);
+  const [h, m] = s.split(':').map((x) => parseInt(x, 10));
+  const hh = Number.isFinite(h) ? h : 0;
+  const mm = Number.isFinite(m) ? m : 0;
+  return ((hh * 60 + mm) % 1440 + 1440) % 1440;
+}
+
+function formatHmLinear(linearMin: number): string {
+  const x = ((linearMin % 1440) + 1440) % 1440;
+  const hh = Math.floor(x / 60);
+  const mm = x % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
   
@@ -198,6 +213,31 @@ export default function ServiciosSLAPage() {
     return analyzeShiftComposition(start, end).total;
   };
 
+  const rebuild24hsVariants = (anchorM: string, anchorD12: string): ShiftVariant[] => {
+    const m0 = parseHm(anchorM);
+    const d0 = parseHm(anchorD12);
+    const H8 = 8 * 60;
+    const H12 = 12 * 60;
+    const presets = SHIFT_VARIANTS_DB;
+    const mS = formatHmLinear(m0);
+    const mE = formatHmLinear(m0 + H8);
+    const tS = formatHmLinear(m0 + H8);
+    const tE = formatHmLinear(m0 + H8 * 2);
+    const nS = formatHmLinear(m0 + H8 * 2);
+    const nE = formatHmLinear(m0 + H8 * 3);
+    const d12S = formatHmLinear(d0);
+    const d12E = formatHmLinear(d0 + H12);
+    const n12S = formatHmLinear(d0 + H12);
+    const n12E = formatHmLinear(d0 + H12 * 2);
+    return [
+      { ...presets['M'], startTime: mS, endTime: mE, hours: calculateShiftHours(mS, mE) },
+      { ...presets['T'], startTime: tS, endTime: tE, hours: calculateShiftHours(tS, tE) },
+      { ...presets['N'], startTime: nS, endTime: nE, hours: calculateShiftHours(nS, nE) },
+      { ...presets['D12'], startTime: d12S, endTime: d12E, hours: calculateShiftHours(d12S, d12E) },
+      { ...presets['N12'], startTime: n12S, endTime: n12E, hours: calculateShiftHours(n12S, n12E) },
+    ];
+  };
+
   const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string) => {
     if (!startStr || !endStr || positions.length === 0) return [];
     
@@ -238,8 +278,23 @@ export default function ServiciosSLAPage() {
             };
 
             if (pos.coverageType === '24hs') {
-                addVariant(SHIFT_VARIANTS_DB['D12']);
-                addVariant(SHIFT_VARIANTS_DB['N12']);
+                const shifts = pos.allowedShiftTypes || [];
+                const m = shifts.find((s) => s.code === 'M');
+                const t = shifts.find((s) => s.code === 'T');
+                const n = shifts.find((s) => s.code === 'N');
+                const d12 = shifts.find((s) => s.code === 'D12');
+                const n12 = shifts.find((s) => s.code === 'N12');
+                if (m && t && n) {
+                  addVariant(m);
+                  addVariant(t);
+                  addVariant(n);
+                } else if (d12 && n12) {
+                  addVariant(d12);
+                  addVariant(n12);
+                } else {
+                  addVariant(SHIFT_VARIANTS_DB['D12']);
+                  addVariant(SHIFT_VARIANTS_DB['N12']);
+                }
             }
             else if (pos.coverageType === '12hs_diurno') addVariant(SHIFT_VARIANTS_DB['D12']);
             else if (pos.coverageType === '12hs_nocturno') addVariant(SHIFT_VARIANTS_DB['N12']);
@@ -337,13 +392,21 @@ export default function ServiciosSLAPage() {
         id: '', name: 'Puesto 1', code: '', coverageType: '24hs', quantity: 1,
         activeDays: ['L','M','X','J','V','S','D'], allowedShiftTypes: []
       };
-      updateVariantsForCoverage('24hs', freshForm);
+      updateVariantsForCoverage('24hs', freshForm, { anchorM: '07:00', anchorD12: '07:00' });
       setShowPositionModal(true);
   };
 
-  const updateVariantsForCoverage = (type: string, currentFormState: ServicePosition) => {
+  const updateVariantsForCoverage = (
+      type: string,
+      currentFormState: ServicePosition,
+      anchors?: { anchorM?: string; anchorD12?: string }
+  ) => {
       let variants: ShiftVariant[] = [];
-      if (type === '24hs') variants = [SHIFT_VARIANTS_DB['M'], SHIFT_VARIANTS_DB['T'], SHIFT_VARIANTS_DB['N'], SHIFT_VARIANTS_DB['D12'], SHIFT_VARIANTS_DB['N12']];
+      if (type === '24hs') {
+        const am = anchors?.anchorM || '07:00';
+        const ad = anchors?.anchorD12 || '07:00';
+        variants = rebuild24hsVariants(am, ad);
+      }
       else if (type === '12hs_diurno') variants = [SHIFT_VARIANTS_DB['M'], SHIFT_VARIANTS_DB['D12']];
       else if (type === '12hs_nocturno') variants = [SHIFT_VARIANTS_DB['N'], SHIFT_VARIANTS_DB['N12']];
       
@@ -352,7 +415,13 @@ export default function ServiciosSLAPage() {
 
   const handleCoverageTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const type = e.target.value;
-      updateVariantsForCoverage(type, positionForm);
+      if (type === '24hs') {
+        const m = positionForm.allowedShiftTypes.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00';
+        const d = positionForm.allowedShiftTypes.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00';
+        updateVariantsForCoverage('24hs', positionForm, { anchorM: m, anchorD12: d });
+      } else {
+        updateVariantsForCoverage(type, positionForm);
+      }
   };
 
   const toggleStandardVariant = (variantKey: string) => {
@@ -1284,7 +1353,19 @@ export default function ServiciosSLAPage() {
                              {pos.allowedShiftTypes.map(v => (<div key={v.code} className="text-center bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg border dark:border-slate-600"><div className="text-[9px] font-black text-slate-600 dark:text-slate-300">{v.code}</div><div className="text-[7px] text-slate-400">{v.hours}h</div></div>))}
                            </div>
                            <div className="flex gap-1">
-                             <button onClick={() => { setEditingShiftCode(null); setPositionForm({ ...pos, allowedShiftTypes: pos.allowedShiftTypes.map(s => ({ ...s })) }); setShowPositionModal(true); }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors"><Edit2 size={14}/></button>
+                             <button onClick={() => {
+                               setEditingShiftCode(null);
+                               const clones = pos.allowedShiftTypes.map((s) => ({ ...s }));
+                               const nextAllowed =
+                                 pos.coverageType === '24hs'
+                                   ? rebuild24hsVariants(
+                                       clones.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00',
+                                       clones.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00'
+                                     )
+                                   : clones;
+                               setPositionForm({ ...pos, allowedShiftTypes: nextAllowed });
+                               setShowPositionModal(true);
+                             }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors"><Edit2 size={14}/></button>
                              <button onClick={() => removePosition(pos.id)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-rose-500 hover:bg-rose-100 transition-colors"><X size={14}/></button>
                            </div>
                         </div>
@@ -1345,6 +1426,51 @@ export default function ServiciosSLAPage() {
                             <option value="custom">PERSONALIZADO / TURNOS ESPECÍFICOS</option>
                         </select>
                     </div>
+
+                    {positionForm.coverageType === '24hs' && (
+                        <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-800 rounded-2xl p-4 space-y-3">
+                            <p className="text-[9px] font-black uppercase text-sky-600 dark:text-sky-400">Horarios base (24 h)</p>
+                            <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-snug">
+                                Definí el inicio del turno M (cada bloque 8 h): se calculan T y N en cadena. Definí el inicio de D12 (12 h): N12 completa las 24 h. Los ciclos 8+8+8 y 12+12 son independientes (dos modelos de planificación).
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 ml-0.5 block mb-1">Inicio M → T → N</label>
+                                    <input
+                                        type="time"
+                                        className="w-full p-2.5 bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-sm text-slate-800 dark:text-white"
+                                        value={positionForm.allowedShiftTypes.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00'}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (!v) return;
+                                            setPositionForm((prev) => {
+                                                if (prev.coverageType !== '24hs') return prev;
+                                                const d12 = prev.allowedShiftTypes.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00';
+                                                return { ...prev, allowedShiftTypes: rebuild24hsVariants(v, d12) };
+                                            });
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 ml-0.5 block mb-1">Inicio D12 → N12</label>
+                                    <input
+                                        type="time"
+                                        className="w-full p-2.5 bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-800 rounded-xl font-bold text-sm text-slate-800 dark:text-white"
+                                        value={positionForm.allowedShiftTypes.find((s) => s.code === 'D12')?.startTime?.slice(0, 5) || '07:00'}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (!v) return;
+                                            setPositionForm((prev) => {
+                                                if (prev.coverageType !== '24hs') return prev;
+                                                const mStart = prev.allowedShiftTypes.find((s) => s.code === 'M')?.startTime?.slice(0, 5) || '07:00';
+                                                return { ...prev, allowedShiftTypes: rebuild24hsVariants(mStart, v) };
+                                            });
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {positionForm.coverageType === 'custom' && (
                         <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-2xl border border-orange-100 dark:border-orange-800">
