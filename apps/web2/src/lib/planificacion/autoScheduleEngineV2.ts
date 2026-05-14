@@ -1292,6 +1292,57 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    // ── SEGUNDO PASE: banda cruzada ──────────────────────────────────────────
+    // Para empleados asignados a un puesto que no recibieron turno en su día de
+    // trabajo del ciclo: intentar cubrir cualquier banda sin llenar en su puesto.
+    // Esto permite que el empleado de relevo (mismo slot que el primario) cubra la
+    // banda que necesita el puesto ese día en vez de quedar en RET innecesario.
+    // Condición: el día debe ser de trabajo para el empleado (cycleWorkDays) y el
+    // puesto debe tener un slot libre.
+    for (const day of ctx.daysInMonth) {
+        const dateStr2 = ctx.getDateKey(day);
+        const dayLetter2 = ctx.getDayLetter(dateStr2);
+        const inCurr2 = day.getDate() <= cutoffDay;
+        for (const emp of ctx.employees) {
+            if (runtime[emp.id].assignedDays.has(dateStr2)) continue;
+            const posName2 = empAssignedTo[emp.id];
+            if (!posName2) continue;
+            if (!cycleWorkDays[emp.id]?.has(dateStr2)) continue;
+            const pos2 = ctx.positions.find(p => p.positionName === posName2);
+            if (!pos2 || !positionIsActiveOn(pos2, dayLetter2)) continue;
+            const dayShifts2 = effectiveShiftsForPositionDay(pos2, dayLetter2, ctx.autoCycles);
+            for (const sh2 of dayShifts2) {
+                const sCode2 = String(sh2.code || '').toUpperCase();
+                const sHrs2 = shiftHoursH(sh2);
+                const sStart2 = sh2.startTime || DEFAULT_SHIFT_TIMES[sCode2] || '07:00';
+                const sEnd2 = sh2.endTime || undefined;
+                const qty2 = Math.max(1, Number(pos2.qty) || 1);
+                const covd2 = assignments.filter(a =>
+                    a.dateStr === dateStr2 &&
+                    a.positionName === posName2 &&
+                    a.code === sCode2 &&
+                    !a.isFranco && !(a as any).isReten
+                ).length;
+                if (covd2 >= qty2) continue;
+                const used2 = inCurr2 ? runtime[emp.id].cycleCurrentUsed : runtime[emp.id].cycleNextUsed;
+                if (used2 + sHrs2 > HARD_MAX_HOURS) continue;
+                if (!passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) continue;
+                writeAssignment(emp.id, dateStr2, posName2, sCode2, sh2.name || sCode2, sHrs2, sStart2, inCurr2, sEnd2);
+                // Eliminar del uncoveredSlotsByDay si la brecha se cerró
+                const gapDay = stats.uncoveredSlotsByDay![dateStr2];
+                if (gapDay) {
+                    const gi = gapDay.findIndex(g => g.positionName === posName2 && g.code === sCode2);
+                    if (gi >= 0) {
+                        gapDay[gi].missing--;
+                        stats.uncoveredSlots--;
+                        if (gapDay[gi].missing <= 0) gapDay.splice(gi, 1);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     const suvicoWeekBillableOver48: Array<{ empId: string; weekKey: string; hours: number }> = [];
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
@@ -1331,11 +1382,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const primaryCode = (empPrimaryShift[emp.id] || 'M').toUpperCase();
             const retActivationHrs = SHIFT_HRS_DEFAULT[primaryCode] ?? 8;
             const retFitsInCycle = usedInCycle + retActivationHrs <= HARD_MAX_HOURS;
-            // Solo los designados (último 1-2 por prioridad de cada grupo) reciben RET.
-            // Los empleados ociosos (sin puesto asignado) reciben F — si sobran, es
-            // un problema de dotación que se alerta en `excessPositionEmployees`.
-            const isRetDesignate = retDesignateSet.has(emp.id);
-            const fallbackCode = isWorkDayInCycle && retFitsInCycle && isRetDesignate ? 'RET' : 'F';
+            // Regla de ciclo estricta: F SOLO en días franco del ciclo.
+            // Día de trabajo (cycleWorkDays) sin turno asignado = RET (stand-by), nunca F.
+            // Excepción: empleado ocioso (sin puesto) siempre recibe F — su exceso se alerta.
+            const assignedPosForFallback = empAssignedTo[emp.id];
+            const fallbackCode = isWorkDayInCycle && retFitsInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
