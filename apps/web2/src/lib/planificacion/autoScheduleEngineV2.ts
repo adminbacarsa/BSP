@@ -918,10 +918,14 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
         if (ring.length === 1 || !shouldRotate) return ring[slot % ring.length];
-        // Rotación semanal: cada 7 días calendario avanza una posición en el anillo.
-        const dayNum = parseInt(dateStr.split('-')[2], 10) - 1; // 0-based desde día 1
-        const weekOfMonth = Math.floor(dayNum / 7);
-        return ring[(slot + weekOfMonth) % ring.length];
+        // Rotación POR CICLO: la banda avanza cada vez que completa un ciclo completo.
+        // Patrón resultante: MMMMMM FF TTTTTT FF NNNNNN FF MMMMMM …
+        // cycleNum = cuántos ciclos completos han pasado para este empleado.
+        const eCycleLen = empCycleLen[empId] ?? cycleLen;
+        const offset = empGroupIdx[empId] ?? 0;
+        const di = parseInt(dateStr.split('-')[2], 10) - 1; // 0-based desde día 1 del mes
+        const cycleNum = Math.floor((di + offset) / eCycleLen);
+        return ring[(slot + cycleNum) % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
