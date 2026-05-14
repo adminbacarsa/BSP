@@ -5095,6 +5095,39 @@ export default function PlanificacionPage() {
                                             </div>
                                         )}
 
+                                        {autoV2Report.metrics.cctSchemeCalendarProjection && (
+                                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2 mb-2">
+                                                <div className="text-[10px] font-black uppercase text-indigo-900 mb-1">
+                                                    Proyección calendario 2026 — {autoV2Report.metrics.cctSchemeCalendarProjection.monthNameEs}
+                                                </div>
+                                                <table className="w-full text-[10px]">
+                                                    <thead>
+                                                        <tr className="text-indigo-800">
+                                                            <th className="text-left px-1 py-0.5 font-black">Ciclo</th>
+                                                            <th className="text-right px-1 py-0.5 font-black">Días</th>
+                                                            <th className="text-right px-1 py-0.5 font-black">Hs mes</th>
+                                                            <th className="text-left px-1 py-0.5 font-black">Estado</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {autoV2Report.metrics.cctSchemeCalendarProjection.rows.map((r) => (
+                                                            <tr key={r.cycleKey} className="border-t border-indigo-100">
+                                                                <td className="px-1 py-0.5 font-bold text-indigo-950">{r.cycleKey}</td>
+                                                                <td className="text-right px-1 py-0.5 text-indigo-900">{r.workDays}</td>
+                                                                <td className="text-right px-1 py-0.5 font-black text-indigo-950">{r.billableHours}h</td>
+                                                                <td className="px-1 py-0.5 text-indigo-900 font-bold">
+                                                                    {r.overHardCap ? '>200h ref. cal.' : r.overSoftWarn ? 'Alerta ref. cal.' : 'OK ref.'}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                <p className="text-[9px] text-indigo-800/90 mt-1 leading-snug">
+                                                    Referencia de carga si todo el mes se trabajara a ritmo del esquema; el tope operativo del motor sigue siendo el ciclo CCT (corte día {autoV2Report.metrics.cctCutoffDay}) más la cola por persona.
+                                                </p>
+                                            </div>
+                                        )}
+
                                         {autoV2Report.warnings && autoV2Report.warnings.length > 0 && (
                                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">
                                                 <div className="text-[10px] font-black uppercase text-amber-800 mb-1">Avisos (no bloquean)</div>

@@ -49,6 +49,8 @@ import {
 } from './restBetweenShifts';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
+import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
+import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -247,6 +249,11 @@ export interface V2FeasibilityReport {
             bufferHours: number;
             retEstimate: number;
         }>;
+        /**
+         * Solo 2026: proyección calendario por esquemas seleccionados (tabla comparativa COSP).
+         * Complementa el tope por ciclo CCT (26→25); no sustituye `empMonthlyInitial` ni la liquidación.
+         */
+        cctSchemeCalendarProjection?: CctSchemeCalendarProjectionBlock;
     };
     perPosition: V2PositionDemand[];
     perEmployee: V2EmployeeOffer[];
@@ -614,6 +621,18 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         );
     }
 
+    const firstDay = ctx.daysInMonth[0];
+    let cctSchemeCalendarProjection: CctSchemeCalendarProjectionBlock | undefined;
+    if (firstDay) {
+        const y = firstDay.getFullYear();
+        const mo = firstDay.getMonth() + 1;
+        const block = buildCctSchemeCalendarProjectionBlock(y, mo, ctx.autoCycles);
+        if (block) {
+            cctSchemeCalendarProjection = block;
+            for (const line of block.messages) warnings.push(line);
+        }
+    }
+
     return {
         ok: reasons.length === 0,
         reasons,
@@ -658,6 +677,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
                     retEstimate: Math.max(0, Math.floor(buffer / avgHrs)),
                 };
             }),
+            cctSchemeCalendarProjection,
         },
         perPosition,
         perEmployee,
@@ -713,6 +733,8 @@ export interface V2GenerateStats {
      * sigue validándose con `verifyScheduleCoverage` / `checkRestBetweenShifts`.
      */
     suvicoWeekBillableOver48?: Array<{ empId: string; weekKey: string; hours: number }>;
+    /** Copia de `feasibility.metrics.cctSchemeCalendarProjection` tras generar (solo 2026 con datos). */
+    cctSchemeCalendarProjection?: CctSchemeCalendarProjectionBlock;
 }
 
 export interface V2GenerateResult {
@@ -1038,6 +1060,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         idleEmployeeIds: Object.entries(empAssignedTo).filter(([, v]) => v === null).map(([k]) => k),
         primaryShiftByEmp: { ...empPrimaryShift },
         suvicoWeekBillableOver48: [],
+        cctSchemeCalendarProjection: feasibility.metrics.cctSchemeCalendarProjection,
     };
 
     const runtime: Record<string, EmpRuntimeState> = {};

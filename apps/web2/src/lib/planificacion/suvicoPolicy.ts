@@ -41,6 +41,11 @@ export const SUVICO_POLICY = {
         WEEK_BILLABLE_HOURS_LIMITED_POSITION: 50,
         /** Sugerencias post-grilla: priorizar “gastar” RET entre quienes llevan menos horas facturables en el mes. */
         LOW_BILLABLE_HOURS_FOR_RET_PRIORITY: 160,
+        /**
+         * Proyección calendario 2026 (tabla comparativa): aviso antes del tope CCT cuando
+         * un esquema típico acumularía muchas horas en ese mes (p. ej. 4+2 ~180h hacia día 20).
+         */
+        MONTHLY_BILLABLE_SOFT_WARN_HOURS: 180,
     },
     /** Días corridos de licencia especial (referencia convenio; validación documental en RRHH). */
     LEAVES_DAYS: {
