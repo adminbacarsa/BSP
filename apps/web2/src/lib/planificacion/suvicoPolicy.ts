@@ -24,7 +24,11 @@ export const SUVICO_POLICY = {
         TARGET_MONTHLY: 192,
         /** Tope duro de horas facturables por ciclo CCT (26→25). */
         MAX_MONTHLY_HARD: 200,
-        /** No planificar un único bloque operativo por encima de esta duración (horas). */
+        /**
+         * Referencia CCT: jornada máxima típica por bloque. No recorta horas en el motor ni en
+         * asignaciones persistidas: la liquidación sigue el mismo criterio que siempre (campo `hours`,
+         * start/end, lookups). Una capa aparte (avisos / RRHH) puede usar este valor si hace falta.
+         */
         MAX_SINGLE_SHIFT_HOURS: 12,
     },
     /**

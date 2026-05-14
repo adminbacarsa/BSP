@@ -292,18 +292,17 @@ function parseShiftHourFloat(t: any): number | null {
  * asignaciones de 8h cuando el SLA pedía 10h/12h, dejando huecos de cobertura.
  */
 function shiftHours(s: V2ShiftDef): number {
-    const maxH = SUVICO_POLICY.REST.MAX_SINGLE_SHIFT_HOURS;
     const code = String(s.code || '').toUpperCase();
     const h = Number(s.hours);
-    if (Number.isFinite(h) && h > 0) return Math.min(maxH, h);
+    if (Number.isFinite(h) && h > 0) return h;
     const start = parseShiftHourFloat(s.startTime);
     const end = parseShiftHourFloat(s.endTime);
     if (start !== null && end !== null) {
         let dur = end - start;
         if (dur <= 0) dur += 24; // turno nocturno (cruza medianoche)
-        if (dur > 0 && dur <= 24) return Math.min(maxH, dur);
+        if (dur > 0 && dur <= 24) return dur;
     }
-    return Math.min(maxH, SHIFT_HRS_DEFAULT[code] ?? 8);
+    return SHIFT_HRS_DEFAULT[code] ?? 8;
 }
 
 export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string): boolean {
