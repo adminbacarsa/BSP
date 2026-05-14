@@ -940,23 +940,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── RET-DESIGNATES: concentrar RETs en el/los empleado/s de menor prioridad ──
-    // En vez de repartir los días de ciclo sin turno real como RET entre todos,
-    // solo los designados reciben RET; los demás reciben F (evita rachas de RET
-    // dispersas que generan falsos positivos al asignar sustituciones manuales).
-    // Regla: último empleado del grupo (menor prioridad) siempre designado;
-    // si hay 2+ excedentes reales, también el penúltimo.
+    // ── RET-DESIGNATES: concentrar RETs en los 3 empleados de menor prioridad global ──
+    // Solo estos reciben RET en el fallback; todos los demás reciben F.
+    // Esto evita celdas RET dispersas en empleados de alta prioridad.
     const retDesignateSet = new Set<string>();
-    Object.entries(positionGroups).forEach(([posName, group]) => {
-        if (group.length === 0) return;
-        const sorted = [...group].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
-        const need = Math.max(1, positionNeed[posName] || 1);
-        const surplus = group.length - need;
-        const designateCount = surplus > 1 ? 2 : 1;
-        for (let i = 0; i < Math.min(designateCount, sorted.length); i++) {
-            retDesignateSet.add(sorted[i]);
+    {
+        // sortedEmps está ordenado high→low priority; tomamos los 3 últimos.
+        const RET_CARRIERS = 3;
+        for (let i = sortedEmps.length - 1; i >= 0 && retDesignateSet.size < RET_CARRIERS; i--) {
+            retDesignateSet.add(sortedEmps[i].id);
         }
-    });
+    }
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
     // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
@@ -1392,8 +1386,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             // En cualquier otro caso (todos los slots cubiertos, empleado ocioso) → RET normal.
             const lastCode = (st.lastShiftCode || '').toUpperCase();
             const isPostNightConstraint = (lastCode === 'N' || lastCode === 'N12') && isWorkDayInCycle;
+            // RET solo para los designados (3 de menor prioridad global); el resto recibe F.
+            const isRetCarrier = retDesignateSet.has(emp.id);
             const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
-                ? (isPostNightConstraint ? 'F' : 'RET')
+                ? (isRetCarrier && !isPostNightConstraint ? 'RET' : 'F')
                 : 'F';
             assignments.push({
                 empId: emp.id,

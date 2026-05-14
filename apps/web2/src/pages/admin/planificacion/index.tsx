@@ -3144,31 +3144,60 @@ export default function PlanificacionPage() {
                                 colSpan={1}
                                 onClick={(e) => {
                                     if (isCovered || required === 0) return;
-                                    // Calcular gaps en tiempo real (estado actual: pendingChanges + shiftsMap)
+                                    // Gaps en tiempo real: misma lógica hours-based que el cálculo de cobertura.
+                                    // NO itera códigos del SLA (evita falsos D12/N12 en esquema 6+2).
                                     const liveGaps: { positionName: string; code: string; missing: number }[] = [];
                                     (positionStructure || []).forEach((pos: any) => {
                                         if (!isPosActiveOnDay(pos, dayLetter)) return;
                                         const posQty = Number(pos?.qty) || 1;
-                                        const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
-                                        const dayShifts = shiftsArr.filter((s: any) => !s.days || s.days.length === 0 || s.days.includes(dayLetter));
-                                        dayShifts.forEach((sh: any) => {
-                                            const sCode = String(sh.code || '').toUpperCase();
-                                            if (!sCode) return;
-                                            let coveredCount = 0;
-                                            displayedEmployees.forEach((emp: any) => {
-                                                const key = `${emp.id}_${dateStr}`;
-                                                const pending = pendingChanges[key];
-                                                const existing = shiftsMap[key];
-                                                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
-                                                if (!activeShift) return;
-                                                const code = String(activeShift.code || '').toUpperCase();
-                                                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                                                const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
-                                                const shiftObj = activeShift.objectiveId || (pending ? selectedObjective : '');
-                                                if (code === sCode && shiftPos === pos.positionName && shiftObj === selectedObjective) coveredCount++;
-                                            });
-                                            if (coveredCount < posQty) liveGaps.push({ positionName: pos.positionName, code: sCode, missing: posQty - coveredCount });
+                                        const cvType = pos?.coverageType || 'custom';
+                                        let dailyTarget = 24;
+                                        if (cvType !== '24hs') {
+                                            const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
+                                            const sum = shiftsArr.reduce((a: number, s: any) => {
+                                                const h = Number(s.hours);
+                                                if (h > 0) return a + h;
+                                                if (s.startTime && s.endTime) {
+                                                    const parseH = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh + (mm || 0) / 60; };
+                                                    let dur = parseH(s.endTime) - parseH(s.startTime);
+                                                    if (dur <= 0) dur += 24;
+                                                    if (dur > 0 && dur <= 24) return a + dur;
+                                                }
+                                                return a + 8;
+                                            }, 0);
+                                            dailyTarget = sum > 0 ? sum : 8;
+                                        }
+                                        let hoursForPos = 0;
+                                        const codeCounts: Record<string, number> = {};
+                                        displayedEmployees.forEach((emp: any) => {
+                                            const key = `${emp.id}_${dateStr}`;
+                                            const pending = pendingChanges[key];
+                                            const existing = shiftsMap[key];
+                                            const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                                            if (!activeShift) return;
+                                            const code = String(activeShift.code || '').toUpperCase();
+                                            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                                            const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
+                                            const shiftObj = activeShift.objectiveId || (pending ? selectedObjective : '');
+                                            if (shiftPos !== pos.positionName || shiftObj !== selectedObjective) return;
+                                            hoursForPos += calcShiftHours(activeShift);
+                                            codeCounts[code] = (codeCounts[code] || 0) + 1;
                                         });
+                                        const missingHours = dailyTarget * posQty - hoursForPos;
+                                        if (missingHours > 0.5) {
+                                            const has12h = (codeCounts['D12'] || 0) + (codeCounts['N12'] || 0) > 0;
+                                            const has8h = (codeCounts['M'] || 0) + (codeCounts['T'] || 0) + (codeCounts['N'] || 0) > 0;
+                                            const shiftHrs = (has12h && !has8h) ? 12 : 8;
+                                            const missCount = Math.max(1, Math.round(missingHours / shiftHrs));
+                                            const bands = shiftHrs === 12 ? ['D12', 'N12'] : ['M', 'T', 'N'];
+                                            let worstBand = bands[0];
+                                            let worstCnt = Infinity;
+                                            for (const b of bands) {
+                                                const cnt = codeCounts[b] ?? 0;
+                                                if (cnt < worstCnt) { worstCnt = cnt; worstBand = b; }
+                                            }
+                                            liveGaps.push({ positionName: pos.positionName, code: worstBand, missing: missCount });
+                                        }
                                     });
                                     const gaps = liveGaps.length > 0 ? liveGaps : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
                                     if (gaps.length > 0) setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
