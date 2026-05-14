@@ -302,7 +302,7 @@ function shiftHours(s: V2ShiftDef): number {
     return SHIFT_HRS_DEFAULT[code] ?? 8;
 }
 
-function positionIsActiveOn(pos: V2PositionDef, dayLetter: string): boolean {
+export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string): boolean {
     if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) {
         return pos.activeDays.includes(dayLetter);
     }
@@ -963,6 +963,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         cycleWorkDays[emp.id] = set;
     });
 
+    // Empleados asignados a puestos con schedule acotado (L-V, custom).
+    // Para ellos NO aplica el tope de días consecutivos del ciclo —
+    // su patrón ya está fijo por la estructura del servicio.
+    const limitedEmpIds = new Set<string>(
+        ctx.employees
+            .filter(emp => {
+                const posName = empAssignedTo[emp.id];
+                if (!posName) return false;
+                const pos = ctx.positions.find(p => p.positionName === posName);
+                return !!pos && !positionOperatesAllWeek(pos);
+            })
+            .map(emp => emp.id)
+    );
+
     const assignments: V2Assignment[] = [];
     // Techo de horas facturables en la generación: el MÁXIMO entre vendidas y demanda
     // estructural del SLA en pantalla. Antes usábamos solo `contractedHours` cuando
@@ -1049,7 +1063,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 targetDateStr: dateStr,
                 proposed: { code: codeUp, startTime: startResolved, hours: hrs },
                 getShift,
-                cfg: V2_AGREEMENT_REST,
+                cfg: limitedEmpIds.has(empId) ? V2_AGREEMENT_REST_BASE : V2_AGREEMENT_REST,
             }) === null
         );
     };
@@ -1158,8 +1172,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const suvicoWeekBillableOver48: Array<{ empId: string; weekKey: string; hours: number }> = [];
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
+        // Puestos L-V con turno > 8h (ej. RO=10h) generan 50h/semana estructuralmente.
+        // Se permite hasta 50h (48+2) para no generar alertas falsas.
+        const weekCap = limitedEmpIds.has(emp.id) ? 50 : 48;
         for (const [weekKey, h] of Object.entries(st.weekHours)) {
-            if (h > 48 + 1e-6) {
+            if (h > weekCap + 1e-6) {
                 suvicoWeekBillableOver48.push({ empId: emp.id, weekKey, hours: Math.round(h * 10) / 10 });
             }
         }

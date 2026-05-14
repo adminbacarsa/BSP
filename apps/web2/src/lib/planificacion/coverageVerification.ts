@@ -16,7 +16,7 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { effectiveShiftsForPositionDay, pickRepresentativeCycle } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, pickRepresentativeCycle, positionIsActiveOn } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -229,12 +229,16 @@ export function verifyScheduleCoverage(
         if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c) || c === 'RET') return;
         const startResolved = a.startTime || DEFAULT_START[c] || '07:00';
         const hrs = Number(a.hours) || SHIFT_HRS[c] || 8;
+        // Puestos L-V/custom: su horario está fijo por el servicio, no aplica tope consecutivo del ciclo.
+        const assignedPos = a.positionName ? ctx.positions.find(p => p.positionName === a.positionName) : null;
+        const isLimitedPos = !!assignedPos && !DAY_LETTERS.every(l => positionIsActiveOn(assignedPos!, l));
+        const restCfg = isLimitedPos ? VERIFY_REST_BASE : VERIFY_REST_CFG;
         const violation = checkRestBetweenShifts({
             empId: a.empId,
             targetDateStr: a.dateStr,
             proposed: { code: c, startTime: startResolved, hours: hrs },
             getShift,
-            cfg: VERIFY_REST_CFG,
+            cfg: restCfg,
         });
         if (violation) {
             restViolations.push({
