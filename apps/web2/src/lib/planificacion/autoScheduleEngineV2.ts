@@ -58,9 +58,9 @@ const CYCLE_MAP: Record<string, [number, number]> = {
     '6+1': [6, 1],
     '6+2': [6, 2],
 };
-// Todos los ciclos usan 8h (M/T/N) por defecto. D12/N12 solo si el SLA no tiene bandas 8h disponibles.
+/** Horas por turno según ciclo: 4+2 → D12/N12 (12h); resto → M/T/N (8h). */
 const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
-    '4+2': 8,
+    '4+2': 12,
     '5+1': 8,
     '6+1': 8,
     '6+2': 8,
@@ -342,16 +342,12 @@ export function effectiveShiftsForPositionDay(
     if (dayShifts.length === 0) return [];
     const { key: cycleKey } = pickRepresentativeCycle(autoCycles || []);
     if (cycleKey === '4+2') {
-        // Ciclo puro 4+2 → 12h/turno
+        // Ciclo puro 4+2 → 48h/4días = 12h/turno → D12/N12
         const bands12 = dayShifts.filter((s) => shiftHours(s) >= 12);
         if (bands12.length > 0) return bands12;
         return dayShifts;
     }
-    // Modo mixto: ciclo 8h + 4+2 simultáneos → devolver todas las bandas.
-    // El motor asignará M/T/N (6+2) a unos empleados y D12/N12 (4+2) a otros.
-    if (Array.isArray(autoCycles) && autoCycles.includes('4+2')) {
-        return dayShifts;
-    }
+    // Ciclo 8h (6+2, 6+1, 5+1) → M/T/N
     const bands8 = dayShifts.filter((s) => shiftHours(s) < 12);
     if (bands8.length > 0) return bands8;
     return dayShifts;
