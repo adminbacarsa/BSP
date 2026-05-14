@@ -2,4 +2,11 @@
  * Validaciones de convenio / descansos entre turnos.
  * La lógica vive en `restBetweenShifts.ts`; este archivo mantiene el import estable.
  */
-export { checkRestBetweenShifts, getAgreementRestConfig, getShiftStartEndAbs, workStreakHoursBackward, workStreakStatsBackward } from './restBetweenShifts';
+export {
+    checkRestBetweenShifts,
+    getAgreementRestConfig,
+    getShiftStartEndAbs,
+    isWorkShift,
+    workStreakHoursBackward,
+    workStreakStatsBackward,
+} from './restBetweenShifts';

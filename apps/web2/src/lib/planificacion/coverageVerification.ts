@@ -22,8 +22,8 @@ import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenS
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
-const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
-const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
+const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
+const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', EN: '09:00' };
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // 0=Dom, 1=Lun...
 
@@ -129,8 +129,8 @@ function buildDemandSlots(
     return slots;
 }
 
-/** Reconstruye el shift de un empleado para checkRestBetweenShifts. */
-function buildGetShift(assignments: V2Assignment[], absences: V2EngineContext['absences']) {
+/** Reconstruye el shift de un empleado para checkRestBetweenShifts y sugerencias. */
+export function buildAssignmentGetShift(assignments: V2Assignment[], absences: V2EngineContext['absences']) {
     const byKey = new Map<string, V2Assignment>();
     assignments.forEach((a) => byKey.set(`${a.empId}__${a.dateStr}`, a));
     return (empId: string, dateStr: string): any | null => {
@@ -223,7 +223,7 @@ export function verifyScheduleCoverage(
 
     // 5. Violaciones de descanso (12h entre turnos / 35h tras 6 días / 48h trabajados)
     const restViolations: RestViolation[] = [];
-    const getShift = buildGetShift(assignments, ctx.absences);
+    const getShift = buildAssignmentGetShift(assignments, ctx.absences);
     assignments.forEach((a) => {
         const c = String(a.code || '').toUpperCase();
         if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c) || c === 'RET') return;

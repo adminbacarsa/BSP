@@ -26,6 +26,7 @@ import { runAutoScheduleV2, generateScheduleV2 } from '@/lib/planificacion/autoS
 import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
+import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
 
 // --- CONFIGURACIÓN VISUAL ---
 const SHIFT_STYLES: any = {
@@ -333,6 +334,7 @@ export default function PlanificacionPage() {
     const [showCapacityModal, setShowCapacityModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
     const [autoV2Coverage, setAutoV2Coverage] = useState<import('@/lib/planificacion/coverageVerification').CoverageVerificationReport | null>(null);
+    const [autoV2Suggestions, setAutoV2Suggestions] = useState<import('@/lib/planificacion/scheduleOptimizationSuggestions').ScheduleChangeSuggestion[] | null>(null);
     const [showCoverageModal, setShowCoverageModal] = useState(false);
     // Snapshot de la última generación para reprocesar errores sin volver a llamar al motor
     const [autoV2LastRun, setAutoV2LastRun] = useState<{
@@ -2566,6 +2568,7 @@ export default function PlanificacionPage() {
             } as any;
             const coverage = verifyScheduleCoverage(verifyCtx, gen.assignments, gen.stats);
             setAutoV2Coverage(coverage);
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, gen.assignments, gen.stats));
             // Snapshot para reprocesar (cuando el usuario hace click en "Reprocesar errores")
             setAutoV2LastRun({ assignments: gen.assignments, stats: gen.stats, ctx: verifyCtx });
 
@@ -2655,6 +2658,9 @@ export default function PlanificacionPage() {
             }
             setPendingChanges(newChanges);
             setAutoV2Coverage(result.report);
+            setAutoV2Suggestions(
+                buildScheduleOptimizationSuggestions(autoV2LastRun.ctx, result.assignments, autoV2LastRun.stats),
+            );
             setAutoV2LastRun({ ...autoV2LastRun, assignments: result.assignments });
 
             const s = result.summary;
@@ -4681,6 +4687,32 @@ export default function PlanificacionPage() {
                                     <p className="text-[10px] text-slate-500">descansos + licencias</p>
                                 </div>
                             </div>
+
+                            {autoV2Suggestions && autoV2Suggestions.length > 0 && (
+                                <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+                                    <h4 className="font-black text-sm text-indigo-800 mb-2">Sugerencias de optimización ({autoV2Suggestions.length})</h4>
+                                    <ul className="max-h-40 overflow-y-auto space-y-1.5 text-[11px] text-slate-700">
+                                        {autoV2Suggestions.slice(0, 40).map((s, i) => (
+                                            <li
+                                                key={`${s.code}_${i}`}
+                                                className={
+                                                    s.severity === 'error'
+                                                        ? 'text-rose-800 font-semibold'
+                                                        : s.severity === 'warning'
+                                                          ? 'text-amber-900'
+                                                          : 'text-slate-600'
+                                                }
+                                            >
+                                                <span className="font-mono text-[9px] uppercase text-indigo-500 mr-1">{s.code}</span>
+                                                {s.message}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    {autoV2Suggestions.length > 40 && (
+                                        <p className="text-[10px] text-slate-500 mt-1">Mostrando 40 de {autoV2Suggestions.length}.</p>
+                                    )}
+                                </div>
+                            )}
 
                             {autoV2Coverage.uncovered.length > 0 && (
                                 <div className="mb-4">

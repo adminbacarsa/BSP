@@ -11,4 +11,4 @@ export const SHIFT_STYLES: any = {
     'FT': 'bg-violet-600 text-white border-violet-700 font-black shadow-sm', 'FF': 'bg-cyan-600 text-white border-cyan-700 font-black shadow-sm',
     'SWAP': 'bg-cyan-50 text-cyan-700 border-cyan-300 border-dashed font-bold'
 };
-export const SHIFT_HOURS_LOOKUP: any = { 'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'RET': 8, 'F': 0, 'FF': 0, 'V': 0, 'L': 0, 'PG': 0, 'A': 0, 'E': 0, 'AA': 0, 'C': 8 };
+export const SHIFT_HOURS_LOOKUP: any = { 'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'RET': 8, 'F': 0, 'FF': 0, 'V': 0, 'L': 0, 'PG': 0, 'A': 0, 'E': 0, 'AA': 0, 'C': 8 };

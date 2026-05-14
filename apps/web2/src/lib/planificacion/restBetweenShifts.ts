@@ -25,11 +25,15 @@ const DEFAULT_LONG_REST = 35;
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 
 const HOURS_BY_CODE: Record<string, number> = {
-    M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, EN: 8, P: 8,
+    M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8,
+    /** Encargada/Admin típico L–V (9 h); el SLA puede traer otras horas en la celda. */
+    EN: 9,
+    P: 8,
 };
 
-const END_DEF: Record<string, number> = { M: 15, T: 23, N: 7, D12: 19, N12: 7 };
-const START_DEF: Record<string, number> = { M: 7, T: 15, N: 23, D12: 7, N12: 19 };
+/** Defaults de reloj si la celda no trae start/end (protocolo 8+8+8 estándar). */
+const END_DEF: Record<string, number> = { M: 14, T: 22, N: 6, D12: 19, N12: 7 };
+const START_DEF: Record<string, number> = { M: 6, T: 14, N: 22, D12: 7, N12: 19 };
 
 const parseHour = (t: any): number | null => {
     if (t == null || t === '' || t === '00:00') return null;
@@ -49,7 +53,7 @@ const shiftHours = (sh: any): number => {
     return HOURS_BY_CODE[code] ?? 8;
 };
 
-const isWorkShift = (sh: any | null | undefined): boolean => {
+export const isWorkShift = (sh: any | null | undefined): boolean => {
     if (!sh || sh.isDeleted) return false;
     const code = String(sh.code || sh.type || '').toUpperCase();
     if (!code) return false;

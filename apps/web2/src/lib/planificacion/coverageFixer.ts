@@ -31,6 +31,23 @@ import { verifyScheduleCoverage, type CoverageVerificationReport } from './cover
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
+const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
+
+function billableHoursByEmp(assignments: V2Assignment[]): Map<string, number> {
+    const m = new Map<string, number>();
+    for (const a of assignments) {
+        const c = String(a.code || '').toUpperCase();
+        if (!c || c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c) || !a.positionName) continue;
+        const h = Number(a.hours) || SHIFT_HRS[c] || 0;
+        if (h <= 0) continue;
+        m.set(a.empId, (m.get(a.empId) || 0) + h);
+    }
+    return m;
+}
+
+function sortGroupByBillableAsc(group: string[], hours: Map<string, number>): string[] {
+    return [...group].sort((a, b) => (hours.get(a) || 0) - (hours.get(b) || 0));
+}
 
 const FIX_REST_BASE: AgreementRestConfig = {
     minRestBetweenShiftsHours: 12,
@@ -193,7 +210,9 @@ function fixRestViolation(
 
     // 1. Buscar un compañero del grupo con RET/F ese día que pueda tomar el turno
     const group = siblings(positionName, stats);
-    for (const otherId of group) {
+    const hrsMap = billableHoursByEmp(assignments);
+    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
+    for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const otherKey = `${otherId}__${dateStr}`;
         const other = byKey.get(otherKey);
@@ -266,7 +285,9 @@ function fixLicenseConflict(
 
     // Buscar reemplazo en el mismo grupo (RET/F)
     const group = siblings(positionName, stats);
-    for (const otherId of group) {
+    const hrsMap = billableHoursByEmp(assignments);
+    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
+    for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const other = byKey.get(`${otherId}__${dateStr}`);
         if (!other) continue;
@@ -401,7 +422,9 @@ function fixUncoveredSlot(
 ): number {
     let filled = 0;
     const group = siblings(positionName, stats);
-    for (const otherId of group) {
+    const hrsMap = billableHoursByEmp(assignments);
+    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
+    for (const otherId of groupSorted) {
         if (filled >= qtyMissing) break;
         const other = byKey.get(`${otherId}__${dateStr}`);
         if (!other) continue;
