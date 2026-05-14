@@ -68,7 +68,7 @@ cronoapp/
 │   │   │   │   ├── planificacion/index.tsx ← Planificador de turnos
 │   │   │   │   ├── rrhh/index.tsx          ← RRHH y novedades
 │   │   │   │   ├── crm/index.tsx           ← Clientes y objetivos
-│   │   │   │   ├── servicios/index.tsx     ← SLA y estructura operativa
+│   │   │   │   ├── servicios/index.tsx     ← SLA, puestos; análisis de turnos/esquema (sin costeo)
 │   │   │   │   ├── reportes/index.tsx      ← Reportes y liquidación
 │   │   │   │   └── configuracion/index.tsx ← Roles, usuarios, empresa
 │   │   │   ├── pages/empleado/dashboard.tsx ← Portal del guardia

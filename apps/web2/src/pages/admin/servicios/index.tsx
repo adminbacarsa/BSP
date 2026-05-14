@@ -12,8 +12,9 @@ import {
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
   Clock, Layers
 } from 'lucide-react';
-import { ServiceMarginPerServiceModal } from '@/components/servicios/ServiceMarginPerServiceModal';
-import { ServiceMarginViabilityIcon } from '@/components/servicios/ServiceMarginViabilityIcon';
+import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
+import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
+import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 
 function toYyyyMmDd(value: unknown): string {
   if (value == null) return '';
@@ -816,13 +817,10 @@ export default function ServiciosSLAPage() {
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [marginModal, setMarginModal] = useState<{
+  const [shiftModal, setShiftModal] = useState<{
     open: boolean;
-    title: string;
-    subtitle: string;
-    slaHours: number;
-    slaNote: string | null;
-  }>({ open: false, title: '', subtitle: '', slaHours: 0, slaNote: null });
+    service: (ServiceSLA & { id: string }) | null;
+  }>({ open: false, service: null });
 
   const toggleGroup = (key: string) =>
     setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -1101,15 +1099,12 @@ export default function ServiciosSLAPage() {
                                         Total contrato: {total} h
                                       </span>
                                     </div>
-                                    <ServiceMarginViabilityIcon
-                                      slaHours={slaR.sla}
+                                    <ServiceShiftSchemeIcon
+                                      hasIssues={analyzeShiftSchemesForService(srv).issues.length > 0}
                                       onOpen={() =>
-                                        setMarginModal({
+                                        setShiftModal({
                                           open: true,
-                                          title: `${srv.clientName || 'Cliente'} — ${srv.objectiveName || 'Objetivo'}`,
-                                          subtitle: `Contrato ${srv.startDate} → ${srv.endDate}`,
-                                          slaHours: slaR.sla,
-                                          slaNote: slaR.note,
+                                          service: srv,
                                         })
                                       }
                                     />
@@ -1143,16 +1138,10 @@ export default function ServiciosSLAPage() {
             </div>
           )}
 
-          <ServiceMarginPerServiceModal
-            open={marginModal.open}
-            onClose={() => setMarginModal({ open: false, title: '', subtitle: '', slaHours: 0, slaNote: null })}
-            title={marginModal.title}
-            subtitle={marginModal.subtitle || undefined}
-            slaHours={marginModal.slaHours}
-            kpiMonthLabel={kpiCurrent.label}
-            slaNote={marginModal.slaNote}
-            billableCalendarYear={kpiYear}
-            billableCalendarMonth={kpiMonth}
+          <ServiceShiftSchemeModal
+            open={shiftModal.open}
+            onClose={() => setShiftModal({ open: false, service: null })}
+            service={shiftModal.service}
           />
         </div>
       )}
