@@ -245,6 +245,7 @@ export default function PlanificacionPage() {
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null } | null>(null);
+    const [coverageTooltip, setCoverageTooltip] = useState<{ dateStr: string; gaps: { positionName: string; code: string; missing: number }[]; x: number; y: number } | null>(null);
     const [columnSelectMode, setColumnSelectMode] = useState(false);
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | null>(null);
@@ -346,6 +347,8 @@ export default function PlanificacionPage() {
         employeeRetHoursPotential?: Record<string, number>;
         totalRetCount?: number;
         totalRetHoursPotential?: number;
+        uncoveredSlotsByDay?: Record<string, { positionName: string; code: string; missing: number }[]>;
+        excessPositionEmployees?: { positionName: string; assigned: number; needed: number; excess: number }[];
     } | null>(null);
     const [showCapacityModal, setShowCapacityModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
@@ -2592,6 +2595,8 @@ export default function PlanificacionPage() {
                 employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
                 totalRetCount: gen.stats.totalRetCount,
                 totalRetHoursPotential: gen.stats.totalRetHoursPotential,
+                uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
+                excessPositionEmployees: gen.stats.excessPositionEmployees,
             });
 
             await bumpAutoV2Progress(78, 'Verificando cobertura y reglas (descansos, licencias)…');
@@ -3131,9 +3136,19 @@ export default function PlanificacionPage() {
                         });
 
                         const isCovered = required > 0 && current >= required;
-                        const cls = required === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600');
+                        const cls = required === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
+                        const gaps = !isCovered ? (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []) : [];
                         return (
-                            <td key={dateStr} className={`text-center border-r border-b text-[10px] font-black ${cls}`} colSpan={1}>
+                            <td
+                                key={dateStr}
+                                className={`text-center border-r border-b text-[10px] font-black ${cls}`}
+                                colSpan={1}
+                                onClick={(e) => {
+                                    if (gaps.length > 0) {
+                                        setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
+                                    }
+                                }}
+                            >
                                 {required > 0 ? `${current}/${required}` : '-'}
                             </td>
                         );
@@ -3148,6 +3163,24 @@ export default function PlanificacionPage() {
             <Head><title>Planificador</title></Head>
             <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <Toaster position="top-center" />
+            {coverageTooltip && (
+                <div
+                    className="fixed z-[9999]"
+                    style={{ left: Math.min(coverageTooltip.x + 8, window.innerWidth - 220), top: coverageTooltip.y + 10 }}
+                    onClick={() => setCoverageTooltip(null)}
+                >
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-xl flex flex-col gap-1 min-w-[180px]">
+                        <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Cobertura incompleta · {coverageTooltip.dateStr.slice(8)}</div>
+                        {coverageTooltip.gaps.map((g, i) => (
+                            <div key={i} className="flex items-center justify-between gap-3">
+                                <span className="text-slate-300">{g.positionName}</span>
+                                <span className="text-rose-400 font-black">{g.missing}× {g.code} faltante{g.missing > 1 ? 's' : ''}</span>
+                            </div>
+                        ))}
+                        <div className="text-slate-500 text-[8px] mt-1">Click para cerrar</div>
+                    </div>
+                </div>
+            )}
             {shiftTooltip && (
                 <div
                     className="fixed z-[9999] pointer-events-none"
@@ -3633,6 +3666,17 @@ export default function PlanificacionPage() {
                             <div className="text-center px-3" title="Esquema(s) de ciclo aplicados en la generación automática.">
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Esquema</p>
                                 <p className="text-sm font-black text-slate-600 dark:text-slate-300 leading-tight">{autoCycles.join(' · ')}</p>
+                            </div>
+                        )}
+                        {autoV2GenStats?.excessPositionEmployees && autoV2GenStats.excessPositionEmployees.length > 0 && (
+                            <div
+                                className="text-center px-3 cursor-default"
+                                title={autoV2GenStats.excessPositionEmployees.map(e => `${e.positionName}: ${e.assigned} asignados, necesita ${e.needed} (sobran ${e.excess})`).join('\n')}
+                            >
+                                <p className="text-[8px] font-black text-amber-500 uppercase leading-none">Personal</p>
+                                <p className="text-sm font-black text-amber-600 leading-tight">
+                                    +{autoV2GenStats.excessPositionEmployees.reduce((s, e) => s + e.excess, 0)} extra
+                                </p>
                             </div>
                         )}
                         {autoV2GenStats && (

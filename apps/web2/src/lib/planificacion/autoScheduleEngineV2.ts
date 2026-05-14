@@ -718,6 +718,10 @@ export interface V2GenerateStats {
     positionGroups?: Record<string, string[]>;
     /** Empleados que quedaron como capacidad ociosa (mes en RET/F, sin turnos). */
     idleEmployeeIds?: string[];
+    /** Slots sin cobertura por día: key=dateStr → lista de {positionName, code, missing}. */
+    uncoveredSlotsByDay?: Record<string, { positionName: string; code: string; missing: number }[]>;
+    /** Puestos con más empleados asignados que los necesarios según el ciclo. */
+    excessPositionEmployees?: { positionName: string; assigned: number; needed: number; excess: number }[];
     /** Turno principal del mes por empleado asignado (M, T, N, D12, N12). */
     primaryShiftByEmp?: Record<string, string | null>;
     /**
@@ -907,6 +911,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Si hay más empleados en un grupo que los que el ciclo necesita
     // (peopleNeededWithCycle), los sobrantes reales quedan ociosos y acumulan
     // todos los RETs del mes, en vez de repartirlos entre todo el grupo.
+    const initialGroupSizes: Record<string, number> = {};
+    Object.entries(positionGroups).forEach(([pos, g]) => { initialGroupSizes[pos] = g.length; });
     for (const posName of Object.keys(positionGroups)) {
         const need = Math.max(1, positionNeed[posName] || 1);
         const group = positionGroups[posName];
@@ -924,6 +930,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             removed++;
         }
     }
+
+    // ── ALERTA DE EXCESO DE EMPLEADOS POR PUESTO ─────────────────────────────
+    const excessPositionEmployees: { positionName: string; assigned: number; needed: number; excess: number }[] = [];
+    Object.entries(initialGroupSizes).forEach(([posName, initial]) => {
+        const need = positionNeed[posName] || 1;
+        if (initial > Math.ceil(need)) {
+            excessPositionEmployees.push({ positionName: posName, assigned: initial, needed: Math.ceil(need), excess: initial - Math.ceil(need) });
+        }
+    });
 
     // ── RET-DESIGNATES: concentrar RETs en el/los empleado/s de menor prioridad ──
     // En vez de repartir los días de ciclo sin turno real como RET entre todos,
@@ -1094,6 +1109,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         totalBillableHours: 0,
         targetHours: mergedBillableTarget,
         uncoveredSlots: 0,
+        uncoveredSlotsByDay: {},
+        excessPositionEmployees,
         employeeMonthlyHours: {},
         employeeCycleHours: { current: {}, next: {} },
         employeesOver200: [],
@@ -1266,7 +1283,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
 
                 if (covered < qty) {
-                    stats.uncoveredSlots += qty - covered;
+                    const missing = qty - covered;
+                    stats.uncoveredSlots += missing;
+                    if (!stats.uncoveredSlotsByDay![dateStr]) stats.uncoveredSlotsByDay![dateStr] = [];
+                    stats.uncoveredSlotsByDay![dateStr].push({ positionName: pos.positionName, code: sCode, missing });
                 }
             }
         }
@@ -1311,10 +1331,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const primaryCode = (empPrimaryShift[emp.id] || 'M').toUpperCase();
             const retActivationHrs = SHIFT_HRS_DEFAULT[primaryCode] ?? 8;
             const retFitsInCycle = usedInCycle + retActivationHrs <= HARD_MAX_HOURS;
-            // Solo los designados reciben RET; los empleados de puesto no designados
-            // reciben F en días de ciclo sin turno real (evita RETs dispersos).
-            const assignedPosForFallback = empAssignedTo[emp.id];
-            const isRetDesignate = assignedPosForFallback === null || retDesignateSet.has(emp.id);
+            // Solo los designados (último 1-2 por prioridad de cada grupo) reciben RET.
+            // Los empleados ociosos (sin puesto asignado) reciben F — si sobran, es
+            // un problema de dotación que se alerta en `excessPositionEmployees`.
+            const isRetDesignate = retDesignateSet.has(emp.id);
             const fallbackCode = isWorkDayInCycle && retFitsInCycle && isRetDesignate ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
