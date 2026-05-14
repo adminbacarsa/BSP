@@ -1031,7 +1031,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const empIds12h = empIds.filter(id => has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12);
         const assignOffsets = (group: string[], eCL: number, eCF: number) => {
             const eCycleLen = eCL + eCF;
-            const modBase = eCF >= 2 ? eCycleLen - 1 : eCycleLen; // evitar offset huérfano
+            const modBase = eCycleLen; // todos los offsets 0..cycleLen-1 para distribución uniforme
             group.forEach((empId, idx) => {
                 const offset = Math.floor((idx * eCycleLen) / Math.max(1, group.length)) % modBase;
                 empGroupIdx[empId] = offset;
