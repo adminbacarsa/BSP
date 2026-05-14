@@ -585,15 +585,27 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
     }
 
     // Verificación estructural por ciclo: ¿alcanza la dotación para cubrir TODOS los puestos
-    // con el ciclo elegido? Si no, es imposible matemáticamente; si justo cierra, cualquier
-    // ausencia o RET genera un hueco.
-    if (structuralPeakPeople > peopleAvailable) {
+    // con el ciclo elegido?
+    //  · Déficit ≥ 2 personas → bloqueo duro (genuinamente imposible).
+    //  · Déficit = 1 persona → advertencia (puede generar con huecos mínimos; a menudo
+    //    causado por un puesto L-V no configurado como tal en Servicios → el motor lo
+    //    trata como 7 días y aplica el factor de ciclo, inflando la cuenta).
+    //  · Colchón 0-1 → advertencia de margen ajustado.
+    const structuralGap = structuralPeakPeople - peopleAvailable;
+    if (structuralGap >= 2) {
         reasons.push(
-            `Ciclo ${cycleKey} inviable con esta dotación: cubrir todos los puestos en simultáneo requiere ~${structuralPeakPeople} personas (pico × factor ${cycleKey}) pero hay ${peopleAvailable}. Elegir otro ciclo (4+2 necesita menos) o agregar personas.`
+            `Ciclo ${cycleKey} inviable: cubrir todos los puestos en simultáneo requiere ~${structuralPeakPeople} personas (pico × factor ${cycleKey}) pero hay ${peopleAvailable} (faltan ${structuralGap}). ` +
+            `Soluciones: elegir 4+2 (menos personas por ciclo), agregar personas, o verificar que los puestos L-V estén configurados con "Días operativos" L-V en Servicios.`
         );
-    } else if (peopleAvailable - structuralPeakPeople < 2) {
+    } else if (structuralGap === 1) {
         warnings.push(
-            `Margen muy ajustado con ciclo ${cycleKey}: se necesitan ${structuralPeakPeople} personas para cubrir todos los puestos y hay ${peopleAvailable} (colchón de ${peopleAvailable - structuralPeakPeople}). Cualquier ausencia o RET puede generar slots vacíos.`
+            `Ciclo ${cycleKey}: necesita ~${structuralPeakPeople} personas para cubrir todos los puestos simultáneamente y hay ${peopleAvailable}. ` +
+            `Va a generar con 1 slot potencialmente sin cubrir por día. Si algún puesto opera solo L-V (ej. Rondin, Encargada), configuralo con "Días operativos" en Servicios para que el motor no aplique el factor de ciclo a ese puesto.`
+        );
+    } else if (structuralGap >= -1) {
+        warnings.push(
+            `Margen muy ajustado con ciclo ${cycleKey}: se necesitan ${structuralPeakPeople} personas y hay ${peopleAvailable} (colchón de ${-structuralGap}). ` +
+            `Cualquier ausencia puede generar slots vacíos. Si algún puesto opera L-V, configuralo en Servicios → Días operativos.`
         );
     }
 
