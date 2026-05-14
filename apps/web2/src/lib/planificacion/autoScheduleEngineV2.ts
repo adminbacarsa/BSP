@@ -165,6 +165,12 @@ export interface V2EngineContext {
      * Si el puesto tiene una sola banda (ej. RO) no tiene efecto.
      */
     rotateShifts?: boolean;
+    /**
+     * Horas por código custom (RO, RON, etc.) según definición del SLA activo.
+     * Fallback para `shiftHours` cuando el código no está en SHIFT_HRS_DEFAULT ni
+     * la definición del turno trae `hours`/`startTime`/`endTime` válidos.
+     */
+    codeHoursHint?: Record<string, number>;
 }
 
 export interface V2PositionDemand {
@@ -771,6 +777,22 @@ function isoWeekKey(d: Date): string {
 
 /** Genera asignaciones respetando ciclo CCT (4+2, 6+1...), 200h/ciclo, ausencias y horas vendidas. */
 export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
+    // Wrapper de shiftHours que usa ctx.codeHoursHint como fallback para códigos custom (RO, RON, etc.).
+    const _hint = ctx.codeHoursHint || {};
+    const shiftHoursH = (s: V2ShiftDef): number => {
+        const code = String(s.code || '').toUpperCase();
+        const h = Number(s.hours);
+        if (Number.isFinite(h) && h > 0) return h;
+        const start = parseShiftHourFloat(s.startTime);
+        const end = parseShiftHourFloat(s.endTime);
+        if (start !== null && end !== null) {
+            let dur = end - start;
+            if (dur <= 0) dur += 24;
+            if (dur > 0 && dur <= 24) return dur;
+        }
+        return _hint[code] ?? SHIFT_HRS_DEFAULT[code] ?? 8;
+    };
+
     const feasibility = checkFeasibility(ctx);
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31 ? ctx.cctCutoffDay : 25;
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
@@ -902,6 +924,24 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             removed++;
         }
     }
+
+    // ── RET-DESIGNATES: concentrar RETs en el/los empleado/s de menor prioridad ──
+    // En vez de repartir los días de ciclo sin turno real como RET entre todos,
+    // solo los designados reciben RET; los demás reciben F (evita rachas de RET
+    // dispersas que generan falsos positivos al asignar sustituciones manuales).
+    // Regla: último empleado del grupo (menor prioridad) siempre designado;
+    // si hay 2+ excedentes reales, también el penúltimo.
+    const retDesignateSet = new Set<string>();
+    Object.entries(positionGroups).forEach(([posName, group]) => {
+        if (group.length === 0) return;
+        const sorted = [...group].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+        const need = Math.max(1, positionNeed[posName] || 1);
+        const surplus = group.length - need;
+        const designateCount = surplus > 1 ? 2 : 1;
+        for (let i = 0; i < Math.min(designateCount, sorted.length); i++) {
+            retDesignateSet.add(sorted[i]);
+        }
+    });
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
     // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
@@ -1189,7 +1229,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
             for (const sh of dayShifts) {
                 const sCode = String(sh.code || '').toUpperCase();
-                const sHrs = shiftHours(sh);
+                const sHrs = shiftHoursH(sh);
                 const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
                 const sEnd = sh.endTime || undefined;
                 const sName = sh.name || sCode;
@@ -1270,7 +1310,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const primaryCode = (empPrimaryShift[emp.id] || 'M').toUpperCase();
             const retActivationHrs = SHIFT_HRS_DEFAULT[primaryCode] ?? 8;
             const retFitsInCycle = usedInCycle + retActivationHrs <= HARD_MAX_HOURS;
-            const fallbackCode = isWorkDayInCycle && retFitsInCycle ? 'RET' : 'F';
+            // Solo los designados reciben RET; los empleados de puesto no designados
+            // reciben F en días de ciclo sin turno real (evita RETs dispersos).
+            const assignedPosForFallback = empAssignedTo[emp.id];
+            const isRetDesignate = assignedPosForFallback === null || retDesignateSet.has(emp.id);
+            const fallbackCode = isWorkDayInCycle && retFitsInCycle && isRetDesignate ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
