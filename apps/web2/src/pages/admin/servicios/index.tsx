@@ -1151,6 +1151,8 @@ export default function ServiciosSLAPage() {
             slaHours={marginModal.slaHours}
             kpiMonthLabel={kpiCurrent.label}
             slaNote={marginModal.slaNote}
+            billableCalendarYear={kpiYear}
+            billableCalendarMonth={kpiMonth}
           />
         </div>
       )}

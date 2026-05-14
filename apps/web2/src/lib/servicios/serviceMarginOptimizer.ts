@@ -13,6 +13,59 @@ export enum WorkScheme {
 
 export const WORK_SCHEME_ORDER: WorkScheme[] = [WorkScheme.SixTwo, WorkScheme.SixOne, WorkScheme.FourTwo];
 
+/** Redondeo de días trabajados dentro del mes (ver `billableHoursOneHeadInMonth`). */
+export type BillableWorkDayRounding = 'rational_hours' | 'ceil_workdays';
+
+const SCHEME_CYCLE: Record<WorkScheme, { cycleDays: number; workDaysPerCycle: number; shiftHours: number }> = {
+    [WorkScheme.SixTwo]: { cycleDays: 8, workDaysPerCycle: 6, shiftHours: 8 },
+    [WorkScheme.SixOne]: { cycleDays: 7, workDaysPerCycle: 6, shiftHours: 8 },
+    [WorkScheme.FourTwo]: { cycleDays: 6, workDaysPerCycle: 4, shiftHours: 12 },
+};
+
+/** Días del mes calendario (28–31), sin asumir “4 semanas”. */
+export function daysInCalendarMonth(year: number, monthIndex0to11: number): number {
+    return new Date(year, monthIndex0to11 + 1, 0).getDate();
+}
+
+/**
+ * Horas de presencia modelo por cabeza en un mes de `daysInMonth` días.
+ * Días trabajados = (díasMes ÷ díasCiclo) × díasTrabajoPorCiclo (continuo), o techo de días enteros si `ceil_workdays`.
+ */
+export function billableHoursOneHeadInMonth(
+    daysInMonth: number,
+    scheme: WorkScheme,
+    rounding: BillableWorkDayRounding,
+): number {
+    const { cycleDays, workDaysPerCycle, shiftHours } = SCHEME_CYCLE[scheme];
+    if (!Number.isFinite(daysInMonth) || daysInMonth <= 0 || cycleDays <= 0) return 0;
+    if (rounding === 'ceil_workdays') {
+        const workDays = Math.ceil((daysInMonth * workDaysPerCycle) / cycleDays);
+        return workDays * shiftHours;
+    }
+    return (daysInMonth / cycleDays) * workDaysPerCycle * shiftHours;
+}
+
+export function billableHoursBySchemeForMonthDays(
+    daysInMonth: number,
+    rounding: BillableWorkDayRounding,
+): Record<WorkScheme, number> {
+    const o = {} as Record<WorkScheme, number>;
+    for (const s of WORK_SCHEME_ORDER) {
+        o[s] = billableHoursOneHeadInMonth(daysInMonth, s, rounding);
+    }
+    return o;
+}
+
+function readSchemeBillableConfig(j: {
+    schemeBillableHours?: { workDayRounding?: string; fallbackDaysInMonth?: number };
+}): { rounding: BillableWorkDayRounding; fallbackDaysInMonth: number } {
+    const rounding: BillableWorkDayRounding =
+        j.schemeBillableHours?.workDayRounding === 'ceil_workdays' ? 'ceil_workdays' : 'rational_hours';
+    const fd = Number(j.schemeBillableHours?.fallbackDaysInMonth);
+    const fallbackDaysInMonth = Number.isFinite(fd) ? Math.min(31, Math.max(28, fd)) : 30;
+    return { rounding, fallbackDaysInMonth };
+}
+
 export interface ServiceMarginVariables {
     totalSlaHours: number;
     sellingPricePerHour: number;
@@ -22,7 +75,7 @@ export interface ServiceMarginVariables {
     maxNormalHoursPerEmployee: number;
     overtime50Multiplier: number;
     overtime100Multiplier: number;
-    /** Promedio mensual de horas facturables por cabeza según esquema (calendario típico). */
+    /** Horas de presencia modelo por cabeza/mes por esquema (ciclo rotación × días del mes; ver `billableHoursBySchemeForMonthDays`). */
     averageBillableHoursPerEmployeeByScheme: Record<WorkScheme, number>;
 }
 
@@ -34,9 +87,9 @@ export interface SchemeMarginRow {
     suggestedHeadcount: number;
     /** Cabezas mínimas para cubrir el SLA al ritmo medio de facturación del esquema. */
     employeesNeeded: number;
-    /** max(0, N×192 − SLA): holgura operativa sin disparar extras por tope 192. */
+    /** max(0, N×tope hs normales − SLA): holgura bajo cupo normativo (p. ej. 192 h). */
     reserveHours: number;
-    /** max(0, SLA − N×192): horas que caen como suplementarias en el modelo. */
+    /** max(0, SLA − N×tope hs normales): suplementarias bajo ese mismo cupo. */
     overtimeHours: number;
     baseLaborARS: number;
     overtimeCostARS: number;
@@ -60,14 +113,17 @@ export interface ServiceMarginEvaluation {
 
 export function mergeDefaultServiceMarginVariables(partial: Partial<ServiceMarginVariables>): ServiceMarginVariables {
     const j = defaultVariables as Omit<ServiceMarginVariables, 'totalSlaHours' | 'averageBillableHoursPerEmployeeByScheme'> & {
-        averageBillableHoursPerEmployeeByScheme: Record<string, number>;
+        averageBillableHoursPerEmployeeByScheme?: Record<string, number>;
+        schemeBillableHours?: { workDayRounding?: string; fallbackDaysInMonth?: number };
     };
     const schemes: WorkScheme[] = [WorkScheme.SixTwo, WorkScheme.SixOne, WorkScheme.FourTwo];
+    const { rounding, fallbackDaysInMonth } = readSchemeBillableConfig(j);
+    const computedFallback = billableHoursBySchemeForMonthDays(fallbackDaysInMonth, rounding);
     const avg: Record<WorkScheme, number> = { ...partial.averageBillableHoursPerEmployeeByScheme } as Record<WorkScheme, number>;
     for (const s of schemes) {
         if (avg[s] == null || !Number.isFinite(avg[s])) {
-            const raw = j.averageBillableHoursPerEmployeeByScheme[s];
-            avg[s] = Number.isFinite(raw) ? Number(raw) : 192;
+            const legacy = j.averageBillableHoursPerEmployeeByScheme?.[s];
+            avg[s] = Number.isFinite(Number(legacy)) ? Number(legacy) : computedFallback[s];
         }
     }
     return {
@@ -92,10 +148,21 @@ export type LaborCostFormInput = {
     structureMonthly: number | '';
     overtime50Multiplier: number | '';
     overtime100Multiplier: number | '';
+    /** Si viene, las hs/cabeza por esquema usan los días reales de ese mes (no “4 semanas”). */
+    billableCalendarYear?: number;
+    billableCalendarMonth?: number;
+    /** Si se omite, se usa `schemeBillableHours.workDayRounding` del JSON. */
+    billableRounding?: BillableWorkDayRounding;
 };
 
 /** Arma variables del simulador a partir de lo que el usuario ingresa en el modal (modos de costo laboral). */
 export function buildServiceMarginVariablesForUi(slaHours: number, input: LaborCostFormInput): ServiceMarginVariables {
+    const j = defaultVariables as {
+        schemeBillableHours?: { workDayRounding?: string; fallbackDaysInMonth?: number };
+    };
+    const { rounding: jsonRounding, fallbackDaysInMonth } = readSchemeBillableConfig(j);
+    const rounding: BillableWorkDayRounding = input.billableRounding ?? jsonRounding;
+
     const p: Partial<ServiceMarginVariables> = {
         totalSlaHours: slaHours,
     };
@@ -117,7 +184,17 @@ export function buildServiceMarginVariablesForUi(slaHours: number, input: LaborC
         if (sa > 0 || st > 0) base = sa + st;
     }
 
-    return mergeDefaultServiceMarginVariables({ ...p, baseEmployeeCostMonthlyARS: base });
+    const useCal =
+        input.billableCalendarYear != null &&
+        input.billableCalendarMonth != null &&
+        Number.isFinite(input.billableCalendarYear) &&
+        Number.isFinite(input.billableCalendarMonth);
+    const daysInMonth = useCal
+        ? daysInCalendarMonth(input.billableCalendarYear!, input.billableCalendarMonth!)
+        : fallbackDaysInMonth;
+    const avgMap = billableHoursBySchemeForMonthDays(daysInMonth, rounding);
+
+    return mergeDefaultServiceMarginVariables({ ...p, baseEmployeeCostMonthlyARS: base, averageBillableHoursPerEmployeeByScheme: avgMap });
 }
 
 function effectiveOvertimeMultiplier(scheme: WorkScheme, v: ServiceMarginVariables): number {
@@ -312,8 +389,8 @@ export function suggestedNominaColumnLabel(n: number, scheme: WorkScheme): strin
 
 /**
  * Comparativa de costo real y margen con dotación fija por columna (nómina ajustada).
- * Capacidad modelo = N × hs/mes promedio del esquema (rotación); horas normales = min(SLA, capacidad); extras = resto.
- * El costo hora “base” para extras sigue siendo costo mensual ÷ tope normativo (p. ej. 192 h SUVICO).
+ * Capacidad = N × hs/cabeza del mes según ciclo (6×2: 8d, 6×1: 7d, 4×2: 6d; días del mes calendario, no “× 4 semanas”).
+ * Horas normales = min(SLA, capacidad); extras = resto. Costo hora base extras = costo mensual ÷ tope (p. ej. 192 h SUVICO).
  */
 export function evaluateAdjustedNominaScenarios(
     slaHours: number,

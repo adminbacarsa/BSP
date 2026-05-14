@@ -5,11 +5,13 @@ import { X, RotateCcw, Sparkles, TrendingUp } from 'lucide-react';
 import {
     buildServiceMarginVariablesForUi,
     defaultNominaComparisonScenarios,
+    daysInCalendarMonth,
     evaluateAdjustedNominaScenarios,
     formatARS,
     overtimeVariableCostExplanationLines,
     schemeLabelShort,
     suggestedNominaColumnLabel,
+    type BillableWorkDayRounding,
     type LaborCostInputMode,
     type NominaScenarioColumnInput,
     WorkScheme,
@@ -25,11 +27,16 @@ export interface ServiceMarginPerServiceModalProps {
     kpiMonthLabel: string;
     /** Si el SLA vino del mes pico porque el mes listado no tenía horas. */
     slaNote?: string | null;
+    /** Mes calendario del carrusel KPI (0 = enero). Si falta, se usa `fallbackDaysInMonth` del JSON. */
+    billableCalendarYear?: number;
+    billableCalendarMonth?: number;
 }
 
 type ScenarioForm = NominaScenarioColumnInput;
 
 const DEFAULT_SCENARIOS: ScenarioForm[] = defaultNominaComparisonScenarios();
+
+type BillableRoundingChoice = 'json' | BillableWorkDayRounding;
 
 function scenariosFromForm(rows: ScenarioForm[]): NominaScenarioColumnInput[] {
     return rows.map((r) => ({
@@ -46,6 +53,8 @@ export function ServiceMarginPerServiceModal({
     slaHours,
     kpiMonthLabel,
     slaNote,
+    billableCalendarYear,
+    billableCalendarMonth,
 }: ServiceMarginPerServiceModalProps) {
     const [scenarios, setScenarios] = useState<ScenarioForm[]>(DEFAULT_SCENARIOS);
     const [price, setPrice] = useState<number | ''>('');
@@ -56,7 +65,15 @@ export function ServiceMarginPerServiceModal({
     const [structureMonthly, setStructureMonthly] = useState<number | ''>('');
     const [ot50, setOt50] = useState<number | ''>('');
     const [ot100, setOt100] = useState<number | ''>('');
+    const [billableRoundingChoice, setBillableRoundingChoice] = useState<BillableRoundingChoice>('json');
 
+    const calendarDaysInMonth =
+        billableCalendarYear != null &&
+        billableCalendarMonth != null &&
+        Number.isFinite(billableCalendarYear) &&
+        Number.isFinite(billableCalendarMonth)
+            ? daysInCalendarMonth(billableCalendarYear, billableCalendarMonth)
+            : null;
     useEffect(() => {
         if (!open) return;
         setScenarios(DEFAULT_SCENARIOS.map((s) => ({ ...s })));
@@ -68,6 +85,7 @@ export function ServiceMarginPerServiceModal({
         setOt50('');
         setOt100('');
         setPrice('');
+        setBillableRoundingChoice('json');
     }, [open, slaHours]);
 
     const variables = useMemo(
@@ -81,8 +99,25 @@ export function ServiceMarginPerServiceModal({
                 structureMonthly,
                 overtime50Multiplier: ot50,
                 overtime100Multiplier: ot100,
+                ...(billableCalendarYear != null && billableCalendarMonth != null
+                    ? { billableCalendarYear, billableCalendarMonth }
+                    : {}),
+                ...(billableRoundingChoice !== 'json' ? { billableRounding: billableRoundingChoice } : {}),
             }),
-        [slaHours, price, laborMode, monthlyLoaded, hourlyLoaded, salaryMonthly, structureMonthly, ot50, ot100],
+        [
+            slaHours,
+            price,
+            laborMode,
+            monthlyLoaded,
+            hourlyLoaded,
+            salaryMonthly,
+            structureMonthly,
+            ot50,
+            ot100,
+            billableCalendarYear,
+            billableCalendarMonth,
+            billableRoundingChoice,
+        ],
     );
 
     const evaluation = useMemo(
@@ -133,13 +168,43 @@ export function ServiceMarginPerServiceModal({
 
                 <div className="p-4 space-y-3">
                     <p className="text-[10px] text-slate-600 dark:text-slate-400 font-bold leading-snug">
-                        Cada columna usa el <strong>N</strong> y el <strong>esquema</strong> (6×2 / 6×1 / 4×2). La{' '}
-                        <strong>capacidad total</strong> es <strong>N × horas de presencia promedio al mes</strong> de ese esquema: depende
-                        de cuántos <strong>días se trabaja vs francos</strong> en el calendario, no de un único “192 h por persona” para
-                        comparar rotaciones. El <strong>192 h</strong> del SUVICO sigue usándose solo como <strong>tope</strong> para armar
-                        el costo hora base de extras (costo mensual ÷ tope). El texto de cabecera es leyenda: <strong>N mínimo</strong>{' '}
-                        alinea título con N.
+                        Las <strong>hs/cabeza por esquema</strong> salen del <strong>ciclo de rotación</strong> y los{' '}
+                        <strong>días reales del mes</strong> (no se usa “× 4 semanas”; un mes ≈ 4,34 semanas de promedio). Fórmula continua:{' '}
+                        <span className="font-mono text-[9px]">(díasMes ÷ díasCiclo) × díasTrabajoPorCiclo × hsTurno</span>. Opción{' '}
+                        <strong>techo días</strong>: <span className="font-mono text-[9px]">⌈díasMes×trab÷ciclo⌉×hsTurno</span> (ej. junio 30d →
+                        184 / 208 / 240 hs). El <strong>192 h</strong> SUVICO sigue siendo solo <strong>tope</strong> para costo hora base de extras. El{' '}
+                        <strong>N</strong> manda; el título es leyenda — <strong>N mínimo</strong> alinea título con N.
                     </p>
+
+                    <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/40 px-2 py-2">
+                        <div className="min-w-[140px] flex-1">
+                            <span className="text-[9px] font-black uppercase text-slate-500 block mb-0.5">Mes para hs/cabeza</span>
+                            <p className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
+                                {calendarDaysInMonth != null ? (
+                                    <>
+                                        {kpiMonthLabel}: <span className="tabular-nums">{calendarDaysInMonth}</span> días calendario
+                                    </>
+                                ) : (
+                                    <>Sin mes KPI: se usan días modelo del JSON (típ. 30)</>
+                                )}
+                            </p>
+                        </div>
+                        <label className="min-w-[180px] flex-1 flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase text-slate-500">Redondeo días trabajados</span>
+                            <select
+                                value={billableRoundingChoice}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setBillableRoundingChoice(v === 'json' ? 'json' : (v as BillableWorkDayRounding));
+                                }}
+                                className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-[10px] font-black bg-white dark:bg-slate-800"
+                            >
+                                <option value="json">Predeterminado (JSON)</option>
+                                <option value="rational_hours">Continuo (promedio)</option>
+                                <option value="ceil_workdays">Techo días enteros</option>
+                            </select>
+                        </label>
+                    </div>
 
                     <div className="flex flex-wrap gap-2">
                         <button
@@ -476,7 +541,8 @@ export function ServiceMarginPerServiceModal({
                     )}
 
                     <p className="text-[9px] text-slate-500 font-bold">
-                        Parámetros en <code className="text-[8px]">serviceMarginOptimizer.variables.json</code>. Simulación orientativa.
+                        Parámetros en <code className="text-[8px]">serviceMarginOptimizer.variables.json</code> (incl.{' '}
+                        <code className="text-[8px]">schemeBillableHours</code>). Simulación orientativa.
                     </p>
                 </div>
             </div>
