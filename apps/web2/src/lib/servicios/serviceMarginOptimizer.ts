@@ -196,42 +196,160 @@ export function formatARS(n: number): string {
     return Math.round(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
 }
 
-/** Resumen rápido para icono en tarjeta de servicio (viabilidad orientativa). */
+/** Tres columnas tipo “18 pers. 6×2 / 17 pers. 6×1 / 15 pers. 4×2” con la misma demanda SLA. */
+export interface NominaScenarioColumnInput {
+    id: string;
+    label: string;
+    scheme: WorkScheme;
+    headcount: number;
+}
+
+export interface NominaScenarioColumnResult {
+    id: string;
+    label: string;
+    scheme: WorkScheme;
+    headcount: number;
+    capacityTotal192: number;
+    slaDemand: number;
+    normalHours: number;
+    overtimeHours: number;
+    payrollFixedARS: number;
+    overtimeVariableARS: number;
+    totalLaborARS: number;
+    revenueARS: number;
+    grossMarginARS: number;
+    marginPct: number;
+    marginalOvertimeCostPerHourARS: number;
+    losesMoneyOnOvertime: boolean;
+}
+
+export interface AdjustedNominaEvaluation {
+    variables: ServiceMarginVariables;
+    columns: NominaScenarioColumnResult[];
+    winnerColumnId: string;
+    winnerLabel: string;
+    alerts: string[];
+}
+
+export function defaultNominaComparisonScenarios(): NominaScenarioColumnInput[] {
+    return [
+        { id: 's62', label: '18 pers. 6×2', scheme: WorkScheme.SixTwo, headcount: 18 },
+        { id: 's61', label: '17 pers. 6×1', scheme: WorkScheme.SixOne, headcount: 17 },
+        { id: 'f42', label: '15 pers. 4×2', scheme: WorkScheme.FourTwo, headcount: 15 },
+    ];
+}
+
+/**
+ * Comparativa de costo real y margen con dotación fija por columna (nómina ajustada).
+ * Horas normales = min(SLA, N×192); extras = max(0, SLA − N×192).
+ */
+export function evaluateAdjustedNominaScenarios(
+    slaHours: number,
+    variables: ServiceMarginVariables,
+    scenarios: NominaScenarioColumnInput[],
+): AdjustedNominaEvaluation {
+    const sla = Math.max(0, Number(slaHours) || 0);
+    const revenue = sla * variables.sellingPricePerHour;
+    const costPerNormalHour = variables.baseEmployeeCostMonthlyARS / Math.max(1, variables.maxNormalHoursPerEmployee);
+
+    const columns: NominaScenarioColumnResult[] = scenarios.map((sc) => {
+        const N = Math.max(0, Math.floor(Number(sc.headcount) || 0));
+        const cap = N * variables.maxNormalHoursPerEmployee;
+        const normalH = Math.min(sla, cap);
+        const otH = Math.max(0, sla - cap);
+        const otMult = effectiveOvertimeMultiplier(sc.scheme, variables);
+        const marginalOvertimeCostPerHourARS = costPerNormalHour * otMult;
+        const payrollFixed = N * variables.baseEmployeeCostMonthlyARS;
+        const overtimeVariable = otH * marginalOvertimeCostPerHourARS;
+        const totalLabor = payrollFixed + overtimeVariable;
+        const grossMargin = revenue - totalLabor;
+        const marginPct = revenue > 1e-6 ? (grossMargin / revenue) * 100 : 0;
+        const losesMoneyOnOvertime = marginalOvertimeCostPerHourARS > variables.sellingPricePerHour + 1e-6;
+        return {
+            id: sc.id,
+            label: sc.label,
+            scheme: sc.scheme,
+            headcount: N,
+            capacityTotal192: cap,
+            slaDemand: sla,
+            normalHours: normalH,
+            overtimeHours: otH,
+            payrollFixedARS: payrollFixed,
+            overtimeVariableARS: overtimeVariable,
+            totalLaborARS: totalLabor,
+            revenueARS: revenue,
+            grossMarginARS: grossMargin,
+            marginPct,
+            marginalOvertimeCostPerHourARS,
+            losesMoneyOnOvertime,
+        };
+    });
+
+    const winner =
+        columns.length === 0
+            ? null
+            : columns.reduce((a, b) => (b.grossMarginARS > a.grossMarginARS ? b : a), columns[0]);
+    const winnerColumnId = winner?.id ?? '';
+    const winnerLabel = winner?.label ?? '';
+
+    const alerts: string[] = [];
+    if (sla > 0) {
+        for (const c of columns) {
+            if (c.losesMoneyOnOvertime && c.overtimeHours > 0) {
+                alerts.push(
+                    `${c.label}: costo marginal hora extra (~$${Math.round(c.marginalOvertimeCostPerHourARS).toLocaleString('es-AR')}) > precio vendido ($${Math.round(variables.sellingPricePerHour).toLocaleString('es-AR')}).`,
+                );
+            }
+        }
+    }
+
+    return {
+        variables,
+        columns,
+        winnerColumnId,
+        winnerLabel,
+        alerts,
+    };
+}
+
+/** Icono en listado: usa la comparativa estándar 18/17/15 vs SLA. */
+export function marginNominaScenariosIconMeta(slaHours: number, variables: ServiceMarginVariables): {
+    tone: 'emerald' | 'amber' | 'rose' | 'slate';
+    shortLabel: string;
+    hint: string;
+} {
+    const sla = Math.max(0, Number(slaHours) || 0);
+    if (sla <= 0) {
+        return { tone: 'slate', shortLabel: '—', hint: 'Sin horas SLA para simular (elegí un mes con contrato activo).' };
+    }
+    const ev = evaluateAdjustedNominaScenarios(sla, variables, defaultNominaComparisonScenarios());
+    const best = ev.columns.reduce((a, b) => (b.grossMarginARS > a.grossMarginARS ? b : a));
+    const anyNeg = ev.columns.some((c) => c.grossMarginARS < 0);
+    if (best.grossMarginARS < 0) {
+        return {
+            tone: 'rose',
+            shortLabel: 'Riesgo',
+            hint: `Con el ejemplo 18/17/15 nadie cierra margen positivo a ${Math.round(sla)} h.`,
+        };
+    }
+    if (best.losesMoneyOnOvertime && best.overtimeHours > 0) {
+        return { tone: 'amber', shortLabel: 'Extras', hint: `Mejor: ${best.label}, pero con extras caras vs precio hora.` };
+    }
+    if (anyNeg) {
+        return { tone: 'amber', shortLabel: 'Mixto', hint: `Mejor margen: ${best.label}. Otra columna queda en rojo.` };
+    }
+    return {
+        tone: 'emerald',
+        shortLabel: 'OK',
+        hint: `Mejor escenario ejemplo: ${best.label} (${best.marginPct.toFixed(1)}% margen).`,
+    };
+}
+
+/** @deprecated usar marginNominaScenariosIconMeta para UI de nómina ajustada */
 export function marginEvaluationIconMeta(ev: ServiceMarginEvaluation): {
     tone: 'emerald' | 'amber' | 'rose' | 'slate';
     shortLabel: string;
     hint: string;
 } {
-    const sla = ev.variables.totalSlaHours;
-    if (!Number.isFinite(sla) || sla <= 0) {
-        return { tone: 'slate', shortLabel: '—', hint: 'Sin horas SLA en el mes seleccionado del listado' };
-    }
-    const best = ev.rows.reduce((a, b) => (b.grossMarginARS > a.grossMarginARS ? b : a));
-    const anyNegative = ev.rows.some((r) => r.grossMarginARS < 0);
-    if (best.grossMarginARS < 0) {
-        return {
-            tone: 'rose',
-            shortLabel: 'Riesgo',
-            hint: `Incluso el mejor esquema (${best.scheme}) deja margen negativo con la dotación indicada.`,
-        };
-    }
-    if (best.losesMoneyOnOvertime && best.overtimeHours > 0) {
-        return {
-            tone: 'amber',
-            shortLabel: 'Extras',
-            hint: `En ${best.scheme} las horas extra modeladas tienen costo marginal alto vs precio hora.`,
-        };
-    }
-    if (anyNegative) {
-        return {
-            tone: 'amber',
-            shortLabel: 'Mixto',
-            hint: 'Algún esquema pierde margen con la dotación actual; otro es favorable.',
-        };
-    }
-    return {
-        tone: 'emerald',
-        shortLabel: 'OK',
-        hint: `Mejor margen: ${best.scheme}. Más reserva operativa: ${ev.winnerByOperationalSafety}.`,
-    };
+    return marginNominaScenariosIconMeta(ev.variables.totalSlaHours, ev.variables);
 }

@@ -2,11 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { Activity } from 'lucide-react';
-import {
-    evaluateServiceMargin,
-    marginEvaluationIconMeta,
-    mergeDefaultServiceMarginVariables,
-} from '@/lib/servicios/serviceMarginOptimizer';
+import { marginNominaScenariosIconMeta, mergeDefaultServiceMarginVariables } from '@/lib/servicios/serviceMarginOptimizer';
 
 const toneRing: Record<string, string> = {
     emerald: 'ring-emerald-500/50 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300',
@@ -22,8 +18,8 @@ export interface ServiceMarginViabilityIconProps {
 
 export function ServiceMarginViabilityIcon({ slaHours, onOpen }: ServiceMarginViabilityIconProps) {
     const meta = useMemo(() => {
-        const ev = evaluateServiceMargin(mergeDefaultServiceMarginVariables({ totalSlaHours: slaHours }));
-        return marginEvaluationIconMeta(ev);
+        const v = mergeDefaultServiceMarginVariables({ totalSlaHours: slaHours });
+        return marginNominaScenariosIconMeta(slaHours, v);
     }, [slaHours]);
 
     return (

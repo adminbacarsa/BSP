@@ -309,7 +309,7 @@ export default function ServiciosSLAPage() {
     while (current <= end) {
         const year = current.getFullYear();
         const month = current.getMonth();
-        const monthKey = `${year}-${month}`;
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
         const monthName = current.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
         const dayIdx = current.getDay();
         const dayCode = WEEK_DAY_CODES[dayIdx];
@@ -333,7 +333,9 @@ export default function ServiciosSLAPage() {
         });
         current.setDate(current.getDate() + 1);
     }
-    return Object.values(monthAccumulator);
+    return Object.entries(monthAccumulator)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([monthKey, row]) => ({ ...row, monthKey }));
   };
 
   const monthlyBreakdown = useMemo(
@@ -361,19 +363,15 @@ export default function ServiciosSLAPage() {
     services
       .filter(s => s.clientId === form.clientId && s.objectiveId === form.objectiveId && s.id !== form.id)
       .forEach(srv => {
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((m, i) => {
-          const ref = srv.startDate ? new Date(srv.startDate + 'T00:00:00') : new Date();
-          const d = new Date(ref.getFullYear(), ref.getMonth() + i, 1);
-          const sk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((m) => {
+          const sk = m.monthKey;
           if (!map[sk]) map[sk] = { ...m, isCurrent: false, sortKey: sk, serviceId: srv.id };
         });
       });
 
     // Meses del form actual (sobrescriben si coinciden)
-    monthlyBreakdown.forEach((m, i) => {
-      const ref = form.startDate ? new Date(form.startDate + 'T00:00:00') : new Date();
-      const d = new Date(ref.getFullYear(), ref.getMonth() + i, 1);
-      const sk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    monthlyBreakdown.forEach((m) => {
+      const sk = m.monthKey;
       map[sk] = { ...m, isCurrent: true, sortKey: sk };
     });
 
@@ -782,7 +780,8 @@ export default function ServiciosSLAPage() {
     title: string;
     subtitle: string;
     slaHours: number;
-  }>({ open: false, title: '', subtitle: '', slaHours: 0 });
+    slaNote: string | null;
+  }>({ open: false, title: '', subtitle: '', slaHours: 0, slaNote: null });
 
   const toggleGroup = (key: string) =>
     setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
@@ -827,22 +826,16 @@ export default function ServiciosSLAPage() {
         positions += (srv.positions || []).length;
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
         (srv.positions || []).forEach(p => {
-          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate).forEach((mb, idx) => {
-            const ref0 = new Date(srv.startDate + 'T00:00:00');
-            const dd0  = new Date(ref0.getFullYear(), ref0.getMonth() + idx, 1);
-            const msk0 = `${dd0.getFullYear()}-${String(dd0.getMonth() + 1).padStart(2, '0')}`;
-            if (msk0 === sk) {
+          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate).forEach((mb) => {
+            if (mb.monthKey === sk) {
               const pax = p.quantity || 1;
               const minRot = p.coverageType === '24hs' ? pax * 2 : pax;
               guards += Math.max(minRot, Math.ceil(mb.totalHours / 200));
             }
           });
         });
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb, idx) => {
-          const ref = new Date(srv.startDate + 'T00:00:00');
-          const dd  = new Date(ref.getFullYear(), ref.getMonth() + idx, 1);
-          const msk = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}`;
-          if (msk === sk) hours += mb.totalHours;
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb) => {
+          if (mb.monthKey === sk) hours += mb.totalHours;
         });
       });
       result.push({ label: `${MONTHS[m]} ${y}`, short: MONTHS[m], year: y, month: m, isCurrent: i === 0, active, hours: Math.round(hours), positions, guards });
@@ -868,15 +861,33 @@ export default function ServiciosSLAPage() {
       if (sStart > mEnd || sEnd < mStart) return 0;
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let hours = 0;
-      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb, idx) => {
-        const ref = new Date(srv.startDate + 'T00:00:00');
-        const dd = new Date(ref.getFullYear(), ref.getMonth() + idx, 1);
-        const msk = `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}`;
-        if (msk === sk) hours += mb.totalHours;
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb) => {
+        if (mb.monthKey === sk) hours += mb.totalHours;
       });
       return Math.round(hours);
     },
     [kpiYear, kpiMonth],
+  );
+
+  const getResolvedSlaForMargin = useCallback(
+    (srv: ServiceSLA & { id: string }) => {
+      const kpiH = getServiceHoursForKpiMonth(srv);
+      if (kpiH > 0) return { sla: kpiH, note: null as string | null };
+      const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate);
+      if (!bd.length) return { sla: 0, note: null as string | null };
+      const peak = bd.reduce((b, x) => (x.totalHours > b.totalHours ? x : b), bd[0]);
+      const peakH = Math.round(peak.totalHours);
+      const monthNames = [
+        'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+        'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+      ];
+      const listLabel = `${monthNames[kpiMonth]} ${kpiYear}`;
+      return {
+        sla: peakH,
+        note: `El mes del listado (${listLabel}) no tiene horas en este contrato. Se usa el mes pico ${peak.monthKey} (${peakH} h) para la comparativa.`,
+      };
+    },
+    [getServiceHoursForKpiMonth, kpiMonth, kpiYear],
   );
 
   return (
@@ -1012,6 +1023,7 @@ export default function ServiciosSLAPage() {
                         <div className="space-y-2">
                           {(isExpanded ? group.services : group.services.slice(0,1)).map(srv => {
                             const total = serviceTotals.get(srv.id || '') ?? 0;
+                            const slaR = getResolvedSlaForMargin(srv);
                             return (
                               <div key={srv.id} className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2.5">
                                 <div className="flex items-center gap-2 mb-2">
@@ -1025,22 +1037,28 @@ export default function ServiciosSLAPage() {
                                   <div className="flex items-center gap-2 min-w-0">
                                     <div className="flex flex-col min-w-0">
                                       <span className="text-base font-black text-indigo-600 dark:text-indigo-400 tabular-nums leading-tight">
-                                        {getServiceHoursForKpiMonth(srv)}
+                                        {slaR.sla}
                                         <span className="text-[9px] font-bold ml-0.5">h</span>
-                                        <span className="text-[8px] font-black text-slate-400 uppercase ml-1">mes</span>
+                                        <span className="text-[8px] font-black text-slate-400 uppercase ml-1">SLA sim.</span>
                                       </span>
+                                      {slaR.note && (
+                                        <span className="text-[8px] font-black text-amber-600" title={slaR.note}>
+                                          {' '}*
+                                        </span>
+                                      )}
                                       <span className="text-[8px] font-bold text-slate-400 tabular-nums truncate" title="Horas acumuladas en todo el contrato">
                                         Total contrato: {total} h
                                       </span>
                                     </div>
                                     <ServiceMarginViabilityIcon
-                                      slaHours={getServiceHoursForKpiMonth(srv)}
+                                      slaHours={slaR.sla}
                                       onOpen={() =>
                                         setMarginModal({
                                           open: true,
                                           title: `${srv.clientName || 'Cliente'} — ${srv.objectiveName || 'Objetivo'}`,
                                           subtitle: `Contrato ${srv.startDate} → ${srv.endDate}`,
-                                          slaHours: getServiceHoursForKpiMonth(srv),
+                                          slaHours: slaR.sla,
+                                          slaNote: slaR.note,
                                         })
                                       }
                                     />
@@ -1076,11 +1094,12 @@ export default function ServiciosSLAPage() {
 
           <ServiceMarginPerServiceModal
             open={marginModal.open}
-            onClose={() => setMarginModal((x) => ({ ...x, open: false }))}
+            onClose={() => setMarginModal({ open: false, title: '', subtitle: '', slaHours: 0, slaNote: null })}
             title={marginModal.title}
             subtitle={marginModal.subtitle || undefined}
             slaHours={marginModal.slaHours}
             kpiMonthLabel={kpiCurrent.label}
+            slaNote={marginModal.slaNote}
           />
         </div>
       )}
