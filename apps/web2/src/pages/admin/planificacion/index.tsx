@@ -4644,17 +4644,17 @@ export default function PlanificacionPage() {
                                     </p>
                                     <p className="text-[10px] text-slate-500">{Math.round(autoV2Coverage.coverage.coverageRatio * 100)}%</p>
                                 </div>
-                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-center">
-                                    <p className="text-[9px] font-black text-slate-500 uppercase">Hs. facturables</p>
-                                    <p className="text-base font-black text-indigo-700">{Math.round(autoV2Coverage.hours.billableHoursGenerated)}h</p>
-                                    <p className="text-[10px] text-slate-500">vs {Math.round(autoV2Coverage.hours.slaVendidas)}h vendidas</p>
+                                <div className={`border rounded-lg p-2 text-center ${autoV2Coverage.hours.slaVendidas > 0 && autoV2Coverage.hours.billableHoursGenerated < autoV2Coverage.hours.slaVendidas ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`}>
+                                    <p className="text-[9px] font-black text-slate-500 uppercase">Hs. planificadas</p>
+                                    <p className={`text-base font-black ${autoV2Coverage.hours.slaVendidas > 0 && autoV2Coverage.hours.billableHoursGenerated < autoV2Coverage.hours.slaVendidas ? 'text-rose-600' : 'text-indigo-700'}`}>{Math.round(autoV2Coverage.hours.billableHoursGenerated)}h</p>
+                                    <p className="text-[10px] text-slate-500">de {Math.round(autoV2Coverage.hours.slaVendidas)}h vendidas</p>
                                 </div>
-                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-center">
-                                    <p className="text-[9px] font-black text-slate-500 uppercase">Desvío</p>
-                                    <p className={`text-base font-black ${Math.abs(autoV2Coverage.hours.deltaPct) > 0.05 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                        {(autoV2Coverage.hours.deltaPct * 100).toFixed(1)}%
+                                <div className={`border rounded-lg p-2 text-center ${autoV2Coverage.hours.deltaPct < 0 ? 'bg-rose-50 border-rose-300' : autoV2Coverage.hours.deltaPct > 0.05 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                                    <p className="text-[9px] font-black text-slate-500 uppercase">Cierre</p>
+                                    <p className={`text-base font-black ${autoV2Coverage.hours.deltaPct < 0 ? 'text-rose-600' : autoV2Coverage.hours.deltaPct > 0.05 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                        {autoV2Coverage.hours.deltaPct >= 0 ? '+' : ''}{(autoV2Coverage.hours.deltaPct * 100).toFixed(1)}%
                                     </p>
-                                    <p className="text-[10px] text-slate-500">±5% recomendado</p>
+                                    <p className="text-[10px] text-slate-500">{autoV2Coverage.hours.deltaPct < 0 ? `−${Math.round(autoV2Coverage.hours.slaVendidas - autoV2Coverage.hours.billableHoursGenerated)}h` : '≥ vendidas ✓'}</p>
                                 </div>
                                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-center">
                                     <p className="text-[9px] font-black text-slate-500 uppercase">Conflictos duros</p>
@@ -5035,6 +5035,7 @@ export default function PlanificacionPage() {
                                                         <thead className="bg-slate-100">
                                                             <tr className="text-slate-700">
                                                                 <th className="text-left px-2 py-1 font-black">Puesto</th>
+                                                                <th className="text-right px-2 py-1 font-black text-slate-500">Días</th>
                                                                 <th className="text-right px-2 py-1 font-black text-indigo-700">Turnos</th>
                                                                 <th className="text-right px-2 py-1 font-black">Horas</th>
                                                                 <th className="text-right px-2 py-1 font-black">Pico</th>
@@ -5045,6 +5046,7 @@ export default function PlanificacionPage() {
                                                             {autoV2Report.perPosition.map(p => (
                                                                 <tr key={p.positionName} className="border-t border-slate-100">
                                                                     <td className="px-2 py-0.5 text-slate-900 font-bold">{p.positionName}</td>
+                                                                    <td className="text-right px-2 py-0.5 text-slate-500 font-bold">{p.activeDays}</td>
                                                                     <td className="text-right px-2 py-0.5 font-black text-indigo-700">{p.totalSlots}</td>
                                                                     <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(p.monthHours)}</td>
                                                                     <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{p.peakConcurrent}</td>
