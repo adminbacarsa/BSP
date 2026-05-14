@@ -3137,16 +3137,41 @@ export default function PlanificacionPage() {
 
                         const isCovered = required > 0 && current >= required;
                         const cls = required === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
-                        const gaps = !isCovered ? (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []) : [];
                         return (
                             <td
                                 key={dateStr}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
                                 onClick={(e) => {
-                                    if (gaps.length > 0) {
-                                        setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
-                                    }
+                                    if (isCovered || required === 0) return;
+                                    // Calcular gaps en tiempo real (estado actual: pendingChanges + shiftsMap)
+                                    const liveGaps: { positionName: string; code: string; missing: number }[] = [];
+                                    (positionStructure || []).forEach((pos: any) => {
+                                        if (!isPosActiveOnDay(pos, dayLetter)) return;
+                                        const posQty = Number(pos?.qty) || 1;
+                                        const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
+                                        const dayShifts = shiftsArr.filter((s: any) => !s.days || s.days.length === 0 || s.days.includes(dayLetter));
+                                        dayShifts.forEach((sh: any) => {
+                                            const sCode = String(sh.code || '').toUpperCase();
+                                            if (!sCode) return;
+                                            let coveredCount = 0;
+                                            displayedEmployees.forEach((emp: any) => {
+                                                const key = `${emp.id}_${dateStr}`;
+                                                const pending = pendingChanges[key];
+                                                const existing = shiftsMap[key];
+                                                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                                                if (!activeShift) return;
+                                                const code = String(activeShift.code || '').toUpperCase();
+                                                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                                                const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
+                                                const shiftObj = activeShift.objectiveId || (pending ? selectedObjective : '');
+                                                if (code === sCode && shiftPos === pos.positionName && shiftObj === selectedObjective) coveredCount++;
+                                            });
+                                            if (coveredCount < posQty) liveGaps.push({ positionName: pos.positionName, code: sCode, missing: posQty - coveredCount });
+                                        });
+                                    });
+                                    const gaps = liveGaps.length > 0 ? liveGaps : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
+                                    if (gaps.length > 0) setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
                                 }}
                             >
                                 {required > 0 ? `${current}/${required}` : '-'}
