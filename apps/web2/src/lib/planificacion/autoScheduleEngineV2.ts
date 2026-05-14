@@ -4,14 +4,14 @@
  * Reglas que asume:
  *  - La PLANIFICACIÓN de un objetivo se ve por MES CALENDARIO (1 → fin del mes).
  *  - El CONTROL de horas del empleado se hace por CICLO CCT (26 → 25 del mes siguiente).
- *  - Regla dura: ningún empleado puede superar HARD_MAX_HOURS (200h) en un ciclo CCT.
- *  - El target promedio (TARGET_AVG_HOURS = 192h) es informativo, no acota la oferta.
+ *  - Regla dura: ningún empleado puede superar HARD_MAX_HOURS (tope CCT en `suvicoPolicy`).
+ *  - El target promedio (TARGET_AVG_HOURS) es informativo, no acota la oferta.
  *
  * Por eso la oferta de un empleado en el mes calendario se compone de DOS tramos:
  *   T1 (1 → cutoff, día 25 por defecto): pertenece al ciclo CCT que viene del 26 del mes anterior.
- *      Tope = 200h − cola CCT del mes anterior.
+ *      Tope = HARD_MAX − cola CCT del mes anterior.
  *   T2 (cutoff+1 → fin del mes): pertenece al ciclo CCT siguiente, que arranca de cero.
- *      Tope = 200h (lo que quede sin usar se planifica el mes siguiente).
+ *      Tope = HARD_MAX (lo que quede sin usar se planifica el mes siguiente).
  *
  * A diferencia del generador clásico (`generateAutoSchedule` en index.tsx),
  * acá NO se pinta nada antes de validar:
@@ -48,6 +48,7 @@ import {
     type AgreementRestConfig,
 } from './restBetweenShifts';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
+import { SUVICO_POLICY } from './suvicoPolicy';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -72,15 +73,15 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
  * respete EXACTO el ciclo y nunca produzca rachas mayores.
  */
 const V2_AGREEMENT_REST_BASE: AgreementRestConfig = {
-    minRestBetweenShiftsHours: 12,
-    longRestAfterWorkedHours: 48,
-    minLongRestHours: 35,
+    minRestBetweenShiftsHours: SUVICO_POLICY.REST.DAILY_MIN_HOURS,
+    longRestAfterWorkedHours: SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST,
+    minLongRestHours: SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS,
 };
 
-/** Tope target promedio por empleado / mes (CCT 422/05 ≈ 192h). */
-export const TARGET_AVG_HOURS = 192;
-/** Tope duro CCT 422/05 art. 7. */
-export const HARD_MAX_HOURS = 200;
+/** Tope target promedio por empleado / mes; fuente: `SUVICO_POLICY.REST.TARGET_MONTHLY`. */
+export const TARGET_AVG_HOURS = SUVICO_POLICY.REST.TARGET_MONTHLY;
+/** Tope duro de horas facturables por ciclo CCT; fuente: `SUVICO_POLICY.REST.MAX_MONTHLY_HARD`. */
+export const HARD_MAX_HOURS = SUVICO_POLICY.REST.MAX_MONTHLY_HARD;
 /**
  * La racha 48h → descanso 35h del CCT se controla día a día con `checkRestBetweenShifts` y
  * `verifyScheduleCoverage` (no hay "tope semanal blando" que la reemplace). Tras generar,
@@ -252,9 +253,11 @@ export interface V2EngineResult {
     changes: Record<string, any>;
 }
 
-/** Devuelve [cL, cF] del ciclo "más representativo" elegido por el usuario. */
+/** Devuelve [cL, cF] del ciclo "más representativo" elegido por el usuario.
+ *  Prefiere el ciclo con más días de franco (6+2 > 6+1) para que si ambos
+ *  están marcados, se respete el esquema de mayor descanso solicitado. */
 export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL: number; cF: number } {
-    const ordered = ['6+1', '6+2', '5+1', '4+2'];
+    const ordered = ['6+2', '6+1', '5+1', '4+2'];
     for (const key of ordered) {
         if (autoCycles.includes(key)) {
             const [cL, cF] = CYCLE_MAP[key];
@@ -289,17 +292,18 @@ function parseShiftHourFloat(t: any): number | null {
  * asignaciones de 8h cuando el SLA pedía 10h/12h, dejando huecos de cobertura.
  */
 function shiftHours(s: V2ShiftDef): number {
+    const maxH = SUVICO_POLICY.REST.MAX_SINGLE_SHIFT_HOURS;
     const code = String(s.code || '').toUpperCase();
     const h = Number(s.hours);
-    if (Number.isFinite(h) && h > 0) return h;
+    if (Number.isFinite(h) && h > 0) return Math.min(maxH, h);
     const start = parseShiftHourFloat(s.startTime);
     const end = parseShiftHourFloat(s.endTime);
     if (start !== null && end !== null) {
         let dur = end - start;
         if (dur <= 0) dur += 24; // turno nocturno (cruza medianoche)
-        if (dur > 0 && dur <= 24) return dur;
+        if (dur > 0 && dur <= 24) return Math.min(maxH, dur);
     }
-    return SHIFT_HRS_DEFAULT[code] ?? 8;
+    return Math.min(maxH, SHIFT_HRS_DEFAULT[code] ?? 8);
 }
 
 export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string): boolean {
@@ -693,8 +697,9 @@ export interface V2GenerateStats {
     totalRetCount?: number;
     totalRetHoursPotential?: number;
     /**
-     * Semanas ISO (facturación acumulada en `writeAssignment`) con más de 48h por empleado.
-     * Solo alerta operativa: el cumplimiento legal de 48h trabajadas seguidas + 35h de descanso
+     * Semanas ISO (facturación acumulada en `writeAssignment`) por encima del umbral semanal
+     * en `SUVICO_POLICY.ALERTS` (48h por defecto, 50h en puestos limitados).
+     * Solo alerta operativa: el cumplimiento legal de racha + descanso prolongado
      * sigue validándose con `verifyScheduleCoverage` / `checkRestBetweenShifts`.
      */
     suvicoWeekBillableOver48?: Array<{ empId: string; weekKey: string; hours: number }>;
@@ -1172,9 +1177,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const suvicoWeekBillableOver48: Array<{ empId: string; weekKey: string; hours: number }> = [];
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
-        // Puestos L-V con turno > 8h (ej. RO=10h) generan 50h/semana estructuralmente.
-        // Se permite hasta 50h (48+2) para no generar alertas falsas.
-        const weekCap = limitedEmpIds.has(emp.id) ? 50 : 48;
+        // Puestos L–V con jornada >8h estructural: `WEEK_BILLABLE_HOURS_LIMITED_POSITION` evita falsos positivos.
+        const weekCap = limitedEmpIds.has(emp.id)
+            ? SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_LIMITED_POSITION
+            : SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_DEFAULT;
         for (const [weekKey, h] of Object.entries(st.weekHours)) {
             if (h > weekCap + 1e-6) {
                 suvicoWeekBillableOver48.push({ empId: emp.id, weekKey, hours: Math.round(h * 10) / 10 });

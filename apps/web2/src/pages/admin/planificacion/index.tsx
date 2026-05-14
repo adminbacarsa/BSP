@@ -101,8 +101,19 @@ const calcShiftHours = (shift: any): number => {
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
     const stored = Number(shift.hours);
     if (stored > 0) return stored;
+    // Firestore Timestamp
     if (shift.startTime?.seconds && shift.endTime?.seconds) {
         return Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+    }
+    // String times "HH:MM" → "HH:MM" (shifts generados por el motor automático)
+    if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+        const parseH = (t: string) => { const m = t.match(/^(\d{1,2}):(\d{2})$/); return m ? +m[1] + +m[2] / 60 : null; };
+        const s = parseH(shift.startTime), e = parseH(shift.endTime);
+        if (s !== null && e !== null) {
+            let dur = e - s;
+            if (dur <= 0) dur += 24;
+            return Math.max(0, Math.min(dur, 24));
+        }
     }
     const fromLookup = SHIFT_HOURS_LOOKUP[code];
     if (fromLookup !== undefined) return fromLookup;
