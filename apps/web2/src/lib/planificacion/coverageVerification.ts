@@ -302,17 +302,18 @@ export function verifyScheduleCoverage(
         }
     });
 
-    // "Cierre": si las horas planificadas son menores que las vendidas, es un aviso
-    // aunque el desvío sea pequeño. El cronograma no puede entregar menos de lo contratado.
-    const underSold = slaVendidas > 0 && billableHoursGenerated < slaVendidas;
+    // "Cierre": tolerancia de 1 turno (8h) para el redondeo natural de la planificación discreta.
+    // Con bloques de 8h es imposible completar exactamente X horas si X no es múltiplo de 8.
+    const CIERRE_TOLERANCE_HRS = 8;
+    const hoursGap = slaVendidas > 0 ? Math.round(slaVendidas - billableHoursGenerated) : 0;
+    const underSold = slaVendidas > 0 && hoursGap > CIERRE_TOLERANCE_HRS;
     const hasHardIssues = uncovered.length > 0 || restViolations.length > 0 || licenseConflicts.length > 0;
     const hasSoftIssues = overHours.length > 0 || underSold || deltaPct > 0.05;
     const ok = !hasHardIssues && !hasSoftIssues;
     const warnings = !ok && !hasHardIssues;
 
-    const hoursGap = underSold ? Math.round(slaVendidas - billableHoursGenerated) : 0;
     const summary = ok
-        ? `Cobertura ✓ ${totalSlots} slots cubiertos al 100% — ${Math.round(billableHoursGenerated)}h planificadas ≥ ${Math.round(slaVendidas)}h vendidas.`
+        ? `Cobertura ✓ ${totalSlots} slots cubiertos al 100% — ${Math.round(billableHoursGenerated)}h planificadas (diferencia ${hoursGap > 0 ? '-' : '+'}${Math.abs(hoursGap)}h respecto a ${Math.round(slaVendidas)}h vendidas).`
         : hasHardIssues
             ? `Cobertura con problemas: ${uncovered.length} slots sin cubrir, ${restViolations.length} descansos rotos, ${licenseConflicts.length} conflictos con licencias.`
             : underSold
