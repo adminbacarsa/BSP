@@ -81,11 +81,67 @@ export function mergeDefaultServiceMarginVariables(partial: Partial<ServiceMargi
     };
 }
 
+export type LaborCostInputMode = 'monthly_loaded' | 'hourly_loaded' | 'salary_structure';
+
+export type LaborCostFormInput = {
+    sellingPricePerHour: number | '';
+    laborMode: LaborCostInputMode;
+    monthlyLoaded: number | '';
+    hourlyLoaded: number | '';
+    salaryMonthly: number | '';
+    structureMonthly: number | '';
+    overtime50Multiplier: number | '';
+    overtime100Multiplier: number | '';
+};
+
+/** Arma variables del simulador a partir de lo que el usuario ingresa en el modal (modos de costo laboral). */
+export function buildServiceMarginVariablesForUi(slaHours: number, input: LaborCostFormInput): ServiceMarginVariables {
+    const p: Partial<ServiceMarginVariables> = {
+        totalSlaHours: slaHours,
+    };
+    if (input.sellingPricePerHour !== '') p.sellingPricePerHour = Number(input.sellingPricePerHour);
+    if (input.overtime50Multiplier !== '') p.overtime50Multiplier = Number(input.overtime50Multiplier);
+    if (input.overtime100Multiplier !== '') p.overtime100Multiplier = Number(input.overtime100Multiplier);
+
+    const merged = mergeDefaultServiceMarginVariables(p);
+    const maxH = Math.max(1, merged.maxNormalHoursPerEmployee);
+    let base = merged.baseEmployeeCostMonthlyARS;
+
+    if (input.laborMode === 'monthly_loaded') {
+        if (input.monthlyLoaded !== '') base = Math.max(0, Number(input.monthlyLoaded));
+    } else if (input.laborMode === 'hourly_loaded') {
+        if (input.hourlyLoaded !== '') base = Math.max(0, Number(input.hourlyLoaded)) * maxH;
+    } else {
+        const sa = input.salaryMonthly === '' ? 0 : Math.max(0, Number(input.salaryMonthly));
+        const st = input.structureMonthly === '' ? 0 : Math.max(0, Number(input.structureMonthly));
+        if (sa > 0 || st > 0) base = sa + st;
+    }
+
+    return mergeDefaultServiceMarginVariables({ ...p, baseEmployeeCostMonthlyARS: base });
+}
+
 function effectiveOvertimeMultiplier(scheme: WorkScheme, v: ServiceMarginVariables): number {
     if (scheme === WorkScheme.FourTwo) {
         return 0.5 * v.overtime100Multiplier + 0.5 * v.overtime50Multiplier;
     }
     return v.overtime50Multiplier;
+}
+
+/** Ayuda UI: cómo se arma el costo variable de extras (alineado a `effectiveOvertimeMultiplier`). */
+export function overtimeVariableCostExplanationLines(
+    v: Pick<ServiceMarginVariables, 'maxNormalHoursPerEmployee' | 'overtime50Multiplier' | 'overtime100Multiplier'>,
+): string[] {
+    const maxH = Math.max(1, Math.round(v.maxNormalHoursPerEmployee));
+    const m50 = v.overtime50Multiplier;
+    const m100 = v.overtime100Multiplier;
+    const mix = 0.5 * m100 + 0.5 * m50;
+    const mixStr = Number.isInteger(mix) ? String(mix) : mix.toFixed(2).replace(/\.?0+$/, '');
+    return [
+        `Costo hora “normal” modelo = (costo mensual por empleado) ÷ ${maxH} (tope de horas normales del período).`,
+        `Cada hora que excede N×${maxH} se valora al costo marginal: (costo hora normal) × recargo del esquema.`,
+        `6×2 y 6×1: recargo ×${m50}. 4×2: 50% al ×${m100} + 50% al ×${m50} → efectivo ×${mixStr}.`,
+        'Costo extras (variable) = horas extra necesarias × costo marginal hora extra.',
+    ];
 }
 
 function buildSchemeRow(

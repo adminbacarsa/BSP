@@ -3,10 +3,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, RotateCcw, Sparkles, TrendingUp } from 'lucide-react';
 import {
+    buildServiceMarginVariablesForUi,
     defaultNominaComparisonScenarios,
     evaluateAdjustedNominaScenarios,
     formatARS,
-    mergeDefaultServiceMarginVariables,
+    overtimeVariableCostExplanationLines,
+    type LaborCostInputMode,
     type NominaScenarioColumnInput,
     WorkScheme,
 } from '@/lib/servicios/serviceMarginOptimizer';
@@ -45,20 +47,49 @@ export function ServiceMarginPerServiceModal({
 }: ServiceMarginPerServiceModalProps) {
     const [scenarios, setScenarios] = useState<ScenarioForm[]>(DEFAULT_SCENARIOS);
     const [price, setPrice] = useState<number | ''>('');
-    const [baseCost, setBaseCost] = useState<number | ''>('');
+    const [laborMode, setLaborMode] = useState<LaborCostInputMode>('monthly_loaded');
+    const [monthlyLoaded, setMonthlyLoaded] = useState<number | ''>('');
+    const [hourlyLoaded, setHourlyLoaded] = useState<number | ''>('');
+    const [salaryMonthly, setSalaryMonthly] = useState<number | ''>('');
+    const [structureMonthly, setStructureMonthly] = useState<number | ''>('');
+    const [ot50, setOt50] = useState<number | ''>('');
+    const [ot100, setOt100] = useState<number | ''>('');
 
     useEffect(() => {
-        if (open) setScenarios(DEFAULT_SCENARIOS.map((s) => ({ ...s })));
+        if (!open) return;
+        setScenarios(DEFAULT_SCENARIOS.map((s) => ({ ...s })));
+        setLaborMode('monthly_loaded');
+        setMonthlyLoaded('');
+        setHourlyLoaded('');
+        setSalaryMonthly('');
+        setStructureMonthly('');
+        setOt50('');
+        setOt100('');
+        setPrice('');
     }, [open, slaHours]);
 
-    const evaluation = useMemo(() => {
-        const v = mergeDefaultServiceMarginVariables({
-            totalSlaHours: slaHours,
-            ...(price !== '' ? { sellingPricePerHour: Number(price) } : {}),
-            ...(baseCost !== '' ? { baseEmployeeCostMonthlyARS: Number(baseCost) } : {}),
-        });
-        return evaluateAdjustedNominaScenarios(slaHours, v, scenariosFromForm(scenarios));
-    }, [slaHours, price, baseCost, scenarios]);
+    const variables = useMemo(
+        () =>
+            buildServiceMarginVariablesForUi(slaHours, {
+                sellingPricePerHour: price,
+                laborMode,
+                monthlyLoaded,
+                hourlyLoaded,
+                salaryMonthly,
+                structureMonthly,
+                overtime50Multiplier: ot50,
+                overtime100Multiplier: ot100,
+            }),
+        [slaHours, price, laborMode, monthlyLoaded, hourlyLoaded, salaryMonthly, structureMonthly, ot50, ot100],
+    );
+
+    const evaluation = useMemo(
+        () => evaluateAdjustedNominaScenarios(slaHours, variables, scenariosFromForm(scenarios)),
+        [slaHours, variables, scenarios],
+    );
+
+    const impliedHourlyCost =
+        variables.baseEmployeeCostMonthlyARS / Math.max(1, variables.maxNormalHoursPerEmployee);
 
     if (!open) return null;
 
@@ -116,14 +147,9 @@ export function ServiceMarginPerServiceModal({
                         <button
                             type="button"
                             onClick={() => {
-                                const v = mergeDefaultServiceMarginVariables({
-                                    totalSlaHours: slaHours,
-                                    ...(price !== '' ? { sellingPricePerHour: Number(price) } : {}),
-                                    ...(baseCost !== '' ? { baseEmployeeCostMonthlyARS: Number(baseCost) } : {}),
-                                });
                                 setScenarios((prev) =>
                                     prev.map((s) => {
-                                        const avg = v.averageBillableHoursPerEmployeeByScheme[s.scheme] || 192;
+                                        const avg = variables.averageBillableHoursPerEmployeeByScheme[s.scheme] || 192;
                                         const n = slaHours <= 0 ? 0 : Math.ceil(slaHours / Math.max(1, avg));
                                         return { ...s, headcount: n };
                                     }),
@@ -147,18 +173,122 @@ export function ServiceMarginPerServiceModal({
                                 className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
                             />
                         </label>
+                        <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-black uppercase text-slate-500">Costo laboral por empleado</span>
+                            <select
+                                value={laborMode}
+                                onChange={(e) => setLaborMode(e.target.value as LaborCostInputMode)}
+                                className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-xs font-black bg-white dark:bg-slate-800"
+                            >
+                                <option value="monthly_loaded">Mensual ya cargado (sueldo + cargas en un monto)</option>
+                                <option value="hourly_loaded">$/h costo empresa (× horas tope normales)</option>
+                                <option value="salary_structure">Sueldo mensual + estructura / otros</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {laborMode === 'monthly_loaded' && (
                         <label className="flex flex-col gap-0.5">
                             <span className="text-[9px] font-black uppercase text-slate-500">Costo empleado / mes ARS (opc.)</span>
                             <input
                                 type="number"
                                 min={0}
                                 placeholder="1732964"
-                                value={baseCost}
-                                onChange={(e) => setBaseCost(e.target.value === '' ? '' : Number(e.target.value))}
+                                value={monthlyLoaded}
+                                onChange={(e) => setMonthlyLoaded(e.target.value === '' ? '' : Number(e.target.value))}
+                                className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
+                            />
+                        </label>
+                    )}
+                    {laborMode === 'hourly_loaded' && (
+                        <label className="flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase text-slate-500">
+                                $/h costo empresa ARS (opc.) — se multiplica por {variables.maxNormalHoursPerEmployee} h tope
+                            </span>
+                            <input
+                                type="number"
+                                min={0}
+                                placeholder={String(Math.round(impliedHourlyCost))}
+                                value={hourlyLoaded}
+                                onChange={(e) => setHourlyLoaded(e.target.value === '' ? '' : Number(e.target.value))}
+                                className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
+                            />
+                        </label>
+                    )}
+                    {laborMode === 'salary_structure' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <label className="flex flex-col gap-0.5">
+                                <span className="text-[9px] font-black uppercase text-slate-500">Sueldo / aporte mensual ARS (opc.)</span>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={salaryMonthly}
+                                    onChange={(e) => setSalaryMonthly(e.target.value === '' ? '' : Number(e.target.value))}
+                                    className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
+                                />
+                            </label>
+                            <label className="flex flex-col gap-0.5">
+                                <span className="text-[9px] font-black uppercase text-slate-500">Estructura, indumentaria, gestión… / mes (opc.)</span>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={structureMonthly}
+                                    onChange={(e) => setStructureMonthly(e.target.value === '' ? '' : Number(e.target.value))}
+                                    className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
+                                />
+                            </label>
+                        </div>
+                    )}
+
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-[10px] font-bold text-slate-600 dark:text-slate-300 space-y-0.5">
+                        <p>
+                            Costo mensual por cabeza usado:{' '}
+                            <span className="tabular-nums text-indigo-700 dark:text-indigo-300">
+                                ${formatARS(variables.baseEmployeeCostMonthlyARS)}
+                            </span>{' '}
+                            (~{' '}
+                            <span className="tabular-nums">${formatARS(impliedHourlyCost)}</span> /h modelo con tope{' '}
+                            {variables.maxNormalHoursPerEmployee} h)
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase text-slate-500">Recargo extra 50% (opc., ej. 1.5)</span>
+                            <input
+                                type="number"
+                                min={0}
+                                step={0.05}
+                                placeholder="1.5"
+                                value={ot50}
+                                onChange={(e) => setOt50(e.target.value === '' ? '' : Number(e.target.value))}
+                                className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-0.5">
+                            <span className="text-[9px] font-black uppercase text-slate-500">Recargo extra 100% (opc., ej. 2)</span>
+                            <input
+                                type="number"
+                                min={0}
+                                step={0.05}
+                                placeholder="2"
+                                value={ot100}
+                                onChange={(e) => setOt100(e.target.value === '' ? '' : Number(e.target.value))}
                                 className="rounded-lg border border-slate-200 dark:border-slate-600 px-2 py-1.5 text-sm font-bold bg-white dark:bg-slate-800"
                             />
                         </label>
                     </div>
+
+                    <details className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                        <summary className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 cursor-pointer">
+                            Cómo se calcula el costo de horas extra (variable)
+                        </summary>
+                        <ul className="mt-2 space-y-1 text-[9px] font-bold text-slate-600 dark:text-slate-400 list-disc list-inside">
+                            {overtimeVariableCostExplanationLines(variables).map((line, i) => (
+                                <li key={i}>{line}</li>
+                            ))}
+                        </ul>
+                    </details>
 
                     <div className="inline-flex items-center gap-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-900 dark:text-emerald-200 px-2 py-1.5 text-[10px] font-black">
                         <TrendingUp size={12} /> Mejor margen (esta comparativa): {winnerLabel || '—'}
@@ -308,7 +438,9 @@ export function ServiceMarginPerServiceModal({
                         </table>
                     </div>
 
-                    <p className="text-[8px] text-slate-500 font-bold">* Columna 4×2: extras con mezcla 50% al 100% y 50% al 50% sobre costo hora base.</p>
+                    <p className="text-[8px] text-slate-500 font-bold">
+                        * Columna 4×2: el multiplicador efectivo de extra es promedio entre recargo 100% y 50% (ver desplegable arriba).
+                    </p>
 
                     {alerts.length > 0 && (
                         <ul className="list-disc list-inside text-[10px] font-bold text-rose-800 dark:text-rose-200 space-y-1">
