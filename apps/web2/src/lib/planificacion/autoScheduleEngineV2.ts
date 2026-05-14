@@ -826,6 +826,31 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    // ── SURPLUS: mover empleados sobrantes a capacidad ociosa real ──────────
+    // Con overcapFactor=1.05, el matching puede meter más personas en un grupo
+    // que las que el ciclo necesita. Esos "sobrantes" quedan EN el grupo y
+    // reciben RETs salpicados a lo largo del mes en vez de tener un patrón
+    // limpio de F/RET. La solución: sacarlos del grupo y marcarlos como
+    // empAssignedTo = null (ociosos) antes de asignar cualquier turno.
+    // Solo aplica a empleados sin puesto fijo (defaultPos) en ese puesto.
+    for (const posName of Object.keys(positionGroups)) {
+        const need = Math.max(1, positionNeed[posName] || 1);
+        const group = positionGroups[posName];
+        if (group.length <= need) continue;
+        // Ordenar por score ascendente: los de menor prioridad (más lejos, más ausencias)
+        // son los candidatos para quedar ociosos. Los que tienen defaultPos fijo nunca se mueven.
+        const byScore = [...group].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+        let removed = 0;
+        for (const empId of byScore) {
+            if (group.length - removed <= need) break;
+            if (defaultPos[empId] === posName) continue; // owner fijo nunca se saca
+            const idx = group.indexOf(empId);
+            if (idx >= 0) group.splice(idx, 1);
+            empAssignedTo[empId] = null;
+            removed++;
+        }
+    }
+
     // ── INFERENCIA DE OWNER VIRTUAL ──
     // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
     // empleado no tiene defaultPos cargado desde la UI, lo marcamos como owner
@@ -2012,10 +2037,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (code === 'RET') (retDaysByEmp[a.empId] ||= new Set()).add(a.dateStr);
             else if (code === 'F') (fDaysByEmp[a.empId] ||= new Set()).add(a.dateStr);
         }
-        const allGroups: string[][] = [
-            ...Object.values(positionGroups),
-            ctx.employees.filter((e) => empAssignedTo[e.id] === null).map((e) => e.id),
-        ];
+        // Los empleados ociosos (empAssignedTo=null) son los RET-concentrados del mes;
+        // NO se les quita RETs hacia trabajadores activos.
+        const allGroups: string[][] = Object.values(positionGroups);
         for (const group of allGroups) {
             if (group.length < 2) continue;
             const sortedByRetCount = [...group].sort(
