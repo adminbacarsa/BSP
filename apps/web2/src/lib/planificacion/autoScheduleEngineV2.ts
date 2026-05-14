@@ -1364,7 +1364,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     //     ese empleado está en stand-by todo el mes.
     //   - Empleado asignado a un puesto:
     //       · Día de franco del ciclo → F.
-    //       · Día de trabajo del ciclo sin turno asignado (lo cubrió otro del grupo) → RET.
+    //       · Día de trabajo del ciclo sin turno asignado → celda vacía (no se genera nada).
+    //   - Empleado ocioso (sin puesto) o en día no operativo del puesto limitado → F.
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
         const ownerPosName = defaultPos[emp.id];
@@ -1373,30 +1374,26 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const dateStr = ctx.getDateKey(day);
             if (st.assignedDays.has(dateStr)) continue;
             const dayLetter = ctx.getDayLetter(dateStr);
-            // Salvaguarda: owner de puesto limitado en día NO operativo del puesto → F.
+            // Owner de puesto limitado en día NO operativo del puesto → F.
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
-            // RET solo si la activación potencial no excedería 200h en el ciclo.
-            const inCurrentCycleDay = day.getDate() <= cutoffDay;
-            const usedInCycle = inCurrentCycleDay ? st.cycleCurrentUsed : st.cycleNextUsed;
-            const primaryCode = (empPrimaryShift[emp.id] || 'M').toUpperCase();
-            const retActivationHrs = SHIFT_HRS_DEFAULT[primaryCode] ?? 8;
-            const retFitsInCycle = usedInCycle + retActivationHrs <= HARD_MAX_HOURS;
-            // Regla de ciclo estricta: F SOLO en días franco del ciclo.
-            // Día de trabajo (cycleWorkDays) sin turno asignado = RET (stand-by), nunca F.
-            // Excepción: empleado ocioso (sin puesto) siempre recibe F — su exceso se alerta.
             const assignedPosForFallback = empAssignedTo[emp.id];
-            const fallbackCode = isWorkDayInCycle && retFitsInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
+            // Día de trabajo del ciclo sin turno asignado: celda vacía (sin push).
+            // Solo se registra el día para no re-procesar. F va solo en franco de ciclo.
+            if (isWorkDayInCycle && assignedPosForFallback !== null) {
+                st.assignedDays.add(dateStr);
+                continue;
+            }
+            // Franco de ciclo, empleado ocioso, o puesto limitado en día inactivo → F.
             assignments.push({
                 empId: emp.id,
                 dateStr,
                 positionName: '',
-                code: fallbackCode,
-                name: fallbackCode === 'RET' ? 'Retén' : 'Franco',
+                code: 'F',
+                name: 'Franco',
                 hours: 0,
                 startTime: '00:00',
-                isFranco: fallbackCode === 'F',
-                isReten: fallbackCode === 'RET',
+                isFranco: true,
             });
             st.assignedDays.add(dateStr);
         }
