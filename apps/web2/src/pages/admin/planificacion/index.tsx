@@ -4971,6 +4971,7 @@ export default function PlanificacionPage() {
                                             <span>Demanda estructural (solo ese mes): <span className="text-slate-800">{Math.round(autoV2Report.metrics.structuralDemandHours)}h</span></span>
                                             <span>Pico simultáneo: <span className="text-slate-800">{autoV2Report.metrics.peakConcurrent}</span></span>
                                             <span>Req. para 100% estructura: <span className="text-slate-800">{autoV2Report.metrics.peopleNeededForStructure}</span></span>
+                                            <span className="font-black text-indigo-700">Turnos a cubrir: <span>{autoV2Report.metrics.totalSlotsAll}</span></span>
                                         </div>
 
                                         {autoV2Report.warnings && autoV2Report.warnings.length > 0 && (
@@ -5034,15 +5035,17 @@ export default function PlanificacionPage() {
                                                         <thead className="bg-slate-100">
                                                             <tr className="text-slate-700">
                                                                 <th className="text-left px-2 py-1 font-black">Puesto</th>
-                                                                <th className="text-right px-2 py-1 font-black">Horas mes</th>
+                                                                <th className="text-right px-2 py-1 font-black text-indigo-700">Turnos</th>
+                                                                <th className="text-right px-2 py-1 font-black">Horas</th>
                                                                 <th className="text-right px-2 py-1 font-black">Pico</th>
-                                                                <th className="text-right px-2 py-1 font-black">Personas req.</th>
+                                                                <th className="text-right px-2 py-1 font-black">Personas</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody className="bg-white">
                                                             {autoV2Report.perPosition.map(p => (
                                                                 <tr key={p.positionName} className="border-t border-slate-100">
                                                                     <td className="px-2 py-0.5 text-slate-900 font-bold">{p.positionName}</td>
+                                                                    <td className="text-right px-2 py-0.5 font-black text-indigo-700">{p.totalSlots}</td>
                                                                     <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(p.monthHours)}</td>
                                                                     <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{p.peakConcurrent}</td>
                                                                     <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{p.peopleNeededWithCycle}</td>

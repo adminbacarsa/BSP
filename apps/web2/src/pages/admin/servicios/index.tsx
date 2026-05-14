@@ -1309,6 +1309,34 @@ export default function ServiciosSLAPage() {
                         <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Pax</label><input type="number" min="1" className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-center dark:text-white" value={positionForm.quantity} onChange={e => setPositionForm({...positionForm, quantity: parseInt(e.target.value) || 1})}/></div>
                     </div>
                     <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1 block">Días operativos</label>
+                        <div className="flex gap-1">
+                            {['L','M','X','J','V','S','D'].map(day => {
+                                const active = (positionForm.activeDays || ['L','M','X','J','V','S','D']).includes(day);
+                                return (
+                                    <button key={day} type="button"
+                                        onClick={() => {
+                                            const cur = positionForm.activeDays || ['L','M','X','J','V','S','D'];
+                                            const next = active ? cur.filter(d => d !== day) : [...cur, day];
+                                            // Mantener orden canónico
+                                            const ordered = ['L','M','X','J','V','S','D'].filter(d => next.includes(d));
+                                            setPositionForm({...positionForm, activeDays: ordered});
+                                        }}
+                                        className={`w-9 h-9 rounded-lg text-[11px] font-black transition-colors border ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-600'}`}
+                                    >{day}</button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[9px] text-slate-400 font-bold mt-1">
+                            {(() => {
+                                const days = positionForm.activeDays || ['L','M','X','J','V','S','D'];
+                                if (days.length === 7) return 'Todos los días (incluye S/D → usa ciclo 6+1 con franco rotativo)';
+                                if (days.length === 5 && !days.includes('S') && !days.includes('D')) return 'Lunes a viernes → francos automáticos en S/D';
+                                return `${days.length} días/semana → Franco en días no seleccionados`;
+                            })()}
+                        </p>
+                    </div>
+                    <div>
                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Tipo de Cobertura</label>
                         <select className="w-full p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-indigo-700 dark:text-indigo-300" value={positionForm.coverageType} onChange={handleCoverageTypeChange}>
                             <option value="24hs">24 HORAS (Lunes a Lunes)</option>

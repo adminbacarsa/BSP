@@ -170,6 +170,8 @@ export interface V2PositionDemand {
     activeDays: number;
     /** Personas estimadas para cubrir el puesto continuamente, dado el ciclo (qty × (cL+cF)/cL). */
     peopleNeededWithCycle: number;
+    /** Total de asignaciones (slots) a cubrir en el mes: Σ qty × bandas × días activos. */
+    totalSlots: number;
 }
 
 export interface V2EmployeeOffer {
@@ -230,6 +232,8 @@ export interface V2FeasibilityReport {
         idleEmployees?: number;
         /** Detalle de empleados ociosos (id + nombre). */
         idleEmployeesList?: Array<{ id: string; nombre?: string }>;
+        /** Total de asignaciones (slots) a cubrir en el mes: Σ por puesto qty × bandas × días activos. */
+        totalSlotsAll: number;
     };
     perPosition: V2PositionDemand[];
     perEmployee: V2EmployeeOffer[];
@@ -393,6 +397,8 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         let monthHours = 0;
         let peakConcurrent = 0;
         let activeDays = 0;
+        let totalSlots = 0;
+        const qty = Math.max(1, Number(pos.qty) || 1);
         ctx.daysInMonth.forEach((d) => {
             const letter = ctx.getDayLetter(ctx.getDateKey(d));
             const dh = dayDemandHoursForPosition(pos, letter, ctx.autoCycles);
@@ -401,6 +407,9 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
                 monthHours += dh;
                 const peak = dayPeakConcurrentForPosition(pos, letter, ctx.autoCycles);
                 if (peak > peakConcurrent) peakConcurrent = peak;
+                // Slots = qty × bandas activas ese día
+                const bands = effectiveShiftsForPositionDay(pos, letter, ctx.autoCycles).length;
+                totalSlots += qty * Math.max(1, bands);
             }
         });
         // Dotación realista: cabezas necesarias para cubrir las horas mensuales del puesto
@@ -420,6 +429,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             peakConcurrent,
             activeDays,
             peopleNeededWithCycle,
+            totalSlots,
         };
     });
 
@@ -587,6 +597,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             offerHoursNextCycle,
             idleEmployees: idleCount,
             idleEmployeesList,
+            totalSlotsAll: perPosition.reduce((s, p) => s + p.totalSlots, 0),
         },
         perPosition,
         perEmployee,
