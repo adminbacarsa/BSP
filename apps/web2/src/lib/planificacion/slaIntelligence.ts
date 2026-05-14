@@ -10,7 +10,9 @@ export const calculateCoverageStats = (dateStr: string, posName: string, structu
         const key = emp.id + '_' + dateStr;
         const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
         if (shift && (shift.objectiveId === objectiveId || changes[key])) {
-            if (!['F','FF','V','L'].includes(shift.code)) current += (SHIFT_HOURS_LOOKUP[shift.code] || 8);
+            const code = String(shift.code || '').toUpperCase();
+            if (['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET'].includes(code)) return;
+            current += SHIFT_HOURS_LOOKUP[code] ?? 8;
         }
     });
     return { current, target, pax, active };

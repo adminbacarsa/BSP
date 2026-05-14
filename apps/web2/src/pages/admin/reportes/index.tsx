@@ -494,7 +494,7 @@ export default function ReportsPage() {
                                 const TRUE_NON_WORK = new Set(['F','FF','FP','AA']);
                                 const PAID_LEAVE    = new Set(['V','L','PG','E','A']);
                                 const isUnjustAbsent = !PAID_LEAVE.has(rawCode) && (s.isAbsent || s.status === 'ABSENT');
-                                let duration = (TRUE_NON_WORK.has(rawCode) || isUnjustAbsent) ? 0
+                                let duration = (TRUE_NON_WORK.has(rawCode) || rawCode === 'RET' || isUnjustAbsent) ? 0
                                     : Math.max(0, ((s.endTime?.seconds||0) - (s.startTime?.seconds||0)) / 3600);
                                 if (!TRUE_NON_WORK.has(rawCode) && !isUnjustAbsent && (duration === 0 || duration > 24 || isNaN(duration))) duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
                                 const isLicencia = ['L','PG'].includes(rawCode);
@@ -593,7 +593,7 @@ export default function ReportsPage() {
                 const TRUE_NON_WORK_DETAIL = new Set(['F','FF','FP','AA']);
                 // isNonWork ya incluye V/L/E/A/PG/AA/F/FF — lo reemplazamos con la lógica correcta
                 const isUnjustAbsentDetail = !PAID_LEAVE_DETAIL.has(rawCode) && isAbsent;
-                const zeroHours = TRUE_NON_WORK_DETAIL.has(rawCode) || isUnjustAbsentDetail;
+                const zeroHours = TRUE_NON_WORK_DETAIL.has(rawCode) || rawCode === 'RET' || isUnjustAbsentDetail;
                 let duration = zeroHours ? 0 : Math.max(0, (end.getTime() - start.getTime()) / 3600000);
                 if (!zeroHours && (duration === 0 || duration > 24 || isNaN(duration))) {
                     duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;

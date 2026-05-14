@@ -19,6 +19,6 @@ export const SHIFT_PROTOCOL = {
     N: { label: 'Noche', defaultHours: 8, defaultStart: '22:00', defaultEnd: '06:00' },
     D12: { label: 'Diurno 12h', defaultHours: 12, defaultStart: '07:00', defaultEnd: '19:00' },
     N12: { label: 'Nocturno 12h', defaultHours: 12, defaultStart: '19:00', defaultEnd: '07:00' },
-    RET: { label: 'Retención pasiva', defaultHours: RET_BILLABLE_HOURS },
+    RET: { label: 'Retención pasiva', defaultHours: 0 },
     F: { label: 'Franco', defaultHours: 0 },
 } as const;

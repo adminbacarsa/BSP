@@ -5,12 +5,12 @@ import { toast } from 'sonner';
 
 // --- CONSTANTES Y HELPERS ---
 // Non-work codes: días libres / licencias. Cualquier otro código se considera operativo.
-const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP']);
+const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'FT': 0,
-    'F':0, 'V':0, 'L':0, 'PG':0, 'A':0, 'E':0, 'FF':0, 'RET': 8
+    'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN': 9, 'FT': 0,
+    'F':0, 'V':0, 'L':0, 'PG':0, 'A':0, 'E':0, 'FF':0, 'RET': 0
 };
 
 // Helper seguro para fechas (Formato local Argentina)
@@ -66,7 +66,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (d.type === 'NOVEDAD') return;
 
             const rawCode = (d.code || '').trim().toUpperCase();
-            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode)) return;
+            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET'].includes(rawCode)) return;
 
             const start = d.startTime.toDate();
             const end = d.endTime.toDate();

@@ -47,9 +47,10 @@ import {
     workStreakStatsForward,
     type AgreementRestConfig,
 } from './restBetweenShifts';
+import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
-const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
+const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
 const CYCLE_MAP: Record<string, [number, number]> = {
     '4+2': [4, 2],
     '5+1': [5, 1],
@@ -81,14 +82,11 @@ export const TARGET_AVG_HOURS = 192;
 /** Tope duro CCT 422/05 art. 7. */
 export const HARD_MAX_HOURS = 200;
 /**
- * Tope semanal blando: 60h.
- * El CCT marca 48h/semana, pero en seguridad es común tener turnos de 10h/12h en
- * jornadas L-V donde 5×10=50h superan 48 sin pasarse del techo de 200h/ciclo.
- * Mantenemos un tope al sólo efecto de evitar cargas extremas (>60h en 7 días);
- * la regla dura sigue siendo HARD_MAX_HOURS por ciclo CCT.
+ * La racha 48h → descanso 35h del CCT se controla día a día con `checkRestBetweenShifts` y
+ * `verifyScheduleCoverage` (no hay "tope semanal blando" que la reemplace). Tras generar,
+ * `stats.suvicoWeekBillableOver48` lista semanas ISO con más de 48h facturables solo como
+ * alerta de carga/costo; no liquida extras ni sustituye asesoramiento legal.
  */
-const WEEKLY_SOFT_CAP = 60;
-
 export interface V2ShiftDef {
     code: string;
     name?: string;
@@ -686,14 +684,20 @@ export interface V2GenerateStats {
      * Cantidad de RETs por empleado en el mes.
      * RET = stand-by ("retenido por si hace falta"); no suma a horas trabajadas
      * pero representa horas POTENCIALES que pueden activarse para cubrir ausencias
-     * en otros objetivos (típicamente 8h por RET).
+     * en otros objetivos (usa `RET_STANDBY_REFERENCE_HOURS` en stats, no liquidación).
      */
     employeeRetCount?: Record<string, number>;
-    /** Horas RET potenciales por empleado = retCount × 8 (estimación operativa). */
+    /** Horas RET potenciales por empleado = retCount × referencia stand-by (~8h, ver `RET_STANDBY_REFERENCE_HOURS`). */
     employeeRetHoursPotential?: Record<string, number>;
     /** Total mes de RETs y horas RET potenciales (suma de todos los empleados). */
     totalRetCount?: number;
     totalRetHoursPotential?: number;
+    /**
+     * Semanas ISO (facturación acumulada en `writeAssignment`) con más de 48h por empleado.
+     * Solo alerta operativa: el cumplimiento legal de 48h trabajadas seguidas + 35h de descanso
+     * sigue validándose con `verifyScheduleCoverage` / `checkRestBetweenShifts`.
+     */
+    suvicoWeekBillableOver48?: Array<{ empId: string; weekKey: string; hours: number }>;
 }
 
 export interface V2GenerateResult {
@@ -984,6 +988,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         positionGroups: { ...positionGroups },
         idleEmployeeIds: Object.entries(empAssignedTo).filter(([, v]) => v === null).map(([k]) => k),
         primaryShiftByEmp: { ...empPrimaryShift },
+        suvicoWeekBillableOver48: [],
     };
 
     const runtime: Record<string, EmpRuntimeState> = {};
@@ -1150,6 +1155,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    const suvicoWeekBillableOver48: Array<{ empId: string; weekKey: string; hours: number }> = [];
+    for (const emp of ctx.employees) {
+        const st = runtime[emp.id];
+        for (const [weekKey, h] of Object.entries(st.weekHours)) {
+            if (h > 48 + 1e-6) {
+                suvicoWeekBillableOver48.push({ empId: emp.id, weekKey, hours: Math.round(h * 10) / 10 });
+            }
+        }
+    }
+    stats.suvicoWeekBillableOver48 = suvicoWeekBillableOver48;
+
     // Días sobrantes:
     //   - Empleado IDLE (sin puesto asignado por capacidad ociosa): TODO el mes en RET o F,
     //     según ciclo. Nunca se mezcla con un turno facturable, así queda evidente que
@@ -1202,7 +1218,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Acumulado de RETs por empleado (horas potenciales en stand-by)
     // RET no suma a horas trabajadas pero queremos mostrar en el reporte
     // cuántas horas "potenciales" tiene cada vigilador retenido.
-    const RET_POTENTIAL_HOURS = 8;
     const empRetCount: Record<string, number> = {};
     for (const a of assignments) {
         if (a.code === 'RET' && a.empId) {
@@ -1212,13 +1227,13 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const empRetHoursPotential: Record<string, number> = {};
     let totalRetCount = 0;
     for (const [empId, count] of Object.entries(empRetCount)) {
-        empRetHoursPotential[empId] = count * RET_POTENTIAL_HOURS;
+        empRetHoursPotential[empId] = count * RET_STANDBY_REFERENCE_HOURS;
         totalRetCount += count;
     }
     stats.employeeRetCount = empRetCount;
     stats.employeeRetHoursPotential = empRetHoursPotential;
     stats.totalRetCount = totalRetCount;
-    stats.totalRetHoursPotential = totalRetCount * RET_POTENTIAL_HOURS;
+    stats.totalRetHoursPotential = totalRetCount * RET_STANDBY_REFERENCE_HOURS;
 
     return { feasibility, assignments, stats };
 }

@@ -275,8 +275,8 @@ const calcSrvMonth = (srv: any, y: number, m: number, efectiveHs = 192) => {
 
 /** Fallback de horas por código de turno (alineado con planificador y reportes). */
 const SHIFT_HOURS_LOOKUP_FALLBACK: Record<string, number> = {
-  M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 12, FT: 8, C: 8,
-  F: 0, FF: 0, FP: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0,
+  M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 12, EN: 9, FT: 8, C: 8,
+  F: 0, FF: 0, FP: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0, RET: 0,
 };
 
 /** Mismo orden que el planificador: campo hours > diferencia start/end > fallback por código.

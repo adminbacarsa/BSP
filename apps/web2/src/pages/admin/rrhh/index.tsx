@@ -173,7 +173,7 @@ const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // lega
 // Códigos NO operativos (días libres/licencias). Cualquier otro código se considera operativo.
 const NON_WORK_CODES_RRHH = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
 const isOperativeCodeRRHH = (code: string) => !NON_WORK_CODES_RRHH.has((code || '').trim().toUpperCase());
-const SHIFT_HOURS_LOOKUP: Record<string, number> = { 'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'FT': 0, 'F':0, 'V':0, 'L':0, 'A':0, 'E':0 };
+const SHIFT_HOURS_LOOKUP: Record<string, number> = { 'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN':9, 'FT': 0, 'F':0, 'V':0, 'L':0, 'A':0, 'E':0, 'RET': 0 };
 
 interface Agreement {
     id?: string;

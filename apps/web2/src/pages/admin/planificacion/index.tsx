@@ -89,7 +89,7 @@ const SHIFT_RANGES: Record<string, string> = {
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
 };
 
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */

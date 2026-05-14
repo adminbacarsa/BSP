@@ -16,11 +16,9 @@ const DEFAULT_LONG_REST = 35;
  * Códigos que ROMPEN la racha de trabajo consecutivo.
  * Incluye:
  *  - Francos reales (F, FF, FP, FT) y licencias (V, L, A, E, AA, PG).
- *  - RET (retén): por definición operativa es un día de stand-by — si nadie lo
- *    activa, el guardia no trabaja (equivale a un "franco pasivo"). Si después
- *    operaciones lo activa para cubrir otro objetivo, ese día queda registrado
- *    con otro código (RETEN/OPERATIONS_COVERAGE) que sí cuenta como turno real.
- *    Por eso desde el punto de vista de la planificación, RET corta la racha.
+ *  - RET (retén): stand-by planificado — **no suma horas liquidables** (`SHIFT_HOURS_LOOKUP.RET = 0`).
+ *    Sigue en STREAK_BREAK_CODES porque **no extiende** la racha de trabajo CCT (no es turno
+ *    efectivo a la espera del descanso de 35h); la activación real se modela aparte en operaciones.
  */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 
