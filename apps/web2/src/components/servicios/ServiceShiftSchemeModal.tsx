@@ -58,8 +58,9 @@ export function ServiceShiftSchemeModal({ open, onClose, service }: ServiceShift
 
                 <div className="p-4 space-y-4 text-[11px]">
                     <p className="font-bold text-slate-600 dark:text-slate-400 leading-snug">
-                        Vista <strong>sólo operativa</strong>: si la mezcla de coberturas (hs/día, 24 h, custom, etc.) encaja mejor con{' '}
-                        <strong>6×2</strong>, <strong>6×1</strong> o <strong>4×2</strong>. No incluye costos ni precios.
+                        Vista <strong>sólo operativa</strong>: encaje de la <strong>SLA vendida</strong> (puestos y hs) con rotación{' '}
+                        <strong>6×2 / 6×1 / 4×2</strong>, y si los <strong>bloques custom (9 h, 10 h, etc.)</strong> convienen frente a marcos{' '}
+                        <strong>8 h / 12 h</strong> CCT. Sin costos.
                     </p>
 
                     <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 px-3 py-2.5">
@@ -112,8 +113,49 @@ export function ServiceShiftSchemeModal({ open, onClose, service }: ServiceShift
                         </div>
                     )}
 
+                    {advice.soldShiftAnalyses.length > 0 && (
+                        <div className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/70 dark:bg-rose-950/25 px-3 py-2">
+                            <p className="text-[9px] font-black uppercase text-rose-800 dark:text-rose-200 mb-1.5">
+                                Lo vendido vs conviene (CCT 8 h / 12 h)
+                            </p>
+                            <p className="text-[10px] font-bold text-rose-950 dark:text-rose-100 mb-2 leading-snug">
+                                Estos bloques <strong>no</strong> son 8 h ni 12 h: suben la carga mensual y complican encadenar descansos. La
+                                proyección ~mes es orientativa (escala desde el tramo muestreado del contrato).
+                            </p>
+                            <ul className="space-y-2">
+                                {advice.soldShiftAnalyses.map((row, i) => (
+                                    <li
+                                        key={i}
+                                        className="rounded-lg bg-white/80 dark:bg-slate-900/50 border border-rose-100 dark:border-rose-900/50 px-2 py-1.5"
+                                    >
+                                        <p className="text-[10px] font-black text-slate-800 dark:text-slate-100">
+                                            {row.positionName} · {row.blockLabel}{' '}
+                                            <span className="tabular-nums text-rose-700 dark:text-rose-300">({row.hours} h)</span>
+                                            {row.indicativeMonthlyHsApprox > 0 && (
+                                                <span className="text-[9px] font-bold text-slate-500 ml-1">
+                                                    ≈ {row.indicativeMonthlyHsApprox} h/mes puesto
+                                                </span>
+                                            )}
+                                        </p>
+                                        <p className="text-[9px] font-bold text-slate-700 dark:text-slate-300 mt-0.5 leading-snug">{row.verdict}</p>
+                                        <p className="text-[9px] font-black text-indigo-700 dark:text-indigo-300 mt-0.5 leading-snug">
+                                            Cómo tratarlo: {row.treatment}
+                                        </p>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {advice.soldShiftAnalyses.length === 0 &&
+                        (service.positions || []).some((p) => p.coverageType === 'custom' && (p.allowedShiftTypes || []).length > 0) && (
+                            <p className="text-[10px] font-bold text-emerald-800 dark:text-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/30 rounded-lg px-2 py-1.5 border border-emerald-200 dark:border-emerald-800">
+                                Bloques custom revisados: las hs declaradas encajan en marcos típicos <strong>8 h</strong> o <strong>12 h</strong>{' '}
+                                (o son jornadas cortas bajo 8 h sin alerta).
+                            </p>
+                        )}
+
                     <div>
-                        <p className="text-[9px] font-black uppercase text-slate-500 mb-2">Por esquema</p>
                         <div className="space-y-2">
                             {advice.schemes.map((s) => {
                                 const t = fitTone[s.fit];

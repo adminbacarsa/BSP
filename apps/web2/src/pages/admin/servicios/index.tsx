@@ -1100,7 +1100,10 @@ export default function ServiciosSLAPage() {
                                       </span>
                                     </div>
                                     <ServiceShiftSchemeIcon
-                                      hasIssues={analyzeShiftSchemesForService(srv).issues.length > 0}
+                                      hasIssues={(() => {
+                                          const a = analyzeShiftSchemesForService(srv);
+                                          return a.issues.length > 0 || a.soldShiftAnalyses.length > 0;
+                                      })()}
                                       onOpen={() =>
                                         setShiftModal({
                                           open: true,

@@ -989,8 +989,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Rotación POR CICLO alineada al offset personal del empleado.
     // El offset es el mismo que define los días de trabajo/franco: (di + offset) % cycleLen < cL.
     // Así la banda cambia exactamente al inicio de cada nuevo bloque de trabajo, nunca a mitad.
-    // Patrón resultante: NNNNNN FF MMMMMM FF TTTTTT FF …
-    // La transición N→M tiene 48h de descanso (2 francos entre medio) → CCT 12h OK, sin F extra.
+    // Patrón resultante: secuencias de códigos según `shiftRingByPosition` y el índice de ciclo.
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
@@ -1382,15 +1381,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
             const assignedPosForFallback = empAssignedTo[emp.id];
-            // Regla N→M/T: si el último turno real fue noche (N/N12) y este día de ciclo
-            // quedó sin turno (el descanso de 12h impide entrar a M o T al día siguiente),
-            // se asigna F en vez de RET → ciclo corto de ajuste (5+1 ó 5+2) para ese período.
-            // Esto evita que esos días aparezcan como "retén" cuando el empleado simplemente
-            // está cumpliendo el descanso mínimo CCT entre N y el próximo turno diurno.
-            // En cualquier otro caso (todos los slots cubiertos, empleado ocioso) → RET normal.
-            // Día de ciclo-trabajo sin turno asignado → RET (empleado disponible, suma a horas mínimas).
-            // Día de ciclo-franco (el "2" del 6+2) → F.
-            // No hay excepciones por post-noche: los 2 francos del ciclo ya proveen 48h de descanso.
+            // Día de ciclo-trabajo sin turno asignado → RET (empleado disponible).
+            // Día de ciclo-franco o sin puesto / puesto inactivo ese día → F.
             const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,

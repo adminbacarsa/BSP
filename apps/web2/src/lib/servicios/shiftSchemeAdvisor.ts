@@ -3,12 +3,23 @@
  * Usa la misma noción de hs/día que `hoursForPositionOnDay` (viabilityAnalysis).
  */
 
-import type { ServicePosition, ServiceSLA } from '@/services/slaService';
+import type { ServicePosition, ServiceSLA, ShiftVariant } from '@/services/slaService';
 import { hoursForPositionOnDay, requiredConcurrentPaxForServiceDay } from '@/utils/viabilityAnalysis';
 
 export type RotationSchemeId = '6x2' | '6x1' | '4x2';
 
 export type SchemeFit = 'alta' | 'media' | 'baja';
+
+/** Bloque custom vendido (hs) vs marcos CCT habituales 8h / 12h. */
+export interface SoldShiftHourAnalysis {
+    positionName: string;
+    blockLabel: string;
+    hours: number;
+    indicativeMonthlyHsApprox: number;
+    alignsWithCct8Or12: boolean;
+    verdict: string;
+    treatment: string;
+}
 
 export interface ShiftSchemeAdvice {
     positionSummaries: string[];
@@ -19,6 +30,7 @@ export interface ShiftSchemeAdvice {
     /** Máx. puestos en paralelo requeridos (día del muestreo). */
     peakConcurrentPax: number;
     issues: string[];
+    soldShiftAnalyses: SoldShiftHourAnalysis[];
     schemes: Array<{
         id: RotationSchemeId;
         label: string;
@@ -65,6 +77,109 @@ function customHoursOnDayLetter(pos: ServicePosition, dayLetter: string): number
 }
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
+
+function dayLetterFromDate(day: Date): string {
+    return DAY_LETTERS[day.getDay()];
+}
+
+function positionActiveOnLetter(pos: ServicePosition, letter: string): boolean {
+    if (!pos.activeDays || pos.activeDays.length === 0) return true;
+    return pos.activeDays.includes(letter);
+}
+
+function shiftAppliesOnDay(shift: ShiftVariant, letter: string): boolean {
+    if (!shift.days || shift.days.length === 0) return true;
+    return shift.days.includes(letter);
+}
+
+function isCctStandardBlockHours(h: number): boolean {
+    return Math.abs(h - 8) < 0.05 || Math.abs(h - 12) < 0.05;
+}
+
+function verdictTreatmentForSoldHours(h: number): { verdict: string; treatment: string } {
+    if (isCctStandardBlockHours(h)) {
+        return {
+            verdict: 'Marco habitual SUVICO (8 h o 12 h).',
+            treatment: 'Coherente con M/T/N o D12/N12 según el tipo de puesto.',
+        };
+    }
+    if (Math.abs(h - 9) < 0.05) {
+        return {
+            verdict:
+                '9 h no es estándar CCT: queda “entre” 8 h y 12 h y suele complicar encadenar descansos y el reparto M/T/N sin sobras incómodas.',
+            treatment:
+                'Conviene reformular a 8 h (dos bloques o reorden de franja) o subir a 12 h (D12) si el servicio admite marco largo único; evitá dejar 9 h como jornada “típica” del contrato.',
+        };
+    }
+    if (Math.abs(h - 10) < 0.05) {
+        return {
+            verdict:
+                '10 h es un mal punto intermedio: sube fuerte la carga mensual por cabeza (del orden de ~220 h/mes en L–V) y no encaja en turnos base 8/12 h CCT.',
+            treatment:
+                'Priorizá vender/planificar 12 h (D12 o N12 según caso) o bajar a 8 h + refuerzo en otro puesto; 10 h genera presión alta en rotación y francos.',
+        };
+    }
+    if (h > 12.01) {
+        return {
+            verdict: 'Más de 12 h en un solo bloque supera la jornada típica de un tramo CCT.',
+            treatment: 'Dividí en D12/N12 o en dos bloques con descanso intermedio; validá con legal.',
+        };
+    }
+    if (h < 8 - 0.05 && h >= 4) {
+        return {
+            verdict: 'Jornada corta: puede ser válida pero suele “romper” simetría con el resto del anillo de turnos.',
+            treatment: 'Alinear con bloques de 8 h o concentrar horas en menos tramos para simplificar ciclos.',
+        };
+    }
+    return {
+        verdict: `Las ${Math.round(h * 100) / 100} h no son marco estándar 8/12 h: dificulta rotaciones y acople con 6×2 / 4×2.`,
+        treatment: 'Aproximá a 8 h o 12 h según cobertura diurna extendida o puesto 24 h.',
+    };
+}
+
+function approximateMonthlyHsForBlock(sample: Date[], pos: ServicePosition, shift: ShiftVariant, q: number): number {
+    const h = Number(shift.hours) || 0;
+    if (h <= 0 || sample.length === 0) return 0;
+    let sum = 0;
+    for (const day of sample) {
+        const letter = dayLetterFromDate(day);
+        if (!positionActiveOnLetter(pos, letter)) continue;
+        if (!shiftAppliesOnDay(shift, letter)) continue;
+        sum += h * q;
+    }
+    const factor = 30 / sample.length;
+    return Math.round(sum * factor);
+}
+
+/** Solo bloques custom cuyas hs no son 8 ni 12 (marco CCT habitual). */
+function buildNonStandardSoldShiftAnalyses(sample: Date[], positions: ServicePosition[]): SoldShiftHourAnalysis[] {
+    const out: SoldShiftHourAnalysis[] = [];
+    for (const pos of positions) {
+        if (pos.coverageType !== 'custom') continue;
+        const q = pos.quantity ?? 1;
+        const pname = pos.name || 'Custom';
+        let bi = 0;
+        for (const shift of pos.allowedShiftTypes || []) {
+            const h = Number(shift.hours) || 0;
+            if (h < 1e-6) continue;
+            bi++;
+            const label = shift.name || shift.code || `Bloque ${bi}`;
+            if (isCctStandardBlockHours(h)) continue;
+            const approx = approximateMonthlyHsForBlock(sample, pos, shift, q);
+            const vt = verdictTreatmentForSoldHours(h);
+            out.push({
+                positionName: pname,
+                blockLabel: label,
+                hours: Math.round(h * 100) / 100,
+                indicativeMonthlyHsApprox: approx,
+                alignsWithCct8Or12: false,
+                verdict: vt.verdict,
+                treatment: vt.treatment,
+            });
+        }
+    }
+    return out;
+}
 
 function summarizePosition(pos: ServicePosition, idx: number): string {
     const q = pos.quantity ?? 1;
@@ -204,12 +319,21 @@ export function analyzeShiftSchemesForService(srv: Pick<ServiceSLA, 'startDate' 
             'Carga diaria moderada y sin 24 h duros: 6×2 suele ser el mejor compromiso fatiga / dotación.';
     }
 
+    const soldShiftAnalyses = buildNonStandardSoldShiftAnalyses(sample, positions);
+    if (soldShiftAnalyses.length > 0) {
+        issues.push('Hay bloques custom fuera de 8h/12h CCT: encarecen planificación y descansos (ver “Lo vendido vs conviene”).');
+        if (!h24 && peakDaily < 36) {
+            primaryReason += ' Ojo: lo vendido en hs de turno no siempre ayuda al esquema elegido.';
+        }
+    }
+
     return {
         positionSummaries,
         peakDailyCoverageHs: Math.round(peakDaily * 10) / 10,
         avgWeekdayCoverageHs: Math.round(avgWeekday * 10) / 10,
         peakConcurrentPax: peakConcurrent,
         issues,
+        soldShiftAnalyses,
         schemes,
         primaryScheme: primary,
         primaryReason,
@@ -230,5 +354,6 @@ function emptyAdvice(issues: string[], positionSummaries: string[]): ShiftScheme
         ],
         primaryScheme: '6x2',
         primaryReason: 'Sin datos suficientes.',
+        soldShiftAnalyses: [],
     };
 }
