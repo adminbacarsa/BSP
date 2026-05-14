@@ -95,7 +95,7 @@ const SHIFT_HOURS_LOOKUP: Record<string, number> = {
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
 const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 
-const calcShiftHours = (shift: any): number => {
+const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number => {
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
@@ -117,6 +117,8 @@ const calcShiftHours = (shift: any): number => {
     }
     const fromLookup = SHIFT_HOURS_LOOKUP[code];
     if (fromLookup !== undefined) return fromLookup;
+    // Códigos custom (RO, RON, etc.): horas definidas en el SLA del servicio
+    if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
     return 8;
 };
 
@@ -473,6 +475,29 @@ export default function PlanificacionPage() {
         });
     }, [employees, selectedObjective, forceShowAll, searchTerm, shiftsMap, pendingChanges, sortBy, sortDir, daysInMonth, slaIdToObjId, customOrderMap]);
 
+    // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
+    // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
+    const slaCodeHoursHint = useMemo(() => {
+        const hint: Record<string, number> = {};
+        const parseH = (t: string) => { const m = t.match(/^(\d{1,2}):(\d{2})$/); return m ? +m[1] + +m[2] / 60 : null; };
+        positionStructure.forEach((pos: any) => {
+            (pos.shifts || []).forEach((sh: any) => {
+                const code = String(sh.code || '').toUpperCase();
+                if (!code || OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                const n = Number(sh.hours);
+                if (n > 0) { hint[code] = n; return; }
+                if (typeof sh.startTime === 'string' && typeof sh.endTime === 'string') {
+                    const s = parseH(sh.startTime), e = parseH(sh.endTime);
+                    if (s !== null && e !== null) {
+                        let dur = e - s; if (dur <= 0) dur += 24;
+                        if (dur > 0) hint[code] = dur;
+                    }
+                }
+            });
+        });
+        return hint;
+    }, [positionStructure]);
+
     const empMonthlyHours = useMemo(() => {
         const result: Record<string, number> = {};
         displayedEmployees.forEach((emp: any) => {
@@ -488,12 +513,12 @@ export default function PlanificacionPage() {
                         String(activeShift.objectiveId) !== String(selectedObjective)) return;
                 } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
                 if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
-                total += calcShiftHours(activeShift);
+                total += calcShiftHours(activeShift, slaCodeHoursHint);
             });
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
 
     // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
     // Suma:
@@ -530,7 +555,7 @@ export default function PlanificacionPage() {
             }
             if (!activeShift) return;
             if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
-            result[empId] = (result[empId] || 0) + calcShiftHours(activeShift);
+            result[empId] = (result[empId] || 0) + calcShiftHours(activeShift, slaCodeHoursHint);
         };
         displayedEmployees.forEach((emp: any) => {
             result[emp.id] = 0;
@@ -538,7 +563,7 @@ export default function PlanificacionPage() {
             headDays.forEach((d) => acumular(emp.id, `${emp.id}_${getDateKey(d)}`, false));
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective, slaCodeHoursHint]);
 
     const retCount = useMemo(() => {
         let count = 0;
@@ -2521,6 +2546,7 @@ export default function PlanificacionPage() {
                 defaultPositionByEmp,
                 getDayLetter,
                 getDateKey,
+                rotateShifts: autoRotateShifts,
             });
 
             await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');

@@ -158,6 +158,11 @@ export interface V2EngineContext {
     getDayLetter: (dateStr: string) => string;
     /** Función para serializar Date → YYYY-MM-DD. */
     getDateKey: (d: Date) => string;
+    /**
+     * Rotar bandas semana a semana (M→T→N→M…). Default: true.
+     * Si el puesto tiene una sola banda (ej. RO) no tiene efecto.
+     */
+    rotateShifts?: boolean;
 }
 
 export interface V2PositionDemand {
@@ -907,12 +912,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Ciclo por empleado: D12/N12 → 4+2 (cycleLen=6, cL=4); M/T/N → ciclo 8h global.
     const empCycleLen: Record<string, number> = {};
     const empCL_map: Record<string, number> = {};
+    const shouldRotate = ctx.rotateShifts !== false; // default true
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
-        void dateStr; // banda fija todo el mes: no rotar por semana
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
-        return ring[slot % ring.length];
+        if (ring.length === 1 || !shouldRotate) return ring[slot % ring.length];
+        // Rotación semanal: cada 7 días calendario avanza una posición en el anillo.
+        const dayNum = parseInt(dateStr.split('-')[2], 10) - 1; // 0-based desde día 1
+        const weekOfMonth = Math.floor(dayNum / 7);
+        return ring[(slot + weekOfMonth) % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
@@ -1164,8 +1173,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     if (runtime[empId].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[empId]?.has(dateStr)) return false;
                     if (!cycleWorkDays[empId]?.has(dateStr)) return false;
-                    const primary = empPrimaryShift[empId];
-                    if (primary && primary !== sCode) return false; // banda estricta
+                    const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
+                    if (primary && primary !== sCode) return false; // banda semanal
                     return true;
                 });
 

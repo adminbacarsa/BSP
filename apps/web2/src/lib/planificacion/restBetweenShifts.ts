@@ -112,7 +112,10 @@ export const workStreakStatsBackward = (
         if (STREAK_BREAK_CODES.has(code)) break;
         const h = shiftHours(sh);
         if (h <= 0) {
-            // 0h pero no franco real (ej. RET): transparente, seguir buscando
+            // 0h pero no franco real (ej. RET): cuenta como día potencial (podría activarse)
+            // para que no se forme una brecha que, al activarse, supere el cL del ciclo.
+            // No suma horas efectivas (no dispara el descanso de 35h).
+            workDays += 1;
             d = addDaysStr(d, -1);
             continue;
         }
@@ -148,7 +151,8 @@ export const workStreakStatsForward = (
         if (STREAK_BREAK_CODES.has(code)) break;
         const h = shiftHours(sh);
         if (h <= 0) {
-            // 0h pero no franco real (ej. RET): transparente, seguir buscando
+            // 0h pero no franco real (ej. RET): día potencial, igual que en backward.
+            workDays += 1;
             d = addDaysStr(d, 1);
             continue;
         }
