@@ -27,6 +27,7 @@ import type {
 import { pickRepresentativeCycle, effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
+import { SUVICO_POLICY } from './suvicoPolicy';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
@@ -50,9 +51,9 @@ function sortGroupByBillableAsc(group: string[], hours: Map<string, number>): st
 }
 
 const FIX_REST_BASE: AgreementRestConfig = {
-    minRestBetweenShiftsHours: 12,
-    longRestAfterWorkedHours: 48,
-    minLongRestHours: 35,
+    minRestBetweenShiftsHours: SUVICO_POLICY.REST.DAILY_MIN_HOURS,
+    longRestAfterWorkedHours: SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST,
+    minLongRestHours: SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS,
 };
 
 function makeFixRestCfg(ctx: V2EngineContext): AgreementRestConfig {

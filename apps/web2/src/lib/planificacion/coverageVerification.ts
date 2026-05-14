@@ -5,7 +5,7 @@
  * (más las ausencias del contexto) y devuelve un reporte con:
  *   - Cobertura: slots de SLA pedidos vs cubiertos.
  *   - Conflictos: descansos rotos, empleados con turno en día de licencia,
- *     empleados >200 hs por ciclo, empleados sin turno asignado.
+ *     empleados por encima del tope CCT de horas por ciclo, empleados sin turno asignado.
  *   - Resumen agregado para mostrar en UI.
  *
  * No modifica nada — solo reporta.
@@ -18,6 +18,7 @@ import type {
 } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, pickRepresentativeCycle, positionIsActiveOn } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
+import { SUVICO_POLICY } from './suvicoPolicy';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
@@ -29,9 +30,9 @@ const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // 0=Dom, 1=Lun...
 
 /** Base SUVICO; en cada verificación le agregamos `maxConsecutiveWorkDays = cL` del ciclo elegido. */
 const VERIFY_REST_BASE: AgreementRestConfig = {
-    minRestBetweenShiftsHours: 12,
-    longRestAfterWorkedHours: 48,
-    minLongRestHours: 35,
+    minRestBetweenShiftsHours: SUVICO_POLICY.REST.DAILY_MIN_HOURS,
+    longRestAfterWorkedHours: SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST,
+    minLongRestHours: SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS,
 };
 
 export interface UncoveredSlot {
@@ -250,15 +251,15 @@ export function verifyScheduleCoverage(
         }
     });
 
-    // 6. Empleados > 200h por ciclo (ya viene en stats)
+    // 6. Empleados por encima del tope CCT de horas por ciclo (ya viene en stats)
     const overHours: OverHoursWarning[] = [];
     const cycCur = stats.employeeCycleHours?.current || {};
     const cycNext = stats.employeeCycleHours?.next || {};
     Object.entries(cycCur).forEach(([empId, h]) => {
-        if ((h || 0) > 200) overHours.push({ empId, cycle: 'current', hours: h });
+        if ((h || 0) > SUVICO_POLICY.REST.MAX_MONTHLY_HARD) overHours.push({ empId, cycle: 'current', hours: h });
     });
     Object.entries(cycNext).forEach(([empId, h]) => {
-        if ((h || 0) > 200) overHours.push({ empId, cycle: 'next', hours: h });
+        if ((h || 0) > SUVICO_POLICY.REST.MAX_MONTHLY_HARD) overHours.push({ empId, cycle: 'next', hours: h });
     });
 
     // 7. Empleados ociosos (sin turno productivo)
@@ -322,7 +323,7 @@ export function verifyScheduleCoverage(
             ? `Cobertura con problemas: ${uncovered.length} slots sin cubrir, ${restViolations.length} descansos rotos, ${licenseConflicts.length} conflictos con licencias.`
             : underSold
                 ? `Cierre ⚠: ${Math.round(billableHoursGenerated)}h planificadas < ${Math.round(slaVendidas)}h vendidas (faltan ${hoursGap}h). Agregar turnos o revisar SLA.`
-                : `Cobertura aceptable con avisos: ${overHours.length} empleados sobre 200h, desvío de horas ${(deltaPct * 100).toFixed(1)}%.`;
+                : `Cobertura aceptable con avisos: ${overHours.length} empleados sobre ${SUVICO_POLICY.REST.MAX_MONTHLY_HARD}h, desvío de horas ${(deltaPct * 100).toFixed(1)}%.`;
 
     return {
         ok,

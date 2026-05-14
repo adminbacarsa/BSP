@@ -4,9 +4,10 @@
  */
 
 import type { V2Assignment, V2EngineContext, V2GenerateStats } from './autoScheduleEngineV2';
-import { pickRepresentativeCycle, TARGET_AVG_HOURS } from './autoScheduleEngineV2';
+import { pickRepresentativeCycle } from './autoScheduleEngineV2';
 import { verifyScheduleCoverage, buildAssignmentGetShift } from './coverageVerification';
 import { checkRestBetweenShifts, getShiftStartEndAbs, isWorkShift, type AgreementRestConfig } from './restBetweenShifts';
+import { SUVICO_POLICY } from './suvicoPolicy';
 
 const FRANCO = new Set(['F', 'FF', 'FP', 'FT']);
 const ABS = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
@@ -46,16 +47,16 @@ function billableHoursByEmp(assignments: V2Assignment[]): Map<string, number> {
 function makeRestCfg(ctx: V2EngineContext): AgreementRestConfig {
     const { cL } = pickRepresentativeCycle(ctx.autoCycles || []);
     return {
-        minRestBetweenShiftsHours: 12,
-        longRestAfterWorkedHours: 48,
-        minLongRestHours: 35,
+        minRestBetweenShiftsHours: SUVICO_POLICY.REST.DAILY_MIN_HOURS,
+        longRestAfterWorkedHours: SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST,
+        minLongRestHours: SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS,
         maxConsecutiveWorkDays: cL,
     };
 }
 
 /**
  * Tras ≥2 francos calendario seguidos (F/FF), el descanso real entre el fin del último
- * trabajo previo y el inicio del siguiente trabajo debe ser ≥ 35 h (SUVICO / 48h racha).
+ * trabajo previo y el inicio del siguiente trabajo debe cumplir el mínimo post-racha (SUVICO).
  */
 function collectDoubleFrancoGaps(
     empId: string,
@@ -78,9 +79,10 @@ function collectDoubleFrancoGaps(
             }
             if (francoRun >= 2 && lastWorkEndAbs) {
                 const gapH = (se.start.getTime() - lastWorkEndAbs.getTime()) / 3600000;
-                if (gapH + 1e-6 < 35) {
+                const minLong = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
+                if (gapH + 1e-6 < minLong) {
                     msgs.push(
-                        `Doble franco (${francoRun}d) con solo ${gapH.toFixed(1)}h entre fin de trabajo previo e inicio del ${ds} — conviene ≥35h.`,
+                        `Doble franco (${francoRun}d) con solo ${gapH.toFixed(1)}h entre fin de trabajo previo e inicio del ${ds} — conviene ≥${minLong}h.`,
                     );
                 }
             }
@@ -143,7 +145,7 @@ function coverageKpiHints(report: ReturnType<typeof verifyScheduleCoverage>): Sc
     out.push({
         severity: 'warning',
         code: 'coverage_kpi',
-        message: `Cobertura ${(report.coverage.coverageRatio * 100).toFixed(0)}% (${report.coverage.coveredSlots}/${report.coverage.totalSlots} slots). Priorizar convertir RET de quienes están lejos de ${TARGET_AVG_HOURS}h hasta llenar huecos sin romper 12h interjornada.`,
+        message: `Cobertura ${(report.coverage.coverageRatio * 100).toFixed(0)}% (${report.coverage.coveredSlots}/${report.coverage.totalSlots} slots). Priorizar convertir RET de quienes están lejos de ${SUVICO_POLICY.REST.TARGET_MONTHLY}h hasta llenar huecos sin romper ${SUVICO_POLICY.REST.DAILY_MIN_HOURS}h interjornada.`,
     });
     return out;
 }
@@ -204,7 +206,7 @@ export function buildScheduleOptimizationSuggestions(
         suggestions.push({
             severity: 'error',
             code: 'cover_slot',
-            message: `Hueco ${u.shiftCode} ${u.positionName} ${u.dateStr} (${missing}): priorizar RET de baja carga — candidatos (orden por hs facturables): ${top || 'ninguno pasa 12h/35h en simulación'}.`,
+            message: `Hueco ${u.shiftCode} ${u.positionName} ${u.dateStr} (${missing}): priorizar RET de baja carga — candidatos (orden por hs facturables): ${top || `ninguno pasa ${SUVICO_POLICY.REST.DAILY_MIN_HOURS}h/${SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS}h en simulación`}.`,
             dateStr: u.dateStr,
             positionName: u.positionName,
             shiftCode: u.shiftCode,
@@ -212,7 +214,7 @@ export function buildScheduleOptimizationSuggestions(
         });
     }
 
-    const hi = [...hours.entries()].filter(([, h]) => h >= 192).sort((a, b) => b[1] - a[1]);
+    const hi = [...hours.entries()].filter(([, h]) => h >= SUVICO_POLICY.REST.TARGET_MONTHLY).sort((a, b) => b[1] - a[1]);
     for (const [empId, h] of hi.slice(0, 8)) {
         const nom = ctx.employees.find((x) => x.id === empId)?.nombre || empId;
         suggestions.push({
@@ -223,13 +225,14 @@ export function buildScheduleOptimizationSuggestions(
         });
     }
 
-    const lo = [...hours.entries()].filter(([, h]) => h > 0 && h < 160).sort((a, b) => a[1] - b[1]);
+    const retLoCap = SUVICO_POLICY.ALERTS.LOW_BILLABLE_HOURS_FOR_RET_PRIORITY;
+    const lo = [...hours.entries()].filter(([, h]) => h > 0 && h < retLoCap).sort((a, b) => a[1] - b[1]);
     if (lo.length && report.uncovered.length) {
         const names = lo.slice(0, 5).map(([id]) => ctx.employees.find((x) => x.id === id)?.nombre || id).join(', ');
         suggestions.push({
             severity: 'info',
             code: 'ret_spend_order',
-            message: `Para cerrar vendido vs planificado, conviene "gastar" RET primero entre: ${names} (menos de 160h).`,
+            message: `Para cerrar vendido vs planificado, conviene "gastar" RET primero entre: ${names} (menos de ${retLoCap}h).`,
         });
     }
 

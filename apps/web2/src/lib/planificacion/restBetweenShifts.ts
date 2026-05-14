@@ -7,10 +7,11 @@
  *   exigir el descanso largo también por días seguidos, pero SUVICO no lo usa.
  */
 import { getDateKey } from './utils';
+import { SUVICO_POLICY } from './suvicoPolicy';
 
-const DEFAULT_MIN_REST = 12;
-const DEFAULT_STREAK_THRESHOLD = 48;
-const DEFAULT_LONG_REST = 35;
+const DEFAULT_MIN_REST = SUVICO_POLICY.REST.DAILY_MIN_HOURS;
+const DEFAULT_STREAK_THRESHOLD = SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST;
+const DEFAULT_LONG_REST = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
 
 /**
  * Códigos que ROMPEN la racha de trabajo consecutivo.
