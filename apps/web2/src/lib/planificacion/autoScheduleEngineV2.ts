@@ -342,8 +342,14 @@ export function effectiveShiftsForPositionDay(
     if (dayShifts.length === 0) return [];
     const { key: cycleKey } = pickRepresentativeCycle(autoCycles || []);
     if (cycleKey === '4+2') {
+        // Ciclo puro 4+2 → 12h/turno
         const bands12 = dayShifts.filter((s) => shiftHours(s) >= 12);
         if (bands12.length > 0) return bands12;
+        return dayShifts;
+    }
+    // Modo mixto: ciclo 8h + 4+2 simultáneos → devolver todas las bandas.
+    // El motor asignará M/T/N (6+2) a unos empleados y D12/N12 (4+2) a otros.
+    if (Array.isArray(autoCycles) && autoCycles.includes('4+2')) {
         return dayShifts;
     }
     const bands8 = dayShifts.filter((s) => shiftHours(s) < 12);
@@ -746,6 +752,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31 ? ctx.cctCutoffDay : 25;
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleLen = cL + cF; // p.ej. 6+1 → 7
+    const has4x2 = ctx.autoCycles.includes('4+2');
     const defaultPos = { ...(ctx.defaultPositionByEmp || {}) };
     // Empleados con puesto fijo EXPLÍCITO (configurado por el usuario, no auto-detectado).
     // Se usa en el emergency pass para diferenciar quién puede moverse entre puestos.
@@ -901,6 +908,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const empGroupIdx: Record<string, number> = {};
     const shiftRingByPosition: Record<string, string[]> = {};
     const empRotationSlot: Record<string, number> = {};
+    // Ciclo por empleado: D12/N12 → 4+2 (cycleLen=6, cL=4); M/T/N → ciclo 8h global.
+    const empCycleLen: Record<string, number> = {};
+    const empCL_map: Record<string, number> = {};
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         void dateStr; // banda fija todo el mes: no rotar por semana
         const ring = shiftRingByPosition[posName];
@@ -927,17 +937,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empPrimaryShift[empId] = code; // semana 0 (referencia para stats)
             empRotationSlot[empId] = idx % shiftCodes.length;
         });
-        // Offsets de franco: distribuidos SOBRE TODO EL GRUPO del puesto.
-        // Antes los repartíamos por subgrupo de shift (M/T/N), lo que hacía que
-        // cada subgrupo arrancara en offset 0 → solapamiento de francos el mismo
-        // día (causando columnas con 6 francos simultáneos y cobertura 5/6).
-        // Ahora cada empleado del puesto cae en un offset distinto, garantizando
-        // francos escalonados a lo largo del ciclo (cL+cF).
-        const groupSize = empIds.length;
-        empIds.forEach((empId, idx) => {
-            const offset = Math.floor((idx * cycleLen) / Math.max(1, groupSize)) % cycleLen;
-            empGroupIdx[empId] = offset;
-        });
+        // Offsets de franco: separados por tipo de turno (8h vs 12h) para que
+        // cada subgrupo tenga offsets distribuidos sobre SU propio cycleLen.
+        // cF≥2 → evitar offset=cycleLen-1 (causa franco huérfano al inicio del mes).
+        const empIds8h = empIds.filter(id => !(has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12));
+        const empIds12h = empIds.filter(id => has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12);
+        const assignOffsets = (group: string[], eCL: number, eCF: number) => {
+            const eCycleLen = eCL + eCF;
+            const modBase = eCF >= 2 ? eCycleLen - 1 : eCycleLen; // evitar offset huérfano
+            group.forEach((empId, idx) => {
+                const offset = Math.floor((idx * eCycleLen) / Math.max(1, group.length)) % modBase;
+                empGroupIdx[empId] = offset;
+                empCycleLen[empId] = eCycleLen;
+                empCL_map[empId] = eCL;
+            });
+        };
+        assignOffsets(empIds8h, cL, cF);
+        assignOffsets(empIds12h, 4, 2); // 4+2 siempre
     });
 
     // ── PASO 3: Días "de trabajo" del ciclo por empleado ────────────────
@@ -962,10 +978,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 if (positionIsActiveOn(assignedPos, dayLetter)) set.add(ctx.getDateKey(day));
             });
         } else {
-            const offset = (empGroupIdx[emp.id] ?? globalIdx) % cycleLen;
+            const eCycleLen = empCycleLen[emp.id] ?? cycleLen;
+            const eCL = empCL_map[emp.id] ?? cL;
+            const offset = (empGroupIdx[emp.id] ?? globalIdx) % eCycleLen;
             ctx.daysInMonth.forEach((day, di) => {
-                const slot = (di + offset) % cycleLen;
-                if (slot < cL) set.add(ctx.getDateKey(day));
+                const slot = (di + offset) % eCycleLen;
+                if (slot < eCL) set.add(ctx.getDateKey(day));
             });
         }
         cycleWorkDays[emp.id] = set;
@@ -1065,13 +1083,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 endTime: (a as any).endTime,
             };
         };
+        const empMaxCons = limitedEmpIds.has(empId) ? undefined : (empCL_map[empId] ?? cL);
+        const empRestCfg: AgreementRestConfig = empMaxCons !== undefined
+            ? { ...V2_AGREEMENT_REST_BASE, maxConsecutiveWorkDays: empMaxCons }
+            : V2_AGREEMENT_REST_BASE;
         return (
             checkRestBetweenShifts({
                 empId,
                 targetDateStr: dateStr,
                 proposed: { code: codeUp, startTime: startResolved, hours: hrs },
                 getShift,
-                cfg: limitedEmpIds.has(empId) ? V2_AGREEMENT_REST_BASE : V2_AGREEMENT_REST,
+                cfg: empRestCfg,
             }) === null
         );
     };
