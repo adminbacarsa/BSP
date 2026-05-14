@@ -8,6 +8,7 @@ import {
     evaluateAdjustedNominaScenarios,
     formatARS,
     overtimeVariableCostExplanationLines,
+    suggestedNominaColumnLabel,
     type LaborCostInputMode,
     type NominaScenarioColumnInput,
     WorkScheme,
@@ -131,9 +132,10 @@ export function ServiceMarginPerServiceModal({
 
                 <div className="p-4 space-y-3">
                     <p className="text-[10px] text-slate-600 dark:text-slate-400 font-bold leading-snug">
-                        Cada columna es un escenario: editá <strong>N personas</strong> y el <strong>texto de cabecera</strong>. Las tres
-                        compiten con la misma SLA; horas normales = min(SLA, N×192), extras = resto (recargo según esquema: 4×2 con
-                        mezcla 100%/50%).
+                        Cada columna es un escenario: el cálculo usa el <strong>N</strong> numérico y el <strong>esquema</strong> (6×2 / 6×1 /
+                        4×2). La capacidad es <strong>N × hs/mes promedio</strong> de ese esquema (config. JSON), no el mismo valor para todos;
+                        el costo hora base para extras sigue siendo costo mensual ÷ tope normativo (p. ej. 192 h). El texto de cabecera es
+                        solo leyenda: usá <strong>N mínimo</strong> para alinear texto con N.
                     </p>
 
                     <div className="flex flex-wrap gap-2">
@@ -151,7 +153,7 @@ export function ServiceMarginPerServiceModal({
                                     prev.map((s) => {
                                         const avg = variables.averageBillableHoursPerEmployeeByScheme[s.scheme] || 192;
                                         const n = slaHours <= 0 ? 0 : Math.ceil(slaHours / Math.max(1, avg));
-                                        return { ...s, headcount: n };
+                                        return { ...s, headcount: n, label: suggestedNominaColumnLabel(n, s.scheme) };
                                     }),
                                 );
                             }}
@@ -304,9 +306,11 @@ export function ServiceMarginPerServiceModal({
                                     {scenarios.map((s, idx) => {
                                         const col = columns[idx];
                                         const isWin = col && winnerColumnId && col.id === winnerColumnId;
+                                        const hsCap = col ? `${col.billableHoursPerEmployee.toFixed(2).replace(/\.?0+$/, '')} hs/cab.` : '';
                                         return (
                                             <th
                                                 key={s.id}
+                                                title={hsCap ? `Capacidad modelo: N × ${hsCap}` : undefined}
                                                 className={`text-right px-2 py-2 font-black whitespace-nowrap align-bottom ${
                                                     isWin ? 'bg-emerald-100/80 dark:bg-emerald-900/25 text-emerald-900 dark:text-emerald-100' : 'text-slate-700 dark:text-slate-200'
                                                 }`}
@@ -346,10 +350,16 @@ export function ServiceMarginPerServiceModal({
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 <tr>
-                                    <td className="px-2 py-1.5 font-bold text-slate-700 dark:text-slate-200">Capacidad total (192h pp)</td>
+                                    <td className="px-2 py-1.5 font-bold text-slate-700 dark:text-slate-200">
+                                        Capacidad (N × hs/mes esquema)
+                                    </td>
                                     {columns.map((c) => (
-                                        <td key={c.id} className="text-right px-2 py-1.5 font-black tabular-nums">
-                                            {Math.round(c.capacityTotal192).toLocaleString('es-AR')} hs
+                                        <td
+                                            key={c.id}
+                                            className="text-right px-2 py-1.5 font-black tabular-nums"
+                                            title={`${c.billableHoursPerEmployee.toFixed(2)} hs promedio por cabeza (${c.scheme})`}
+                                        >
+                                            {Math.round(c.capacityBillableHours).toLocaleString('es-AR')} hs
                                         </td>
                                     ))}
                                 </tr>

@@ -265,7 +265,10 @@ export interface NominaScenarioColumnResult {
     label: string;
     scheme: WorkScheme;
     headcount: number;
-    capacityTotal192: number;
+    /** N × hs/mes promedio según esquema de rotación (ver `averageBillableHoursPerEmployeeByScheme`). */
+    capacityBillableHours: number;
+    /** Hs promedio por empleado usadas para la capacidad de esa columna. */
+    billableHoursPerEmployee: number;
     slaDemand: number;
     normalHours: number;
     overtimeHours: number;
@@ -295,9 +298,22 @@ export function defaultNominaComparisonScenarios(): NominaScenarioColumnInput[] 
     ];
 }
 
+export function schemeLabelShort(scheme: WorkScheme): string {
+    if (scheme === WorkScheme.SixTwo) return '6×2';
+    if (scheme === WorkScheme.SixOne) return '6×1';
+    return '4×2';
+}
+
+/** Texto de cabecera alineado con N y el esquema (p. ej. "17 pers. 6×1"). */
+export function suggestedNominaColumnLabel(n: number, scheme: WorkScheme): string {
+    const k = Math.max(0, Math.floor(Number(n) || 0));
+    return `${k} pers. ${schemeLabelShort(scheme)}`;
+}
+
 /**
  * Comparativa de costo real y margen con dotación fija por columna (nómina ajustada).
- * Horas normales = min(SLA, N×192); extras = max(0, SLA − N×192).
+ * Capacidad modelo = N × hs/mes promedio del esquema (rotación); horas normales = min(SLA, capacidad); extras = resto.
+ * El costo hora “base” para extras sigue siendo costo mensual ÷ tope normativo (p. ej. 192 h SUVICO).
  */
 export function evaluateAdjustedNominaScenarios(
     slaHours: number,
@@ -310,7 +326,12 @@ export function evaluateAdjustedNominaScenarios(
 
     const columns: NominaScenarioColumnResult[] = scenarios.map((sc) => {
         const N = Math.max(0, Math.floor(Number(sc.headcount) || 0));
-        const cap = N * variables.maxNormalHoursPerEmployee;
+        const rawAvg = variables.averageBillableHoursPerEmployeeByScheme[sc.scheme];
+        const hrsPerHead = Math.max(
+            1,
+            typeof rawAvg === 'number' && Number.isFinite(rawAvg) && rawAvg > 0 ? rawAvg : variables.maxNormalHoursPerEmployee,
+        );
+        const cap = N * hrsPerHead;
         const normalH = Math.min(sla, cap);
         const otH = Math.max(0, sla - cap);
         const otMult = effectiveOvertimeMultiplier(sc.scheme, variables);
@@ -326,7 +347,8 @@ export function evaluateAdjustedNominaScenarios(
             label: sc.label,
             scheme: sc.scheme,
             headcount: N,
-            capacityTotal192: cap,
+            capacityBillableHours: cap,
+            billableHoursPerEmployee: hrsPerHead,
             slaDemand: sla,
             normalHours: normalH,
             overtimeHours: otH,
