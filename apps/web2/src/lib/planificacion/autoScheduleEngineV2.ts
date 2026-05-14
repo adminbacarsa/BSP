@@ -940,17 +940,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── RET-DESIGNATES: concentrar RETs en los 3 empleados de menor prioridad global ──
-    // Solo estos reciben RET en el fallback; todos los demás reciben F.
-    // Esto evita celdas RET dispersas en empleados de alta prioridad.
+    // ── RET-DESIGNATES (diagnóstico solamente) ──────────────────────────────
+    // Lista de empleados de menor prioridad por puesto, para informes futuros.
+    // NO altera el fallback: los días de ciclo-trabajo sin turno siempre → RET.
     const retDesignateSet = new Set<string>();
-    {
-        // sortedEmps está ordenado high→low priority; tomamos los 3 últimos.
-        const RET_CARRIERS = 3;
-        for (let i = sortedEmps.length - 1; i >= 0 && retDesignateSet.size < RET_CARRIERS; i--) {
-            retDesignateSet.add(sortedEmps[i].id);
+    Object.entries(positionGroups).forEach(([posName, group]) => {
+        if (group.length === 0) return;
+        const sorted = [...group].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+        const need = Math.max(1, positionNeed[posName] || 1);
+        const surplus = Math.max(0, group.length - need);
+        const designateCount = surplus > 1 ? 2 : 1;
+        for (let i = 0; i < Math.min(designateCount, sorted.length); i++) {
+            retDesignateSet.add(sorted[i]);
         }
-    }
+    });
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
     // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
@@ -1386,10 +1389,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             // En cualquier otro caso (todos los slots cubiertos, empleado ocioso) → RET normal.
             const lastCode = (st.lastShiftCode || '').toUpperCase();
             const isPostNightConstraint = (lastCode === 'N' || lastCode === 'N12') && isWorkDayInCycle;
-            // RET solo para los designados (3 de menor prioridad global); el resto recibe F.
-            const isRetCarrier = retDesignateSet.has(emp.id);
+            // Día de ciclo-trabajo sin turno asignado:
+            //   - post-noche (N→M/T) → F (descanso CCT, fuerza mayor aprobada)
+            //   - cualquier otro caso → RET (empleado disponible, cuenta para horas mínimas)
+            // Día de ciclo-franco → F siempre.
             const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
-                ? (isRetCarrier && !isPostNightConstraint ? 'RET' : 'F')
+                ? (isPostNightConstraint ? 'F' : 'RET')
                 : 'F';
             assignments.push({
                 empId: emp.id,
