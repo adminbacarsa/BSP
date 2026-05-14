@@ -855,17 +855,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     // ── SURPLUS: mover empleados sobrantes a capacidad ociosa real ──────────
-    // Con overcapFactor=1.05, el matching puede meter más personas en un grupo
-    // que las que el ciclo necesita. Esos "sobrantes" quedan EN el grupo y
-    // reciben RETs salpicados a lo largo del mes en vez de tener un patrón
-    // limpio de F/RET. La solución: sacarlos del grupo y marcarlos como
-    // empAssignedTo = null (ociosos) antes de asignar cualquier turno.
-    // Usamos peakConcurrent (pico real simultáneo, sin factor de ciclo) para
-    // que los empleados adicionales queden como relevos puros (4 en vez de 2).
-    const peakConcurrentByPos: Record<string, number> = {};
-    feasibility.perPosition.forEach((p) => { peakConcurrentByPos[p.positionName] = p.peakConcurrent; });
+    // Si hay más empleados en un grupo que los que el ciclo necesita
+    // (peopleNeededWithCycle), los sobrantes reales quedan ociosos y acumulan
+    // todos los RETs del mes, en vez de repartirlos entre todo el grupo.
     for (const posName of Object.keys(positionGroups)) {
-        const need = Math.max(1, peakConcurrentByPos[posName] ?? positionNeed[posName] ?? 1);
+        const need = Math.max(1, positionNeed[posName] || 1);
         const group = positionGroups[posName];
         if (group.length <= need) continue;
         // Ordenar por score ascendente: los de menor prioridad (más lejos, más ausencias)

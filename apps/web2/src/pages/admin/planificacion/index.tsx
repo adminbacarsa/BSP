@@ -2767,10 +2767,27 @@ export default function PlanificacionPage() {
     );
 
     const avgHoursPerEmployee = useMemo(() => {
-        const count = displayedEmployees.length;
-        if (!count || !monthPlannedHours) return 0;
+        if (!monthPlannedHours) return 0;
+        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
+        const empWithHours = new Set<string>();
+        daysInMonth.forEach((day) => {
+            const dateStr = getDateKey(day);
+            displayedEmployees.forEach((emp: any) => {
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                if (!activeShift) return;
+                const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
+                if (!shiftObjective || shiftObjective !== selectedObjective) return;
+                if (!isWorkingCode(activeShift.code)) return;
+                if (calcShiftHours(activeShift) > 0) empWithHours.add(emp.id);
+            });
+        });
+        const count = empWithHours.size;
+        if (!count) return 0;
         return Math.round(monthPlannedHours / count);
-    }, [monthPlannedHours, displayedEmployees]);
+    }, [monthPlannedHours, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
 
     const monthPlannedHoursByPosition = useMemo(() => {
         const map: Record<string, number> = {};
