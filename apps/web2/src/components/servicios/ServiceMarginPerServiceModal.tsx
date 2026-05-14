@@ -8,6 +8,7 @@ import {
     evaluateAdjustedNominaScenarios,
     formatARS,
     overtimeVariableCostExplanationLines,
+    schemeLabelShort,
     suggestedNominaColumnLabel,
     type LaborCostInputMode,
     type NominaScenarioColumnInput,
@@ -132,10 +133,12 @@ export function ServiceMarginPerServiceModal({
 
                 <div className="p-4 space-y-3">
                     <p className="text-[10px] text-slate-600 dark:text-slate-400 font-bold leading-snug">
-                        Cada columna es un escenario: el cálculo usa el <strong>N</strong> numérico y el <strong>esquema</strong> (6×2 / 6×1 /
-                        4×2). La capacidad es <strong>N × hs/mes promedio</strong> de ese esquema (config. JSON), no el mismo valor para todos;
-                        el costo hora base para extras sigue siendo costo mensual ÷ tope normativo (p. ej. 192 h). El texto de cabecera es
-                        solo leyenda: usá <strong>N mínimo</strong> para alinear texto con N.
+                        Cada columna usa el <strong>N</strong> y el <strong>esquema</strong> (6×2 / 6×1 / 4×2). La{' '}
+                        <strong>capacidad total</strong> es <strong>N × horas de presencia promedio al mes</strong> de ese esquema: depende
+                        de cuántos <strong>días se trabaja vs francos</strong> en el calendario, no de un único “192 h por persona” para
+                        comparar rotaciones. El <strong>192 h</strong> del SUVICO sigue usándose solo como <strong>tope</strong> para armar
+                        el costo hora base de extras (costo mensual ÷ tope). El texto de cabecera es leyenda: <strong>N mínimo</strong>{' '}
+                        alinea título con N.
                     </p>
 
                     <div className="flex flex-wrap gap-2">
@@ -306,11 +309,17 @@ export function ServiceMarginPerServiceModal({
                                     {scenarios.map((s, idx) => {
                                         const col = columns[idx];
                                         const isWin = col && winnerColumnId && col.id === winnerColumnId;
-                                        const hsCap = col ? `${col.billableHoursPerEmployee.toFixed(2).replace(/\.?0+$/, '')} hs/cab.` : '';
+                                        const hsCap = col
+                                            ? `${col.billableHoursPerEmployee.toFixed(2).replace(/\.?0+$/, '')} h/cab. (${schemeLabelShort(s.scheme)})`
+                                            : '';
                                         return (
                                             <th
                                                 key={s.id}
-                                                title={hsCap ? `Capacidad modelo: N × ${hsCap}` : undefined}
+                                                title={
+                                                    hsCap
+                                                        ? `Capacidad: N × ${hsCap}. Según días trabajados/francos del esquema en el mes, no 192 h fijas.`
+                                                        : undefined
+                                                }
                                                 className={`text-right px-2 py-2 font-black whitespace-nowrap align-bottom ${
                                                     isWin ? 'bg-emerald-100/80 dark:bg-emerald-900/25 text-emerald-900 dark:text-emerald-100' : 'text-slate-700 dark:text-slate-200'
                                                 }`}
@@ -350,14 +359,20 @@ export function ServiceMarginPerServiceModal({
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 <tr>
-                                    <td className="px-2 py-1.5 font-bold text-slate-700 dark:text-slate-200">
-                                        Capacidad (N × hs/mes esquema)
+                                    <td
+                                        className="px-2 py-1.5 font-bold text-slate-700 dark:text-slate-200 align-top max-w-[160px]"
+                                        title="Las horas por cabeza vienen del calendario típico del esquema (días de trabajo y francos en el mes). No se usa aquí el fijo 192 h pp; el 192 h es solo tope para costo de extras."
+                                    >
+                                        <span className="block leading-tight">Capacidad total</span>
+                                        <span className="block text-[8px] font-black uppercase text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                                            según rotación (días trabajados / mes)
+                                        </span>
                                     </td>
                                     {columns.map((c) => (
                                         <td
                                             key={c.id}
-                                            className="text-right px-2 py-1.5 font-black tabular-nums"
-                                            title={`${c.billableHoursPerEmployee.toFixed(2)} hs promedio por cabeza (${c.scheme})`}
+                                            className="text-right px-2 py-1.5 font-black tabular-nums align-top"
+                                            title={`${schemeLabelShort(c.scheme)}: ~${c.billableHoursPerEmployee.toFixed(2)} h de presencia promedio por cabeza en el mes (francos del ciclo incluidos).`}
                                         >
                                             {Math.round(c.capacityBillableHours).toLocaleString('es-AR')} hs
                                         </td>
