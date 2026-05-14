@@ -15,6 +15,38 @@ import {
 import { ServiceMarginPerServiceModal } from '@/components/servicios/ServiceMarginPerServiceModal';
 import { ServiceMarginViabilityIcon } from '@/components/servicios/ServiceMarginViabilityIcon';
 
+function toYyyyMmDd(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim().slice(0, 10);
+  if (value instanceof Timestamp) {
+    const d = value.toDate();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'object' && value !== null && 'seconds' in (value as Record<string, unknown>)) {
+    const o = value as { seconds: number; nanoseconds?: number };
+    const d = new Timestamp(o.seconds, o.nanoseconds ?? 0).toDate();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return String(value).trim().slice(0, 10);
+}
+
+function parseYmdToLocalDate(ymd: string): Date | null {
+  const core = (ymd || '').trim().slice(0, 10);
+  if (core.length < 10) return null;
+  const y = parseInt(core.slice(0, 4), 10);
+  const mo = parseInt(core.slice(5, 7), 10);
+  const d = parseInt(core.slice(8, 10), 10);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  const dt = new Date(y, mo - 1, d);
+  if (Number.isNaN(dt.getTime())) return null;
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function serviceSlaRowKey(srv: ServiceSLA): string {
+  return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
+}
+
 // --- 1. MODELO DE DATOS ---
 
 // ✅ PRESETS (SUVICO/CCT 422/05)
@@ -120,7 +152,9 @@ export default function ServiciosSLAPage() {
                 const data = doc.data();
                 return { 
                     id: doc.id, 
-                    ...data, 
+                    ...data,
+                    startDate: toYyyyMmDd(data.startDate),
+                    endDate: toYyyyMmDd(data.endDate),
                     positions: data.positions || [] 
                 } as ServiceSLA;
             });
@@ -143,7 +177,12 @@ export default function ServiciosSLAPage() {
 
   const loadDataFallback = async () => {
     const data = await slaService.getAll();
-    const adaptedData = data.map((d: any) => ({ ...d, positions: d.positions || [] }));
+    const adaptedData = data.map((d: any) => ({
+      ...d,
+      startDate: toYyyyMmDd(d.startDate),
+      endDate: toYyyyMmDd(d.endDate),
+      positions: d.positions || [],
+    }));
     setServices(adaptedData);
     setLoading(false);
   };
@@ -295,12 +334,13 @@ export default function ServiciosSLAPage() {
   };
 
   const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string) => {
-    if (!startStr || !endStr || positions.length === 0) return [];
-    
-    const sParts = startStr.split('-').map(Number);
-    const eParts = endStr.split('-').map(Number);
-    let current = new Date(sParts[0], sParts[1] - 1, sParts[2]);
-    const end = new Date(eParts[0], eParts[1] - 1, eParts[2]);
+    const startNorm = (startStr || '').trim().slice(0, 10);
+    const endNorm = (endStr || '').trim().slice(0, 10);
+    if (!startNorm || !endNorm || positions.length === 0) return [];
+
+    let current = parseYmdToLocalDate(startNorm);
+    const end = parseYmdToLocalDate(endNorm);
+    if (!current || !end) return [];
 
     const monthAccumulator: Record<string, { 
         name: string, days: number, totalHours: number, nightHours: number, weekendHours: number 
@@ -382,8 +422,9 @@ export default function ServiciosSLAPage() {
     const map = new Map<string, number>();
     services.forEach((srv) => {
       const breakdown = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate);
-      const total = Math.round(breakdown.reduce((acc, curr) => acc + curr.totalHours, 0));
-      map.set(srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`, total);
+      const fromBreakdown = Math.round(breakdown.reduce((acc, curr) => acc + curr.totalHours, 0));
+      const total = fromBreakdown > 0 ? fromBreakdown : Math.round(Number(srv.totalMonthlyHours) || 0);
+      map.set(serviceSlaRowKey(srv), total);
     });
     return map;
   }, [services]);
@@ -819,9 +860,9 @@ export default function ServiciosSLAPage() {
       let active = 0, hours = 0, positions = 0, guards = 0;
       services.forEach(srv => {
         if (!srv.startDate || !srv.endDate) return;
-        const sStart = new Date(srv.startDate + 'T00:00:00');
-        const sEnd   = new Date(srv.endDate   + 'T00:00:00');
-        if (sStart > mEnd || sEnd < mStart) return;
+        const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
+        const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+        if (!sStart || !sEnd || sStart > mEnd || sEnd < mStart) return;
         active++;
         positions += (srv.positions || []).length;
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
@@ -856,8 +897,9 @@ export default function ServiciosSLAPage() {
       const m = kpiMonth;
       const mStart = new Date(y, m, 1);
       const mEnd = new Date(y, m + 1, 0);
-      const sStart = new Date(srv.startDate + 'T00:00:00');
-      const sEnd = new Date(srv.endDate + 'T00:00:00');
+      const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
+      const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+      if (!sStart || !sEnd) return 0;
       if (sStart > mEnd || sEnd < mStart) return 0;
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let hours = 0;
@@ -874,7 +916,16 @@ export default function ServiciosSLAPage() {
       const kpiH = getServiceHoursForKpiMonth(srv);
       if (kpiH > 0) return { sla: kpiH, note: null as string | null };
       const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate);
-      if (!bd.length) return { sla: 0, note: null as string | null };
+      if (!bd.length) {
+        const stored = Math.round(Number(srv.totalMonthlyHours) || 0);
+        if (stored > 0) {
+          return {
+            sla: stored,
+            note: `Sin desglose por puestos/días: se usa totalMonthlyHours (${stored} h).`,
+          };
+        }
+        return { sla: 0, note: null as string | null };
+      }
       const peak = bd.reduce((b, x) => (x.totalHours > b.totalHours ? x : b), bd[0]);
       const peakH = Math.round(peak.totalHours);
       const monthNames = [
@@ -1022,7 +1073,7 @@ export default function ServiciosSLAPage() {
                         </button>
                         <div className="space-y-2">
                           {(isExpanded ? group.services : group.services.slice(0,1)).map(srv => {
-                            const total = serviceTotals.get(srv.id || '') ?? 0;
+                            const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
                             const slaR = getResolvedSlaForMargin(srv);
                             return (
                               <div key={srv.id} className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-2.5">
@@ -1184,7 +1235,7 @@ export default function ServiciosSLAPage() {
           }
           accentFn={s => s.status === 'active' ? 'bg-indigo-700' : 'bg-slate-300'}
           renderCardSummary={srv => {
-            const total = serviceTotals.get(srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`) ?? 0;
+            const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
             return (
               <>
                 <div className="flex items-start justify-between gap-2">
@@ -1214,7 +1265,7 @@ export default function ServiciosSLAPage() {
             );
           }}
           renderRowSummary={srv => {
-            const total = serviceTotals.get(srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`) ?? 0;
+            const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
             return (
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1">
@@ -1230,7 +1281,7 @@ export default function ServiciosSLAPage() {
             );
           }}
           renderExpanded={(srv, close) => {
-            const total = serviceTotals.get(srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`) ?? 0;
+            const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
             return (
               <div className="space-y-4">
                 <div className="flex items-center gap-3 text-xs text-slate-500">
