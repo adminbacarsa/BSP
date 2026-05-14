@@ -12,6 +12,7 @@ import {
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
   Clock, Layers
 } from 'lucide-react';
+import { ServiceMarginAnalyzer } from '@/components/servicios/ServiceMarginAnalyzer';
 
 // --- 1. MODELO DE DATOS ---
 
@@ -909,6 +910,8 @@ export default function ServiciosSLAPage() {
               ))}
             </div>
           </div>
+
+          <ServiceMarginAnalyzer initialSlaHours={kpiCurrent.hours} />
 
           {/* Contador */}
           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">

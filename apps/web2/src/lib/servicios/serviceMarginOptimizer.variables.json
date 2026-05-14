@@ -1,0 +1,12 @@
+{
+  "sellingPricePerHour": 16500,
+  "baseEmployeeCostMonthlyARS": 1732964,
+  "maxNormalHoursPerEmployee": 192,
+  "overtime50Multiplier": 1.5,
+  "overtime100Multiplier": 2,
+  "averageBillableHoursPerEmployeeByScheme": {
+    "6x2": 182.67,
+    "6x1": 208.67,
+    "4x2": 243
+  }
+}
