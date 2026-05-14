@@ -1374,10 +1374,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
             const assignedPosForFallback = empAssignedTo[emp.id];
-            // Día de trabajo del ciclo sin turno: RET (stand-by).
-            // Con bandas fijas los RETs quedan concentrados en el empleado de relevo
-            // y solo en días donde la regla N→M (sin franco de por medio) lo impide.
-            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
+            // Regla N→M/T: si el último turno real fue noche (N/N12) y este día de ciclo
+            // quedó sin turno (el descanso de 12h impide entrar a M o T al día siguiente),
+            // se asigna F en vez de RET → ciclo corto de ajuste (5+1 ó 5+2) para ese período.
+            // Esto evita que esos días aparezcan como "retén" cuando el empleado simplemente
+            // está cumpliendo el descanso mínimo CCT entre N y el próximo turno diurno.
+            // En cualquier otro caso (todos los slots cubiertos, empleado ocioso) → RET normal.
+            const lastCode = (st.lastShiftCode || '').toUpperCase();
+            const isPostNightConstraint = (lastCode === 'N' || lastCode === 'N12') && isWorkDayInCycle;
+            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
+                ? (isPostNightConstraint ? 'F' : 'RET')
+                : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
