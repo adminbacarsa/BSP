@@ -39,6 +39,8 @@ function formatHmLinear(linearMin: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
+
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
   
@@ -238,6 +240,58 @@ export default function ServiciosSLAPage() {
     ];
   };
 
+  const computePositionDayComposition = (pos: ServicePosition, dayCode: string) => {
+    let dayTotal = 0;
+    let dayNight = 0;
+    const addVariant = (v: ShiftVariant) => {
+      const comp = analyzeShiftComposition(v.startTime, v.endTime);
+      dayTotal += comp.total;
+      dayNight += comp.night;
+    };
+    if (pos.coverageType === '24hs') {
+      const shifts = pos.allowedShiftTypes || [];
+      const m = shifts.find((s) => s.code === 'M');
+      const t = shifts.find((s) => s.code === 'T');
+      const n = shifts.find((s) => s.code === 'N');
+      const d12 = shifts.find((s) => s.code === 'D12');
+      const n12 = shifts.find((s) => s.code === 'N12');
+      if (m && t && n) {
+        addVariant(m);
+        addVariant(t);
+        addVariant(n);
+      } else if (d12 && n12) {
+        addVariant(d12);
+        addVariant(n12);
+      } else {
+        addVariant(SHIFT_VARIANTS_DB['D12']);
+        addVariant(SHIFT_VARIANTS_DB['N12']);
+      }
+    } else if (pos.coverageType === '12hs_diurno') {
+      addVariant(SHIFT_VARIANTS_DB['D12']);
+    } else if (pos.coverageType === '12hs_nocturno') {
+      addVariant(SHIFT_VARIANTS_DB['N12']);
+    } else if (pos.coverageType === 'custom') {
+      (pos.allowedShiftTypes || []).forEach((shift) => {
+        if (shift.days && shift.days.length > 0) {
+          if (shift.days.includes(dayCode)) addVariant(shift);
+        } else {
+          addVariant(shift);
+        }
+      });
+    }
+    return { dayTotal, dayNight };
+  };
+
+  const formatPositionDailyCoverageLabel = (pos: ServicePosition) => {
+    const totals = WEEK_DAY_CODES.map((d) => computePositionDayComposition(pos, d).dayTotal);
+    const min = Math.min(...totals);
+    const max = Math.max(...totals);
+    const r = (x: number) => Math.round(x * 10) / 10;
+    if (max < 1e-6) return '—';
+    if (Math.abs(min - max) < 1e-6) return `${r(max)} hs/día`;
+    return `${r(min)}–${r(max)} hs/día`;
+  };
+
   const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string) => {
     if (!startStr || !endStr || positions.length === 0) return [];
     
@@ -246,7 +300,6 @@ export default function ServiciosSLAPage() {
     let current = new Date(sParts[0], sParts[1] - 1, sParts[2]);
     const end = new Date(eParts[0], eParts[1] - 1, eParts[2]);
 
-    const JS_DAY_MAP = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
     const monthAccumulator: Record<string, { 
         name: string, days: number, totalHours: number, nightHours: number, weekendHours: number 
     }> = {};
@@ -257,7 +310,7 @@ export default function ServiciosSLAPage() {
         const monthKey = `${year}-${month}`;
         const monthName = current.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
         const dayIdx = current.getDay();
-        const dayCode = JS_DAY_MAP[dayIdx];
+        const dayCode = WEEK_DAY_CODES[dayIdx];
         const isWeekend = (dayIdx === 0 || dayIdx === 6); // D y S
 
         if (!monthAccumulator[monthKey]) {
@@ -270,44 +323,7 @@ export default function ServiciosSLAPage() {
         monthAccumulator[monthKey].days++;
 
         positions.forEach(pos => {
-            let dayTotal = 0, dayNight = 0;
-            const addVariant = (v: ShiftVariant) => {
-                const comp = analyzeShiftComposition(v.startTime, v.endTime);
-                dayTotal += comp.total;
-                dayNight += comp.night;
-            };
-
-            if (pos.coverageType === '24hs') {
-                const shifts = pos.allowedShiftTypes || [];
-                const m = shifts.find((s) => s.code === 'M');
-                const t = shifts.find((s) => s.code === 'T');
-                const n = shifts.find((s) => s.code === 'N');
-                const d12 = shifts.find((s) => s.code === 'D12');
-                const n12 = shifts.find((s) => s.code === 'N12');
-                if (m && t && n) {
-                  addVariant(m);
-                  addVariant(t);
-                  addVariant(n);
-                } else if (d12 && n12) {
-                  addVariant(d12);
-                  addVariant(n12);
-                } else {
-                  addVariant(SHIFT_VARIANTS_DB['D12']);
-                  addVariant(SHIFT_VARIANTS_DB['N12']);
-                }
-            }
-            else if (pos.coverageType === '12hs_diurno') addVariant(SHIFT_VARIANTS_DB['D12']);
-            else if (pos.coverageType === '12hs_nocturno') addVariant(SHIFT_VARIANTS_DB['N12']);
-            else if (pos.coverageType === 'custom') {
-                pos.allowedShiftTypes.forEach(shift => {
-                    if (shift.days && shift.days.length > 0) {
-                        if (shift.days.includes(dayCode)) addVariant(shift);
-                    } else {
-                        addVariant(shift); // Standard
-                    }
-                });
-            }
-            
+            const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
             const q = pos.quantity;
             monthAccumulator[monthKey].totalHours += (dayTotal * q);
             monthAccumulator[monthKey].nightHours += (dayNight * q);
@@ -1346,7 +1362,12 @@ export default function ServiciosSLAPage() {
                         <div key={pos.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
                            <div className="flex-1 text-left">
                               <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{pos.quantity} PAX</span></div>
-                              <div className="mt-1 flex items-center gap-2"><span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span></div>
+                              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
+                                <span className="text-[10px] font-black text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800" title="Horas de cobertura por día (un puesto). Rango si cambia según el día de la semana.">
+                                  {formatPositionDailyCoverageLabel(pos)}
+                                </span>
+                              </div>
                            </div>
                            <div className="flex gap-1 flex-wrap justify-end max-w-xs items-center">
                              {pos.code && <div className="text-center bg-indigo-100 dark:bg-indigo-900/40 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-700"><div className="text-[9px] font-black text-indigo-700 dark:text-indigo-300">{pos.code}</div><div className="text-[7px] text-indigo-400">sigla</div></div>}
