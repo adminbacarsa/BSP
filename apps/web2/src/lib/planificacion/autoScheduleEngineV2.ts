@@ -1270,7 +1270,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 for (const empId of candidates) {
                     if (covered >= qty) break;
                     const st = runtime[empId];
-                    const used = inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed;
+                    // Puestos L-V: cap sobre el total del mes (ambos ciclos sumados),
+                    // porque trabajan todos los días hábiles sin importar el corte del ciclo CCT.
+                    const used = limitedEmpIds.has(empId)
+                        ? st.cycleCurrentUsed + st.cycleNextUsed
+                        : (inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed);
                     if (used + sHrs > HARD_MAX_HOURS) continue;
                     if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                     writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
@@ -1319,7 +1323,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     !a.isFranco && !(a as any).isReten
                 ).length;
                 if (covd2 >= qty2) continue;
-                const used2 = inCurr2 ? runtime[emp.id].cycleCurrentUsed : runtime[emp.id].cycleNextUsed;
+                const used2 = limitedEmpIds.has(emp.id)
+                    ? runtime[emp.id].cycleCurrentUsed + runtime[emp.id].cycleNextUsed
+                    : (inCurr2 ? runtime[emp.id].cycleCurrentUsed : runtime[emp.id].cycleNextUsed);
                 if (used2 + sHrs2 > HARD_MAX_HOURS) continue;
                 if (!passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) continue;
                 writeAssignment(emp.id, dateStr2, posName2, sCode2, sh2.name || sCode2, sHrs2, sStart2, inCurr2, sEnd2);
