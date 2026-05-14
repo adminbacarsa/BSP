@@ -403,10 +403,14 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         // lo que subestimaba feo a los puestos 24/7 (M+T+N).
         // Si el puesto NO opera todos los días de la semana (ej. EN/RON L-V), el descanso
         // ya está incorporado: S/D son francos "naturales". No aplicamos cycleFactor en
-        // ese caso para no inflar la dotación (1 persona alcanza para cubrir un L-V).
+        // ese caso para no inflar la dotación.
+        // Para puestos limitados (L-V) usamos HARD_MAX_HOURS (200h) como divisor porque
+        // es el tope CCT real; con TARGET_AVG_HOURS (192h) se infla la dotación necesaria
+        // (ej. 198h daría 2 personas cuando 1 alcanza, ya que 198 < 200).
         const isLimitedSchedule = activeDays < ctx.daysInMonth.length;
         const factorForPosition = isLimitedSchedule ? 1 : cycleFactor;
-        const peopleByHours = monthHours > 0 ? Math.ceil((monthHours / TARGET_AVG_HOURS) * factorForPosition) : 0;
+        const hoursRef = isLimitedSchedule ? HARD_MAX_HOURS : TARGET_AVG_HOURS;
+        const peopleByHours = monthHours > 0 ? Math.ceil((monthHours / hoursRef) * factorForPosition) : 0;
         const peopleByPeak = Math.ceil(peakConcurrent * factorForPosition);
         const peopleNeededWithCycle = Math.max(peopleByHours, peopleByPeak);
         return {
