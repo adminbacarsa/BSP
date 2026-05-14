@@ -1359,7 +1359,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     //     ese empleado está en stand-by todo el mes.
     //   - Empleado asignado a un puesto:
     //       · Día de franco del ciclo → F.
-    //       · Día de trabajo del ciclo sin turno asignado → celda vacía (no se genera nada).
+    //       · Día de trabajo del ciclo sin turno asignado → RET (el 2° pase ya cubrió
+    //         lo que el descanso permitía; el resto es stand-by real).
     //   - Empleado ocioso (sin puesto) o en día no operativo del puesto limitado → F.
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
@@ -1373,22 +1374,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const ownerLimitedInactive = !!ownerPos && !positionIsActiveOn(ownerPos, dayLetter);
             const isWorkDayInCycle = !ownerLimitedInactive && cycleWorkDays[emp.id]?.has(dateStr);
             const assignedPosForFallback = empAssignedTo[emp.id];
-            // Día de trabajo del ciclo sin turno asignado: celda vacía (sin push).
-            // Solo se registra el día para no re-procesar. F va solo en franco de ciclo.
-            if (isWorkDayInCycle && assignedPosForFallback !== null) {
-                st.assignedDays.add(dateStr);
-                continue;
-            }
-            // Franco de ciclo, empleado ocioso, o puesto limitado en día inactivo → F.
+            // Día de trabajo del ciclo sin turno: RET (stand-by).
+            // Con bandas fijas los RETs quedan concentrados en el empleado de relevo
+            // y solo en días donde la regla N→M (sin franco de por medio) lo impide.
+            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null ? 'RET' : 'F';
             assignments.push({
                 empId: emp.id,
                 dateStr,
                 positionName: '',
-                code: 'F',
-                name: 'Franco',
+                code: fallbackCode,
+                name: fallbackCode === 'RET' ? 'Retén' : 'Franco',
                 hours: 0,
                 startTime: '00:00',
-                isFranco: true,
+                isFranco: fallbackCode === 'F',
+                isReten: fallbackCode === 'RET',
             });
             st.assignedDays.add(dateStr);
         }
