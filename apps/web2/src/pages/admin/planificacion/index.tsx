@@ -2581,6 +2581,51 @@ export default function PlanificacionPage() {
                 empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
             });
 
+            // ── Racha del mes anterior: calcula la fase de ciclo correcta para el día 1 ──
+            // Consultamos los últimos 10 días del mes anterior (cubre 6+2 y 4+2).
+            // Sin esto el motor asigna offsets ficticios y genera hasta 9 días seguidos (ej. trabajó
+            // mayo 29-31 y el motor arranca el ciclo desde el día 1 de junio sin saberlo).
+            const prevMonthEndDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0); // último día mes anterior
+            const trailLookbackStart = new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), Math.max(1, prevMonthEndDate.getDate() - 9));
+            const prevTrailSnap = await getDocs(query(
+                collection(db, 'turnos'),
+                where('objectiveId', '==', selectedObjective),
+                where('startTime', '>=', Timestamp.fromDate(trailLookbackStart)),
+                where('startTime', '<=', Timestamp.fromDate(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), prevMonthEndDate.getDate(), 23, 59, 59)))
+            ));
+            const prevTrailByEmp: Record<string, Record<string, string>> = {};
+            const FRANCO_CODES_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+            prevTrailSnap.docs.forEach(d => {
+                const data = d.data() as any;
+                if (!data.employeeId || !data.startTime) return;
+                const dt: Date = (data.startTime as Timestamp).toDate();
+                const dateStr = getDateKey(dt);
+                const code = String(data.code || '').toUpperCase();
+                if (!prevTrailByEmp[data.employeeId]) prevTrailByEmp[data.employeeId] = {};
+                prevTrailByEmp[data.employeeId][dateStr] = code;
+            });
+            const prevMonthTrailingWorkDays: Record<string, number> = {};
+            const prevMonthTrailingRestDays: Record<string, number> = {};
+            const lastDayStr = getDateKey(prevMonthEndDate);
+            displayedEmployees.forEach((emp: any) => {
+                const empShifts = prevTrailByEmp[emp.id] || {};
+                const lastCode = empShifts[lastDayStr];
+                if (!lastCode) return; // sin datos, el motor usará offset distribuido
+                const isFrancoLast = FRANCO_CODES_SET.has(lastCode);
+                let count = 0;
+                for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
+                    const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
+                    const c = empShifts[ds];
+                    if (!c) break;
+                    const isFranco = FRANCO_CODES_SET.has(c);
+                    if (isFrancoLast && isFranco) { count++; }
+                    else if (!isFrancoLast && !isFranco) { count++; }
+                    else break;
+                }
+                if (isFrancoLast) prevMonthTrailingRestDays[emp.id] = count;
+                else prevMonthTrailingWorkDays[emp.id] = count;
+            });
+
             const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
             const defaultPositionByEmp: Record<string,string> = {};
@@ -2613,6 +2658,8 @@ export default function PlanificacionPage() {
                 getDateKey,
                 rotateShifts: autoRotateShifts,
                 codeHoursHint: slaCodeHoursHint,
+                prevMonthTrailingWorkDays,
+                prevMonthTrailingRestDays,
             });
 
             await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');

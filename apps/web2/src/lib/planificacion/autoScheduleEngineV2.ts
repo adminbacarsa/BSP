@@ -171,6 +171,17 @@ export interface V2EngineContext {
      * la definición del turno trae `hours`/`startTime`/`endTime` válidos.
      */
     codeHoursHint?: Record<string, number>;
+    /**
+     * Días de trabajo consecutivos al final del mes anterior por empId.
+     * Permite al motor calcular la fase de ciclo correcta para el día 1 del mes
+     * y evitar rachas que crucen el límite de mes (ej. 3 días en mayo + 6 en junio = 9 seguidos).
+     */
+    prevMonthTrailingWorkDays?: Record<string, number>;
+    /**
+     * Días de franco consecutivos al final del mes anterior por empId.
+     * Si > 0 y < cF: el empleado está a mitad de su bloque de descanso y junio arranca con franco.
+     */
+    prevMonthTrailingRestDays?: Record<string, number>;
 }
 
 export interface V2PositionDemand {
@@ -1057,9 +1068,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const empIds12h = empIds.filter(id => has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12);
         const assignOffsets = (group: string[], eCL: number, eCF: number) => {
             const eCycleLen = eCL + eCF;
-            const modBase = eCycleLen; // todos los offsets 0..cycleLen-1 para distribución uniforme
             group.forEach((empId, idx) => {
-                const offset = Math.floor((idx * eCycleLen) / Math.max(1, group.length)) % modBase;
+                const tw = ctx.prevMonthTrailingWorkDays?.[empId];
+                const tr = ctx.prevMonthTrailingRestDays?.[empId];
+                let offset: number;
+                if (tw !== undefined && tw > 0) {
+                    // En bloque de trabajo: la fase de ciclo al día 1 = días trabajados al final del mes anterior
+                    offset = tw % eCycleLen;
+                } else if (tr !== undefined && tr > 0 && tr < eCF) {
+                    // A mitad del bloque de descanso: el día 1 del mes sigue siendo franco
+                    offset = (eCL + tr) % eCycleLen;
+                } else {
+                    // Sin datos o descanso completo: distribución uniforme para escalonar francos
+                    offset = Math.floor((idx * eCycleLen) / Math.max(1, group.length)) % eCycleLen;
+                }
                 empGroupIdx[empId] = offset;
                 empCycleLen[empId] = eCycleLen;
                 empCL_map[empId] = eCL;
@@ -1093,7 +1115,18 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         } else {
             const eCycleLen = empCycleLen[emp.id] ?? cycleLen;
             const eCL = empCL_map[emp.id] ?? cL;
-            const offset = (empGroupIdx[emp.id] ?? globalIdx) % eCycleLen;
+            const eCF = eCycleLen - eCL;
+            // Si hay datos del mes anterior, usar la fase real del ciclo
+            const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
+            const tr = ctx.prevMonthTrailingRestDays?.[emp.id];
+            let offset: number;
+            if (tw !== undefined && tw > 0) {
+                offset = tw % eCycleLen;
+            } else if (tr !== undefined && tr > 0 && tr < eCF) {
+                offset = (eCL + tr) % eCycleLen;
+            } else {
+                offset = (empGroupIdx[emp.id] ?? globalIdx) % eCycleLen;
+            }
             ctx.daysInMonth.forEach((day, di) => {
                 const slot = (di + offset) % eCycleLen;
                 if (slot < eCL) set.add(ctx.getDateKey(day));
