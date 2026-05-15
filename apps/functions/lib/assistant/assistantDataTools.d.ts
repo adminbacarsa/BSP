@@ -6,9 +6,19 @@ export type AssistantToolContext = {
     selfEmployeeFirestoreId: string | null;
     referenceDateYsMmDd: string;
 };
+export declare function ejecutarListadoFrancoRetDia(ctx: AssistantToolContext, args: {
+    fecha?: string;
+    tipo?: string;
+    id_objetivo_cercania?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
 export declare function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean;
 export declare function resolveSelfEmployeeFirestoreId(uid: string): Promise<string | null>;
 export declare function ejecutarBuscarEmpleadosPorNombre(ctx: AssistantToolContext, args: {
+    texto?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarBuscarObjetivosPorNombre(ctx: AssistantToolContext, args: {
     texto?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
@@ -32,4 +42,5 @@ export declare function ejecutarContarServiciosSlaVigentesEmpresa(ctx: Assistant
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;
 }): Promise<Record<string, unknown>>;
+export declare function buildEmpresaMetricsSnapshotForPrompt(ctx: AssistantToolContext): Promise<string>;
 export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;

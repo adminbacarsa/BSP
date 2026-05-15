@@ -11,14 +11,17 @@ const resolveAssistantUser_1 = require("./resolveAssistantUser");
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
 
-1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
+1) **No** abras diciendo en qué ruta o pantalla está el usuario (evitá "Estás en…" o URLs). El chat ya muestra el módulo arriba.
 
-2) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / contratos vigentes «hoy»** usá **contar_servicios_sla_vigentes_empresa**. Para **empleados en plantilla / legajos activos de la empresa** (incl. desde Planificación) usá **contar_empleados_plantilla_empresa**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
+2) **No** incluyas rutas técnicas tipo \`/admin/…\`, \`/empleado/…\` ni \`/cliente/…\` en respuestas normales (incluido listados tipo "qué podés responder" o "qué módulos hay"). Referí al lugar por **nombre del ítem del menú lateral** (p. ej. "Servicios y SLA", "Planificación y Turnos", "Operaciones", "Clientes y Objetivos", "RRHH", "Reportes", "Configuración"). **Solo** si el usuario pregunta explícitamente por la **URL**, la **barra de direcciones** o "en qué link", podés mencionar una ruta concreta.
 
-3) Usá **lista numerada** cuando expliques procedimientos UI (sólo si el usuario pidió proceso o ubicación). Ahí resaltá controles con **negritas markdown** típicas: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+3) Si al inicio del mensaje de sistema aparece el bloque **MÉTRICAS YA CALCULADAS EN ESTE TURNO**, **usá esas cifras** para totales de nómina panel, SLA del mes u operaciones del día de referencia cuando la pregunta coincida; no inventes otros totales genéricos. Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de datos de herramientas o de ese bloque, **respondé ese número en la primera oración**. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **empleados en nómina / vigiladores en plantilla** como la tarjeta del panel usá **contar_empleados_plantilla_empresa** y **cuenta_para_tarjeta_panel_empleados_nomina**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
-4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones, /admin/servicios.
-5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
+4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+
+5) En resúmenes o varios temas seguidos: **un párrafo o un ítem por bloque**, separados con línea en blanco; no amontones todo en un solo párrafo.
+
+6) Evitá títulos tipo #; sin rollos legales si no pidieron eso.
 `.trim();
 const MAX_MESSAGES = 24;
 const MAX_CONTENT = 2600;
@@ -57,8 +60,8 @@ function personaModuleBlurb(persona, readableKeys, moduleKey) {
     const parts = [];
     if (persona === 'SYSTEM') {
         parts.push(`Perfil BACKOFFICE/COSP. Tiene alcance declarado sólo sobre módulos con permiso READ: ${readableKeys.sort().join(', ') || '(ninguno listado)'}.`);
-        parts.push('No describas rutas /admin ni flujos de módulos que no estén en esa lista.');
-        parts.push(`Sugerencias de ruta conocidas:`);
+        parts.push('No describas flujos de módulos que no estén en esa lista. En mensajes al usuario no listes URLs /admin/…; usá nombres del menú.');
+        parts.push(`Referencia interna de módulos (no volcar textual al usuario):`);
         readableKeys.slice(0, 12).forEach((k) => {
             const h = cospKnowledge_1.ADMIN_MODULE_ROUTE_HINTS[k];
             if (h)
@@ -66,7 +69,7 @@ function personaModuleBlurb(persona, readableKeys, moduleKey) {
         });
     }
     else if (persona === 'EMPLOYEE') {
-        parts.push('Perfil PORTAL EMPLEADO: responder sobre turnos propios, presencia marcada desde portal/ausencias, avisos. No exponer otros empleados por nombre salvo ejemplo genérico. No rutas administrativas salvo mencionar brevemente qué pueden hacer los supervisores en /admin cuando el usuario pregunte cómo reclamar ante la empresa.');
+        parts.push('Perfil PORTAL EMPLEADO: responder sobre turnos propios, presencia marcada desde portal/ausencias, avisos. No exponer otros empleados por nombre salvo ejemplo genérico. No menciones URLs administrativas salvo que el usuario pregunte explícitamente por el acceso web del personal de oficina.');
     }
     else {
         parts.push('Perfil PORTAL CLIENTE: vistas de cliente (accesos, personal autorizado, consultas típicas según desarrollo). Orientar sobre qué hacer si no encuentra función (contactar empresa de seguridad, etc.). Sin datos operativos de otros clientes.');
@@ -92,10 +95,11 @@ function normalizeClientTodayYsMmDd(raw) {
     const s = String(raw ?? '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
 }
-function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled) {
+function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock) {
     const guide = (0, cospKnowledge_1.operationalGuideForModuleKey)(moduleKey);
     return [
         `Sos la asistente virtual de COSP (Grupo Bacar). Español Argentina, tono claro y servicial.`,
+        metricsVerifiedBlock ? `${metricsVerifiedBlock}\n` : '',
         ASSISTANT_RESPONSE_STYLE,
         '',
         cospKnowledge_1.COSP_PLATFORM_KNOWLEDGE,
@@ -183,7 +187,16 @@ async function runPlatformAssistant(uid, payload) {
         referenceDateYsMmDd: referenceYsMmDd,
     };
     const toolsEnabled = (0, assistantDataTools_1.assistantToolsEnabledForContext)(toolCtx);
-    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled);
+    let metricsVerifiedBlock = '';
+    if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
+        try {
+            metricsVerifiedBlock = await (0, assistantDataTools_1.buildEmpresaMetricsSnapshotForPrompt)(toolCtx);
+        }
+        catch (e) {
+            console.warn('[assistant] buildEmpresaMetricsSnapshotForPrompt', e);
+        }
+    }
+    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock || undefined);
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
     return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
 }

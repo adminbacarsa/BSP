@@ -1294,6 +1294,83 @@ export async function ejecutarContarEmpleadosPlantillaEmpresa(
   };
 }
 
+/**
+ * Texto para system prompt: mismos helpers que las tools, en paralelo,
+ * para anclar totales (evita p. ej. «150» cuando el panel muestra 62 en nómina).
+ */
+export async function buildEmpresaMetricsSnapshotForPrompt(ctx: AssistantToolContext): Promise<string> {
+  if (ctx.persona !== 'SYSTEM' || !ctx.empresaId.trim()) return '';
+
+  const jobs: Promise<string[] | null>[] = [];
+
+  if (canQueryEmpleadosPlantillaResumen(ctx)) {
+    jobs.push(
+      (async (): Promise<string[] | null> => {
+        try {
+          const r = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {});
+          if (String(r.error ?? '').trim()) return [`- Empleados/nómina: error (${String(r.error)}).`];
+          const lines = [
+            `- Empleados en nómina (tarjeta panel «EMPLEADOS EN NÓMINA», status activo explícito): ${String(r.cuenta_para_tarjeta_panel_empleados_nomina ?? '—')}`,
+            `- Legajos activos criterio amplio RRHH (incluye sin estado): ${String(r.cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado ?? '—')}`,
+          ];
+          if (r.truncado_loteFirestore_900) {
+            lines.push('- Aviso: consulta con límite 900 legajos; el conteo puede estar incompleto.');
+          }
+          return lines;
+        } catch {
+          return ['- Empleados/nómina: no disponible en este turno.'];
+        }
+      })(),
+    );
+  }
+
+  if (canQueryServiciosSlaResumen(ctx)) {
+    jobs.push(
+      (async (): Promise<string[] | null> => {
+        try {
+          const r = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, {});
+          if (String(r.error ?? '').trim()) return [`- Servicios SLA (mes referencia): error (${String(r.error)}).`];
+          return [
+            `- Contratos SLA que solapan el mes de la fecha referencia (KPI panel Servicios): ${String(r.cuenta_para_tarjeta_servicios_activos_del_mes ?? '—')}`,
+            `- Objetivos distintos con SLA en ese mes: ${String(r.cuenta_objetivos_distintos_con_sla_en_ese_mes ?? '—')}`,
+          ];
+        } catch {
+          return ['- Servicios SLA (mes referencia): no disponible en este turno.'];
+        }
+      })(),
+    );
+  }
+
+  if (canQueryOperationsDaySummary(ctx)) {
+    jobs.push(
+      (async (): Promise<string[] | null> => {
+        try {
+          const r = await ejecutarResumenPresenciasObjetivosDia(ctx, {});
+          if (String(r.error ?? '').trim()) return [`- Operaciones (día referencia): error (${String(r.error)}).`];
+          const t = r.totales as Record<string, unknown> | undefined;
+          if (!t) return ['- Operaciones (día referencia): sin totales.'];
+          return [
+            `- Operaciones día referencia — turnos visibles: ${String(t.turnos_visibles_en_dia ?? '—')}; presentes: ${String(t.presentes ?? '—')}; ausentes: ${String(t.ausentes ?? '—')}; sin marcación: ${String(t.sin_marcacion_relevante ?? '—')}`,
+          ];
+        } catch {
+          return ['- Operaciones (día referencia): no disponible en este turno.'];
+        }
+      })(),
+    );
+  }
+
+  if (jobs.length === 0) return '';
+
+  const blocks = await Promise.all(jobs);
+  const flat = blocks.flatMap((b) => (b ?? []).filter(Boolean));
+
+  return [
+    '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para totales alineados al panel; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
+    ...flat,
+    'Si preguntan «cuántos empleados somos» en sentido plantilla/nómina del dashboard o RRHH, el número es el de «Empleados en nómina» arriba; el criterio amplio RRHH es distinto y solo aplica si lo piden explícito.',
+  ].join('\n');
+}
+
 function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value === undefined) return null;

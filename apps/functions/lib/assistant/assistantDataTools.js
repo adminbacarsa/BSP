@@ -1,13 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ejecutarListadoFrancoRetDia = ejecutarListadoFrancoRetDia;
 exports.assistantToolsEnabledForContext = assistantToolsEnabledForContext;
 exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
 exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
+exports.ejecutarBuscarObjetivosPorNombre = ejecutarBuscarObjetivosPorNombre;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetivosDia;
 exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.ejecutarContarServiciosSlaVigentesEmpresa = ejecutarContarServiciosSlaVigentesEmpresa;
 exports.ejecutarContarEmpleadosPlantillaEmpresa = ejecutarContarEmpleadosPlantillaEmpresa;
+exports.buildEmpresaMetricsSnapshotForPrompt = buildEmpresaMetricsSnapshotForPrompt;
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const AR_DAY_OFFSET = '-03:00';
@@ -43,6 +46,13 @@ function canQueryServiciosSlaResumen(ctx) {
     if (!ctx.empresaId.trim())
         return false;
     return ctx.readableModuleKeys.some((k) => ['SERVICES', 'PLANNING', 'OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'CONFIG', 'CLIENTS'].includes(k));
+}
+function canSearchObjectivesCrm(ctx) {
+    if (ctx.persona !== 'SYSTEM')
+        return false;
+    if (!ctx.empresaId.trim())
+        return false;
+    return ctx.readableModuleKeys.some((k) => ['CLIENTS', 'PLANNING', 'OPERATIONS', 'SERVICES', 'ANALYSIS', 'DASHBOARD', 'REPORTS', 'CONFIG'].includes(k));
 }
 function canQueryEmpleadosPlantillaResumen(ctx) {
     if (ctx.persona !== 'SYSTEM')
@@ -224,12 +234,247 @@ async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
     }
     return out;
 }
+async function objectivesMapWithCoordsForEmpresa(db, empresaId, filterObjectiveId) {
+    const out = new Map();
+    const filt = filterObjectiveId?.trim();
+    const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(480).get();
+    for (const d of snap.docs) {
+        const data = d.data();
+        const clientName = String(data.name ?? '').trim() || d.id;
+        const objetivos = data.objetivos;
+        const readLatLng = (o) => {
+            const lat = o?.lat != null ? Number(o.lat) : NaN;
+            const lng = o?.lng != null ? Number(o.lng) : NaN;
+            return {
+                lat: Number.isFinite(lat) ? lat : null,
+                lng: Number.isFinite(lng) ? lng : null,
+            };
+        };
+        if (Array.isArray(objetivos)) {
+            for (const o of objetivos) {
+                const oid = String(o?.id ?? '').trim();
+                if (!oid)
+                    continue;
+                if (filt && oid !== filt)
+                    continue;
+                const name = String(o?.name ?? '').trim() || oid;
+                const { lat, lng } = readLatLng(o);
+                out.set(oid, { name, clientId: d.id, clientName, lat, lng });
+            }
+        }
+        else if (!objetivos) {
+            if (filt && d.id !== filt)
+                continue;
+            const lat = data.lat != null ? Number(data.lat) : NaN;
+            const lng = data.lng != null ? Number(data.lng) : NaN;
+            out.set(d.id, {
+                name: clientName,
+                clientId: d.id,
+                clientName,
+                lat: Number.isFinite(lat) ? lat : null,
+                lng: Number.isFinite(lng) ? lng : null,
+            });
+        }
+    }
+    return out;
+}
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const toRad = (x) => (x * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
+    const { start, end } = monitorWideWindow(fecha);
+    const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
+    const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
+    const rows = [];
+    for (const docSnap of qsnap.docs) {
+        const shift = docSnap.data();
+        if (shift.status === 'Canceled')
+            continue;
+        const st = shift.startTime;
+        if (!(st instanceof admin.firestore.Timestamp))
+            continue;
+        const shiftDateObj = st.toDate();
+        if (!isSameCordobaCalendarDay(shiftDateObj, fecha))
+            continue;
+        const oid = String(shift.objectiveId ?? '').trim();
+        if (!oid || !objectiveMap.has(oid))
+            continue;
+        const empId = String(shift.employeeId ?? '').trim();
+        if (!empId || empId === 'VACANTE')
+            continue;
+        const codeRaw = String(shift.code ?? shift.type ?? '').trim();
+        const codeU = codeRaw.toUpperCase();
+        const isFranco = FRANCO_CODES.has(codeU);
+        const isRet = codeU === 'RET';
+        const wantF = tipo === 'franco' || tipo === 'ambos';
+        const wantR = tipo === 'ret' || tipo === 'ambos';
+        if (!(isFranco && wantF) && !(isRet && wantR))
+            continue;
+        const meta = objectiveMap.get(oid);
+        const nombreEmp = String(shift.employeeName ?? '').trim();
+        rows.push({
+            employee_firestore_id: empId,
+            empleado_etiqueta: nombreEmp || empId.slice(0, 12),
+            codigo: codeRaw || codeU,
+            cliente: meta.clientName,
+            objetivo: meta.name,
+            objetivo_id: oid,
+            hora_inicio_cor: horaHmCordoba(shiftDateObj),
+        });
+    }
+    rows.sort((a, b) => {
+        const c0 = `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es');
+        if (c0 !== 0)
+            return c0;
+        return a.empleado_etiqueta.localeCompare(b.empleado_etiqueta, 'es');
+    });
+    return { rows, truncado: qsnap.size >= 2800 };
+}
+async function empleadosCoordsBatch(db, empresaId, empIds) {
+    const out = new Map();
+    const uniq = [...new Set(empIds)].filter(Boolean);
+    const chunk = 100;
+    for (let i = 0; i < uniq.length; i += chunk) {
+        const slice = uniq.slice(i, i + chunk);
+        const refs = slice.map((id) => db.collection('empleados').doc(id));
+        const snaps = await db.getAll(...refs);
+        for (let j = 0; j < snaps.length; j++) {
+            const s = snaps[j];
+            if (!s.exists)
+                continue;
+            const row = s.data();
+            const empE = String(row.empresaId ?? '').trim();
+            if (empE && empE.toLowerCase() !== empresaId.toLowerCase())
+                continue;
+            const lat = row.lat != null ? Number(row.lat) : NaN;
+            const lng = row.lng != null ? Number(row.lng) : NaN;
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                out.set(s.id, { lat, lng });
+            }
+        }
+    }
+    return out;
+}
+async function ejecutarListadoFrancoRetDia(ctx, args) {
+    if (!canQueryOperationsDaySummary(ctx)) {
+        return { error: 'sin_permiso_requiere_modulo_operaciones_planificacion_o_similar' };
+    }
+    const fecha = String(args.fecha ?? ctx.referenceDateYsMmDd).trim();
+    const tipoRaw = String(args.tipo ?? 'ambos').trim().toLowerCase();
+    const tipo = tipoRaw === 'franco' || tipoRaw === 'ret' || tipoRaw === 'ambos' ? tipoRaw : 'ambos';
+    try {
+        parseYmd(fecha);
+    }
+    catch (e) {
+        return { error: e?.message ?? 'fecha_invalida' };
+    }
+    let lim = Math.floor(Number(args.limite ?? 80));
+    if (!Number.isFinite(lim))
+        lim = 80;
+    lim = Math.max(8, Math.min(160, lim));
+    const db = admin.firestore();
+    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined);
+    if (objectiveMap.size === 0) {
+        return { fecha_referencia: fecha, nota: 'sin_objetivos_para_esta_empresa', cuenta: 0, filas: [] };
+    }
+    const { rows: raw, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
+    const idCerc = String(args.id_objetivo_cercania ?? '').trim();
+    if (idCerc) {
+        const withCoords = await objectivesMapWithCoordsForEmpresa(db, ctx.empresaId, undefined);
+        const target = withCoords.get(idCerc);
+        if (!target) {
+            return { error: 'objetivo_no_encontrado_en_empresa', hint: 'usar id Firestore del objetivo (CRM).' };
+        }
+        if (target.lat == null || target.lng == null) {
+            return {
+                error: 'objetivo_sin_coordenadas_en_crm',
+                objetivo: target.name,
+                hint: 'Cargá lat/lng del objetivo en Clientes y Objetivos para calcular distancias.',
+            };
+        }
+        const empIds = [...new Set(raw.map((r) => r.employee_firestore_id))];
+        const coords = await empleadosCoordsBatch(db, ctx.empresaId, empIds);
+        const scored = [];
+        const sinCoord = [];
+        for (const r of raw) {
+            const c = coords.get(r.employee_firestore_id);
+            if (!c) {
+                if (!sinCoord.includes(r.empleado_etiqueta))
+                    sinCoord.push(r.empleado_etiqueta);
+                scored.push({ ...r, distancia_km: null });
+                continue;
+            }
+            scored.push({
+                ...r,
+                distancia_km: haversineKm(c.lat, c.lng, target.lat, target.lng),
+            });
+        }
+        scored.sort((a, b) => {
+            if (a.distancia_km == null && b.distancia_km == null)
+                return 0;
+            if (a.distancia_km == null)
+                return 1;
+            if (b.distancia_km == null)
+                return -1;
+            return a.distancia_km - b.distancia_km;
+        });
+        const filas = scored.slice(0, lim).map((r) => ({
+            empleado: r.empleado_etiqueta,
+            codigo: r.codigo,
+            cliente: r.cliente,
+            objetivo_turno: r.objetivo,
+            hora_inicio_cor: r.hora_inicio_cor,
+            distancia_km_al_objetivo_pedido: r.distancia_km != null ? Math.round(r.distancia_km * 100) / 100 : null,
+        }));
+        return {
+            fecha_referencia: fecha,
+            tipo_filtro: tipo,
+            objetivo_referencia_distancia: { id: idCerc, nombre: target.name, cliente: target.clientName },
+            criterios: 'Turnos del día (zona AR) con código F/FF/FP/FT (franco) o RET, objetivos de la empresa; incluye borradores/planificación. Distancia = Haversine entre lat/lng del legajo (RRHH) y el objetivo pedido.',
+            cuenta_filas: raw.length,
+            truncado_consulta_turnos: truncado,
+            muestra_cap: lim,
+            filas,
+            empleados_sin_coordenadas_en_legajo_muestra: sinCoord.slice(0, 24),
+            nota_tras_herramienta: 'Ordená por distancia_km_al_objetivo_pedido ascendente; los null no tienen geolocalización en el legajo. No inventes nombres: usá solo campos de filas.',
+        };
+    }
+    const filas = raw.slice(0, lim).map((r) => ({
+        empleado: r.empleado_etiqueta,
+        id_legajo: r.employee_firestore_id,
+        codigo: r.codigo,
+        cliente: r.cliente,
+        objetivo: r.objetivo,
+        hora_inicio_cor: r.hora_inicio_cor,
+    }));
+    return {
+        fecha_referencia: fecha,
+        tipo_filtro: tipo,
+        criterios: 'Turnos del día (zona AR) con código F/FF/FP/FT (franco) o RET en objetivos de la empresa; incluye planificación/borrador. No es la misma vista filtrada que el monitor de cobertura operativa.',
+        cuenta_filas: raw.length,
+        truncado_consulta_turnos: truncado,
+        muestra_cap: lim,
+        filas,
+        nota_tras_herramienta: 'Para «quién está de franco» o «quién en RET» listá filas. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania. No inventes nombres.',
+    };
+}
 function assistantToolsEnabledForContext(ctx) {
     if (!ctx.empresaId)
         return false;
     if (ctx.persona === 'CLIENT')
         return false;
-    return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx) || canQueryEmpleadosPlantillaResumen(ctx);
+    return (canQueryShifts(ctx) ||
+        canUseEmployeeSearch(ctx) ||
+        canQueryServiciosSlaResumen(ctx) ||
+        canQueryEmpleadosPlantillaResumen(ctx) ||
+        canSearchObjectivesCrm(ctx));
 }
 function parseYmd(s) {
     const rex = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
@@ -275,6 +520,37 @@ function slaCampoFechaYmD(raw) {
 async function empresaClientIdsSet(db, empresaId) {
     const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(520).get();
     return new Set(snap.docs.map((d) => d.id));
+}
+function chunkIds(arr, size) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size)
+        out.push(arr.slice(i, i + size));
+    return out;
+}
+function servicioSlaSolapaMesReferencia(desdeYmd, hastaYmd, refYmd) {
+    const ym = refYmd.slice(0, 7);
+    const sd = (desdeYmd || '').trim().slice(0, 10);
+    const ed = (hastaYmd || '').trim().slice(0, 10);
+    if (sd.length < 10 || ed.length < 10)
+        return false;
+    return sd <= `${ym}-31` && ed >= `${ym}-01`;
+}
+function servicioSlaVigenteEnDiaInclusivo(desdeYmd, hastaYmd, refYmd) {
+    const sd = (desdeYmd || '').trim().slice(0, 10);
+    const ed = (hastaYmd || '').trim().slice(0, 10);
+    if (sd.length < 10 || ed.length < 10)
+        return false;
+    return sd <= refYmd && ed >= refYmd;
+}
+function slaStatusOperativoComoPantallaServicios(row) {
+    const s = String(row.status ?? '').trim().toLowerCase();
+    if (!s)
+        return true;
+    if (s === 'active' || s === 'activo' || s === 'activa')
+        return true;
+    if (s === 'inactive' || s === 'inactivo' || s === 'expired' || s === 'vencido')
+        return false;
+    return true;
 }
 function arRangeTimestamps(desdeYsMmDd, hastaYsMmDd) {
     const a = parseYmd(desdeYsMmDd);
@@ -350,6 +626,84 @@ async function ejecutarBuscarEmpleadosPorNombre(ctx, args) {
         nota_ambigua: ambigua && sliced.length <= limite
             ? 'varias personas similares: pedí al usuario aclaración o segundo apellido y volvé a buscar antes de declarar estado de presencia.'
             : undefined,
+    };
+}
+async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
+    if (!canSearchObjectivesCrm(ctx)) {
+        return { error: 'sin_permiso_buscar_objetivos_crm' };
+    }
+    const textoRaw = String(args.texto ?? '').trim();
+    if (textoRaw.length < 2)
+        return { error: 'pedir_fragmento_de_nombre_mas_largo' };
+    let limite = Math.floor(Number(args.limite ?? 12));
+    if (!Number.isFinite(limite) || limite < 1)
+        limite = 12;
+    limite = Math.min(20, limite);
+    const db = admin.firestore();
+    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const needle = norm(textoRaw);
+    const out = [];
+    const pushObj = (clientDocId, clientName, oid, oname, o) => {
+        const lat = o?.lat != null ? Number(o.lat) : NaN;
+        const lng = o?.lng != null ? Number(o.lng) : NaN;
+        const has = Number.isFinite(lat) && Number.isFinite(lng);
+        out.push({
+            id_objetivo: oid,
+            nombre_objetivo: oname.slice(0, 120),
+            id_cliente: clientDocId,
+            nombre_cliente: clientName.slice(0, 120),
+            tiene_coordenadas: has,
+        });
+    };
+    for (const d of snap.docs) {
+        const data = d.data();
+        const clientName = String(data.name ?? '').trim() || d.id;
+        const objetivosRaw = data.objetivos ?? data.objectives;
+        const objetivos = Array.isArray(objetivosRaw) ? objetivosRaw : undefined;
+        if (Array.isArray(objetivos)) {
+            for (const o of objetivos) {
+                const oid = String(o?.id ?? '').trim();
+                if (!oid)
+                    continue;
+                const oname = String(o?.name ?? '').trim() || oid;
+                const nameNorm = norm(oname);
+                const idNorm = norm(oid);
+                if (!nameNorm.includes(needle) && !idNorm.includes(needle) && nameNorm !== needle)
+                    continue;
+                pushObj(d.id, clientName, oid, oname, o);
+                if (out.length >= limite * 5)
+                    break;
+            }
+        }
+        else if (!objetivos) {
+            const oid = d.id;
+            const oname = clientName;
+            const hay = norm(`${oname} ${oid}`);
+            if (!hay.includes(needle))
+                continue;
+            pushObj(d.id, clientName, oid, oname, data);
+        }
+        if (out.length >= limite * 5)
+            break;
+    }
+    const sliced = out.slice(0, limite);
+    if (sliced.length === 0) {
+        return { coincidencias: [], nota: 'ningún objetivo; probá otro fragmento del nombre del sitio o del cliente' };
+    }
+    const ambigua = sliced.length >= 2;
+    return {
+        coincidencias: sliced.map((r) => ({
+            id_objetivo: r.id_objetivo,
+            nombre_objetivo: r.nombre_objetivo,
+            id_cliente: r.id_cliente,
+            nombre_cliente: r.nombre_cliente,
+            tiene_coordenadas: r.tiene_coordenadas,
+        })),
+        ambigua,
+        nota_tras_herramienta: (ambigua
+            ? 'Varias sedes: pedí aclaración (cliente o parte del nombre) o que el usuario elija id_objetivo antes de listado_franco_ret_dia con id_objetivo_cercania.'
+            : 'Si el usuario sólo dijo el nombre del sitio, usá id_objetivo de la coincidencia en listado_franco_ret_dia(id_objetivo_cercania=…).') +
+            ' No inventes ids.',
     };
 }
 async function ejecutarConsultarTurnosEmpleado(ctx, args) {
@@ -580,24 +934,34 @@ async function ejecutarContarServiciosSlaVigentesEmpresa(ctx, args) {
     if (clientIds.size === 0) {
         return {
             fecha_referencia: fecha,
-            cuenta_vigentes_en_fecha: 0,
-            cuenta_filas_servicios_active_empresa_en_lote: 0,
+            mes_yyyy_mm: fecha.slice(0, 7),
+            cuenta_para_tarjeta_servicios_activos_del_mes: 0,
+            cuenta_objetivos_distintos_con_sla_en_ese_mes: 0,
+            cuenta_contratos_vigentes_en_el_dia_referencia: 0,
             nota: 'ningún_cliente_de_esta_empresa_en_clients',
-            muestra_servicios_vigentes: [],
+            muestra_contratos_en_mes: [],
         };
     }
-    const qsnap = await db.collection('servicios_sla').where('status', '==', 'active').limit(800).get();
+    const idList = Array.from(clientIds);
+    const byDocId = new Map();
+    for (const batch of chunkIds(idList, 10)) {
+        const qs = await db.collection('servicios_sla').where('clientId', 'in', batch).limit(500).get();
+        for (const d of qs.docs) {
+            if (!byDocId.has(d.id))
+                byDocId.set(d.id, d);
+        }
+    }
     let incompletosPeriodo = 0;
-    let cuentaVigentes = 0;
-    let cuentaFilasEmpresaEnQuery = 0;
+    let cuentaSolapaMes = 0;
+    let cuentaVigentesDia = 0;
+    const objetivosUnicosMes = new Set();
     const vigentesParaMuestra = [];
     const incompletosMuestra = [];
-    for (const docSnap of qsnap.docs) {
+    for (const docSnap of byDocId.values()) {
         const row = docSnap.data();
         const cid = String(row.clientId ?? '').trim();
         if (!cid || !clientIds.has(cid))
             continue;
-        cuentaFilasEmpresaEnQuery += 1;
         const desde = slaCampoFechaYmD(row.startDate ?? row.desde ?? row.inicioContrato ?? '');
         const hasta = slaCampoFechaYmD(row.endDate ?? row.hasta ?? row.finContrato ?? '');
         if (!desde || !hasta) {
@@ -607,39 +971,48 @@ async function ejecutarContarServiciosSlaVigentesEmpresa(ctx, args) {
                     cliente: String(row.clientName ?? '').slice(0, 80),
                     objetivo: String(row.objectiveName ?? '').slice(0, 80),
                     id_doc_corto: docSnap.id.slice(0, 12),
-                    motivo_excluye_vigentes: 'falta_o_invalido_start_or_end_Date',
+                    motivo: 'falta_o_invalido_start_or_end_Date',
                 });
             }
             continue;
         }
-        const enVigencia = desde <= fecha && hasta >= fecha;
-        if (!enVigencia)
-            continue;
-        cuentaVigentes += 1;
-        const item = {
-            cliente: String(row.clientName ?? cid).slice(0, 100),
-            objetivo: String(row.objectiveName ?? row.objectiveId ?? '').slice(0, 100),
-            desde,
-            hasta,
-            id_servicio_firestore_corto: docSnap.id.slice(0, 14),
-        };
-        if (vigentesParaMuestra.length < 80)
-            vigentesParaMuestra.push(item);
+        const solapaMes = servicioSlaSolapaMesReferencia(desde, hasta, fecha);
+        if (solapaMes) {
+            cuentaSolapaMes += 1;
+            const oid = String(row.objectiveId ?? '').trim() || String(row.objectiveName ?? '').trim() || docSnap.id;
+            objetivosUnicosMes.add(`${cid}__${oid}`);
+            const item = {
+                cliente: String(row.clientName ?? cid).slice(0, 100),
+                objetivo: String(row.objectiveName ?? row.objectiveId ?? '').slice(0, 100),
+                desde,
+                hasta,
+                estado: String(row.status ?? '').slice(0, 24),
+                id_servicio_firestore_corto: docSnap.id.slice(0, 14),
+            };
+            if (vigentesParaMuestra.length < 80)
+                vigentesParaMuestra.push(item);
+        }
+        if (slaStatusOperativoComoPantallaServicios(row) && servicioSlaVigenteEnDiaInclusivo(desde, hasta, fecha)) {
+            cuentaVigentesDia += 1;
+        }
     }
     const muestraLista = [...vigentesParaMuestra]
         .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'))
         .slice(0, 36);
     return {
         fecha_referencia: fecha,
-        zona_fechas_contracto: 'America/Argentina/Cordoba interpretando Timestamps cuando existen',
-        criterios: 'status exactamente "active" en Firestore, clientId debe ser cliente de empresa (clients.empresaId), día ref entre startDate y endDate string-inclusivos YYYY-MM-DD.',
-        cuenta_vigentes_en_fecha: cuentaVigentes,
-        cuenta_filas_servicios_active_empresa_en_primer_loteFirestore: cuentaFilasEmpresaEnQuery,
+        mes_yyyy_mm: fecha.slice(0, 7),
+        criterios: {
+            tarjeta_panel_y_kpi_servicios: 'Cuenta documentos en servicios_sla cuyo clientId pertenece a clients.empresaId actual y startDate/endDate solapan el mes calendario de fecha_referencia (misma regla string que dashboard y KPI «Servicios activos» del mes en la pantalla Servicios).',
+            vigentes_en_un_dia: 'cuenta_contratos_vigentes_en_el_dia_referencia = status operativo (activo/activo en español o vacío; excluye inactivo) y el día fecha_referencia está entre start y end inclusive.',
+        },
+        cuenta_para_tarjeta_servicios_activos_del_mes: cuentaSolapaMes,
+        cuenta_objetivos_distintos_con_sla_en_ese_mes: objetivosUnicosMes.size,
+        cuenta_contratos_vigentes_en_el_dia_referencia: cuentaVigentesDia,
         cuenta_activos_sin_rango_fechas_calendario: incompletosPeriodo,
-        truncado_primer_loteFirestore_800_documentos_GLOBAL_active: qsnap.size >= 800,
-        muestra_servicios_vigentes: muestraLista,
+        muestra_contratos_en_mes: muestraLista,
         muestra_activos_sin_fechas: incompletosMuestra,
-        nota_tras_herramienta: 'Primera frase: el número cuenta_vigentes_en_fecha. Si truncado_primer_loteFirestore_800, puede haber SLA activos no contados hasta ampliar la consulta. Si el usuario no pidió ubicación pantalla, no des tutorial largo.',
+        nota_tras_herramienta: 'Respondé con cuenta_para_tarjeta_servicios_activos_del_mes cuando la pregunta sea «cuántos servicios activos» como en el panel o la tarjeta del mes (coincide con el KPI del módulo Servicios). Usá cuenta_objetivos_distintos_con_sla_en_ese_mes si hablan de «objetivos» o tarjetas por sitio. Usá cuenta_contratos_vigentes_en_el_dia_referencia solo si piden explícitamente vigentes «hoy» / en esa fecha con sentido contractual estricto. No inventes cifras. Si listan nombres de contratos o SLA, usá solo los textos del array muestra_contratos_en_mes (campos cliente y objetivo); si la muestra no alcanza, decí que hay más y que vean Servicios y SLA; no inventes títulos comerciales.',
     };
 }
 function esLegajoActivoComoPantallaRRHH(statusRaw) {
@@ -651,6 +1024,10 @@ function esLegajoActivoComoPantallaRRHH(statusRaw) {
     if (s === 'inactivo' || s === 'inactive')
         return false;
     return true;
+}
+function esEmpleadoNominaTarjetaDashboard(statusRaw) {
+    const s = String(statusRaw ?? '').trim().toLowerCase();
+    return ['active', 'activo', 'activa'].includes(s);
 }
 async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
     if (!canQueryEmpleadosPlantillaResumen(ctx)) {
@@ -666,8 +1043,9 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
     const ym = fechaRef.slice(0, 7);
     const db = admin.firestore();
     const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
-    let activos = 0;
-    let inactivos = 0;
+    let activosPanelNomina = 0;
+    let activosRrhhAmplio = 0;
+    let inactivosExplicitos = 0;
     const muestra = [];
     for (const d of qsnap.docs) {
         const row = d.data();
@@ -675,10 +1053,12 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
         if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase())
             continue;
         const st = row.status;
+        if (esEmpleadoNominaTarjetaDashboard(st))
+            activosPanelNomina += 1;
         if (esLegajoActivoComoPantallaRRHH(st))
-            activos++;
+            activosRrhhAmplio += 1;
         else
-            inactivos++;
+            inactivosExplicitos += 1;
         if (muestra.length < 12) {
             const ln = String(row.lastName ?? '').trim();
             const fn = String(row.firstName ?? '').trim();
@@ -694,14 +1074,86 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
     return {
         fecha_referencia_para_rotulo: fechaRef,
         mes_calendario_yyyy_mm: ym,
-        cuenta_legajos_activos_misma_logica_rrhh: activos,
-        cuenta_legajos_inactivos_explicitos: inactivos,
-        cuenta_total_en_lote: activos + inactivos,
+        cuenta_para_tarjeta_panel_empleados_nomina: activosPanelNomina,
+        cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado: activosRrhhAmplio,
+        cuenta_legajos_inactivos_explicitos: inactivosExplicitos,
+        cuenta_total_en_lote: activosRrhhAmplio + inactivosExplicitos,
         truncado_loteFirestore_900: qsnap.size >= 900,
-        aclaracion_plantilla: '«Plantilla» aquí = legajos en colección empleados de la empresa: activo = activo/active o sin estado (como pantalla RRHH). No incluye «sólo quienes tienen turno cargado en planificación del mes» salvo que pidan explícitamente ese criterio.',
+        criterios: {
+            panel_dashboard: 'cuenta_para_tarjeta_panel_empleados_nomina = legajos con status exactamente activo/active/activa (misma regla que tarjeta EMPLEADOS EN NÓMINA del panel).',
+            rrhh_lista: 'cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado = activo/active o vacío u otros no marcados inactivo (lista RRHH).',
+        },
         muestra_primeros_legajos: muestra,
-        nota_tras_herramienta: 'Primera oración: número de legajos activos. Si el usuario dijo «este mes» en sentido plantilla general, el dato es al día fecha_referencia; si querían dotación planificada en grilla, decí que es otro informe.',
+        nota_tras_herramienta: 'Para «cuántos vigiladores», «empleados en nómina», «plantilla» como la tarjeta del panel de control, respondé con **cuenta_para_tarjeta_panel_empleados_nomina**. Usá cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado solo si el usuario pide el criterio amplio de RRHH o comparación con listados que incluyen legajos sin estado cargado.',
     };
+}
+async function buildEmpresaMetricsSnapshotForPrompt(ctx) {
+    if (ctx.persona !== 'SYSTEM' || !ctx.empresaId.trim())
+        return '';
+    const jobs = [];
+    if (canQueryEmpleadosPlantillaResumen(ctx)) {
+        jobs.push((async () => {
+            try {
+                const r = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {});
+                if (String(r.error ?? '').trim())
+                    return [`- Empleados/nómina: error (${String(r.error)}).`];
+                const lines = [
+                    `- Empleados en nómina (tarjeta panel «EMPLEADOS EN NÓMINA», status activo explícito): ${String(r.cuenta_para_tarjeta_panel_empleados_nomina ?? '—')}`,
+                    `- Legajos activos criterio amplio RRHH (incluye sin estado): ${String(r.cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado ?? '—')}`,
+                ];
+                if (r.truncado_loteFirestore_900) {
+                    lines.push('- Aviso: consulta con límite 900 legajos; el conteo puede estar incompleto.');
+                }
+                return lines;
+            }
+            catch {
+                return ['- Empleados/nómina: no disponible en este turno.'];
+            }
+        })());
+    }
+    if (canQueryServiciosSlaResumen(ctx)) {
+        jobs.push((async () => {
+            try {
+                const r = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, {});
+                if (String(r.error ?? '').trim())
+                    return [`- Servicios SLA (mes referencia): error (${String(r.error)}).`];
+                return [
+                    `- Contratos SLA que solapan el mes de la fecha referencia (KPI panel Servicios): ${String(r.cuenta_para_tarjeta_servicios_activos_del_mes ?? '—')}`,
+                    `- Objetivos distintos con SLA en ese mes: ${String(r.cuenta_objetivos_distintos_con_sla_en_ese_mes ?? '—')}`,
+                ];
+            }
+            catch {
+                return ['- Servicios SLA (mes referencia): no disponible en este turno.'];
+            }
+        })());
+    }
+    if (canQueryOperationsDaySummary(ctx)) {
+        jobs.push((async () => {
+            try {
+                const r = await ejecutarResumenPresenciasObjetivosDia(ctx, {});
+                if (String(r.error ?? '').trim())
+                    return [`- Operaciones (día referencia): error (${String(r.error)}).`];
+                const t = r.totales;
+                if (!t)
+                    return ['- Operaciones (día referencia): sin totales.'];
+                return [
+                    `- Operaciones día referencia — turnos visibles: ${String(t.turnos_visibles_en_dia ?? '—')}; presentes: ${String(t.presentes ?? '—')}; ausentes: ${String(t.ausentes ?? '—')}; sin marcación: ${String(t.sin_marcacion_relevante ?? '—')}`,
+                ];
+            }
+            catch {
+                return ['- Operaciones (día referencia): no disponible en este turno.'];
+            }
+        })());
+    }
+    if (jobs.length === 0)
+        return '';
+    const blocks = await Promise.all(jobs);
+    const flat = blocks.flatMap((b) => (b ?? []).filter(Boolean));
+    return [
+        '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para totales alineados al panel; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
+        ...flat,
+        'Si preguntan «cuántos empleados somos» en sentido plantilla/nómina del dashboard o RRHH, el número es el de «Empleados en nómina» arriba; el criterio amplio RRHH es distinto y solo aplica si lo piden explícito.',
+    ].join('\n');
 }
 function sanitizeGeminiStruct(value, depth = 0) {
     if (depth > 10)
@@ -733,6 +1185,12 @@ async function dispatchAssistantToolCall(ctx, name, rawArgs) {
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
+    else if (name === 'buscar_objetivos_por_nombre') {
+        raw = await ejecutarBuscarObjetivosPorNombre(ctx, {
+            texto: String(args.texto ?? ''),
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
     else if (name === 'consultar_turnos_empleado') {
         raw = await ejecutarConsultarTurnosEmpleado(ctx, {
             id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
@@ -750,6 +1208,14 @@ async function dispatchAssistantToolCall(ctx, name, rawArgs) {
         raw = await ejecutarListadoTurnosOperativosDia(ctx, {
             fecha: args.fecha != null ? String(args.fecha) : undefined,
             id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'listado_franco_ret_dia') {
+        raw = await ejecutarListadoFrancoRetDia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            tipo: args.tipo != null ? String(args.tipo) : undefined,
+            id_objetivo_cercania: args.id_objetivo_cercania != null ? String(args.id_objetivo_cercania) : undefined,
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }

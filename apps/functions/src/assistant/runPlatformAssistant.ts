@@ -9,6 +9,7 @@ import {
 import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS, operationalGuideForModuleKey } from './cospKnowledge';
 import {
   assistantToolsEnabledForContext,
+  buildEmpresaMetricsSnapshotForPrompt,
   dispatchAssistantToolCall,
   resolveSelfEmployeeFirestoreId,
   type AssistantToolContext,
@@ -23,7 +24,7 @@ Cómo responder (subir calidad sin inventar datos):
 
 2) **No** incluyas rutas técnicas tipo \`/admin/…\`, \`/empleado/…\` ni \`/cliente/…\` en respuestas normales (incluido listados tipo "qué podés responder" o "qué módulos hay"). Referí al lugar por **nombre del ítem del menú lateral** (p. ej. "Servicios y SLA", "Planificación y Turnos", "Operaciones", "Clientes y Objetivos", "RRHH", "Reportes", "Configuración"). **Solo** si el usuario pregunta explícitamente por la **URL**, la **barra de direcciones** o "en qué link", podés mencionar una ruta concreta.
 
-3) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **empleados en nómina / vigiladores en plantilla** como la tarjeta del panel usá **contar_empleados_plantilla_empresa** y **cuenta_para_tarjeta_panel_empleados_nomina**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
+3) Si al inicio del mensaje de sistema aparece el bloque **MÉTRICAS YA CALCULADAS EN ESTE TURNO**, **usá esas cifras** para totales de nómina panel, SLA del mes u operaciones del día de referencia cuando la pregunta coincida; no inventes otros totales genéricos. Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de datos de herramientas o de ese bloque, **respondé ese número en la primera oración**. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **empleados en nómina / vigiladores en plantilla** como la tarjeta del panel usá **contar_empleados_plantilla_empresa** y **cuenta_para_tarjeta_panel_empleados_nomina**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
 4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
 
@@ -132,10 +133,12 @@ function buildSystemPrompt(
   moduleKey: string | null | undefined,
   referenceYsMmDd: string,
   toolsEnabled: boolean,
+  metricsVerifiedBlock?: string,
 ): string {
   const guide = operationalGuideForModuleKey(moduleKey);
   return [
     `Sos la asistente virtual de COSP (Grupo Bacar). Español Argentina, tono claro y servicial.`,
+    metricsVerifiedBlock ? `${metricsVerifiedBlock}\n` : '',
     ASSISTANT_RESPONSE_STYLE,
     '',
     COSP_PLATFORM_KNOWLEDGE,
@@ -243,7 +246,24 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   };
 
   const toolsEnabled = assistantToolsEnabledForContext(toolCtx);
-  const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled);
+
+  let metricsVerifiedBlock = '';
+  if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
+    try {
+      metricsVerifiedBlock = await buildEmpresaMetricsSnapshotForPrompt(toolCtx);
+    } catch (e) {
+      console.warn('[assistant] buildEmpresaMetricsSnapshotForPrompt', e);
+    }
+  }
+
+  const systemInstruction = buildSystemPrompt(
+    profile,
+    pathname,
+    moduleKey,
+    referenceYsMmDd,
+    toolsEnabled,
+    metricsVerifiedBlock || undefined,
+  );
 
   const genAI = new GoogleGenerativeAI(apiKey);
   return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
