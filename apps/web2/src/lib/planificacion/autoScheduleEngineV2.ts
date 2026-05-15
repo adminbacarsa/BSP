@@ -183,6 +183,12 @@ export interface V2EngineContext {
      */
     prevMonthTrailingRestDays?: Record<string, number>;
     /**
+     * Mapa empId → código de turno fijo (M/T/N/D12/N12) asignado por el operador
+     * desde el selector "puesto prefijado + turno". Si está presente, el empleado
+     * trabajará ese turno todo el mes, sin importar el orden dentro del grupo.
+     */
+    defaultShiftByEmp?: Record<string, string>;
+    /**
      * Semilla de variación para los offsets distribuidos (0..cycleLen-1).
      * Al probar múltiples seeds en el caller se pueden encontrar distribuciones de francos
      * que cierren la cobertura sin incidencias.
@@ -1073,11 +1079,21 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empIds.forEach((empId, idx) => { empGroupIdx[empId] = idx; empPrimaryShift[empId] = null; });
             return;
         }
-        // Asignación de turno primario (rota semanalmente) por índice.
+        // Asignación de turno primario por índice.
         empIds.forEach((empId, idx) => {
             const code = shiftCodes[idx % shiftCodes.length];
-            empPrimaryShift[empId] = code; // semana 0 (referencia para stats)
+            empPrimaryShift[empId] = code;
             empRotationSlot[empId] = idx % shiftCodes.length;
+        });
+        // Turno fijo del operador: sobreescribe el slot calculado por índice.
+        // Si el operador seleccionó M para un empleado, ese empleado trabaja M todo el mes.
+        empIds.forEach(empId => {
+            const fixedCode = (ctx.defaultShiftByEmp?.[empId] || '').toUpperCase();
+            if (!fixedCode) return;
+            const ringIdx = shiftCodes.indexOf(fixedCode);
+            if (ringIdx < 0) return; // código no disponible en este puesto → ignorar
+            empPrimaryShift[empId] = fixedCode;
+            empRotationSlot[empId] = ringIdx;
         });
         // Offsets de franco: separados por tipo de turno (8h vs 12h) para que
         // cada subgrupo tenga offsets distribuidos sobre SU propio cycleLen.

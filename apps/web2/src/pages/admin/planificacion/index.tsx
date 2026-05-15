@@ -254,6 +254,10 @@ export default function PlanificacionPage() {
         if (typeof window === 'undefined') return {};
         try { return JSON.parse(localStorage.getItem('planif_emp_pos') || '{}'); } catch { return {}; }
     });
+    const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>(() => {
+        if (typeof window === 'undefined') return {};
+        try { return JSON.parse(localStorage.getItem('planif_emp_shift') || '{}'); } catch { return {}; }
+    });
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number } | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -1662,12 +1666,17 @@ export default function PlanificacionPage() {
     };
 
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
-    const saveEmpPos = (empId: string, posName: string | null) => {
+    const getEmpDefaultShift = (empId: string) => empDefaultShift[`${empId}___${selectedObjective}`] || null;
+    const saveEmpPos = (empId: string, posName: string | null, shiftCode?: string | null) => {
         const key = `${empId}___${selectedObjective}`;
-        const newMap = { ...empDefaultPos };
-        if (posName) { newMap[key] = posName; } else { delete newMap[key]; }
-        setEmpDefaultPos(newMap);
-        try { localStorage.setItem('planif_emp_pos', JSON.stringify(newMap)); } catch {}
+        const newPosMap = { ...empDefaultPos };
+        if (posName) { newPosMap[key] = posName; } else { delete newPosMap[key]; }
+        setEmpDefaultPos(newPosMap);
+        try { localStorage.setItem('planif_emp_pos', JSON.stringify(newPosMap)); } catch {}
+        const newShiftMap = { ...empDefaultShift };
+        if (shiftCode) { newShiftMap[key] = shiftCode.toUpperCase(); } else { delete newShiftMap[key]; }
+        setEmpDefaultShift(newShiftMap);
+        try { localStorage.setItem('planif_emp_shift', JSON.stringify(newShiftMap)); } catch {}
         setEmpPosPicker(null);
     };
 
@@ -2629,9 +2638,12 @@ export default function PlanificacionPage() {
             const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
             const defaultPositionByEmp: Record<string,string> = {};
+            const defaultShiftByEmp: Record<string,string> = {};
             displayedEmployees.forEach((e:any) => {
                 const pos = empDefaultPos[`${e.id}___${selectedObjective}`];
                 if (pos) defaultPositionByEmp[e.id] = pos;
+                const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
+                if (shift) defaultShiftByEmp[e.id] = shift;
             });
             // Probar hasta cycleLen seeds diferentes y quedarse con la distribución
             // que minimice los slots de cobertura faltantes (0 = cobertura cerrada).
@@ -2654,6 +2666,7 @@ export default function PlanificacionPage() {
                 objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
                 objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
                 defaultPositionByEmp,
+                defaultShiftByEmp,
                 getDayLetter,
                 getDateKey,
                 rotateShifts: autoRotateShifts,
@@ -3165,9 +3178,11 @@ export default function PlanificacionPage() {
                                                                 draggable={false}
                                                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const estimatedH = Math.min(positionStructure.length * 36 + 48, 240); const flipUp = r.bottom + estimatedH > window.innerHeight - 8; setEmpPosPicker(empPosPicker?.empId === emp.id ? null : { empId: emp.id, x: r.left, y: flipUp ? r.top - estimatedH - 4 : r.bottom + 4 }); }}
                                                                 className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-colors whitespace-nowrap ${getEmpDefaultPos(emp.id) ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100'}`}
-                                                                title={`Puesto prefijado: ${getEmpDefaultPos(emp.id) || 'sin asignar'}`}
+                                                                title={`Puesto: ${getEmpDefaultPos(emp.id) || 'sin asignar'} · Turno: ${getEmpDefaultShift(emp.id) || 'auto'}`}
                                                             >
-                                                                {getEmpDefaultPos(emp.id) || '···'}
+                                                                {getEmpDefaultShift(emp.id)
+                                                                    ? `${getEmpDefaultShift(emp.id)}`
+                                                                    : (getEmpDefaultPos(emp.id) || '···')}
                                                             </button>
                                                         )}
                                                         {!isSnapshotView && selectedObjective && !isServiceLocked && (
@@ -3466,20 +3481,46 @@ export default function PlanificacionPage() {
             {empPosPicker && (
                 <div
                     className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
-                    style={{ left: empPosPicker.x, top: empPosPicker.y, minWidth: 160 }}
+                    style={{ left: empPosPicker.x, top: empPosPicker.y, minWidth: 180 }}
                     onClick={e => e.stopPropagation()}
                 >
-                    <div className="px-3 py-2 text-[9px] font-black text-slate-400 uppercase border-b bg-slate-50 tracking-wider">Puesto prefijado</div>
-                    <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: 200 }}>
-                    {positionStructure.map(p => (
-                        <button key={p.positionName} onClick={() => saveEmpPos(empPosPicker.empId, p.positionName)}
-                            className={`w-full text-left px-3 py-2 text-[11px] font-bold hover:bg-indigo-50 hover:text-indigo-700 transition-colors ${getEmpDefaultPos(empPosPicker.empId) === p.positionName ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}>
-                            {p.positionName}
-                        </button>
-                    ))}
+                    <div className="px-3 py-2 text-[9px] font-black text-slate-400 uppercase border-b bg-slate-50 tracking-wider">Puesto + Turno</div>
+                    <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: 260 }}>
+                    {positionStructure.map(p => {
+                        const codes = [...new Set((p.shifts || []).map((s:any) => String(s.code || '').toUpperCase()).filter(Boolean))];
+                        const isSelPos = getEmpDefaultPos(empPosPicker.empId) === p.positionName;
+                        const selShift = getEmpDefaultShift(empPosPicker.empId);
+                        const shiftColor: Record<string,string> = {
+                            M: 'bg-sky-500 text-white', T: 'bg-amber-500 text-white',
+                            N: 'bg-indigo-600 text-white', D12: 'bg-sky-600 text-white',
+                            N12: 'bg-violet-600 text-white',
+                        };
+                        return (
+                            <div key={p.positionName} className={`border-b last:border-0 ${isSelPos ? 'bg-indigo-50' : ''}`}>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600">{p.positionName}</div>
+                                <div className="flex flex-wrap gap-1 px-3 pb-2">
+                                {codes.length > 0 ? codes.map((sc:string) => {
+                                    const active = isSelPos && selShift === sc;
+                                    return (
+                                        <button key={sc}
+                                            onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, sc)}
+                                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[sc] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
+                                            {sc}
+                                        </button>
+                                    );
+                                }) : (
+                                    <button onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
+                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100'}`}>
+                                        Asignar
+                                    </button>
+                                )}
+                                </div>
+                            </div>
+                        );
+                    })}
                     </div>
                     {getEmpDefaultPos(empPosPicker.empId) && (
-                        <button onClick={() => saveEmpPos(empPosPicker.empId, null)}
+                        <button onClick={() => saveEmpPos(empPosPicker.empId, null, null)}
                             className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-400 hover:bg-slate-50 border-t transition-colors">
                             Quitar prefijo
                         </button>
