@@ -163,7 +163,9 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
   1. Crear el secreto (una vez): en la raíz del repo ejecutá `firebase functions:secrets:set GEMINI_API_KEY` y pegá la API key cuando pida valor (queda en Google Secret Manager).
   2. Desplegar: `firebase deploy --only functions`. La función `chatPlatformAssistant` ya declara `secrets: ['GEMINI_API_KEY']` y Firebase inyecta `process.env.GEMINI_API_KEY` en runtime.
   3. Si rotás la key: volvé a `secrets:set` con versión nueva y redeploy de functions.
-  4. Alternativa manual: Cloud Console → Secret Manager / variables de la función — menos alineado con el manifest de Firebase.
+  4. Si `firebase deploy --only functions` falla por timeout al analizar el código, usá deploy por nombre: `firebase deploy --only functions:chatPlatformAssistant` (u otra export) hasta optimizar la carga del `index`.
+  5. Alternativa manual: Cloud Console → Secret Manager / variables de la función — menos alineado con el manifest de Firebase.
+- Front: `getFunctions(app, 'us-central1')` en `firebase.ts` debe coincidir con la región de la callable desplegada.
 - **Laboratorio local (emulador):** crear `apps/functions/.env` (no se commitea) con una línea `GEMINI_API_KEY=tu_api_key` y reiniciar el emulador; con `FUNCTIONS_EMULATOR=true` se carga vía `bootstrap-env.ts`. Alternativa: PowerShell `$env:GEMINI_API_KEY='...'` antes de `firebase emulators`.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).

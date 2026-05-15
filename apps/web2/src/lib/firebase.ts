@@ -55,7 +55,7 @@ try {
   db = getFirestore(app);
 }
 
-const functions = getFunctions(app);
+const functions = getFunctions(app, 'us-central1');
 const storage = getStorage(app);
 
 // Conectar emuladores en modo local
