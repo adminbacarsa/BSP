@@ -74,6 +74,28 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'listado_franco_ret_dia',
+    description:
+      'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador; no es el mismo filtro que cobertura operativa). Con id_objetivo_cercania + coordenadas en CRM y legajos, ordena candidatos por distancia Haversine km al objetivo (útil para «el más cercano en franco/RET a tal sitio»).',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD; omitir = hoy del cliente.' },
+        tipo: {
+          type: SchemaType.STRING,
+          description: 'franco | ret | ambos (default ambos). Franco = códigos F, FF, FP, FT. RET = código RET.',
+        },
+        id_objetivo_cercania: {
+          type: SchemaType.STRING,
+          description:
+            'Id Firestore del objetivo (CRM). Si lo pasás, la respuesta incluye distancia_km por legajo georreferenciado; si falta lat/lng en objetivo o legajo, el tool lo indica.',
+        },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas (8–160, default 80).' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'contar_servicios_sla_vigentes_empresa',
     description:
       'Para «cuántos servicios activos», SLA del mes, tarjeta del panel: devuelve cuenta_para_tarjeta_servicios_activos_del_mes (misma lógica que el KPI del módulo Servicios / panel) y cuenta_objetivos_distintos_con_sla_en_ese_mes. Para «vigentes hoy» contractual estricto mirá cuenta_contratos_vigentes_en_el_dia_referencia. Usar SIEMPRE que pidan número; no inventar cifras.',
