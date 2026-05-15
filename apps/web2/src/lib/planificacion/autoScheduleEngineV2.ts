@@ -26,9 +26,9 @@
  *     puesto fijo (defaultPositionByEmp), cercanía y bajo ausentismo. Si sobra gente
  *     (capacidad ociosa) los empleados restantes quedan IDLE: mes entero en RET/F,
  *     sin turnos salpicados.
- *   - Rotación de bandas: en puestos con varios códigos (M/T/N o D12/N12), cada
- *     empleado rota de banda **semana a semana** (anillo + slot desfasado), no se
- *     queda todo el mes en la misma letra.
+ *   - Banda fija: en puestos con varios códigos (M/T/N o D12/N12), cada
+ *     empleado queda TODO el mes en la misma banda que le corresponde por su slot
+ *     en el grupo (E1→M, E2→T, E3→N…). No hay rotación entre ciclos.
  *   - El ciclo manda: cada empleado tiene un patrón fijo de trabajo/franco.
  *       · Puesto con días limitados (ej. EN L-V) → días de trabajo = días activos del puesto.
  *       · Puesto 24/7 / empleado idle → ciclo genérico (4+2, 6+1, etc.) con offset
@@ -1038,17 +1038,13 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Rotación POR CICLO alineada al offset personal del empleado.
     // Dirección DESCENDENTE: N→T→M→N (slot decrementa con cada ciclo).
     // Así N nunca va directo a M; siempre pasa por T primero.
-    const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
+    const expectedShiftForDay = (empId: string, _dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
         if (ring.length === 1) return ring[0];
-        const eCycleLen = empCycleLen[empId] ?? cycleLen;
-        const di = parseInt(dateStr.split('-')[2], 10) - 1;
-        const empOffset = (empGroupIdx[empId] ?? 0) % eCycleLen;
-        const cycleNum = Math.floor((di + empOffset) / eCycleLen);
-        // Rotación descendente: (slot - cycleNum) mod len
-        return ring[((slot - cycleNum) % ring.length + ring.length) % ring.length];
+        // Banda fija todo el mes: cada empleado queda en su banda inicial (M, T o N).
+        return ring[slot % ring.length];
     };
 
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
