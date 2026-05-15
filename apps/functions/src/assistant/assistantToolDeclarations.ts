@@ -37,6 +37,25 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
       required: ['fecha_desde', 'fecha_hasta'],
     },
   },
+  {
+    name: 'resumen_presencias_objetivos_dia',
+    description:
+      'Para preguntas agregadas del tipo «cuántos presentes hay hoy», «resumen por objetivo», «cuántos ausentes», etc.: consulta turnos del día (zona AR) limitados a la empresa del usuario y alineados a la lógica del monitor de Operaciones. Usá fecha YYYY-MM-DD = fechaReferenciaCliente si el usuario dice "hoy". Opcional id_objetivo para un solo objetivo.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: {
+          type: SchemaType.STRING,
+          description: 'Día a analizar YYYY-MM-DD. Si omitís, se usa el hoy del cliente.',
+        },
+        id_objetivo: {
+          type: SchemaType.STRING,
+          description: 'Si el usuario nombra un objetivo puntual y ya conocés su id Firestore, filtrá; si no, omití y resumí toda la empresa.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 6;

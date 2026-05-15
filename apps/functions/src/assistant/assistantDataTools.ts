@@ -35,6 +35,82 @@ function canQueryShifts(ctx: AssistantToolContext): boolean {
   );
 }
 
+/** Agregados tipo «cuántos presentes hay hoy» — sólo backoffice con módulos operativos/planificación. */
+function canQueryOperationsDaySummary(ctx: AssistantToolContext): boolean {
+  if (ctx.persona !== 'SYSTEM') return false;
+  if (!ctx.empresaId.trim()) return false;
+  return ctx.readableModuleKeys.some((k) =>
+    ['OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'REPORTS', 'PLANNING'].includes(k),
+  );
+}
+
+function ymCordoba(dt: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Argentina/Cordoba',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(dt);
+  const y = Number(parts.find((p) => p.type === 'year')?.value);
+  const m = Number(parts.find((p) => p.type === 'month')?.value);
+  return `${y}_${m}`;
+}
+
+function isSameCordobaCalendarDay(dt: Date, ymdHyphen: string): boolean {
+  const s = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Cordoba',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(dt);
+  return s === ymdHyphen;
+}
+
+/** Ventana de consulta como useOperacionesMonitor: ref D → [D−1 12:00 .. D+1 23:59:59], zona AR. */
+function monitorWideWindow(referenceYsMmDd: string): { start: FirebaseFirestore.Timestamp; end: FirebaseFirestore.Timestamp } {
+  parseYmd(referenceYsMmDd);
+  const dNoonMs = Date.parse(`${referenceYsMmDd}T12:00:00.000${AR_DAY_OFFSET}`);
+  const dEndMs = Date.parse(`${referenceYsMmDd}T23:59:59.999${AR_DAY_OFFSET}`);
+  const startMs = dNoonMs - 86400000;
+  const endMs = dEndMs + 86400000;
+  return {
+    start: admin.firestore.Timestamp.fromMillis(startMs),
+    end: admin.firestore.Timestamp.fromMillis(endMs),
+  };
+}
+
+async function objectivesMapForEmpresa(
+  db: FirebaseFirestore.Firestore,
+  empresaId: string,
+  filterObjectiveId?: string,
+): Promise<Map<string, { name: string; clientId: string; clientName: string }>> {
+  const out = new Map<string, { name: string; clientId: string; clientName: string }>();
+  const filt = filterObjectiveId?.trim();
+  const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(480).get();
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const clientName = String(data.name ?? '').trim() || d.id;
+    const objetivos = data.objetivos;
+    if (Array.isArray(objetivos)) {
+      for (const o of objetivos as Array<Record<string, unknown>>) {
+        const oid = String(o?.id ?? '').trim();
+        if (!oid) continue;
+        if (filt && oid !== filt) continue;
+        const name = String(o?.name ?? '').trim() || oid;
+        out.set(oid, { name, clientId: d.id, clientName });
+      }
+    } else if (!objetivos) {
+      /* cliente sin objetivos explícitos: el doc mismo es el “objetivo” en algunos modelos legacy */
+      if (filt && d.id !== filt) continue;
+      out.set(d.id, {
+        name: clientName,
+        clientId: d.id,
+        clientName,
+      });
+    }
+  }
+  return out;
+}
+
 export function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean {
   if (!ctx.empresaId) return false;
   if (ctx.persona === 'CLIENT') return false;
@@ -236,6 +312,185 @@ export async function ejecutarConsultarTurnosEmpleado(
   };
 }
 
+/**
+ * Conteos alineados al monitor de Operaciones (misma ventana y reglas básicas de visibilidad).
+ * No incluye vacantes virtuales del SLA (sólo documentos en `turnos`).
+ */
+export async function ejecutarResumenPresenciasObjetivosDia(
+  ctx: AssistantToolContext,
+  args: { fecha?: string; id_objetivo?: string },
+): Promise<Record<string, unknown>> {
+  if (!canQueryOperationsDaySummary(ctx)) {
+    return { error: 'sin_permiso_resumen_operaciones_requiere_modulo_operaciones_planificacion_o_similar' };
+  }
+
+  const fecha = String(args.fecha ?? ctx.referenceDateYsMmDd).trim();
+  const filterObj = String(args.id_objetivo ?? '').trim() || undefined;
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+
+  const db = admin.firestore();
+  const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+  const objectiveIds = new Set(objectiveMap.keys());
+  if (objectiveIds.size === 0) {
+    return {
+      fecha_referencia: fecha,
+      nota: filterObj ? 'objetivo_no_encontrado_en_empresa' : 'sin_objetivos_para_esta_empresa',
+      totales: { turnos_visibles_en_dia: 0, presentes: 0, ausentes: 0, sin_marcacion_relevante: 0 },
+      por_objetivo: [],
+    };
+  }
+
+  const { start, end } = monitorWideWindow(fecha);
+  const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
+
+  type Cand = {
+    oid: string;
+    needsPubCheck: boolean;
+    shiftDateObj: Date;
+    isPresent: boolean;
+    isAbsent: boolean;
+  };
+
+  const candidates: Cand[] = [];
+  const pubDocKeys = new Set<string>();
+
+  for (const docSnap of qsnap.docs) {
+    const shift = docSnap.data() as Record<string, unknown>;
+    const st = shift.startTime;
+    if (!(st instanceof admin.firestore.Timestamp)) continue;
+    const shiftDateObj = st.toDate();
+    if (!isSameCordobaCalendarDay(shiftDateObj, fecha)) continue;
+
+    const oid = String(shift.objectiveId ?? '').trim();
+    if (!oid || !objectiveIds.has(oid)) continue;
+
+    if (shift.draft === true) continue;
+    if (shift.status === 'COVERED') continue;
+    const rawPos = String(shift.positionName ?? '').trim();
+    if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') continue;
+
+    const isOp =
+      shift.origin === 'RETEN' ||
+      shift.origin === 'OPERATIONS_COVERAGE' ||
+      shift.origin === 'SLA_VIRTUAL' ||
+      !!shift.isReten ||
+      shift.resolvedBy === 'OPERACIONES';
+    const isAlreadyProcessed =
+      !!shift.isPresent ||
+      shift.status === 'PRESENT' ||
+      shift.status === 'COMPLETED' ||
+      !!shift.isReportedToPlanning ||
+      !!shift.isReported;
+
+    const empId = String(shift.employeeId ?? '');
+    const isValidEmployee = !!(empId && empId !== 'VACANTE');
+    const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
+    const isUnassigned = !isValidEmployee;
+    if (isUnassigned && !isReportedToPlanning) continue;
+
+    const needsPubCheck = !isOp && !isAlreadyProcessed;
+    if (needsPubCheck) {
+      pubDocKeys.add(`${oid}_${ymCordoba(shiftDateObj)}`);
+    }
+
+    const isAbsent = !!shift.isAbsent;
+    const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
+
+    candidates.push({ oid, needsPubCheck, shiftDateObj, isPresent, isAbsent });
+  }
+
+  const pubMap = new Map<string, boolean>();
+  const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
+  const chunk = 100;
+  for (let i = 0; i < refs.length; i += chunk) {
+    const slice = refs.slice(i, i + chunk);
+    if (slice.length === 0) continue;
+    const snaps = await db.getAll(...slice);
+    for (let j = 0; j < snaps.length; j++) {
+      pubMap.set(slice[j].id, snaps[j].exists);
+    }
+  }
+
+  type PerObj = {
+    objetivo_id: string;
+    objetivo_nombre: string;
+    cliente: string;
+    presentes: number;
+    ausentes: number;
+    sin_marcacion: number;
+    turnos_visibles: number;
+  };
+  const byObj = new Map<string, PerObj>();
+
+  const ensureRow = (oid: string) => {
+    let r = byObj.get(oid);
+    if (!r) {
+      const meta = objectiveMap.get(oid);
+      r = {
+        objetivo_id: oid,
+        objetivo_nombre: meta?.name ?? oid,
+        cliente: meta?.clientName ?? '',
+        presentes: 0,
+        ausentes: 0,
+        sin_marcacion: 0,
+        turnos_visibles: 0,
+      };
+      byObj.set(oid, r);
+    }
+    return r;
+  };
+
+  let presentes = 0;
+  let ausentes = 0;
+  let sinMarc = 0;
+  let visibles = 0;
+
+  for (const c of candidates) {
+    if (c.needsPubCheck) {
+      const k = `${c.oid}_${ymCordoba(c.shiftDateObj)}`;
+      if (!pubMap.get(k)) continue;
+    }
+
+    const row = ensureRow(c.oid);
+    row.turnos_visibles += 1;
+    visibles += 1;
+    if (c.isPresent) {
+      row.presentes += 1;
+      presentes += 1;
+    } else if (c.isAbsent) {
+      row.ausentes += 1;
+      ausentes += 1;
+    } else {
+      row.sin_marcacion += 1;
+      sinMarc += 1;
+    }
+  }
+
+  const porObjetivo = Array.from(byObj.values())
+    .filter((r) => r.turnos_visibles > 0)
+    .sort((a, b) => (a.cliente + a.objetivo_nombre).localeCompare(b.cliente + b.objetivo_nombre, 'es'));
+
+  return {
+    fecha_referencia: fecha,
+    zona: 'America/Argentina/Cordoba',
+    criterio_presente: 'isPresent true, empleado asignado distinto de VACANTE, isAbsent false (como pantalla Operaciones)',
+    truncado_limite_turnos_consultados: qsnap.size >= 2800,
+    totales: {
+      turnos_visibles_en_dia: visibles,
+      presentes,
+      ausentes,
+      sin_marcacion_relevante: sinMarc,
+    },
+    por_objetivo: porObjetivo.slice(0, 64),
+    nota_tras_herramienta:
+      'Respondé con los totales y, si preguntan por objetivos, mencioná los que más concentran guardias según por_objetivo.',
+  };
+}
+
 function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value === undefined) return null;
@@ -272,6 +527,11 @@ export async function dispatchAssistantToolCall(
       id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
       fecha_desde: String(args.fecha_desde ?? ''),
       fecha_hasta: String(args.fecha_hasta ?? ''),
+    });
+  } else if (name === 'resumen_presencias_objetivos_dia') {
+    raw = await ejecutarResumenPresenciasObjetivosDia(ctx, {
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
     });
   } else {
     raw = { error: 'herramienta_desconocida', name };

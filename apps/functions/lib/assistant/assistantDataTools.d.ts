@@ -17,4 +17,8 @@ export declare function ejecutarConsultarTurnosEmpleado(ctx: AssistantToolContex
     fecha_desde: string;
     fecha_hasta: string;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarResumenPresenciasObjetivosDia(ctx: AssistantToolContext, args: {
+    fecha?: string;
+    id_objetivo?: string;
+}): Promise<Record<string, unknown>>;
 export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;

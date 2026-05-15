@@ -16,6 +16,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
         };
         required: string[];
     };
@@ -39,8 +41,32 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             };
             texto?: undefined;
             limite?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
         };
         required: string[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            fecha: {
+                type: SchemaType;
+                description: string;
+            };
+            id_objetivo: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            limite?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+        };
+        required: any[];
     };
 })[];
 export declare const ASSISTANT_TOOL_ROUNDS_MAX = 6;
