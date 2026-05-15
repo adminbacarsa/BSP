@@ -1077,32 +1077,49 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const assignOffsets = (group: string[], eCL: number, eCF: number) => {
             const eCycleLen = eCL + eCF;
             const seed = ctx.distributedOffsetSeed ?? 0;
-            // Offsets distribuidos uniformemente: escalonan francos para no caer todos el mismo día.
-            // El seed permite al caller probar variaciones (0..cycleLen-1) y elegir la mejor cobertura.
-            const baseOffsets = group.map((_, idx) =>
-                (Math.floor((idx * eCycleLen) / Math.max(1, group.length)) + seed) % eCycleLen
-            );
-            // Anclar la fase del GRUPO al historial del mes anterior: el primer empleado con datos
-            // reales define el desplazamiento global → todos los offsets se mueven en bloque →
-            // se respeta la continuidad del ciclo cross-mes SIN romper el escalonamiento relativo.
-            let globalShift = 0;
-            for (let i = 0; i < group.length; i++) {
-                const empId = group[i];
+
+            // ── Offsets individuales desde datos del mes anterior ──────────────────────────
+            // Para cada empleado: offset = trailingWorkDays % cycleLen (fórmula exacta que
+            // garantiza continuidad cross-mes sin crear rachas > cL días).
+            // Si hay duplicados (varios trabajaron la misma racha), se desplazan hacia adelante
+            // (+1, +2, ...) NUNCA hacia atrás para no crear violaciones cross-mes.
+            // Rango seguro de desplazamiento: [desiredOffset, cycleLen-1].
+            const desiredByEmp = new Map<string, number>();
+            group.forEach(empId => {
                 const tw = ctx.prevMonthTrailingWorkDays?.[empId];
                 const tr = ctx.prevMonthTrailingRestDays?.[empId];
-                if (tw !== undefined && tw > 0) {
-                    const desired = tw % eCycleLen;
-                    globalShift = (desired - baseOffsets[i] + eCycleLen) % eCycleLen;
-                    break;
-                } else if (tr !== undefined && tr > 0 && tr < eCF) {
-                    const desired = (eCL + tr) % eCycleLen;
-                    globalShift = (desired - baseOffsets[i] + eCycleLen) % eCycleLen;
-                    break;
-                }
-            }
-            group.forEach((empId, idx) => {
-                const offset = (baseOffsets[idx] + globalShift) % eCycleLen;
-                empGroupIdx[empId] = offset;
+                if (tw !== undefined && tw > 0) desiredByEmp.set(empId, tw % eCycleLen);
+                else if (tr !== undefined && tr > 0 && tr < eCF) desiredByEmp.set(empId, (eCL + tr) % eCycleLen);
+            });
+
+            const assignedOffsets = new Map<string, number>();
+            const usedOffsets = new Set<number>();
+
+            // Ordenar por offset deseado para que los duplicados se desplacen en orden
+            const withData = group.filter(id => desiredByEmp.has(id))
+                .sort((a, b) => (desiredByEmp.get(a)!) - (desiredByEmp.get(b)!));
+            withData.forEach(empId => {
+                const base = desiredByEmp.get(empId)!;
+                // Buscar el menor offset ≥ base no usado (sin wrapping para evitar violaciones)
+                let off = base;
+                while (usedOffsets.has(off) && off < eCycleLen) off++;
+                if (off >= eCycleLen) off = eCycleLen - 1; // último slot válido (día franco)
+                usedOffsets.add(off);
+                assignedOffsets.set(empId, off);
+            });
+
+            // ── Empleados sin datos históricos: distribución uniforme evitando slots usados ──
+            const withoutData = group.filter(id => !desiredByEmp.has(id));
+            withoutData.forEach((empId, i) => {
+                let off = (Math.floor((i * eCycleLen) / Math.max(1, withoutData.length)) + seed) % eCycleLen;
+                let tries = 0;
+                while (usedOffsets.has(off) && tries < eCycleLen) { off = (off + 1) % eCycleLen; tries++; }
+                usedOffsets.add(off);
+                assignedOffsets.set(empId, off);
+            });
+
+            group.forEach(empId => {
+                empGroupIdx[empId] = assignedOffsets.get(empId) ?? 0;
                 empCycleLen[empId] = eCycleLen;
                 empCL_map[empId] = eCL;
             });
