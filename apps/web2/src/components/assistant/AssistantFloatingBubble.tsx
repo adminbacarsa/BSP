@@ -7,7 +7,7 @@ import { Sparkles, X, SendHorizontal, Trash2 } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { inferModuleKeyFromPath } from '@/lib/assistant/inferModuleKeyFromPath';
+import { inferModuleKeyFromPath, moduleTitleEs } from '@/lib/assistant/inferModuleKeyFromPath';
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
@@ -40,6 +40,22 @@ function loadFabPos(): FabPos {
     /* ignore */
   }
   return { bottom: 20, right: 20 };
+}
+
+/** `**paso**` → negritas (solo esto; texto plano en el resto). */
+function formatAssistantSnippet(content: string): React.ReactNode {
+  const chunks = content.split(/(\*\*[^*]+\*\*)/g);
+  return chunks.map((c, idx) => {
+    if (/^\*\*.+\*\*$/.test(c)) {
+      const inner = c.slice(2, -2);
+      return (
+        <strong key={idx} className="font-extrabold text-indigo-950 dark:text-indigo-100">
+          {inner}
+        </strong>
+      );
+    }
+    return <span key={idx}>{c}</span>;
+  });
 }
 
 function hideGloboRoute(pathname: string): boolean {
@@ -231,7 +247,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-wide text-indigo-800 dark:text-indigo-200">Asistente</p>
               <p className="truncate text-[9px] font-bold text-slate-500 dark:text-slate-400" title={fullPath}>
-                {inferModuleKeyFromPath(fullPath || pathname) || 'General'}
+                {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
               </p>
             </div>
             <button
@@ -260,7 +276,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
                     : 'mr-2 border border-slate-100 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                 }`}
               >
-                {m.content}
+                {m.role === 'assistant' ? formatAssistantSnippet(m.content) : m.content}
               </div>
             ))}
             {busy && (

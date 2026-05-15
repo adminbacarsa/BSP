@@ -174,7 +174,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-2.5-flash`; `gemini-1.5-flash` suele dar 404 en proyectos/API keys nuevas).
 - El backend resuelve perfil en Firestore (`system_users` / `client_users` / `empleados` + `roles`) y **no** debe confiar en la ruta del cliente para permisos; el módulo actual se envía sólo como contexto.
-
+- **Guías por módulo (UX):** si el cliente manda `moduleKey` (ej. `PLANNING`), el servidor inyecta texto operativo en `cospKnowledge` + `operationalGuideForModuleKey`, y el prompt (`ASSISTANT_RESPONSE_STYLE` en `runPlatformAssistant`) favorece respuestas con pasos numerados, **negritas** para controles UI y honestidad sobre límites del chat; el globo renderiza `**texto**` en negrita.
 ---
 
 ## 6. Códigos de turno (CCT 422/05)

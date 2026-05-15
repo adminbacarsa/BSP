@@ -1,7 +1,20 @@
 import * as functions from 'firebase-functions/v1';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS } from './cospKnowledge';
+import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS, operationalGuideForModuleKey } from './cospKnowledge';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
+
+const ASSISTANT_RESPONSE_STYLE = `
+Cómo responder (subir calidad sin inventar datos):
+
+1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
+
+2) Sé explícita sobre el límite técnico: **desde este chat no ves** la grilla cargada, Firestore ni pantallas ajenas — no listes empleados ni códigos reales. En cambio guiá **paso a paso** con la GUÍA OPERATIVA si la recibís para ese módulo.
+
+3) Usá **lista numerada** con pocos pasos. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
+
+4) Incluí rutas entre comillas o backticks cuando ayude: /admin/planificacion, /admin/operaciones.
+5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
+`.trim();
 
 export interface AssistantChatMessageInput {
   role: 'user' | 'assistant';
@@ -80,18 +93,22 @@ function buildSystemPrompt(
   pathname: string,
   moduleKey: string | null | undefined,
 ): string {
+  const guide = operationalGuideForModuleKey(moduleKey);
   return [
-    `Sos la asistente virtual de COSP (Grupo Bacar). Sé concisa en español (Argentina); sin markdown excesivo; listas sólo cuando ayuden.`,
+    `Sos la asistente virtual de COSP (Grupo Bacar). Español Argentina, tono claro y servicial.`,
+    ASSISTANT_RESPONSE_STYLE,
     '',
     COSP_PLATFORM_KNOWLEDGE,
+    guide ? `\n${guide}` : '',
     '',
     `Contexto servidor (verificado por backend):`,
     `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
     `- Ruta navegador (orientativa): "${pathname}"`,
+    ...(moduleKey ? [`- moduleKey cliente (orientativo): "${moduleKey}"`] : []),
     '',
     personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
     '',
-    `Reglas: No inventás convocatorias APIs internas nuevas ni prometés ejecutar cambios sobre datos.`,
+    `Reglas: No inventés convocatorias APIs internas nuevas ni prometés ejecutar cambios sobre datos.`,
     `Si falta información o el usuario necesita soporte urgente ante fallo técnico, sugerís contactar a operaciones/IT.`,
   ].join('\n');
 }
