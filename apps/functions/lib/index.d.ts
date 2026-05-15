@@ -11,6 +11,7 @@ export declare const manageAbsences: functions.HttpsFunction & functions.Runnabl
 export declare const managePatterns: functions.HttpsFunction & functions.Runnable<any>;
 export declare const manageAgreements: functions.HttpsFunction & functions.Runnable<any>;
 export declare const checkSystemHealth: functions.HttpsFunction & functions.Runnable<any>;
+export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;

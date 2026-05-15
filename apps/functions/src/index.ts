@@ -19,6 +19,7 @@ import { LaborAgreementService } from './data-management/labor-agreement.service
 
 // Interfaces
 import { EmployeeRole } from './common/interfaces/employee.interface';
+import { runPlatformAssistant, type AssistantChatPayload } from './assistant/runPlatformAssistant';
 
 // Inicialización de Firebase Admin
 if (!admin.apps.length) {
@@ -484,6 +485,21 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
   }
 });
 
+// =========================================================
+// 12b. ASISTENTE VIRTUAL (Gemini vía Functions)
+// =========================================================
+export const chatPlatformAssistant = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  try {
+    return await runPlatformAssistant(context.auth.uid, data as AssistantChatPayload);
+  } catch (e: any) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    console.error('[chatPlatformAssistant]', e?.message, e?.stack);
+    throw new functions.https.HttpsError('internal', e?.message ?? 'Error asistente');
+  }
+});
 
 
 

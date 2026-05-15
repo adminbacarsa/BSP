@@ -155,6 +155,15 @@ Definidos en `apps/web2/src/config/modules.ts`:
 Acciones por módulo: `read`, `create`, `update`, `delete`.
 `isSuperAdmin` bypasea todos los permisos.
 
+### Asistente virtual (globo en la app)
+
+- UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo).
+- Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**.
+- Variables en **Functions** (producción: secreto/param del proyecto Firebase; **emulador local**: exportar antes de arrancar Functions, ej. PowerShell `$env:GEMINI_API_KEY='tu_key'` — el emulador no carga `.env` solo):
+  - `GEMINI_API_KEY` — obligatoria para que responda.
+  - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).
+- El backend resuelve perfil en Firestore (`system_users` / `client_users` / `empleados` + `roles`) y **no** debe confiar en la ruta del cliente para permisos; el módulo actual se envía sólo como contexto.
+
 ---
 
 ## 6. Códigos de turno (CCT 422/05)

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
@@ -16,6 +16,7 @@ const system_user_service_1 = require("./data-management/system-user.service");
 const absence_service_1 = require("./data-management/absence.service");
 const pattern_service_1 = require("./scheduling/pattern.service");
 const labor_agreement_service_1 = require("./data-management/labor-agreement.service");
+const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -384,6 +385,20 @@ exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
                 error: error.message
             }
         };
+    }
+});
+exports.chatPlatformAssistant = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    try {
+        return await (0, runPlatformAssistant_1.runPlatformAssistant)(context.auth.uid, data);
+    }
+    catch (e) {
+        if (e instanceof functions.https.HttpsError)
+            throw e;
+        console.error('[chatPlatformAssistant]', e?.message, e?.stack);
+        throw new functions.https.HttpsError('internal', e?.message ?? 'Error asistente');
     }
 });
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {

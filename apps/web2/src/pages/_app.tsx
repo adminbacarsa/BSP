@@ -1,12 +1,18 @@
 
 import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
+import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
 import { ToastProvider } from '@/context/ToastContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { EmpresaProvider } from '@/context/EmpresaContext';
 import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
+
+const AssistantFloatingBubble = dynamic(
+  () => import('@/components/assistant/AssistantFloatingBubble').then((m) => m.AssistantFloatingBubble),
+  { ssr: false },
+);
 
 export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
@@ -33,6 +39,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
         <Component {...pageProps} />
+        <AssistantFloatingBubble />
       </ToastProvider>
       </EmpresaProvider>
     </AuthProvider>

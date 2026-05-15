@@ -1,0 +1,168 @@
+import * as functions from 'firebase-functions';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS } from './cospKnowledge';
+import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
+
+export interface AssistantChatMessageInput {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AssistantChatPayload {
+  messages: AssistantChatMessageInput[];
+  /** Ruta declarada desde el navegador (orientación). No confiar para permisos. */
+  pathname?: string;
+  /** Módulo deducido en cliente (opcional). */
+  moduleKey?: string | null;
+  empresaId?: string;
+}
+
+const MAX_MESSAGES = 24;
+const MAX_CONTENT = 2600;
+
+function clampMessages(raw: AssistantChatMessageInput[]): AssistantChatMessageInput[] {
+  const out: AssistantChatMessageInput[] = [];
+  const slice = raw.slice(-MAX_MESSAGES);
+  for (const m of slice) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    const content = String(m.content ?? '')
+      .trim()
+      .slice(0, MAX_CONTENT);
+    if (!content) continue;
+    out.push({ role: m.role, content });
+  }
+  return out;
+}
+
+function fuseConsecutiveSameRole(ms: AssistantChatMessageInput[]): AssistantChatMessageInput[] {
+  const o: AssistantChatMessageInput[] = [];
+  for (const m of ms) {
+    if (o.length > 0 && o[o.length - 1].role === m.role) {
+      const prev = o[o.length - 1];
+      o[o.length - 1] = {
+        role: prev.role,
+        content: `${prev.content}\n\n${m.content}`.slice(0, MAX_CONTENT * 2),
+      };
+    } else {
+      o.push({ ...m });
+    }
+  }
+  return o;
+}
+
+function personaModuleBlurb(persona: AssistantPersona, readableKeys: string[], moduleKey?: string | null): string {
+  const parts: string[] = [];
+  if (persona === 'SYSTEM') {
+    parts.push(`Perfil BACKOFFICE/COSP. Tiene alcance declarado sólo sobre módulos con permiso READ: ${readableKeys.sort().join(', ') || '(ninguno listado)'}.`);
+    parts.push('No describas rutas /admin ni flujos de módulos que no estén en esa lista.');
+    parts.push(`Sugerencias de ruta conocidas:`);
+    readableKeys.slice(0, 12).forEach((k) => {
+      const h = ADMIN_MODULE_ROUTE_HINTS[k];
+      if (h) parts.push(`- ${k}: ${h}`);
+    });
+  } else if (persona === 'EMPLOYEE') {
+    parts.push('Perfil PORTAL EMPLEADO: responder sobre turnos propios, presencia marcada desde portal/ausencias, avisos. No exponer otros empleados por nombre salvo ejemplo genérico. No rutas administrativas salvo mencionar brevemente qué pueden hacer los supervisores en /admin cuando el usuario pregunte cómo reclamar ante la empresa.');
+  } else {
+    parts.push(
+      'Perfil PORTAL CLIENTE: vistas de cliente (accesos, personal autorizado, consultas típicas según desarrollo). Orientar sobre qué hacer si no encuentra función (contactar empresa de seguridad, etc.). Sin datos operativos de otros clientes.',
+    );
+  }
+  if (moduleKey) {
+    parts.push(
+      `Foco de pantalla declarado (moduleKey "${moduleKey}") — usar sólo como contexto orientativo si es coherente con el perfil.`,
+    );
+  }
+  return parts.join('\n');
+}
+
+function buildSystemPrompt(
+  profile: { persona: AssistantPersona; readableModuleKeys: string[]; summaryLabel: string },
+  pathname: string,
+  moduleKey: string | null | undefined,
+): string {
+  return [
+    `Sos la asistente virtual de COSP (Grupo Bacar). Sé concisa en español (Argentina); sin markdown excesivo; listas sólo cuando ayuden.`,
+    '',
+    COSP_PLATFORM_KNOWLEDGE,
+    '',
+    `Contexto servidor (verificado por backend):`,
+    `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
+    `- Ruta navegador (orientativa): "${pathname}"`,
+    '',
+    personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
+    '',
+    `Reglas: No inventás convocatorias APIs internas nuevas ni prometés ejecutar cambios sobre datos.`,
+    `Si falta información o el usuario necesita soporte urgente ante fallo técnico, sugerís contactar a operaciones/IT.`,
+  ].join('\n');
+}
+
+export async function runPlatformAssistant(uid: string, payload: AssistantChatPayload): Promise<{ reply: string }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey?.trim()) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'GEMINI_API_KEY no configurada en Firebase Functions. Definir secreto/env y redesplegar.',
+    );
+  }
+
+  const messages = fuseConsecutiveSameRole(clampMessages(payload.messages ?? []));
+  if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
+    throw new functions.https.HttpsError('invalid-argument', 'Enviá al menos un mensaje de usuario al final.');
+  }
+
+  const profile = await resolveAssistantUser(uid);
+  if (!profile) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Tu cuenta no está asociada a usuarios COSP conocidos para el asistente.',
+    );
+  }
+
+  const claimedEmpresa = typeof payload.empresaId === 'string' ? payload.empresaId : '';
+  if (!empresaAllowed(claimedEmpresa && claimedEmpresa.length > 0 ? claimedEmpresa : undefined, profile)) {
+    throw new functions.https.HttpsError('permission-denied', 'Sesión empresa no coincide con el perfil de usuario.');
+  }
+
+  const pathname = String(payload.pathname ?? '/').slice(0, 400);
+  const moduleKey =
+    typeof payload.moduleKey === 'string' ? payload.moduleKey.trim().slice(0, 64) || null : null;
+
+  const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey);
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash',
+    systemInstruction,
+  });
+
+  /** Primer contenido Gemini debe ser usuario. Si el historial arranca en assistant, se descarta ese turno inicial. */
+  let historyMsgs = [...messages];
+  while (historyMsgs.length > 0 && historyMsgs[0].role === 'assistant') {
+    historyMsgs = historyMsgs.slice(1);
+  }
+  const lastTurn = historyMsgs[historyMsgs.length - 1];
+  const lastUser = lastTurn?.role === 'user' ? lastTurn.content : '';
+  const priorRaw = historyMsgs.slice(0, -1);
+  if (!lastUser.trim()) {
+    throw new functions.https.HttpsError('invalid-argument', 'Mensaje vacío.');
+  }
+
+  const historyFiltered: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+  for (let i = 0; i < priorRaw.length; i++) {
+    const m = priorRaw[i];
+    historyFiltered.push({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }],
+    });
+  }
+
+  const chat = model.startChat({ history: historyFiltered });
+
+  const result = await chat.sendMessage(lastUser);
+  const reply = String(result.response.text() ?? '').trim();
+  if (!reply) {
+    throw new functions.https.HttpsError('internal', 'Respuesta vacía del modelo.');
+  }
+
+  return { reply: reply.slice(0, 8000) };
+}
