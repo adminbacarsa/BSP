@@ -75,6 +75,16 @@ if (jdkHome) {
   process.exit(1);
 }
 
+/** En Windows, Cursor/shells a veces ejecutan node sin npm en PATH; priorizamos Node instalado en Program Files. */
+if (process.platform === 'win32') {
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const sysNode = path.join(pf, 'nodejs');
+  if (fs.existsSync(path.join(sysNode, 'npm.cmd'))) {
+    env.PATH = `${sysNode}${sep}${env.PATH || ''}`;
+    logErr(`[emulators] PATH+: ${sysNode} (npm/npx del sistema)`);
+  }
+}
+
 const skipFunctions =
   process.argv.includes('--without-functions') || process.env.COSP_EMULATORS_NO_FUNCTIONS === '1';
 
@@ -113,12 +123,17 @@ if (fs.existsSync(firebaseJs)) {
     cwd: projectRoot,
   });
 } else {
-  logErr('[emulators] Instalá dependencias: npm install (firebase-tools en la raíz)');
-  r = spawnSync('npx', ['--yes', 'firebase-tools', ...emulatorArgs], {
+  logErr('[emulators] firebase-tools no está en node_modules; uso npx firebase-tools (puede descargar la primera vez).');
+  const npxCmd =
+    process.platform === 'win32'
+      ? path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'npx.cmd')
+      : 'npx';
+  const useCmd = process.platform === 'win32' && fs.existsSync(npxCmd) ? npxCmd : 'npx';
+  r = spawnSync(useCmd, ['--yes', 'firebase-tools', ...emulatorArgs], {
     stdio: 'inherit',
     env,
     cwd: projectRoot,
-    shell: true,
+    shell: process.platform === 'win32',
   });
 }
 
