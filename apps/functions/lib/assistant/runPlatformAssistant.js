@@ -7,6 +7,7 @@ const generative_ai_1 = require("@google/generative-ai");
 const cospKnowledge_1 = require("./cospKnowledge");
 const assistantDataTools_1 = require("./assistantDataTools");
 const assistantToolDeclarations_1 = require("./assistantToolDeclarations");
+const assistantDeterministicRouter_1 = require("./assistantDeterministicRouter");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
@@ -189,6 +190,16 @@ async function runPlatformAssistant(uid, payload) {
         referenceDateYsMmDd: referenceYsMmDd,
     };
     const toolsEnabled = (0, assistantDataTools_1.assistantToolsEnabledForContext)(toolCtx);
+    if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
+        try {
+            const direct = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, toolsEnabled, moduleKey, pathname);
+            if (direct?.trim())
+                return { reply: direct.trim() };
+        }
+        catch (e) {
+            console.warn('[assistant] tryDeterministicDataReply', e);
+        }
+    }
     let metricsVerifiedBlock = '';
     if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
         try {

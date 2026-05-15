@@ -15,6 +15,7 @@ import {
   type AssistantToolContext,
 } from './assistantDataTools';
 import { ASSISTANT_FUNCTION_DECLARATIONS, ASSISTANT_TOOL_ROUNDS_MAX } from './assistantToolDeclarations';
+import { tryDeterministicDataReply } from './assistantDeterministicRouter';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
 
 const ASSISTANT_RESPONSE_STYLE = `
@@ -248,6 +249,15 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   };
 
   const toolsEnabled = assistantToolsEnabledForContext(toolCtx);
+
+  if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
+    try {
+      const direct = await tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, moduleKey, pathname);
+      if (direct?.trim()) return { reply: direct.trim() };
+    } catch (e) {
+      console.warn('[assistant] tryDeterministicDataReply', e);
+    }
+  }
 
   let metricsVerifiedBlock = '';
   if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
