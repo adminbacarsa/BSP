@@ -3490,22 +3490,27 @@ export default function PlanificacionPage() {
                         const codes = [...new Set((p.shifts || []).map((s:any) => String(s.code || '').toUpperCase()).filter(Boolean))];
                         const isSelPos = getEmpDefaultPos(empPosPicker.empId) === p.positionName;
                         const selShift = getEmpDefaultShift(empPosPicker.empId);
+                        // D12 y N12 se guardan y muestran como M/N (alias genérico)
+                        const NORM: Record<string,string> = { D12: 'M', N12: 'N' };
                         const shiftColor: Record<string,string> = {
                             M: 'bg-sky-500 text-white', T: 'bg-amber-500 text-white',
-                            N: 'bg-indigo-600 text-white', D12: 'bg-sky-600 text-white',
-                            N12: 'bg-violet-600 text-white',
+                            N: 'bg-indigo-600 text-white',
                         };
                         return (
                             <div key={p.positionName} className={`border-b last:border-0 ${isSelPos ? 'bg-indigo-50' : ''}`}>
                                 <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600">{p.positionName}</div>
                                 <div className="flex flex-wrap gap-1 px-3 pb-2">
                                 {codes.length > 0 ? codes.map((sc:string) => {
-                                    const active = isSelPos && selShift === sc;
+                                    const saveCode = NORM[sc] ?? sc;
+                                    const displayLabel = NORM[sc] ?? sc;
+                                    const is12h = sc === 'D12' || sc === 'N12';
+                                    const active = isSelPos && selShift === saveCode;
                                     return (
                                         <button key={sc}
-                                            onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, sc)}
-                                            className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[sc] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
-                                            {sc}
+                                            onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, saveCode)}
+                                            className={`flex items-center gap-0.5 px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[saveCode] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
+                                            {displayLabel}
+                                            {is12h && <span className={`text-[8px] font-bold ml-0.5 ${active ? 'opacity-80' : 'text-slate-400'}`}>12h</span>}
                                         </button>
                                     );
                                 }) : (
