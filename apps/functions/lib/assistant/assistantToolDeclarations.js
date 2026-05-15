@@ -68,6 +68,20 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
             required: [],
         },
     },
+    {
+        name: 'contar_servicios_sla_vigentes_empresa',
+        description: 'Para «cuántos servicios / SLA activos hay hoy», «contratos vigentes»: cuenta documentos activos en `servicios_sla` limitados a clientes de la empresa actual y donde la fecha de referencia está entre startDate y endDate. Usarlo SIEMPRE que pidan número/cantidad, no bastar con explicar la pantalla /admin/servicios.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'YYYY-MM-DD del «hoy». Si omitís usar la fechaReferenciaCliente del contexto.',
+                },
+            },
+            required: [],
+        },
+    },
 ];
 exports.ASSISTANT_TOOL_ROUNDS_MAX = 6;
 //# sourceMappingURL=assistantToolDeclarations.js.map

@@ -44,6 +44,15 @@ function canQueryOperationsDaySummary(ctx: AssistantToolContext): boolean {
   );
 }
 
+/** Consulta colección servicios_sla para la empresa («cuántos servicios activos hoy», etc.). */
+function canQueryServiciosSlaResumen(ctx: AssistantToolContext): boolean {
+  if (ctx.persona !== 'SYSTEM') return false;
+  if (!ctx.empresaId.trim()) return false;
+  return ctx.readableModuleKeys.some((k) =>
+    ['SERVICES', 'PLANNING', 'OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'CONFIG', 'CLIENTS'].includes(k),
+  );
+}
+
 function ymCordoba(dt: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Argentina/Cordoba',
@@ -267,7 +276,7 @@ async function objectivesMapForEmpresa(
 export function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean {
   if (!ctx.empresaId) return false;
   if (ctx.persona === 'CLIENT') return false;
-  return canQueryShifts(ctx) || canUseEmployeeSearch(ctx);
+  return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx);
 }
 
 function parseYmd(s: string): { y: number; m: number; d: number } {
@@ -278,6 +287,39 @@ function parseYmd(s: string): { y: number; m: number; d: number } {
   const d = Number(rex[3]);
   if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) throw new Error('fecha inválida');
   return { y, m: mo, d };
+}
+
+function slaCampoFechaYmD(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.trim().slice(0, 10);
+  if (raw instanceof admin.firestore.Timestamp) {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Cordoba',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(raw.toDate());
+  }
+  if (typeof raw === 'object' && raw !== null && 'seconds' in raw) {
+    const o = raw as { seconds: number; nanoseconds?: number };
+    try {
+      const ts = new admin.firestore.Timestamp(o.seconds, o.nanoseconds ?? 0);
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Argentina/Cordoba',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(ts.toDate());
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+async function empresaClientIdsSet(db: FirebaseFirestore.Firestore, empresaId: string): Promise<Set<string>> {
+  const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(520).get();
+  return new Set(snap.docs.map((d) => d.id));
 }
 
 /** Inicio inclusivo AR y fin inclusivo para rango ISO (mismo día válido si from===to). */
@@ -629,6 +671,97 @@ export async function ejecutarListadoTurnosOperativosDia(
   };
 }
 
+/** Conteo de SLA en `servicios_sla`: activos (`status`), cliente de esta empresa y vigentes en día ref (startDate/endDate inclusivos como en Pantalla Servicios). */
+export async function ejecutarContarServiciosSlaVigentesEmpresa(
+  ctx: AssistantToolContext,
+  args: { fecha?: string },
+): Promise<Record<string, unknown>> {
+  if (!canQueryServiciosSlaResumen(ctx)) {
+    return { error: 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ' };
+  }
+
+  const fecha = String(args.fecha ?? ctx.referenceDateYsMmDd).trim();
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+
+  const db = admin.firestore();
+  const clientIds = await empresaClientIdsSet(db, ctx.empresaId);
+  if (clientIds.size === 0) {
+    return {
+      fecha_referencia: fecha,
+      cuenta_vigentes_en_fecha: 0,
+      cuenta_filas_servicios_active_empresa_en_lote: 0,
+      nota: 'ningún_cliente_de_esta_empresa_en_clients',
+      muestra_servicios_vigentes: [],
+    };
+  }
+
+  const qsnap = await db.collection('servicios_sla').where('status', '==', 'active').limit(800).get();
+  let incompletosPeriodo = 0;
+  let cuentaVigentes = 0;
+  let cuentaFilasEmpresaEnQuery = 0;
+  const vigentesParaMuestra: Array<Record<string, string>> = [];
+  const incompletosMuestra: Array<Record<string, string>> = [];
+
+  for (const docSnap of qsnap.docs) {
+    const row = docSnap.data() as Record<string, unknown>;
+    const cid = String(row.clientId ?? '').trim();
+    if (!cid || !clientIds.has(cid)) continue;
+
+    cuentaFilasEmpresaEnQuery += 1;
+
+    const desde = slaCampoFechaYmD(row.startDate ?? row.desde ?? row.inicioContrato ?? '');
+    const hasta = slaCampoFechaYmD(row.endDate ?? row.hasta ?? row.finContrato ?? '');
+    if (!desde || !hasta) {
+      incompletosPeriodo += 1;
+      if (incompletosMuestra.length < 6) {
+        incompletosMuestra.push({
+          cliente: String(row.clientName ?? '').slice(0, 80),
+          objetivo: String(row.objectiveName ?? '').slice(0, 80),
+          id_doc_corto: docSnap.id.slice(0, 12),
+          motivo_excluye_vigentes: 'falta_o_invalido_start_or_end_Date',
+        });
+      }
+      continue;
+    }
+
+    const enVigencia = desde <= fecha && hasta >= fecha;
+    if (!enVigencia) continue;
+
+    cuentaVigentes += 1;
+    const item = {
+      cliente: String(row.clientName ?? cid).slice(0, 100),
+      objetivo: String(row.objectiveName ?? row.objectiveId ?? '').slice(0, 100),
+      desde,
+      hasta,
+      id_servicio_firestore_corto: docSnap.id.slice(0, 14),
+    };
+    if (vigentesParaMuestra.length < 80) vigentesParaMuestra.push(item);
+  }
+
+  const muestraLista = [...vigentesParaMuestra]
+    .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'))
+    .slice(0, 36);
+
+  return {
+    fecha_referencia: fecha,
+    zona_fechas_contracto: 'America/Argentina/Cordoba interpretando Timestamps cuando existen',
+    criterios:
+      'status exactamente "active" en Firestore, clientId debe ser cliente de empresa (clients.empresaId), día ref entre startDate y endDate string-inclusivos YYYY-MM-DD.',
+    cuenta_vigentes_en_fecha: cuentaVigentes,
+    cuenta_filas_servicios_active_empresa_en_primer_loteFirestore: cuentaFilasEmpresaEnQuery,
+    cuenta_activos_sin_rango_fechas_calendario: incompletosPeriodo,
+    truncado_primer_loteFirestore_800_documentos_GLOBAL_active: qsnap.size >= 800,
+    muestra_servicios_vigentes: muestraLista,
+    muestra_activos_sin_fechas: incompletosMuestra,
+    nota_tras_herramienta:
+      'Primera frase: el número cuenta_vigentes_en_fecha. Si truncado_primer_loteFirestore_800, puede haber SLA activos no contados hasta ampliar la consulta. Si el usuario no pidió ubicación pantalla, no des tutorial largo.',
+  };
+}
+
 function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value === undefined) return null;
@@ -676,6 +809,10 @@ export async function dispatchAssistantToolCall(
       fecha: args.fecha != null ? String(args.fecha) : undefined,
       id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'contar_servicios_sla_vigentes_empresa') {
+    raw = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, {
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
     });
   } else {
     raw = { error: 'herramienta_desconocida', name };

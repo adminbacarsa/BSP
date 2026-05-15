@@ -13,11 +13,11 @@ Cómo responder (subir calidad sin inventar datos):
 
 1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
 
-2) Si tenés **herramientas de consulta** habilitadas en el contexto: usalas para turnos/presencia/planificación real **antes** de inventar. Para preguntas **quién tiene turno / quiénes están de turno hoy / lista de guardias en objetivos**, usá **listado_turnos_operativos_dia**. Para **totales** (cuántos presentes, ausentes, por objetivo) usá **resumen_presencias_objetivos_dia**. Para **un empleado concreto** usá buscar + consultar_turnos_empleado. Si devuelven varias personas con nombre parecido, pedí aclaración. Si no hay herramientas o devuelven vacío, explicalo y la **GUÍA OPERATIVA** de pantalla.
+2) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / contratos vigentes «hoy»** usá **contar_servicios_sla_vigentes_empresa**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
-3) Usá **lista numerada** cuando expliques procedimientos UI. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
+3) Usá **lista numerada** cuando expliques procedimientos UI (sólo si el usuario pidió proceso o ubicación). Ahí resaltá controles con **negritas markdown** típicas: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
 
-4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones.
+4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones, /admin/servicios.
 5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
 `.trim();
 const MAX_MESSAGES = 24;

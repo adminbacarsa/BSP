@@ -26,4 +26,7 @@ export declare function ejecutarListadoTurnosOperativosDia(ctx: AssistantToolCon
     id_objetivo?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarContarServiciosSlaVigentesEmpresa(ctx: AssistantToolContext, args: {
+    fecha?: string;
+}): Promise<Record<string, unknown>>;
 export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;
