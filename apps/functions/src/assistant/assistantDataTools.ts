@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { AssistantPersona } from './resolveAssistantUser';
 
 /** Zona operativa alineada al planificador web (Argentina). */
@@ -329,6 +330,37 @@ function slaCampoFechaYmD(raw: unknown): string {
 async function empresaClientIdsSet(db: FirebaseFirestore.Firestore, empresaId: string): Promise<Set<string>> {
   const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(520).get();
   return new Set(snap.docs.map((d) => d.id));
+}
+
+function chunkIds<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** Misma comparación por strings YYYY-MM-DD que dashboard.tsx y KPI en Servicios (solapa el mes de referencia). */
+function servicioSlaSolapaMesReferencia(desdeYmd: string, hastaYmd: string, refYmd: string): boolean {
+  const ym = refYmd.slice(0, 7);
+  const sd = (desdeYmd || '').trim().slice(0, 10);
+  const ed = (hastaYmd || '').trim().slice(0, 10);
+  if (sd.length < 10 || ed.length < 10) return false;
+  return sd <= `${ym}-31` && ed >= `${ym}-01`;
+}
+
+function servicioSlaVigenteEnDiaInclusivo(desdeYmd: string, hastaYmd: string, refYmd: string): boolean {
+  const sd = (desdeYmd || '').trim().slice(0, 10);
+  const ed = (hastaYmd || '').trim().slice(0, 10);
+  if (sd.length < 10 || ed.length < 10) return false;
+  return sd <= refYmd && ed >= refYmd;
+}
+
+/** Alineado a badges «Activo» en UI: activo/active/activa o sin estado; excluye inactive/inactivo. */
+function slaStatusOperativoComoPantallaServicios(row: Record<string, unknown>): boolean {
+  const s = String(row.status ?? '').trim().toLowerCase();
+  if (!s) return true;
+  if (s === 'active' || s === 'activo' || s === 'activa') return true;
+  if (s === 'inactive' || s === 'inactivo' || s === 'expired' || s === 'vencido') return false;
+  return true;
 }
 
 /** Inicio inclusivo AR y fin inclusivo para rango ISO (mismo día válido si from===to). */
@@ -680,7 +712,7 @@ export async function ejecutarListadoTurnosOperativosDia(
   };
 }
 
-/** Conteo de SLA en `servicios_sla`: activos (`status`), cliente de esta empresa y vigentes en día ref (startDate/endDate inclusivos como en Pantalla Servicios). */
+/** Conteo de SLA en `servicios_sla` por clientes de la empresa: mismo criterio de mes que KPI Servicios/Dashboard + vigencia en día opcional. */
 export async function ejecutarContarServiciosSlaVigentesEmpresa(
   ctx: AssistantToolContext,
   args: { fecha?: string },
@@ -701,26 +733,35 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
   if (clientIds.size === 0) {
     return {
       fecha_referencia: fecha,
-      cuenta_vigentes_en_fecha: 0,
-      cuenta_filas_servicios_active_empresa_en_lote: 0,
+      mes_yyyy_mm: fecha.slice(0, 7),
+      cuenta_para_tarjeta_servicios_activos_del_mes: 0,
+      cuenta_objetivos_distintos_con_sla_en_ese_mes: 0,
+      cuenta_contratos_vigentes_en_el_dia_referencia: 0,
       nota: 'ningún_cliente_de_esta_empresa_en_clients',
-      muestra_servicios_vigentes: [],
+      muestra_contratos_en_mes: [],
     };
   }
 
-  const qsnap = await db.collection('servicios_sla').where('status', '==', 'active').limit(800).get();
+  const idList = Array.from(clientIds);
+  const byDocId = new Map<string, QueryDocumentSnapshot>();
+  for (const batch of chunkIds(idList, 10)) {
+    const qs = await db.collection('servicios_sla').where('clientId', 'in', batch).limit(500).get();
+    for (const d of qs.docs) {
+      if (!byDocId.has(d.id)) byDocId.set(d.id, d);
+    }
+  }
+
   let incompletosPeriodo = 0;
-  let cuentaVigentes = 0;
-  let cuentaFilasEmpresaEnQuery = 0;
+  let cuentaSolapaMes = 0;
+  let cuentaVigentesDia = 0;
+  const objetivosUnicosMes = new Set<string>();
   const vigentesParaMuestra: Array<Record<string, string>> = [];
   const incompletosMuestra: Array<Record<string, string>> = [];
 
-  for (const docSnap of qsnap.docs) {
+  for (const docSnap of byDocId.values()) {
     const row = docSnap.data() as Record<string, unknown>;
     const cid = String(row.clientId ?? '').trim();
     if (!cid || !clientIds.has(cid)) continue;
-
-    cuentaFilasEmpresaEnQuery += 1;
 
     const desde = slaCampoFechaYmD(row.startDate ?? row.desde ?? row.inicioContrato ?? '');
     const hasta = slaCampoFechaYmD(row.endDate ?? row.hasta ?? row.finContrato ?? '');
@@ -731,24 +772,31 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
           cliente: String(row.clientName ?? '').slice(0, 80),
           objetivo: String(row.objectiveName ?? '').slice(0, 80),
           id_doc_corto: docSnap.id.slice(0, 12),
-          motivo_excluye_vigentes: 'falta_o_invalido_start_or_end_Date',
+          motivo: 'falta_o_invalido_start_or_end_Date',
         });
       }
       continue;
     }
 
-    const enVigencia = desde <= fecha && hasta >= fecha;
-    if (!enVigencia) continue;
+    const solapaMes = servicioSlaSolapaMesReferencia(desde, hasta, fecha);
+    if (solapaMes) {
+      cuentaSolapaMes += 1;
+      const oid = String(row.objectiveId ?? '').trim() || String(row.objectiveName ?? '').trim() || docSnap.id;
+      objetivosUnicosMes.add(`${cid}__${oid}`);
+      const item = {
+        cliente: String(row.clientName ?? cid).slice(0, 100),
+        objetivo: String(row.objectiveName ?? row.objectiveId ?? '').slice(0, 100),
+        desde,
+        hasta,
+        estado: String(row.status ?? '').slice(0, 24),
+        id_servicio_firestore_corto: docSnap.id.slice(0, 14),
+      };
+      if (vigentesParaMuestra.length < 80) vigentesParaMuestra.push(item);
+    }
 
-    cuentaVigentes += 1;
-    const item = {
-      cliente: String(row.clientName ?? cid).slice(0, 100),
-      objetivo: String(row.objectiveName ?? row.objectiveId ?? '').slice(0, 100),
-      desde,
-      hasta,
-      id_servicio_firestore_corto: docSnap.id.slice(0, 14),
-    };
-    if (vigentesParaMuestra.length < 80) vigentesParaMuestra.push(item);
+    if (slaStatusOperativoComoPantallaServicios(row) && servicioSlaVigenteEnDiaInclusivo(desde, hasta, fecha)) {
+      cuentaVigentesDia += 1;
+    }
   }
 
   const muestraLista = [...vigentesParaMuestra]
@@ -757,17 +805,21 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
 
   return {
     fecha_referencia: fecha,
-    zona_fechas_contracto: 'America/Argentina/Cordoba interpretando Timestamps cuando existen',
-    criterios:
-      'status exactamente "active" en Firestore, clientId debe ser cliente de empresa (clients.empresaId), día ref entre startDate y endDate string-inclusivos YYYY-MM-DD.',
-    cuenta_vigentes_en_fecha: cuentaVigentes,
-    cuenta_filas_servicios_active_empresa_en_primer_loteFirestore: cuentaFilasEmpresaEnQuery,
+    mes_yyyy_mm: fecha.slice(0, 7),
+    criterios: {
+      tarjeta_panel_y_kpi_servicios:
+        'Cuenta documentos en servicios_sla cuyo clientId pertenece a clients.empresaId actual y startDate/endDate solapan el mes calendario de fecha_referencia (misma regla string que dashboard y KPI «Servicios activos» del mes en la pantalla Servicios).',
+      vigentes_en_un_dia:
+        'cuenta_contratos_vigentes_en_el_dia_referencia = status operativo (activo/activo en español o vacío; excluye inactivo) y el día fecha_referencia está entre start y end inclusive.',
+    },
+    cuenta_para_tarjeta_servicios_activos_del_mes: cuentaSolapaMes,
+    cuenta_objetivos_distintos_con_sla_en_ese_mes: objetivosUnicosMes.size,
+    cuenta_contratos_vigentes_en_el_dia_referencia: cuentaVigentesDia,
     cuenta_activos_sin_rango_fechas_calendario: incompletosPeriodo,
-    truncado_primer_loteFirestore_800_documentos_GLOBAL_active: qsnap.size >= 800,
-    muestra_servicios_vigentes: muestraLista,
+    muestra_contratos_en_mes: muestraLista,
     muestra_activos_sin_fechas: incompletosMuestra,
     nota_tras_herramienta:
-      'Primera frase: el número cuenta_vigentes_en_fecha. Si truncado_primer_loteFirestore_800, puede haber SLA activos no contados hasta ampliar la consulta. Si el usuario no pidió ubicación pantalla, no des tutorial largo.',
+      'Respondé con cuenta_para_tarjeta_servicios_activos_del_mes cuando la pregunta sea «cuántos servicios activos» como en el panel o la tarjeta del mes (coincide con el KPI del módulo Servicios). Usá cuenta_objetivos_distintos_con_sla_en_ese_mes si hablan de «objetivos» o tarjetas por sitio. Usá cuenta_contratos_vigentes_en_el_dia_referencia solo si piden explícitamente vigentes «hoy» / en esa fecha con sentido contractual estricto. No inventes cifras: son las tres claves anteriores.',
   };
 }
 

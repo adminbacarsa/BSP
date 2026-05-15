@@ -76,7 +76,7 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   {
     name: 'contar_servicios_sla_vigentes_empresa',
     description:
-      'Para «cuántos servicios / SLA activos hay hoy», «contratos vigentes»: cuenta documentos activos en `servicios_sla` limitados a clientes de la empresa actual y donde la fecha de referencia está entre startDate y endDate. Usarlo SIEMPRE que pidan número/cantidad, no bastar con explicar la pantalla /admin/servicios.',
+      'Para «cuántos servicios activos», SLA del mes, tarjeta del panel: devuelve cuenta_para_tarjeta_servicios_activos_del_mes (misma lógica que el KPI del módulo Servicios / panel) y cuenta_objetivos_distintos_con_sla_en_ese_mes. Para «vigentes hoy» contractual estricto mirá cuenta_contratos_vigentes_en_el_dia_referencia. Usar SIEMPRE que pidan número; no inventar cifras.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {

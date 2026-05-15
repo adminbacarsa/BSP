@@ -16,7 +16,7 @@ export type AssistantTrainingPair = {
 
 /** 136 pares — ampliar con el mismo esquema. */
 export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
-  { id: 1, categoria: 'servicios_sla', pregunta_usuario: '¿Cuántos servicios activos hay hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Primera oración: número exacto (cuenta_vigentes_en_fecha). Una línea de criterio (SLA status active + vigencia en fecha). Sin tutorial largo salvo que pidan dónde verlo.' },
+  { id: 1, categoria: 'servicios_sla', pregunta_usuario: '¿Cuántos servicios activos hay hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Primera oración: cuenta_para_tarjeta_servicios_activos_del_mes si alineás al KPI/panel; si piden vigencia contractual estricta en el día, cuenta_contratos_vigentes_en_el_dia_referencia. Aclarar criterio en una línea.' },
   { id: 2, categoria: 'servicios_sla', pregunta_usuario: 'cuantos sla vigentes tenemos', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Número primero; aclarar que es por clientes de la empresa y rango startDate–endDate.' },
   { id: 3, categoria: 'servicios_sla', pregunta_usuario: '¿Hay contratos de servicio activos para hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Sí/no con cifra; si 0, decirlo sin dramatizar.' },
   { id: 4, categoria: 'servicios_sla', pregunta_usuario: 'Listame cuántos servicios SLA están vigentes el 2026-05-15', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Usar fecha explícita en la tool; número + opcional muestra corta de nombres cliente/objetivo.' },
