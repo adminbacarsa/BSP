@@ -14,7 +14,7 @@ export type AssistantTrainingPair = {
   respuesta_ideal_bullet: string;
 };
 
-/** 136 pares — ampliar con el mismo esquema. */
+/** Cantidad total: `ASSISTANT_TRAINING_PAIR_COUNT` (ampliar con el mismo esquema). */
 export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
   { id: 1, categoria: 'servicios_sla', pregunta_usuario: '¿Cuántos servicios activos hay hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Primera oración: cuenta_para_tarjeta_servicios_activos_del_mes si alineás al KPI/panel; si piden vigencia contractual estricta en el día, cuenta_contratos_vigentes_en_el_dia_referencia. Aclarar criterio en una línea.' },
   { id: 2, categoria: 'servicios_sla', pregunta_usuario: 'cuantos sla vigentes tenemos', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Número primero; aclarar que es por clientes de la empresa y rango startDate–endDate.' },
@@ -165,6 +165,19 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
   { id: 133, categoria: 'presencias_dia', pregunta_usuario: 'Ratio presentes sobre turnos visibles', herramienta_sugerida: 'resumen_presencias_objetivos_dia', respuesta_ideal_bullet: 'Calcular división solo si totales >0; porcentaje 0–100.' },
   { id: 134, categoria: 'empleado_turnos', pregunta_usuario: 'Sin nombre solo legajo id ABCDE12345', herramienta_sugerida: 'consultar_turnos_empleado', respuesta_ideal_bullet: 'Si parece idFirestore, consultar directo con fechas default hoy.' },
   { id: 135, categoria: 'planificacion_ui', pregunta_usuario: 'Publicar y despublicar', herramienta_sugerida: undefined, respuesta_ideal_bullet: 'Explicar impacto en vista operaciones planificado; sin borrar planificacion_estados.' },
+
+  { id: 137, categoria: 'reportes_horas', pregunta_usuario: '¿Cuántas horas trabajó García en mayo?', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Primero buscar_empleados_por_nombre; luego resumen_horas con fecha_desde/fecha_hasta del mes; primera cifra: horas_planificadas_cobertura y horas_reales si aplica; aclarar que no es liquidación legal.' },
+  { id: 138, categoria: 'reportes_horas', pregunta_usuario: 'Horas planificadas de López del 1 al 15', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Misma cadena buscar + resumen_horas; mencionar truncado si truncado_consulta_turnos_limite.' },
+  { id: 139, categoria: 'reportes_horas', pregunta_usuario: '¿Cuántas hs reales fichó el guardia la semana pasada?', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Totales.horas_reales_fichadas_sumadas; explicar que solo suma turnos completados con realStart/realEnd o checkin/checkout.' },
+  { id: 140, categoria: 'reportes_horas', pregunta_usuario: 'Compará horas M vs N de un empleado el mes', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Usar array por_codigo devuelto por la tool; no inventar subtotales.' },
+  { id: 141, categoria: 'reportes_horas', pregunta_usuario: 'Liquidación nocturnas y feriados del mes', herramienta_sugerida: undefined, respuesta_ideal_bullet: 'Sin tool CCT fino: remitir a Reportes y liquidación / RRHH; no calcular adicional nocturno en chat.' },
+  { id: 142, categoria: 'rrhh', pregunta_usuario: '¿Este colaborador superó el máximo mensual de horas?', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Dar horas del período con la tool; comparar con tope solo si el usuario aporta convenio o dato de convenios_colectivos; si no, no afirmar exceso.' },
+  { id: 143, categoria: 'rrhh', pregunta_usuario: 'Resumen de turnos y horas de un legajo en abril', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Opcional segunda llamada consultar_turnos_empleado si piden detalle por día; primero totales.' },
+  { id: 144, categoria: 'empleado_turnos', pregunta_usuario: 'Mis horas este mes (portal)', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'EMPLOYEE: omitir id o usar propio; rango mes con clientToday.' },
+  { id: 145, categoria: 'mixto_datos_ui', pregunta_usuario: 'En RRHH: cuántas horas tiene cargadas Pérez', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'buscar + resumen_horas; tono RRHH.' },
+  { id: 146, categoria: 'edge', pregunta_usuario: 'Horas de todos los empleados el mes', herramienta_sugerida: undefined, respuesta_ideal_bullet: 'No hay tool batch: ofrecer repetir por persona o export reportes; no inventar lista.' },
+  { id: 147, categoria: 'reportes_horas', pregunta_usuario: 'Horas en un rango de 6 meses', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Si error de rango >98 días, pedir acotar o hacer varias consultas mensuales.' },
+  { id: 148, categoria: 'reportes_horas', pregunta_usuario: '¿Los borradores suman horas?', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Aclarar en muestra_turnos campo borrador; totales incluyen documentos salvo cancel/novedad — honestidad sobre planificado vs publicado.' },
 ];
 
 export const ASSISTANT_TRAINING_PAIR_COUNT = ASSISTANT_TRAINING_PAIRS.length;

@@ -6,6 +6,7 @@ exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
 exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
 exports.ejecutarBuscarObjetivosPorNombre = ejecutarBuscarObjetivosPorNombre;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
+exports.ejecutarResumenHorasEmpleadoPeriodo = ejecutarResumenHorasEmpleadoPeriodo;
 exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetivosDia;
 exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.ejecutarContarServiciosSlaVigentesEmpresa = ejecutarContarServiciosSlaVigentesEmpresa;
@@ -559,8 +560,8 @@ function arRangeTimestamps(desdeYsMmDd, hastaYsMmDd) {
     const t1 = Date.parse(`${b.y}-${String(b.m).padStart(2, '0')}-${String(b.d).padStart(2, '0')}T23:59:59.999${AR_DAY_OFFSET}`);
     if (Number.isNaN(t0) || Number.isNaN(t1) || t1 < t0)
         throw new Error('rango de fechas inválido');
-    if ((t1 - t0) / 86400000 > 33)
-        throw new Error('el rango no puede superar ~31 días');
+    if ((t1 - t0) / 86400000 > 98)
+        throw new Error('el rango no puede superar ~98 días');
     return {
         start: admin.firestore.Timestamp.fromMillis(t0),
         end: admin.firestore.Timestamp.fromMillis(t1),
@@ -788,6 +789,213 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
             ? 'mezcla_borrador_y_no_borrador: aclarás qué registros pueden ser sólo planeación.'
             : undefined,
     };
+}
+const ASSISTANT_HOURS_NON_COVERAGE_CODES = new Set([
+    'F',
+    'FF',
+    'FP',
+    'FT',
+    'V',
+    'L',
+    'A',
+    'E',
+    'AA',
+    'PG',
+    'RET',
+]);
+const ASSISTANT_SHIFT_HOURS_LOOKUP = {
+    M: 8,
+    T: 8,
+    N: 8,
+    D12: 12,
+    N12: 12,
+    PU: 12,
+    GU: 8,
+    EN: 9,
+    C: 8,
+    F: 0,
+    FF: 0,
+    FP: 0,
+    FT: 0,
+    V: 0,
+    L: 0,
+    A: 0,
+    E: 0,
+    AA: 0,
+    PG: 0,
+    RET: 0,
+};
+function readFirestoreTs(row, key) {
+    const v = row[key];
+    if (v instanceof admin.firestore.Timestamp)
+        return v;
+    if (v && typeof v === 'object' && v !== null && 'seconds' in v) {
+        const o = v;
+        const s = Number(o.seconds);
+        const n = Number(o.nanoseconds ?? 0);
+        if (Number.isFinite(s))
+            return new admin.firestore.Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
+    }
+    return null;
+}
+function plannedCoverageHoursFromShiftRow(row) {
+    const rawCode = String(row.code ?? '').trim().toUpperCase();
+    if (ASSISTANT_HOURS_NON_COVERAGE_CODES.has(rawCode))
+        return 0;
+    const st = String(row.status ?? '').toLowerCase();
+    if (st.includes('cancel') || st.includes('delet'))
+        return 0;
+    if (String(row.type ?? '').toUpperCase() === 'NOVEDAD')
+        return 0;
+    const stored = Number(row.hours);
+    if (Number.isFinite(stored) && stored > 0)
+        return Math.min(stored, 24);
+    const s = readFirestoreTs(row, 'startTime');
+    const e = readFirestoreTs(row, 'endTime');
+    if (s && e) {
+        const h = (e.toMillis() - s.toMillis()) / 3600000;
+        if (h > 0 && h <= 24)
+            return h;
+        if (h > 24)
+            return 24;
+    }
+    const lk = ASSISTANT_SHIFT_HOURS_LOOKUP[rawCode];
+    if (typeof lk === 'number')
+        return lk;
+    return 8;
+}
+function realWorkedHoursFromShiftRow(row) {
+    if (row.isCompleted !== true)
+        return null;
+    const rs = readFirestoreTs(row, 'realStartTime') ?? readFirestoreTs(row, 'checkInTime');
+    const re = readFirestoreTs(row, 'realEndTime') ?? readFirestoreTs(row, 'checkOutTime');
+    if (!rs || !re)
+        return null;
+    const h = (re.toMillis() - rs.toMillis()) / 3600000;
+    if (!Number.isFinite(h) || h <= 0 || h > 24)
+        return null;
+    return Math.round(h * 10) / 10;
+}
+async function ejecutarResumenHorasEmpleadoPeriodo(ctx, args) {
+    if (!canQueryShifts(ctx)) {
+        return { error: 'sin_permiso_para_consultar_turnos' };
+    }
+    let empId = String(args.id_firestore_empleado ?? '').trim();
+    if (ctx.persona === 'EMPLOYEE') {
+        if (!ctx.selfEmployeeFirestoreId) {
+            return { error: 'portal_empleado_sin_legajo_vinculado' };
+        }
+        if (empId && empId !== ctx.selfEmployeeFirestoreId) {
+            return { error: 'portal_empleado_solo_turnos_propios' };
+        }
+        empId = ctx.selfEmployeeFirestoreId;
+    }
+    else if (!empId) {
+        return { error: 'falta_id_firestore_empleado_primero_usar_buscar_empleados' };
+    }
+    const db = admin.firestore();
+    const empRow = await assertEmployeeInEmpresa(db, empId, ctx.empresaId);
+    if (!empRow)
+        return { error: 'empleado_inexistente_o_fuera_de_empresa' };
+    const desde = String(args.fecha_desde ?? '').trim();
+    const hasta = String(args.fecha_hasta ?? '').trim();
+    let start;
+    let end;
+    try {
+        ({ start, end } = arRangeTimestamps(desde, hasta));
+    }
+    catch (e) {
+        return { error: e?.message ?? 'fecha_invalida' };
+    }
+    const LIM = 400;
+    const qsnap = await db
+        .collection('turnos')
+        .where('employeeId', '==', empId)
+        .where('startTime', '>=', start)
+        .where('startTime', '<=', end)
+        .limit(LIM)
+        .get();
+    let horasPlanCobertura = 0;
+    let horasReales = 0;
+    let turnosConReal = 0;
+    let omitidos = 0;
+    const porCodigo = new Map();
+    const muestra = [];
+    for (const docSnap of qsnap.docs) {
+        const row = docSnap.data();
+        const st = String(row.status ?? '').toLowerCase();
+        if (st.includes('cancel') || st.includes('delet')) {
+            omitidos += 1;
+            continue;
+        }
+        if (String(row.type ?? '').toUpperCase() === 'NOVEDAD') {
+            omitidos += 1;
+            continue;
+        }
+        const hp = plannedCoverageHoursFromShiftRow(row);
+        horasPlanCobertura += hp;
+        const code = String(row.code ?? '').trim().toUpperCase() || '(sin código)';
+        const pc = porCodigo.get(code) ?? { n: 0, hs: 0 };
+        pc.n += 1;
+        pc.hs += hp;
+        porCodigo.set(code, pc);
+        const hr = realWorkedHoursFromShiftRow(row);
+        if (hr != null) {
+            horasReales += hr;
+            turnosConReal += 1;
+        }
+        if (muestra.length < 14) {
+            const s = readFirestoreTs(row, 'startTime');
+            muestra.push({
+                id_turno_corto: docSnap.id.slice(0, 12),
+                dia_inicio_cordoba: s ? formatYmdCordobaFromTs(s) : undefined,
+                codigo: code,
+                horas_plan_cobertura: Math.round(hp * 10) / 10,
+                horas_reales_fichada: hr,
+                borrador: !!(row.draft === true),
+                completado: !!(row.isCompleted === true),
+            });
+        }
+    }
+    const porCodigoArr = Array.from(porCodigo.entries())
+        .map(([codigo, v]) => ({ codigo, turnos: v.n, horas_plan_cobertura: Math.round(v.hs * 10) / 10 }))
+        .sort((a, b) => b.horas_plan_cobertura - a.horas_plan_cobertura)
+        .slice(0, 16);
+    return {
+        empleado: {
+            idFirestore: empId,
+            nombreLegible: String(empRow.name ?? empRow.nombre ?? '') || '(sin nombre en legajo)',
+        },
+        rango: { desde_inclusive: desde, hasta_inclusive: hasta },
+        totales: {
+            horas_planificadas_cobertura: Math.round(horasPlanCobertura * 10) / 10,
+            horas_reales_fichadas_sumadas: Math.round(horasReales * 10) / 10,
+            turnos_considerados: qsnap.size - omitidos,
+            turnos_omitidos_cancelados_o_novedad: omitidos,
+            turnos_con_horas_reales: turnosConReal,
+        },
+        por_codigo: porCodigoArr,
+        truncado_consulta_turnos_limite: qsnap.size >= LIM,
+        muestra_turnos: muestra,
+        criterios: {
+            horas_planificadas_cobertura: 'Suma duración teórica de turnos con código de cobertura (excluye F/FF/FP/FT/V/L/A/E/AA/PG/RET y NOVEDAD/cancelados). Usa campo hours, o startTime–endTime, o tabla CCT básica M/T/N/D12/N12/PU/GU/EN/C.',
+            horas_reales_fichadas_sumadas: 'Suma (realStartTime–realEndTime) o (checkInTime–checkOutTime) solo si isCompleted=true y ambos extremos existen; no sustituye liquidación con reglas de noche/feriado.',
+        },
+        nota_tras_herramienta: 'Respondé con totales.horas_planificadas_cobertura para «horas planificadas de puesto» en el período; totales.horas_reales_fichadas_sumadas solo si preguntan fichadas/reales y aclarar que es parcial si hay pocos turnos con real. Si truncado_consulta_turnos_limite=true, decí que puede faltar cola del período. Para liquidación oficial o nocturnas/feriados remití al módulo Reportes y liquidación.',
+    };
+}
+function formatYmdCordobaFromTs(ts) {
+    try {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Argentina/Cordoba',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).format(ts.toDate());
+    }
+    catch {
+        return '';
+    }
 }
 async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
     if (!canQueryOperationsDaySummary(ctx)) {
@@ -1227,6 +1435,13 @@ async function dispatchAssistantToolCall(ctx, name, rawArgs) {
     else if (name === 'contar_empleados_plantilla_empresa') {
         raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
             fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+        });
+    }
+    else if (name === 'resumen_horas_empleado_periodo') {
+        raw = await ejecutarResumenHorasEmpleadoPeriodo(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            fecha_desde: String(args.fecha_desde ?? ''),
+            fecha_hasta: String(args.fecha_hasta ?? ''),
         });
     }
     else {

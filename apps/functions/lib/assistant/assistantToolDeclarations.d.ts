@@ -18,6 +18,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
             fecha_referencia?: undefined;
         };
         required: string[];
@@ -44,6 +46,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
             fecha_referencia?: undefined;
         };
         required: string[];
@@ -67,6 +71,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
             fecha_referencia?: undefined;
         };
         required: any[];
@@ -93,6 +99,39 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            fecha_referencia?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            fecha: {
+                type: SchemaType;
+                description: string;
+            };
+            tipo: {
+                type: SchemaType;
+                description: string;
+            };
+            id_objetivo_cercania: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            id_objetivo?: undefined;
             fecha_referencia?: undefined;
         };
         required: any[];
@@ -113,6 +152,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
             fecha_referencia?: undefined;
         };
         required: any[];
@@ -134,6 +175,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
         };
         required: any[];
     };

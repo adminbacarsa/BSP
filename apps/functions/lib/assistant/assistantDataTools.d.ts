@@ -27,6 +27,11 @@ export declare function ejecutarConsultarTurnosEmpleado(ctx: AssistantToolContex
     fecha_desde: string;
     fecha_hasta: string;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarResumenHorasEmpleadoPeriodo(ctx: AssistantToolContext, args: {
+    id_firestore_empleado?: string;
+    fecha_desde: string;
+    fecha_hasta: string;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarResumenPresenciasObjetivosDia(ctx: AssistantToolContext, args: {
     fecha?: string;
     id_objetivo?: string;

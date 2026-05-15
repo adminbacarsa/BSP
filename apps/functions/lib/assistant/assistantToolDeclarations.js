@@ -5,12 +5,24 @@ const generative_ai_1 = require("@google/generative-ai");
 exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     {
         name: 'buscar_empleados_por_nombre',
-        description: 'Busca colaboradores por fragmento de nombre o apellido dentro de la empresa del usuario admin. Devuelve idFirestore necesario para consultar_turnos_empleado. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
+        description: 'Busca colaboradores por fragmento de nombre o apellido dentro de la empresa del usuario admin. Devuelve idFirestore necesario para consultar_turnos_empleado y resumen_horas_empleado_periodo. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
                 texto: { type: generative_ai_1.SchemaType.STRING, description: 'Texto libre ejemplo "Gomez" o "Maria L"' },
                 limite: { type: generative_ai_1.SchemaType.NUMBER, description: '1 a 15, default implícito 8 si omitís.' },
+            },
+            required: ['texto'],
+        },
+    },
+    {
+        name: 'buscar_objetivos_por_nombre',
+        description: 'Resuelve nombre de sede/objetivo (o fragmento) a id_objetivo Firestore dentro de los clientes de la empresa (CRM). Usalo antes de listado_franco_ret_dia con id_objetivo_cercania cuando el usuario no pasó el id. Devuelve nombre_cliente y tiene_coordenadas. Si ambigua, pedí aclaración.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                texto: { type: generative_ai_1.SchemaType.STRING, description: 'Ej. "Casino", "Ministerio", "Planta Norte"' },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: '1 a 20, default 12.' },
             },
             required: ['texto'],
         },
@@ -69,8 +81,28 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'listado_franco_ret_dia',
+        description: 'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador; no es el mismo filtro que cobertura operativa). Con id_objetivo_cercania + coordenadas en CRM y legajos, ordena candidatos por distancia Haversine km al objetivo (útil para «el más cercano en franco/RET a tal sitio»).',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD; omitir = hoy del cliente.' },
+                tipo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'franco | ret | ambos (default ambos). Franco = códigos F, FF, FP, FT. RET = código RET.',
+                },
+                id_objetivo_cercania: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Id Firestore del objetivo (CRM). Si el usuario dio sólo el nombre del sitio, llamá antes buscar_objetivos_por_nombre y usá id_objetivo de la coincidencia. Con coordenadas en CRM y legajos, la respuesta ordena por distancia km.',
+                },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (8–160, default 80).' },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'contar_servicios_sla_vigentes_empresa',
-        description: 'Para «cuántos servicios / SLA activos hay hoy», «contratos vigentes»: cuenta documentos activos en `servicios_sla` limitados a clientes de la empresa actual y donde la fecha de referencia está entre startDate y endDate. Usarlo SIEMPRE que pidan número/cantidad, no bastar con explicar la pantalla /admin/servicios.',
+        description: 'Para «cuántos servicios activos», SLA del mes, tarjeta del panel: devuelve cuenta_para_tarjeta_servicios_activos_del_mes (misma lógica que el KPI del módulo Servicios / panel) y cuenta_objetivos_distintos_con_sla_en_ese_mes. Para «vigentes hoy» contractual estricto mirá cuenta_contratos_vigentes_en_el_dia_referencia. Usar SIEMPRE que pidan número; no inventar cifras.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -83,8 +115,24 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'resumen_horas_empleado_periodo',
+        description: 'Para «cuántas horas trabajó / tiene planificadas» un colaborador en un rango (semana, quincena, mes): agrega turnos Firestore del legajo con totales horas_planificadas_cobertura (excluye francos/licencias/RET según códigos estándar) y horas_reales_fichadas_sumadas cuando hay fichada y turno completado. Usar después de buscar_empleados_por_nombre si no hay id. Rango máximo ~98 días. No es liquidación legal: remitir a Reportes si piden noche/feriado/CCT fino.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                id_firestore_empleado: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'ID documento empleados. Portal empleado: se ignora y se usa el propio legajo.',
+                },
+                fecha_desde: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD inicio inclusive (zona AR).' },
+                fecha_hasta: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD fin inclusive.' },
+            },
+            required: ['fecha_desde', 'fecha_hasta'],
+        },
+    },
+    {
         name: 'contar_empleados_plantilla_empresa',
-        description: 'Para «cuántos empleados en plantilla», «cuántos legajos activos», «personal de la empresa este mes» en sentido nómina: cuenta documentos en `empleados` con empresaId actual. Activo = activo/active o sin estado (misma lógica que lista RRHH); inactivo = inactivo/inactive. NO sustituye «cuántos tienen turno cargado en la grilla del mes» salvo que el usuario pida explícitamente planificación.',
+        description: 'Para «cuántos empleados en nómina», «vigiladores en plantilla», tarjeta del panel: devuelve cuenta_para_tarjeta_panel_empleados_nomina (status explícito activo/activo/activa, igual que el dashboard). cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado es el criterio amplio de lista RRHH (incluye legajos sin estado). NO sustituye «cuántos tienen turno hoy en planificación» salvo que lo pidan explícito.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {

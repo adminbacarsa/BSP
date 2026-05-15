@@ -5,7 +5,7 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   {
     name: 'buscar_empleados_por_nombre',
     description:
-      'Busca colaboradores por fragmento de nombre o apellido dentro de la empresa del usuario admin. Devuelve idFirestore necesario para consultar_turnos_empleado. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
+      'Busca colaboradores por fragmento de nombre o apellido dentro de la empresa del usuario admin. Devuelve idFirestore necesario para consultar_turnos_empleado y resumen_horas_empleado_periodo. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
@@ -121,6 +121,23 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
         },
       },
       required: [],
+    },
+  },
+  {
+    name: 'resumen_horas_empleado_periodo',
+    description:
+      'Para «cuántas horas trabajó / tiene planificadas» un colaborador en un rango (semana, quincena, mes): agrega turnos Firestore del legajo con totales horas_planificadas_cobertura (excluye francos/licencias/RET según códigos estándar) y horas_reales_fichadas_sumadas cuando hay fichada y turno completado. Usar después de buscar_empleados_por_nombre si no hay id. Rango máximo ~98 días. No es liquidación legal: remitir a Reportes si piden noche/feriado/CCT fino.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: {
+          type: SchemaType.STRING,
+          description: 'ID documento empleados. Portal empleado: se ignora y se usa el propio legajo.',
+        },
+        fecha_desde: { type: SchemaType.STRING, description: 'YYYY-MM-DD inicio inclusive (zona AR).' },
+        fecha_hasta: { type: SchemaType.STRING, description: 'YYYY-MM-DD fin inclusive.' },
+      },
+      required: ['fecha_desde', 'fecha_hasta'],
     },
   },
   {
