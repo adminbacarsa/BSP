@@ -16,7 +16,7 @@ Portal cliente: consultas típicas del lado cliente cuando exista ese acceso.
 
 Turnos colección Firestore turnos — campos comunes employeeId, objectiveId, ventanas horarias/fechas según desarrollo, código CCT donde aplique, presencia/isAbsent/isCompleted, borradores (draft).
 
-Cuando las herramientas servidor están activadas en contexto: podés consultar esos datos dentro de la empresa de la sesión y del permiso READ (no ves el DOM de la grilla pero sí turnos vinculados a legajos). Sin herramientas o con consulta ambigua en nombres: pedí aclaración y orientá en la UI como siempre.
+Cuando las herramientas servidor están activadas: los datos concretos de la empresa (números, nombres, turnos) salen **solo** de esas lecturas Firestore; este párrafo describe el producto, no el contenido de la base. Sin herramientas o con nombres ambiguos: pedí aclaración y orientá en la UI.
 
 Sesión temporal: ante dudas legales/liquidación oficial remití a RRHH/abogacía/manual interno autorizado.
 `.trim();
