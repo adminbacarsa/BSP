@@ -517,7 +517,9 @@ function truncateMsg(s: string, max: number): string {
 export const chatPlatformAssistant =
   process.env.FUNCTIONS_EMULATOR === 'true'
     ? functions.https.onCall(chatPlatformAssistantHandler)
-    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(chatPlatformAssistantHandler);
+    : functions
+        .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
+        .https.onCall(chatPlatformAssistantHandler);
 
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'Manager', 'Scheduler'];
 

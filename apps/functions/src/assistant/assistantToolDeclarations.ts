@@ -56,6 +56,23 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
       required: [],
     },
   },
+  {
+    name: 'listado_turnos_operativos_dia',
+    description:
+      'Lista nombres/horarios/objetivos de los turnos visibles para la empresa un día (misma vista que Operaciones). Usalo para «quién está de turno hoy», «qué obligaciones tiene el equipo hoy». Fecha opcional (= hoy cliente). Opcional limite 8–120 filas si el usuario sólo necesita muestra.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD; omitir = hoy del cliente.' },
+        id_objetivo: {
+          type: SchemaType.STRING,
+          description: 'Filtrar un objetivo por id sólo si lo tenés; si no omití.',
+        },
+        limite: { type: SchemaType.NUMBER, description: 'Filas máximas en muestra_turnos (8–120, default implícito 96).' },
+      },
+      required: [],
+    },
+  },
 ];
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 6;

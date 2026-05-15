@@ -52,6 +52,22 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
             required: [],
         },
     },
+    {
+        name: 'listado_turnos_operativos_dia',
+        description: 'Lista nombres/horarios/objetivos de los turnos visibles para la empresa un día (misma vista que Operaciones). Usalo para «quién está de turno hoy», «qué obligaciones tiene el equipo hoy». Fecha opcional (= hoy cliente). Opcional limite 8–120 filas si el usuario sólo necesita muestra.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD; omitir = hoy del cliente.' },
+                id_objetivo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Filtrar un objetivo por id sólo si lo tenés; si no omití.',
+                },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Filas máximas en muestra_turnos (8–120, default implícito 96).' },
+            },
+            required: [],
+        },
+    },
 ];
 exports.ASSISTANT_TOOL_ROUNDS_MAX = 6;
 //# sourceMappingURL=assistantToolDeclarations.js.map

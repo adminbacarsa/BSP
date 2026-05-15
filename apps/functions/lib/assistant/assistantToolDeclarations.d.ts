@@ -68,5 +68,30 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
         };
         required: any[];
     };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            fecha: {
+                type: SchemaType;
+                description: string;
+            };
+            id_objetivo: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+        };
+        required: any[];
+    };
 })[];
 export declare const ASSISTANT_TOOL_ROUNDS_MAX = 6;

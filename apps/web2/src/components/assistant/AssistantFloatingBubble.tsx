@@ -145,7 +145,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     setBusy(true);
     try {
       const moduleKey = inferModuleKeyFromPath(fullPath || pathname);
-      const call = httpsCallable(functions, 'chatPlatformAssistant');
+      const call = httpsCallable(functions, 'chatPlatformAssistant', { timeout: 210000 });
       const res = await call({
         messages: next.map((m) => ({ role: m.role, content: m.content })),
         pathname: fullPath || pathname,
@@ -157,15 +157,27 @@ export function AssistantFloatingBubble(): React.ReactNode {
       const reply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
       setMsgs([...next, { role: 'assistant', content: reply }]);
     } catch (e: any) {
-      const code = e?.code || '';
-      const msg =
+      const code = String(e?.code ?? '').replace(/^functions\//, '');
+      const rawMsg =
         typeof e?.message === 'string'
           ? e.message
           : 'No se pudo conectar al asistente. Si estás local, necesitás Functions emulator con GEMINI_API_KEY configurada.';
-      const human =
-        code === 'functions/not-found'
-          ? 'La función no está disponible: en producción ejecutá `firebase deploy --only functions` desde la raíz del repo; en local, levantá el emulador de Functions con la versión compilada.'
-          : msg;
+      let human =
+        code === 'not-found'
+          ? 'La función no está disponible: en producción ejecutá firebase deploy del backend; en local, levantá el emulador de Functions compilado.'
+          : rawMsg;
+      if (
+        rawMsg.includes('deadline-exceeded') ||
+        code === 'deadline-exceeded' ||
+        (typeof e?.details === 'string' && e.details.includes('DEADLINE_EXCEEDED'))
+      ) {
+        human =
+          'La respuesta tardó demasiado (tiempo máximo superado). Volvé a intentar con una pregunta más corta o esperá unos segundos; si sigue igual, revisá que la función chatPlatformAssistant esté desplegada con suficiente timeout.';
+      } else if (code === 'internal' || /^internal\b/i.test(rawMsg)) {
+        human = 'Fallo interno en el servidor. Probá de nuevo en un momento; si se repite, avisá a soporte técnico.';
+      } else if (code === 'unavailable') {
+        human = 'Servicio temporalmente no disponible. Probá de nuevo dentro de uno o dos minutos.';
+      }
       setMsgs([...next, { role: 'assistant', content: `⚠️ ${human}` }]);
     } finally {
       setBusy(false);

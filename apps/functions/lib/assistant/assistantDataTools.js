@@ -5,6 +5,7 @@ exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
 exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetivosDia;
+exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const AR_DAY_OFFSET = '-03:00';
@@ -63,6 +64,118 @@ function monitorWideWindow(referenceYsMmDd) {
         start: admin.firestore.Timestamp.fromMillis(startMs),
         end: admin.firestore.Timestamp.fromMillis(endMs),
     };
+}
+function horaHmCordoba(dt) {
+    return new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Argentina/Cordoba',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).format(dt);
+}
+async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha) {
+    const objectiveIds = new Set(objectiveMap.keys());
+    const { start, end } = monitorWideWindow(fecha);
+    const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
+    const pre = [];
+    const pubDocKeys = new Set();
+    for (const docSnap of qsnap.docs) {
+        const shift = docSnap.data();
+        const st = shift.startTime;
+        if (!(st instanceof admin.firestore.Timestamp))
+            continue;
+        const shiftDateObj = st.toDate();
+        if (!isSameCordobaCalendarDay(shiftDateObj, fecha))
+            continue;
+        const oid = String(shift.objectiveId ?? '').trim();
+        if (!oid || !objectiveIds.has(oid))
+            continue;
+        if (shift.draft === true)
+            continue;
+        if (shift.status === 'COVERED')
+            continue;
+        const rawPos = String(shift.positionName ?? '').trim();
+        if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General')
+            continue;
+        const isOp = shift.origin === 'RETEN' ||
+            shift.origin === 'OPERATIONS_COVERAGE' ||
+            shift.origin === 'SLA_VIRTUAL' ||
+            !!shift.isReten ||
+            shift.resolvedBy === 'OPERACIONES';
+        const isAlreadyProcessed = !!shift.isPresent ||
+            shift.status === 'PRESENT' ||
+            shift.status === 'COMPLETED' ||
+            !!shift.isReportedToPlanning ||
+            !!shift.isReported;
+        const empId = String(shift.employeeId ?? '');
+        const isValidEmployee = !!(empId && empId !== 'VACANTE');
+        const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
+        const isUnassigned = !isValidEmployee;
+        if (isUnassigned && !isReportedToPlanning)
+            continue;
+        const needsPubCheck = !isOp && !isAlreadyProcessed;
+        if (needsPubCheck) {
+            pubDocKeys.add(`${oid}_${ymCordoba(shiftDateObj)}`);
+        }
+        const isAbsent = !!shift.isAbsent;
+        const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
+        const meta = objectiveMap.get(oid);
+        const nombreEmp = String(shift.employeeName ?? '').trim();
+        const empleado_etiqueta = isValidEmployee ? nombreEmp || empId.slice(0, 12) || '(legajo)' : 'VACANTE / sin asignar';
+        pre.push({
+            oid,
+            needsPubCheck,
+            shiftDateObj,
+            isPresent,
+            isAbsent,
+            codigo: String(shift.code ?? shift.type ?? '').trim() || '—',
+            puesto: rawPos,
+            empleado_etiqueta,
+            cliente: (meta?.clientName ?? String(shift.clientName ?? '').trim()) || '—',
+            objetivo_nombre: (meta?.name ?? String(shift.objectiveName ?? '').trim()) || oid,
+            h_inicio_cordoba: horaHmCordoba(shiftDateObj),
+        });
+    }
+    const pubMap = new Map();
+    const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
+    const chunk = 100;
+    for (let i = 0; i < refs.length; i += chunk) {
+        const slice = refs.slice(i, i + chunk);
+        if (slice.length === 0)
+            continue;
+        const snaps = await db.getAll(...slice);
+        for (let j = 0; j < snaps.length; j++) {
+            pubMap.set(slice[j].id, snaps[j].exists);
+        }
+    }
+    const rows = [];
+    for (const c of pre) {
+        if (c.needsPubCheck) {
+            const k = `${c.oid}_${ymCordoba(c.shiftDateObj)}`;
+            if (!pubMap.get(k))
+                continue;
+        }
+        rows.push({
+            oid: c.oid,
+            isPresent: c.isPresent,
+            isAbsent: c.isAbsent,
+            codigo: c.codigo,
+            puesto: c.puesto,
+            empleado_etiqueta: c.empleado_etiqueta,
+            cliente: c.cliente,
+            objetivo_nombre: c.objetivo_nombre,
+            h_inicio_cordoba: c.h_inicio_cordoba,
+            shiftTsMs: c.shiftDateObj.getTime(),
+        });
+    }
+    rows.sort((a, b) => {
+        const c0 = `${a.cliente} ${a.objetivo_nombre}`.localeCompare(`${b.cliente} ${b.objetivo_nombre}`, 'es');
+        if (c0 !== 0)
+            return c0;
+        return a.shiftTsMs - b.shiftTsMs;
+    });
+    const outMapped = rows.map(({ shiftTsMs, ...rest }) => rest);
+    return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= 2800 };
 }
 async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
     const out = new Map();
@@ -286,8 +399,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
     }
     const db = admin.firestore();
     const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
-    const objectiveIds = new Set(objectiveMap.keys());
-    if (objectiveIds.size === 0) {
+    if (objectiveMap.size === 0) {
         return {
             fecha_referencia: fecha,
             nota: filterObj ? 'objetivo_no_encontrado_en_empresa' : 'sin_objetivos_para_esta_empresa',
@@ -295,64 +407,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
             por_objetivo: [],
         };
     }
-    const { start, end } = monitorWideWindow(fecha);
-    const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
-    const candidates = [];
-    const pubDocKeys = new Set();
-    for (const docSnap of qsnap.docs) {
-        const shift = docSnap.data();
-        const st = shift.startTime;
-        if (!(st instanceof admin.firestore.Timestamp))
-            continue;
-        const shiftDateObj = st.toDate();
-        if (!isSameCordobaCalendarDay(shiftDateObj, fecha))
-            continue;
-        const oid = String(shift.objectiveId ?? '').trim();
-        if (!oid || !objectiveIds.has(oid))
-            continue;
-        if (shift.draft === true)
-            continue;
-        if (shift.status === 'COVERED')
-            continue;
-        const rawPos = String(shift.positionName ?? '').trim();
-        if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General')
-            continue;
-        const isOp = shift.origin === 'RETEN' ||
-            shift.origin === 'OPERATIONS_COVERAGE' ||
-            shift.origin === 'SLA_VIRTUAL' ||
-            !!shift.isReten ||
-            shift.resolvedBy === 'OPERACIONES';
-        const isAlreadyProcessed = !!shift.isPresent ||
-            shift.status === 'PRESENT' ||
-            shift.status === 'COMPLETED' ||
-            !!shift.isReportedToPlanning ||
-            !!shift.isReported;
-        const empId = String(shift.employeeId ?? '');
-        const isValidEmployee = !!(empId && empId !== 'VACANTE');
-        const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
-        const isUnassigned = !isValidEmployee;
-        if (isUnassigned && !isReportedToPlanning)
-            continue;
-        const needsPubCheck = !isOp && !isAlreadyProcessed;
-        if (needsPubCheck) {
-            pubDocKeys.add(`${oid}_${ymCordoba(shiftDateObj)}`);
-        }
-        const isAbsent = !!shift.isAbsent;
-        const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
-        candidates.push({ oid, needsPubCheck, shiftDateObj, isPresent, isAbsent });
-    }
-    const pubMap = new Map();
-    const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
-    const chunk = 100;
-    for (let i = 0; i < refs.length; i += chunk) {
-        const slice = refs.slice(i, i + chunk);
-        if (slice.length === 0)
-            continue;
-        const snaps = await db.getAll(...slice);
-        for (let j = 0; j < snaps.length; j++) {
-            pubMap.set(slice[j].id, snaps[j].exists);
-        }
-    }
+    const { rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha);
     const byObj = new Map();
     const ensureRow = (oid) => {
         let r = byObj.get(oid);
@@ -375,12 +430,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
     let ausentes = 0;
     let sinMarc = 0;
     let visibles = 0;
-    for (const c of candidates) {
-        if (c.needsPubCheck) {
-            const k = `${c.oid}_${ymCordoba(c.shiftDateObj)}`;
-            if (!pubMap.get(k))
-                continue;
-        }
+    for (const c of visibleRows) {
         const row = ensureRow(c.oid);
         row.turnos_visibles += 1;
         visibles += 1;
@@ -404,7 +454,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
         fecha_referencia: fecha,
         zona: 'America/Argentina/Cordoba',
         criterio_presente: 'isPresent true, empleado asignado distinto de VACANTE, isAbsent false (como pantalla Operaciones)',
-        truncado_limite_turnos_consultados: qsnap.size >= 2800,
+        truncado_limite_turnos_consultados: truncadoConsultaTurnos,
         totales: {
             turnos_visibles_en_dia: visibles,
             presentes,
@@ -413,6 +463,55 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
         },
         por_objetivo: porObjetivo.slice(0, 64),
         nota_tras_herramienta: 'Respondé con los totales y, si preguntan por objetivos, mencioná los que más concentran guardias según por_objetivo.',
+    };
+}
+async function ejecutarListadoTurnosOperativosDia(ctx, args) {
+    if (!canQueryOperationsDaySummary(ctx)) {
+        return { error: 'sin_permiso_resumen_operaciones_requiere_modulo_operaciones_planificacion_o_similar' };
+    }
+    const fecha = String(args.fecha ?? ctx.referenceDateYsMmDd).trim();
+    const filterObj = String(args.id_objetivo ?? '').trim() || undefined;
+    try {
+        parseYmd(fecha);
+    }
+    catch (e) {
+        return { error: e?.message ?? 'fecha_invalida' };
+    }
+    let lim = Math.floor(Number(args.limite ?? 96));
+    if (!Number.isFinite(lim))
+        lim = 96;
+    lim = Math.max(8, Math.min(120, lim));
+    const db = admin.firestore();
+    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+    if (objectiveMap.size === 0) {
+        return {
+            fecha_referencia: fecha,
+            nota: filterObj ? 'objetivo_no_encontrado_en_empresa' : 'sin_objetivos_para_esta_empresa',
+            cuenta_total_visible: 0,
+            muestra_turnos: [],
+        };
+    }
+    const { rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha);
+    const muestra = visibleRows.slice(0, lim).map((r) => ({
+        cliente: r.cliente,
+        objetivo: r.objetivo_nombre,
+        hora_inicio_cor: r.h_inicio_cordoba,
+        codigo: r.codigo,
+        puesto: r.puesto,
+        persona: r.empleado_etiqueta,
+        estado_presencia: r.isPresent ? 'presente'
+            : r.isAbsent ? 'ausente'
+                : 'asignado_sin_marcacion_todavia',
+    }));
+    return {
+        fecha_referencia: fecha,
+        criterios: 'Misma vista que Operaciones para el día referencia en zona Cordoba.',
+        cuenta_total_turnos_visibles: visibleRows.length,
+        muestra_cap: lim,
+        truncado_limite_turnos_consultados: truncadoConsultaTurnos,
+        muestra_truncada_vs_total: visibleRows.length > muestra.length,
+        muestra_turnos: muestra,
+        nota_tras_herramienta: 'Contestá agrupando por cliente/objetivo; si muestra_truncada_vs_total=true o truncado_limite_turnos_consultados=true, aclaralo al usuario.',
     };
 }
 function sanitizeGeminiStruct(value, depth = 0) {
@@ -426,7 +525,7 @@ function sanitizeGeminiStruct(value, depth = 0) {
     if (typeof value !== 'object')
         return String(value);
     if (Array.isArray(value)) {
-        return value.slice(0, 48).map((x) => sanitizeGeminiStruct(x, depth + 1));
+        return value.slice(0, 96).map((x) => sanitizeGeminiStruct(x, depth + 1));
     }
     const o = value;
     const entries = Object.entries(o).slice(0, 64);
@@ -456,6 +555,13 @@ async function dispatchAssistantToolCall(ctx, name, rawArgs) {
         raw = await ejecutarResumenPresenciasObjetivosDia(ctx, {
             fecha: args.fecha != null ? String(args.fecha) : undefined,
             id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'listado_turnos_operativos_dia') {
+        raw = await ejecutarListadoTurnosOperativosDia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
     else {
