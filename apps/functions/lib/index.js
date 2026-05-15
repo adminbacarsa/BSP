@@ -388,9 +388,7 @@ exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
         };
     }
 });
-exports.chatPlatformAssistant = functions
-    .runWith({ secrets: ['GEMINI_API_KEY'] })
-    .https.onCall(async (data, context) => {
+async function chatPlatformAssistantHandler(data, context) {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
     }
@@ -403,7 +401,10 @@ exports.chatPlatformAssistant = functions
         console.error('[chatPlatformAssistant]', e?.message, e?.stack);
         throw new functions.https.HttpsError('internal', e?.message ?? 'Error asistente');
     }
-});
+}
+exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions.https.onCall(chatPlatformAssistantHandler)
+    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(chatPlatformAssistantHandler);
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");

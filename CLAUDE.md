@@ -166,7 +166,9 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
   4. Si `firebase deploy --only functions` falla por timeout al analizar el código, usá deploy por nombre: `firebase deploy --only functions:chatPlatformAssistant` (u otra export) hasta optimizar la carga del `index`.
   5. Alternativa manual: Cloud Console → Secret Manager / variables de la función — menos alineado con el manifest de Firebase.
 - Front: `getFunctions(app, 'us-central1')` en `firebase.ts` debe coincidir con la región de la callable desplegada.
-- **Laboratorio local (emulador):** crear `apps/functions/.env` (no se commitea) con una línea `GEMINI_API_KEY=tu_api_key` y reiniciar el emulador; con `FUNCTIONS_EMULATOR=true` se carga vía `bootstrap-env.ts`. Alternativa: PowerShell `$env:GEMINI_API_KEY='...'` antes de `firebase emulators`.
+- **Laboratorio local (emulador):** el asistente usa la callable **sin** `runWith(secrets)` (en emulador las secrets de prod no vienen cargadas).
+  - Poner **`GEMINI_API_KEY=...`** en **`apps/functions/.env`** (o `.env.local` en esa carpeta) y **reiniciar** solo el proceso del emulador de Functions (`npm run emulators`, etc.). `bootstrap-env.ts` fusiona `.env` + `.env.local` cuando `FUNCTIONS_EMULATOR=true`.
+  - También válido: PowerShell `$env:GEMINI_API_KEY='...'` antes de arrancar el emulador.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).
 - El backend resuelve perfil en Firestore (`system_users` / `client_users` / `empleados` + `roles`) y **no** debe confiar en la ruta del cliente para permisos; el módulo actual se envía sólo como contexto.

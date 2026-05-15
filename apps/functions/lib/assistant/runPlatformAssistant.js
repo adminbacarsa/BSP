@@ -80,7 +80,10 @@ function buildSystemPrompt(profile, pathname, moduleKey) {
 async function runPlatformAssistant(uid, payload) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey?.trim()) {
-        throw new functions.https.HttpsError('failed-precondition', 'GEMINI_API_KEY no configurada en Firebase Functions. Definir secreto/env y redesplegar.');
+        const emu = process.env.FUNCTIONS_EMULATOR === 'true';
+        throw new functions.https.HttpsError('failed-precondition', emu
+            ? 'Emulador: falta GEMINI_API_KEY en apps/functions/.env (o .env.local). Secrets de producción no se montan aquí — reiniciá el emulador de Functions después de guardar.'
+            : 'GEMINI_API_KEY no configurada en Firebase Functions. Ejecutá `firebase functions:secrets:set GEMINI_API_KEY` y `firebase deploy --only functions:chatPlatformAssistant`.');
     }
     const messages = fuseConsecutiveSameRole(clampMessages(payload.messages ?? []));
     if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {

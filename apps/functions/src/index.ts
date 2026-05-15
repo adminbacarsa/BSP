@@ -488,23 +488,29 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
 
 // =========================================================
 // 12b. ASISTENTE VIRTUAL (Gemini vía Functions)
-// Secret Manager: `firebase functions:secrets:set GEMINI_API_KEY` y redeploy.
-// Emulador: sigue valiendo `apps/functions/.env` (bootstrap-env.ts).
+// Producción: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
+// misma llamable sin runWith para que cargue GEMINI desde apps/functions/.env (bootstrap-env.ts).
 // =========================================================
-export const chatPlatformAssistant = functions
-  .runWith({ secrets: ['GEMINI_API_KEY'] })
-  .https.onCall(async (data, context) => {
+async function chatPlatformAssistantHandler(
+  data: AssistantChatPayload,
+  context: functions.https.CallableContext,
+): Promise<{ reply: string }> {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }
   try {
-    return await runPlatformAssistant(context.auth.uid, data as AssistantChatPayload);
+    return await runPlatformAssistant(context.auth.uid, data);
   } catch (e: any) {
     if (e instanceof functions.https.HttpsError) throw e;
     console.error('[chatPlatformAssistant]', e?.message, e?.stack);
     throw new functions.https.HttpsError('internal', e?.message ?? 'Error asistente');
   }
-});
+}
+
+export const chatPlatformAssistant =
+  process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions.https.onCall(chatPlatformAssistantHandler)
+    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(chatPlatformAssistantHandler);
 
 
 
