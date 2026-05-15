@@ -528,6 +528,36 @@ export default function PlanificacionPage() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
 
+    // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
+    const restViolationCells = useMemo(() => {
+        const violated = new Set<string>();
+        if (!displayedEmployees.length || !daysInMonth.length) return violated;
+        const NON_WORK = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
+        const getShift = (empId: string, ds: string) => {
+            const k = `${empId}_${ds}`;
+            const p = pendingChanges[k];
+            if (p) return p.isDeleted ? null : p;
+            return shiftsMap[k] || null;
+        };
+        const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
+        for (const emp of displayedEmployees as any[]) {
+            for (const day of daysInMonth) {
+                const dateStr = getDateKey(day);
+                const sh = getShift(emp.id, dateStr);
+                if (!sh || sh.isDeleted) continue;
+                const code = String(sh.code || '').toUpperCase();
+                if (NON_WORK.has(code)) continue;
+                const violation = checkRestBetweenShifts({
+                    empId: emp.id, targetDateStr: dateStr,
+                    proposed: { code, startTime: sh.startTime || '07:00', hours: Number(sh.hours) || 8 },
+                    getShift, cfg,
+                });
+                if (violation) violated.add(`${emp.id}_${dateStr}`);
+            }
+        }
+        return violated;
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+
     // Horas en el ciclo CCT actual (corre del 26 del mes anterior al 25 del mes activo).
     // Suma:
     //   - Cola del mes anterior (días 26..fin) → tomada de shiftsMap (no editable acá).
@@ -1977,6 +2007,14 @@ export default function PlanificacionPage() {
             positionName: config.positionName || activePosition || 'General'
         };
         setPendingChanges(newChanges);
+        // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
+        const _rc = String(config.code || '').toUpperCase();
+        const _nonWork = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
+        if (!config.isDeleted && !_nonWork.has(_rc)) {
+            const _gs = (eid: string, ds: string) => { const k2 = `${eid}_${ds}`; const p2 = newChanges[k2]; if (p2) return p2.isDeleted ? null : p2; return shiftsMap[k2] || null; };
+            const _v = checkRestBetweenShifts({ empId: selectedCell.empId, targetDateStr: selectedCell.dateStr, proposed: { code: _rc, startTime: config.startTime || '07:00', hours: Number(config.hours) || 8 }, getShift: _gs, cfg: { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 } });
+            if (_v) toast.warning(`⚠️ ${_v}`, { duration: 8000 });
+        }
         setSelectedCell(null);
         setActivePosition(null);
         setFrancoMode('NONE');
@@ -3107,7 +3145,7 @@ export default function PlanificacionPage() {
                                                     : null
                                               ))
                                             : null;
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; setShiftTooltip({ label: shiftLabel, pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; setShiftTooltip({ label: shiftLabel, pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{restViolationCells.has(key) && !isLockedDate && !absence && (<div className="absolute top-0 left-0 w-0 h-0 border-l-[7px] border-t-[7px] border-l-orange-500 border-t-orange-500 rounded-tl" title="Descanso insuficiente (< 12h entre turnos)"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
