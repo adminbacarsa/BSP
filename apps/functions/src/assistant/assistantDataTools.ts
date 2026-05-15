@@ -21,6 +21,27 @@ function norm(s: string): string {
     .trim();
 }
 
+/** Texto normalizado para buscar persona: apellido, nombre, campo name (suele ser "APELLIDO, NOMBRE"), legajo. */
+function buildEmpleadoSearchHaystack(data: Record<string, unknown>): string {
+  const ln = String(data.lastName ?? '').trim();
+  const fn = String(data.firstName ?? '').trim();
+  const nameRaw = String(data.name ?? '').trim().replace(/,/g, ' ');
+  const nom = String(data.nombre ?? '').trim().replace(/,/g, ' ');
+  const leg = String(data.fileNumber ?? '').trim();
+  const chunks = [ln, fn, nameRaw, nom, leg].filter(Boolean);
+  const joined = chunks.join(' ').replace(/\s+/g, ' ');
+  return norm(joined);
+}
+
+/** Coincide si el fragmento está contenido o si son varias palabras y todas aparecen (orden libre). */
+function matchesEmpleadoSearchNeedle(needle: string, haystack: string): boolean {
+  if (!needle || !haystack) return false;
+  if (haystack.includes(needle)) return true;
+  const tokens = needle.split(/\s+/).filter((t) => t.length >= 2);
+  if (tokens.length < 2) return false;
+  return tokens.every((t) => haystack.includes(t));
+}
+
 function canUseEmployeeSearch(ctx: AssistantToolContext): boolean {
   if (ctx.persona !== 'SYSTEM') return false;
   return ctx.readableModuleKeys.some((k) =>
@@ -709,27 +730,39 @@ export async function ejecutarBuscarEmpleadosPorNombre(
 
   const db = admin.firestore();
   const snap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(400).get();
-  const needle = norm(textoRaw);
+  const needle = norm(textoRaw.replace(/,/g, ' ').replace(/\s+/g, ' '));
   type Row = { id: string; nombre: string | null; clienteId?: string; preferredObjectiveId?: string };
   const out: Row[] = [];
   for (const d of snap.docs) {
     const data = d.data() as Record<string, unknown>;
+    const hay = buildEmpleadoSearchHaystack(data);
+    if (!hay) continue;
+    if (!matchesEmpleadoSearchNeedle(needle, hay)) continue;
+
+    const ln = String(data.lastName ?? '').trim();
+    const fn = String(data.firstName ?? '').trim();
     const name = String(data.name ?? data.nombre ?? '').trim();
-    if (!name) continue;
-    if (norm(name).includes(needle)) {
-      out.push({
-        id: d.id,
-        nombre: name || null,
-        clienteId: (data.clientId as string | undefined) ?? undefined,
-        preferredObjectiveId: (data.preferredObjectiveId as string | undefined) ?? undefined,
-      });
-    }
+    const nombreLegible =
+      [ln, fn].filter(Boolean).join(', ') ||
+      name ||
+      [fn, ln].filter(Boolean).join(' ') ||
+      '(sin nombre en legajo)';
+
+    out.push({
+      id: d.id,
+      nombre: nombreLegible,
+      clienteId: (data.clientId as string | undefined) ?? undefined,
+      preferredObjectiveId: (data.preferredObjectiveId as string | undefined) ?? undefined,
+    });
     if (out.length >= limite * 4) break;
   }
 
   const sliced = out.slice(0, limite);
   if (sliced.length === 0) {
-    return { coincidencias: [], nota: 'ningún resultado; probá otro fragmento del nombre/apellido' };
+    return {
+      coincidencias: [],
+      nota: 'ningún resultado; probá apellido, nombre, ambos en cualquier orden, o número de legajo (fileNumber)',
+    };
   }
 
   const ambigua = sliced.length >= 2;
@@ -740,6 +773,8 @@ export async function ejecutarBuscarEmpleadosPorNombre(
       ambigua && sliced.length <= limite
         ? 'varias personas similares: pedí al usuario aclaración o segundo apellido y volvé a buscar antes de declarar estado de presencia.'
         : undefined,
+    nota_tras_herramienta:
+      'La búsqueda usa apellido, nombre, el campo name del legajo (incluye formato «APELLIDO, NOMBRE») y legajo; el orden de las palabras que escribió el usuario no importa si todas las partes aparecen en el legajo.',
   };
 }
 

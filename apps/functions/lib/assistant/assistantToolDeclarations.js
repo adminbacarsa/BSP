@@ -5,7 +5,7 @@ const generative_ai_1 = require("@google/generative-ai");
 exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     {
         name: 'buscar_empleados_por_nombre',
-        description: 'Busca colaboradores por fragmento de nombre o apellido dentro de la empresa del usuario admin. Devuelve idFirestore necesario para consultar_turnos_empleado y resumen_horas_empleado_periodo. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
+        description: 'Busca colaboradores por fragmento de nombre o apellido (orden libre: «Romina Romero» encuentra legajo con lastName/firstName o name «APELLIDO, NOMBRE»), o por número de legajo. Devuelve idFirestore para consultar_turnos_empleado y resumen_horas_empleado_periodo. Si hay varias coincidencias, pedí aclaración antes de afirmar presencia.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {

@@ -22,6 +22,26 @@ function norm(s) {
         .toLowerCase()
         .trim();
 }
+function buildEmpleadoSearchHaystack(data) {
+    const ln = String(data.lastName ?? '').trim();
+    const fn = String(data.firstName ?? '').trim();
+    const nameRaw = String(data.name ?? '').trim().replace(/,/g, ' ');
+    const nom = String(data.nombre ?? '').trim().replace(/,/g, ' ');
+    const leg = String(data.fileNumber ?? '').trim();
+    const chunks = [ln, fn, nameRaw, nom, leg].filter(Boolean);
+    const joined = chunks.join(' ').replace(/\s+/g, ' ');
+    return norm(joined);
+}
+function matchesEmpleadoSearchNeedle(needle, haystack) {
+    if (!needle || !haystack)
+        return false;
+    if (haystack.includes(needle))
+        return true;
+    const tokens = needle.split(/\s+/).filter((t) => t.length >= 2);
+    if (tokens.length < 2)
+        return false;
+    return tokens.every((t) => haystack.includes(t));
+}
 function canUseEmployeeSearch(ctx) {
     if (ctx.persona !== 'SYSTEM')
         return false;
@@ -598,27 +618,37 @@ async function ejecutarBuscarEmpleadosPorNombre(ctx, args) {
     limite = Math.min(15, limite);
     const db = admin.firestore();
     const snap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(400).get();
-    const needle = norm(textoRaw);
+    const needle = norm(textoRaw.replace(/,/g, ' ').replace(/\s+/g, ' '));
     const out = [];
     for (const d of snap.docs) {
         const data = d.data();
-        const name = String(data.name ?? data.nombre ?? '').trim();
-        if (!name)
+        const hay = buildEmpleadoSearchHaystack(data);
+        if (!hay)
             continue;
-        if (norm(name).includes(needle)) {
-            out.push({
-                id: d.id,
-                nombre: name || null,
-                clienteId: data.clientId ?? undefined,
-                preferredObjectiveId: data.preferredObjectiveId ?? undefined,
-            });
-        }
+        if (!matchesEmpleadoSearchNeedle(needle, hay))
+            continue;
+        const ln = String(data.lastName ?? '').trim();
+        const fn = String(data.firstName ?? '').trim();
+        const name = String(data.name ?? data.nombre ?? '').trim();
+        const nombreLegible = [ln, fn].filter(Boolean).join(', ') ||
+            name ||
+            [fn, ln].filter(Boolean).join(' ') ||
+            '(sin nombre en legajo)';
+        out.push({
+            id: d.id,
+            nombre: nombreLegible,
+            clienteId: data.clientId ?? undefined,
+            preferredObjectiveId: data.preferredObjectiveId ?? undefined,
+        });
         if (out.length >= limite * 4)
             break;
     }
     const sliced = out.slice(0, limite);
     if (sliced.length === 0) {
-        return { coincidencias: [], nota: 'ningún resultado; probá otro fragmento del nombre/apellido' };
+        return {
+            coincidencias: [],
+            nota: 'ningún resultado; probá apellido, nombre, ambos en cualquier orden, o número de legajo (fileNumber)',
+        };
     }
     const ambigua = sliced.length >= 2;
     return {
@@ -627,6 +657,7 @@ async function ejecutarBuscarEmpleadosPorNombre(ctx, args) {
         nota_ambigua: ambigua && sliced.length <= limite
             ? 'varias personas similares: pedí al usuario aclaración o segundo apellido y volvé a buscar antes de declarar estado de presencia.'
             : undefined,
+        nota_tras_herramienta: 'La búsqueda usa apellido, nombre, el campo name del legajo (incluye formato «APELLIDO, NOMBRE») y legajo; el orden de las palabras que escribió el usuario no importa si todas las partes aparecen en el legajo.',
     };
 }
 async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
