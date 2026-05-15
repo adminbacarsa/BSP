@@ -1388,18 +1388,21 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
     // ── CAP OVERFLOW: slots bloqueados por 200h que quedaron sin cubrir ──────
     const capOverflowSlots: CapOverflowSlot[] = [];
-    const seenEmpDayOverflow = new Set<string>(); // un solo slot por (empId, dateStr)
+    const seenEmpDayOverflow = new Set<string>(); // un solo turno por (empId, dateStr)
     capBlockedMap.forEach((blocked, key) => {
         const [posName, dateStr, code] = key.split('||');
         const gapDay = stats.uncoveredSlotsByDay![dateStr];
-        // Solo si el slot quedó efectivamente sin cubrir
-        if (!gapDay?.some(g => g.positionName === posName && g.code === code)) return;
+        const gapEntry = gapDay?.find(g => g.positionName === posName && g.code === code);
+        if (!gapEntry) return;
+        // Agregar tantos empleados como hagan falta para cubrir el faltante (no solo 1).
+        let addedForSlot = 0;
         for (const entry of blocked) {
+            if (addedForSlot >= gapEntry.missing) break;
             const empDateKey = `${entry.empId}||${entry.dateStr}`;
             if (seenEmpDayOverflow.has(empDateKey)) continue;
             seenEmpDayOverflow.add(empDateKey);
             capOverflowSlots.push(entry);
-            break; // uno por slot
+            addedForSlot++;
         }
     });
 

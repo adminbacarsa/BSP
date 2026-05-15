@@ -2608,6 +2608,7 @@ export default function PlanificacionPage() {
                             };
                         }
                         setPendingChanges((prev: any) => ({ ...prev, ...overflowChanges }));
+                        setShowCoverageModal(false);
                         toast.success(`${overSlots.length} turno(s) sobre 200h autorizados y agregados al borrador.`, { duration: 5000 });
                     },
                     employees: affectedNames,
