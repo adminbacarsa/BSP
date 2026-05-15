@@ -1232,24 +1232,36 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             .map(emp => emp.id)
     );
 
-    // ── PASO 3b: alinear días de ciclo al tope facturable por tipo de turno ──
-    // Fórmula: hardCapDays = floor(HARD_MAX_HOURS / hrsPerShift)
-    //   8h  → 25 días (200h)  — el ciclo 6+2 ya da 22-25, sin recorte en práctica.
-    //   9h  → 22 días (198h)  — ej. EN L-V exento (limitedEmpIds).
-    //   12h → 16 días (192h)  — con 4+2 el ciclo daría 20; recortamos los 4 sobrantes.
-    // Los días "trabajo" del ciclo que exceden el tope pasan a F en el fallback
-    // (no a RET) porque el empleado ya agotó su cuota mensual facturable.
+    // ── PASO 3b: alinear días de ciclo al tope facturable POR TRAMO CCT ──
+    // El mes tiene DOS tramos CCT (no uno):
+    //   T1 (días 1–cutoff): ciclo CCT actual; tope = HARD_MAX − priorHours del empleado.
+    //   T2 (días cutoff+1–fin): ciclo CCT NUEVO; tope = HARD_MAX fresco (arranca en 0).
+    // Antes se aplicaba el tope al mes entero (16 días totales para 12h), eliminando
+    // los 3–4 días de T2 aunque esos días NO computan contra el tramo anterior.
+    // Con la corrección, T1 se recorta hasta su cuota real, T2 queda intacto.
+    //   8h  → capT1 = floor((200 − prior) / 8)  — 6+2 ya da ≤25, sin recorte habitual.
+    //   12h → capT1 = floor((200 − prior) / 12) — 4+2 da ~17 en T1 + ~3 en T2 = 20 días.
     ctx.employees.forEach(emp => {
-        if (limitedEmpIds.has(emp.id)) return; // L-V tiene su propio control
+        if (limitedEmpIds.has(emp.id)) return;
         const sc = (empPrimaryShift[emp.id] || '').toUpperCase();
         const hrsPerDay = _hint[sc] ?? SHIFT_HRS_DEFAULT[sc] ?? 8;
         if (hrsPerDay <= 0) return;
-        const hardCapDays = Math.floor(HARD_MAX_HOURS / hrsPerDay);
         const wdSet = cycleWorkDays[emp.id];
-        if (!wdSet || wdSet.size <= hardCapDays) return;
-        // Ordenar cronológicamente y eliminar los días que exceden el tope.
-        // Los primeros N días del mes quedan como trabajo; el resto pasa a F.
-        [...wdSet].sort().slice(hardCapDays).forEach(d => wdSet.delete(d));
+        if (!wdSet || wdSet.size === 0) return;
+        const prior = Math.max(0, ctx.empMonthlyInitial[emp.id] || 0);
+        // T1: días 1 → cutoffDay (ciclo CCT actual)
+        const wdT1 = [...wdSet].filter(d => parseInt(d.split('-')[2]) <= cutoffDay).sort();
+        const capT1 = Math.floor(Math.max(0, HARD_MAX_HOURS - prior) / hrsPerDay);
+        if (wdT1.length > capT1) {
+            wdT1.slice(capT1).forEach(d => wdSet.delete(d));
+        }
+        // T2: días cutoffDay+1 → fin de mes (ciclo CCT nuevo, presupuesto limpio)
+        // El tope teórico es HARD_MAX/hrsPerDay, pero en 4–6 días nunca se alcanza.
+        const wdT2 = [...wdSet].filter(d => parseInt(d.split('-')[2]) > cutoffDay).sort();
+        const capT2 = Math.floor(HARD_MAX_HOURS / hrsPerDay);
+        if (wdT2.length > capT2) {
+            wdT2.slice(capT2).forEach(d => wdSet.delete(d));
+        }
     });
 
     const assignments: V2Assignment[] = [];
