@@ -1,0 +1,20 @@
+import type { AssistantPersona } from './resolveAssistantUser';
+export type AssistantToolContext = {
+    persona: AssistantPersona;
+    empresaId: string;
+    readableModuleKeys: string[];
+    selfEmployeeFirestoreId: string | null;
+    referenceDateYsMmDd: string;
+};
+export declare function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean;
+export declare function resolveSelfEmployeeFirestoreId(uid: string): Promise<string | null>;
+export declare function ejecutarBuscarEmpleadosPorNombre(ctx: AssistantToolContext, args: {
+    texto?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarConsultarTurnosEmpleado(ctx: AssistantToolContext, args: {
+    id_firestore_empleado?: string;
+    fecha_desde: string;
+    fecha_hasta: string;
+}): Promise<Record<string, unknown>>;
+export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;

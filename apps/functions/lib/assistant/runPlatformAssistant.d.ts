@@ -7,6 +7,7 @@ export interface AssistantChatPayload {
     pathname?: string;
     moduleKey?: string | null;
     empresaId?: string;
+    clientToday?: string;
 }
 export declare function runPlatformAssistant(uid: string, payload: AssistantChatPayload): Promise<{
     reply: string;

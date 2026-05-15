@@ -1,6 +1,14 @@
 import * as functions from 'firebase-functions/v1';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as admin from 'firebase-admin';
+import { FunctionCallingMode, GoogleGenerativeAI } from '@google/generative-ai';
 import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS, operationalGuideForModuleKey } from './cospKnowledge';
+import {
+  assistantToolsEnabledForContext,
+  dispatchAssistantToolCall,
+  resolveSelfEmployeeFirestoreId,
+  type AssistantToolContext,
+} from './assistantDataTools';
+import { ASSISTANT_FUNCTION_DECLARATIONS, ASSISTANT_TOOL_ROUNDS_MAX } from './assistantToolDeclarations';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
 
 const ASSISTANT_RESPONSE_STYLE = `
@@ -8,11 +16,11 @@ Cómo responder (subir calidad sin inventar datos):
 
 1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
 
-2) Sé explícita sobre el límite técnico: **desde este chat no ves** la grilla cargada, Firestore ni pantallas ajenas — no listes empleados ni códigos reales. En cambio guiá **paso a paso** con la GUÍA OPERATIVA si la recibís para ese módulo.
+2) Si tenés **herramientas de consulta** habilitadas en el contexto: usalas para turnos/presencia/planificación real **antes** de inventar. Si la herramienta devuelve varias personas con nombre parecido, pedí aclaración al usuario y no afirmes presencia. Si no hay herramientas o devuelven vacío, explicalo y mezclá con la **GUÍA OPERATIVA** de pantalla.
 
-3) Usá **lista numerada** con pocos pasos. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
+3) Usá **lista numerada** cuando expliques procedimientos UI. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
 
-4) Incluí rutas entre comillas o backticks cuando ayude: /admin/planificacion, /admin/operaciones.
+4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones.
 5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
 `.trim();
 
@@ -28,6 +36,8 @@ export interface AssistantChatPayload {
   /** Módulo deducido en cliente (opcional). */
   moduleKey?: string | null;
   empresaId?: string;
+  /** "Hoy" del navegador del usuario (YYYY-MM-DD) para interpretar consultas y herramientas. */
+  clientToday?: string;
 }
 
 const MAX_MESSAGES = 24;
@@ -88,10 +98,30 @@ function personaModuleBlurb(persona: AssistantPersona, readableKeys: string[], m
   return parts.join('\n');
 }
 
+function serverTodayCordobaYsMmDd(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Cordoba',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  return y && m && d ? `${y}-${m}-${d}` : new Date().toISOString().slice(0, 10);
+}
+
+function normalizeClientTodayYsMmDd(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
 function buildSystemPrompt(
   profile: { persona: AssistantPersona; readableModuleKeys: string[]; summaryLabel: string },
   pathname: string,
   moduleKey: string | null | undefined,
+  referenceYsMmDd: string,
+  toolsEnabled: boolean,
 ): string {
   const guide = operationalGuideForModuleKey(moduleKey);
   return [
@@ -101,9 +131,15 @@ function buildSystemPrompt(
     COSP_PLATFORM_KNOWLEDGE,
     guide ? `\n${guide}` : '',
     '',
+    `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
+    toolsEnabled
+      ? `Activadas sólo lectura Firestore empresa actual. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd} cuando el usuario no precise otra fecha.`
+      : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
+    '',
     `Contexto servidor (verificado por backend):`,
     `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
     `- Ruta navegador (orientativa): "${pathname}"`,
+    `- fechaReferenciaCliente (hoy): "${referenceYsMmDd}"`,
     ...(moduleKey ? [`- moduleKey cliente (orientativo): "${moduleKey}"`] : []),
     '',
     personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
@@ -147,13 +183,7 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   const moduleKey =
     typeof payload.moduleKey === 'string' ? payload.moduleKey.trim().slice(0, 64) || null : null;
 
-  const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey);
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash',
-    systemInstruction,
-  });
+  const claimedTrim = claimedEmpresa.trim();
 
   /** Primer contenido Gemini debe ser usuario. Si el historial arranca en assistant, se descarta ese turno inicial. */
   let historyMsgs = [...messages];
@@ -176,13 +206,88 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
     });
   }
 
-  const chat = model.startChat({ history: historyFiltered });
+  let selfEmployeeId: string | null = null;
+  if (profile.persona === 'EMPLOYEE') {
+    selfEmployeeId = await resolveSelfEmployeeFirestoreId(uid);
+  }
 
-  const result = await chat.sendMessage(lastUser);
+  let empresaForTools = profile.empresaId.trim() || claimedTrim;
+  if (profile.persona === 'EMPLOYEE' && selfEmployeeId) {
+    const ed = await admin.firestore().collection('empleados').doc(selfEmployeeId).get();
+    const row = ed.data();
+    if (row?.empresaId) empresaForTools = String(row.empresaId).trim();
+  }
+  if (profile.persona === 'CLIENT') {
+    empresaForTools = '';
+  }
+
+  const clientYmd = normalizeClientTodayYsMmDd(payload.clientToday);
+  const referenceYsMmDd = clientYmd || serverTodayCordobaYsMmDd();
+
+  const toolCtx: AssistantToolContext = {
+    persona: profile.persona,
+    empresaId: empresaForTools,
+    readableModuleKeys: profile.readableModuleKeys,
+    selfEmployeeFirestoreId: selfEmployeeId,
+    referenceDateYsMmDd: referenceYsMmDd,
+  };
+
+  const toolsEnabled = assistantToolsEnabledForContext(toolCtx);
+  const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled);
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
+}
+
+async function runGeminiAssistantChat(
+  genAI: GoogleGenerativeAI,
+  systemInstruction: string,
+  toolsEnabled: boolean,
+  historyFiltered: { role: 'user' | 'model'; parts: { text: string }[] }[],
+  lastUser: string,
+  toolCtx: AssistantToolContext,
+): Promise<{ reply: string }> {
+  const modelName = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction,
+    ...(toolsEnabled
+      ? {
+          tools: [{ functionDeclarations: ASSISTANT_FUNCTION_DECLARATIONS as any }],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
+        }
+      : {}),
+  });
+
+  const chat = model.startChat({ history: historyFiltered as any });
+
+  let result = await chat.sendMessage(lastUser);
+  let rounds = 0;
+
+  while (toolsEnabled && rounds < ASSISTANT_TOOL_ROUNDS_MAX) {
+    rounds++;
+    const calls = result.response.functionCalls?.() ?? [];
+    if (!calls.length) break;
+
+    const responseParts = await Promise.all(
+      calls.map(async (fc) => {
+        const args = (fc.args ?? {}) as Record<string, unknown>;
+        const out = await dispatchAssistantToolCall(toolCtx, fc.name, args);
+        return {
+          functionResponse: {
+            name: fc.name,
+            response: out as Record<string, unknown>,
+          },
+        };
+      }),
+    );
+
+    result = await chat.sendMessage(responseParts as any);
+  }
+
   const reply = String(result.response.text() ?? '').trim();
   if (!reply) {
     throw new functions.https.HttpsError('internal', 'Respuesta vacía del modelo.');
   }
-
   return { reply: reply.slice(0, 8000) };
 }

@@ -58,6 +58,23 @@ function formatAssistantSnippet(content: string): React.ReactNode {
   });
 }
 
+function clientLocalTodayYsMmDd(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((z) => z.type === 'year')?.value;
+    const m = parts.find((z) => z.type === 'month')?.value;
+    const d = parts.find((z) => z.type === 'day')?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {
+    /* ignore */
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
 function hideGloboRoute(pathname: string): boolean {
   const base = pathname.split('?')[0];
   if (base === '/') return false;
@@ -134,6 +151,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         pathname: fullPath || pathname,
         moduleKey,
         empresaId: empresaId || '',
+        clientToday: clientLocalTodayYsMmDd(),
       });
       const data = res.data as { reply?: string };
       const reply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';

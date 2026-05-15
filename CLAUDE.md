@@ -159,7 +159,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 ### Asistente virtual (globo en la app)
 
 - UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo). El **FAB es arrastrable**; la posición se guarda en `sessionStorage` hasta cerrar pestaña/navegador.
-- Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**.
+- Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**. Con permiso READ (`OPERATIONS` / `PLANNING` / `RRHH` / etc.) y `empresaId` en sesión, el modelo puede usar **herramientas sólo lectura**: búsqueda de legajo por nombre y **`consultar_turnos_empleado`** (rango de fechas AR). El cliente envía **`clientToday`** (YYYY-MM-DD). Portal **empleado**: sólo turnos propios.
 - **IA ajuste fino de planificación:** el front llama la callable **`optimizePlanningGemini`** (`planningGeminiServer.ts` + export en `index.ts`); usa el mismo secreto **`GEMINI_API_KEY`**. No hay `NEXT_PUBLIC_GEMINI_*` en el bundle. Deploy selectivo: `firebase deploy --only functions:optimizePlanningGemini` si el deploy completo de functions timeouta.
 - **Producción (hosting + app real):**
   1. Crear el secreto (una vez): en la raíz del repo ejecutá `firebase functions:secrets:set GEMINI_API_KEY` y pegá la API key cuando pida valor (queda en Google Secret Manager).

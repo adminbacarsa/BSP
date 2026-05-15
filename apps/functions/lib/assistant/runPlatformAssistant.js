@@ -2,19 +2,22 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runPlatformAssistant = runPlatformAssistant;
 const functions = require("firebase-functions/v1");
+const admin = require("firebase-admin");
 const generative_ai_1 = require("@google/generative-ai");
 const cospKnowledge_1 = require("./cospKnowledge");
+const assistantDataTools_1 = require("./assistantDataTools");
+const assistantToolDeclarations_1 = require("./assistantToolDeclarations");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
 
 1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
 
-2) Sé explícita sobre el límite técnico: **desde este chat no ves** la grilla cargada, Firestore ni pantallas ajenas — no listes empleados ni códigos reales. En cambio guiá **paso a paso** con la GUÍA OPERATIVA si la recibís para ese módulo.
+2) Si tenés **herramientas de consulta** habilitadas en el contexto: usalas para turnos/presencia/planificación real **antes** de inventar. Si la herramienta devuelve varias personas con nombre parecido, pedí aclaración al usuario y no afirmes presencia. Si no hay herramientas o devuelven vacío, explicalo y mezclá con la **GUÍA OPERATIVA** de pantalla.
 
-3) Usá **lista numerada** con pocos pasos. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
+3) Usá **lista numerada** cuando expliques procedimientos UI. Resaltá controles con **negritas markdown** así: **Cliente**, **Objetivo**, **mes**, **columna del día**, **grilla**, **publicar cronograma**.
 
-4) Incluí rutas entre comillas o backticks cuando ayude: /admin/planificacion, /admin/operaciones.
+4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones.
 5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
 `.trim();
 const MAX_MESSAGES = 24;
@@ -73,7 +76,23 @@ function personaModuleBlurb(persona, readableKeys, moduleKey) {
     }
     return parts.join('\n');
 }
-function buildSystemPrompt(profile, pathname, moduleKey) {
+function serverTodayCordobaYsMmDd() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Argentina/Cordoba',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    return y && m && d ? `${y}-${m}-${d}` : new Date().toISOString().slice(0, 10);
+}
+function normalizeClientTodayYsMmDd(raw) {
+    const s = String(raw ?? '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled) {
     const guide = (0, cospKnowledge_1.operationalGuideForModuleKey)(moduleKey);
     return [
         `Sos la asistente virtual de COSP (Grupo Bacar). Español Argentina, tono claro y servicial.`,
@@ -82,9 +101,15 @@ function buildSystemPrompt(profile, pathname, moduleKey) {
         cospKnowledge_1.COSP_PLATFORM_KNOWLEDGE,
         guide ? `\n${guide}` : '',
         '',
+        `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
+        toolsEnabled
+            ? `Activadas sólo lectura Firestore empresa actual. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd} cuando el usuario no precise otra fecha.`
+            : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
+        '',
         `Contexto servidor (verificado por backend):`,
         `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
         `- Ruta navegador (orientativa): "${pathname}"`,
+        `- fechaReferenciaCliente (hoy): "${referenceYsMmDd}"`,
         ...(moduleKey ? [`- moduleKey cliente (orientativo): "${moduleKey}"`] : []),
         '',
         personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
@@ -115,12 +140,7 @@ async function runPlatformAssistant(uid, payload) {
     }
     const pathname = String(payload.pathname ?? '/').slice(0, 400);
     const moduleKey = typeof payload.moduleKey === 'string' ? payload.moduleKey.trim().slice(0, 64) || null : null;
-    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey);
-    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-        model: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash',
-        systemInstruction,
-    });
+    const claimedTrim = claimedEmpresa.trim();
     let historyMsgs = [...messages];
     while (historyMsgs.length > 0 && historyMsgs[0].role === 'assistant') {
         historyMsgs = historyMsgs.slice(1);
@@ -139,8 +159,66 @@ async function runPlatformAssistant(uid, payload) {
             parts: [{ text: m.content }],
         });
     }
+    let selfEmployeeId = null;
+    if (profile.persona === 'EMPLOYEE') {
+        selfEmployeeId = await (0, assistantDataTools_1.resolveSelfEmployeeFirestoreId)(uid);
+    }
+    let empresaForTools = profile.empresaId.trim() || claimedTrim;
+    if (profile.persona === 'EMPLOYEE' && selfEmployeeId) {
+        const ed = await admin.firestore().collection('empleados').doc(selfEmployeeId).get();
+        const row = ed.data();
+        if (row?.empresaId)
+            empresaForTools = String(row.empresaId).trim();
+    }
+    if (profile.persona === 'CLIENT') {
+        empresaForTools = '';
+    }
+    const clientYmd = normalizeClientTodayYsMmDd(payload.clientToday);
+    const referenceYsMmDd = clientYmd || serverTodayCordobaYsMmDd();
+    const toolCtx = {
+        persona: profile.persona,
+        empresaId: empresaForTools,
+        readableModuleKeys: profile.readableModuleKeys,
+        selfEmployeeFirestoreId: selfEmployeeId,
+        referenceDateYsMmDd: referenceYsMmDd,
+    };
+    const toolsEnabled = (0, assistantDataTools_1.assistantToolsEnabledForContext)(toolCtx);
+    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled);
+    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+    return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
+}
+async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx) {
+    const modelName = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+    const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction,
+        ...(toolsEnabled
+            ? {
+                tools: [{ functionDeclarations: assistantToolDeclarations_1.ASSISTANT_FUNCTION_DECLARATIONS }],
+                toolConfig: { functionCallingConfig: { mode: generative_ai_1.FunctionCallingMode.AUTO } },
+            }
+            : {}),
+    });
     const chat = model.startChat({ history: historyFiltered });
-    const result = await chat.sendMessage(lastUser);
+    let result = await chat.sendMessage(lastUser);
+    let rounds = 0;
+    while (toolsEnabled && rounds < assistantToolDeclarations_1.ASSISTANT_TOOL_ROUNDS_MAX) {
+        rounds++;
+        const calls = result.response.functionCalls?.() ?? [];
+        if (!calls.length)
+            break;
+        const responseParts = await Promise.all(calls.map(async (fc) => {
+            const args = (fc.args ?? {});
+            const out = await (0, assistantDataTools_1.dispatchAssistantToolCall)(toolCtx, fc.name, args);
+            return {
+                functionResponse: {
+                    name: fc.name,
+                    response: out,
+                },
+            };
+        }));
+        result = await chat.sendMessage(responseParts);
+    }
     const reply = String(result.response.text() ?? '').trim();
     if (!reply) {
         throw new functions.https.HttpsError('internal', 'Respuesta vacía del modelo.');
