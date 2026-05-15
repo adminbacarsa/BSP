@@ -60,6 +60,33 @@ async function resolveAssistantUser(uid) {
             summaryLabel: 'Colaborador (portal empleado)',
         };
     }
+    const emulatorAuth = await tryResolveAssistantFromEmulatorAuth(uid);
+    if (emulatorAuth)
+        return emulatorAuth;
+    return null;
+}
+async function tryResolveAssistantFromEmulatorAuth(uid) {
+    if (process.env.FUNCTIONS_EMULATOR !== 'true')
+        return null;
+    try {
+        const u = await admin.auth().getUser(uid);
+        const claims = (u.customClaims ?? {});
+        const role = String(claims.role ?? '').trim();
+        const isSuper = normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
+        if (isSuper) {
+            const empresaId = String(claims.empresaId ?? '').trim() || 'bacarsa';
+            return {
+                persona: 'SYSTEM',
+                roleName: role || 'SUPERADMIN',
+                empresaId,
+                readableModuleKeys: [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS],
+                summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
+            };
+        }
+    }
+    catch {
+        return null;
+    }
     return null;
 }
 function empresaAllowed(claimedEmpresaId, profile) {

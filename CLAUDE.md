@@ -173,6 +173,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
   - También válido: PowerShell `$env:GEMINI_API_KEY='...'` antes de arrancar el emulador.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-2.5-flash`; `gemini-1.5-flash` suele dar 404 en proyectos/API keys nuevas).
+  - **Usuario no reconocido por el asistente** (`Tu cuenta no está asociada…`): el backend resuelve el perfil con `system_users/{uidAuth}`, `client_users` o `empleados.uid`. En emulador, si falta `system_users` pero el login tiene **custom claim `role: SUPERADMIN`** (como deja `seed-admin.js`), hay **respaldo por Auth** sólo con `FUNCTIONS_EMULATOR=true`. Si aun así falla: levantá **Firestore + Auth + Functions** juntos (`npm run emulators`), ejecutá **`npm run seed`** (o `node scripts/seed-admin.js`) y **cerrá sesión y volvé a entrar** si recreaste el usuario de Auth (cambia el UID).
 - **Dataset entrenamiento/evaluación (pares Q + guía respuesta):** `apps/functions/src/assistant/assistantTrainingPairs.ts` (`ASSISTANT_TRAINING_PAIRS`, ~135 ítems). No se inyecta solo en el prompt; sirve para tests, few-shot manual o export externo.
 - **Guías por módulo (UX):** si el cliente manda `moduleKey` (ej. `PLANNING`), el servidor inyecta texto operativo en `cospKnowledge` + `operationalGuideForModuleKey`, y el prompt (`ASSISTANT_RESPONSE_STYLE` en `runPlatformAssistant`) favorece respuestas con pasos numerados, **negritas** para controles UI y honestidad sobre límites del chat; el globo renderiza `**texto**` en negrita.
 ---

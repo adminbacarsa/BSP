@@ -71,6 +71,38 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
     };
   }
 
+  const emulatorAuth = await tryResolveAssistantFromEmulatorAuth(uid);
+  if (emulatorAuth) return emulatorAuth;
+
+  return null;
+}
+
+/**
+ * En el emulador de Functions, Auth y Firestore suelen estar alineados; si alguien levanta solo
+ * Functions o Firestore quedó vacío, system_users puede faltar aunque el login (claims) sea válido.
+ * Solo aplica con FUNCTIONS_EMULATOR=true (nunca en producción).
+ */
+async function tryResolveAssistantFromEmulatorAuth(uid: string): Promise<ResolvedAssistantUser | null> {
+  if (process.env.FUNCTIONS_EMULATOR !== 'true') return null;
+  try {
+    const u = await admin.auth().getUser(uid);
+    const claims = (u.customClaims ?? {}) as Record<string, unknown>;
+    const role = String(claims.role ?? '').trim();
+    const isSuper =
+      normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
+    if (isSuper) {
+      const empresaId = String(claims.empresaId ?? '').trim() || 'bacarsa';
+      return {
+        persona: 'SYSTEM',
+        roleName: role || 'SUPERADMIN',
+        empresaId,
+        readableModuleKeys: [...KNOWN_ADMIN_MODULE_KEYS],
+        summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
+      };
+    }
+  } catch {
+    return null;
+  }
   return null;
 }
 
