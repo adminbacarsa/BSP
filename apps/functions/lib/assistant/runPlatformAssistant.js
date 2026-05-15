@@ -102,7 +102,7 @@ async function runPlatformAssistant(uid, payload) {
     const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey);
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-        model: process.env.GEMINI_MODEL?.trim() || 'gemini-1.5-flash',
+        model: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash',
         systemInstruction,
     });
     let historyMsgs = [...messages];

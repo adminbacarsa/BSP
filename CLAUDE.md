@@ -171,7 +171,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
   - Poner **`GEMINI_API_KEY=...`** en **`apps/functions/.env`** (o `.env.local` en esa carpeta) y **reiniciar** solo el proceso del emulador de Functions (`npm run emulators`, etc.). `bootstrap-env.ts` fusiona `.env` + `.env.local` cuando `FUNCTIONS_EMULATOR=true`.
   - También válido: PowerShell `$env:GEMINI_API_KEY='...'` antes de arrancar el emulador.
   - `GEMINI_API_KEY` — obligatoria para que responda.
-  - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).
+  - `GEMINI_MODEL` — opcional (default `gemini-2.5-flash`; `gemini-1.5-flash` suele dar 404 en proyectos/API keys nuevas).
 - El backend resuelve perfil en Firestore (`system_users` / `client_users` / `empleados` + `roles`) y **no** debe confiar en la ruta del cliente para permisos; el módulo actual se envía sólo como contexto.
 
 ---
