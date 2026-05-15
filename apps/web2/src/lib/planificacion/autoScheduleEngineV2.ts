@@ -1086,13 +1086,27 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empRotationSlot[empId] = idx % shiftCodes.length;
         });
         // Turno fijo del operador: sobreescribe el slot calculado por índice.
-        // Si el operador seleccionó M para un empleado, ese empleado trabaja M todo el mes.
+        // Alias: M ↔ D12 y N ↔ N12 — el operador siempre piensa en "mañana/noche"
+        // aunque el puesto use códigos de 12h. Si el puesto tiene D12 y el fijo es M,
+        // se resuelve como D12; si tiene M y el fijo es D12, se resuelve como M.
+        const SHIFT_ALIAS_MAP: Record<string, string[]> = {
+            M:   ['M',   'D12'],
+            N:   ['N',   'N12'],
+            D12: ['D12', 'M'  ],
+            N12: ['N12', 'N'  ],
+        };
         empIds.forEach(empId => {
             const fixedCode = (ctx.defaultShiftByEmp?.[empId] || '').toUpperCase();
             if (!fixedCode) return;
-            const ringIdx = shiftCodes.indexOf(fixedCode);
-            if (ringIdx < 0) return; // código no disponible en este puesto → ignorar
-            empPrimaryShift[empId] = fixedCode;
+            const aliases = SHIFT_ALIAS_MAP[fixedCode] ?? [fixedCode];
+            let ringIdx = -1;
+            let resolvedCode = fixedCode;
+            for (const alias of aliases) {
+                ringIdx = shiftCodes.indexOf(alias);
+                if (ringIdx >= 0) { resolvedCode = alias; break; }
+            }
+            if (ringIdx < 0) return; // no hay match ni con alias → ignorar
+            empPrimaryShift[empId] = resolvedCode;
             empRotationSlot[empId] = ringIdx;
         });
         // Offsets de franco: separados por tipo de turno (8h vs 12h) para que
@@ -1480,6 +1494,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const dayShifts2 = effectiveShiftsForPositionDay(pos2, dayLetter2, ctx.autoCycles);
             for (const sh2 of dayShifts2) {
                 const sCode2 = String(sh2.code || '').toUpperCase();
+                // Banda fija: el segundo pase NO puede asignar fuera de la banda primaria del empleado.
+                const primary2 = expectedShiftForDay(emp.id, dateStr2, posName2);
+                if (primary2 && primary2 !== sCode2) continue;
                 const sHrs2 = shiftHoursH(sh2);
                 const sStart2 = sh2.startTime || DEFAULT_SHIFT_TIMES[sCode2] || '07:00';
                 const sEnd2 = sh2.endTime || undefined;
