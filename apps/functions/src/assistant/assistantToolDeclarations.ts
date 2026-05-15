@@ -88,6 +88,22 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
       required: [],
     },
   },
+  {
+    name: 'contar_empleados_plantilla_empresa',
+    description:
+      'Para «cuántos empleados en plantilla», «cuántos legajos activos», «personal de la empresa este mes» en sentido nómina: cuenta documentos en `empleados` con empresaId actual. Activo = activo/active o sin estado (misma lógica que lista RRHH); inactivo = inactivo/inactive. NO sustituye «cuántos tienen turno cargado en la grilla del mes» salvo que el usuario pida explícitamente planificación.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha_referencia: {
+          type: SchemaType.STRING,
+          description:
+            'YYYY-MM-DD para rotular «hoy» / mes (default fechaReferenciaCliente). No filtra altas/bajas históricas por fecha si el legajo no tiene esos campos.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 6;

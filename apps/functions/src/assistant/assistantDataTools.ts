@@ -53,6 +53,15 @@ function canQueryServiciosSlaResumen(ctx: AssistantToolContext): boolean {
   );
 }
 
+/** Legajos `empleados` de la empresa — conteos «cuántos en plantilla». */
+function canQueryEmpleadosPlantillaResumen(ctx: AssistantToolContext): boolean {
+  if (ctx.persona !== 'SYSTEM') return false;
+  if (!ctx.empresaId.trim()) return false;
+  return ctx.readableModuleKeys.some((k) =>
+    ['RRHH', 'PLANNING', 'OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'CONFIG', 'REPORTS'].includes(k),
+  );
+}
+
 function ymCordoba(dt: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Argentina/Cordoba',
@@ -276,7 +285,7 @@ async function objectivesMapForEmpresa(
 export function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean {
   if (!ctx.empresaId) return false;
   if (ctx.persona === 'CLIENT') return false;
-  return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx);
+  return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx) || canQueryEmpleadosPlantillaResumen(ctx);
 }
 
 function parseYmd(s: string): { y: number; m: number; d: number } {
@@ -762,6 +771,80 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
   };
 }
 
+/** Misma regla que RRHH lista: activo/active o sin estado → activo; inactivo/inactive → baja. */
+function esLegajoActivoComoPantallaRRHH(statusRaw: unknown): boolean {
+  const s = String(statusRaw ?? '').trim().toLowerCase();
+  if (!s) return true;
+  if (s === 'activo' || s === 'active') return true;
+  if (s === 'inactivo' || s === 'inactive') return false;
+  return true;
+}
+
+/**
+ * Conteo de legajos `empleados` por empresa — para «cuántos empleados en plantilla», «cuántos activos», etc.
+ * No cuenta turnos planificados del mes (eso sería otro criterio).
+ */
+export async function ejecutarContarEmpleadosPlantillaEmpresa(
+  ctx: AssistantToolContext,
+  args: { fecha_referencia?: string },
+): Promise<Record<string, unknown>> {
+  if (!canQueryEmpleadosPlantillaResumen(ctx)) {
+    return { error: 'sin_permiso_legajos_requiere_rrhh_planificacion_operaciones_o_similar' };
+  }
+
+  const fechaRef = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+  try {
+    parseYmd(fechaRef);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+  const ym = fechaRef.slice(0, 7);
+
+  const db = admin.firestore();
+  const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+
+  let activos = 0;
+  let inactivos = 0;
+  const muestra: Array<{ apellido_nombre: string; estado: string }> = [];
+
+  for (const d of qsnap.docs) {
+    const row = d.data() as Record<string, unknown>;
+    const empE = String(row.empresaId ?? '').trim();
+    if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase()) continue;
+
+    const st = row.status;
+    if (esLegajoActivoComoPantallaRRHH(st)) activos++;
+    else inactivos++;
+
+    if (muestra.length < 12) {
+      const ln = String(row.lastName ?? '').trim();
+      const fn = String(row.firstName ?? '').trim();
+      const name =
+        [ln, fn].filter(Boolean).join(' ').trim() ||
+        String(row.name ?? row.nombre ?? '').trim() ||
+        '(sin nombre)';
+      muestra.push({
+        apellido_nombre: name.slice(0, 80),
+        estado: String(st ?? '(vacío)').slice(0, 24),
+      });
+    }
+  }
+
+  return {
+    fecha_referencia_para_rotulo: fechaRef,
+    mes_calendario_yyyy_mm: ym,
+    cuenta_legajos_activos_misma_logica_rrhh: activos,
+    cuenta_legajos_inactivos_explicitos: inactivos,
+    cuenta_total_en_lote: activos + inactivos,
+    truncado_loteFirestore_900: qsnap.size >= 900,
+    aclaracion_plantilla:
+      '«Plantilla» aquí = legajos en colección empleados de la empresa: activo = activo/active o sin estado (como pantalla RRHH). No incluye «sólo quienes tienen turno cargado en planificación del mes» salvo que pidan explícitamente ese criterio.',
+    muestra_primeros_legajos: muestra,
+    nota_tras_herramienta:
+      'Primera oración: número de legajos activos. Si el usuario dijo «este mes» en sentido plantilla general, el dato es al día fecha_referencia; si querían dotación planificada en grilla, decí que es otro informe.',
+  };
+}
+
 function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value === undefined) return null;
@@ -813,6 +896,10 @@ export async function dispatchAssistantToolCall(
   } else if (name === 'contar_servicios_sla_vigentes_empresa') {
     raw = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, {
       fecha: args.fecha != null ? String(args.fecha) : undefined,
+    });
+  } else if (name === 'contar_empleados_plantilla_empresa') {
+    raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
     });
   } else {
     raw = { error: 'herramienta_desconocida', name };

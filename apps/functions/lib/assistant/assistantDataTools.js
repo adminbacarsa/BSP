@@ -7,6 +7,7 @@ exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetivosDia;
 exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.ejecutarContarServiciosSlaVigentesEmpresa = ejecutarContarServiciosSlaVigentesEmpresa;
+exports.ejecutarContarEmpleadosPlantillaEmpresa = ejecutarContarEmpleadosPlantillaEmpresa;
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const AR_DAY_OFFSET = '-03:00';
@@ -42,6 +43,13 @@ function canQueryServiciosSlaResumen(ctx) {
     if (!ctx.empresaId.trim())
         return false;
     return ctx.readableModuleKeys.some((k) => ['SERVICES', 'PLANNING', 'OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'CONFIG', 'CLIENTS'].includes(k));
+}
+function canQueryEmpleadosPlantillaResumen(ctx) {
+    if (ctx.persona !== 'SYSTEM')
+        return false;
+    if (!ctx.empresaId.trim())
+        return false;
+    return ctx.readableModuleKeys.some((k) => ['RRHH', 'PLANNING', 'OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'CONFIG', 'REPORTS'].includes(k));
 }
 function ymCordoba(dt) {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -221,7 +229,7 @@ function assistantToolsEnabledForContext(ctx) {
         return false;
     if (ctx.persona === 'CLIENT')
         return false;
-    return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx);
+    return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx) || canQueryEmpleadosPlantillaResumen(ctx);
 }
 function parseYmd(s) {
     const rex = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
@@ -634,6 +642,67 @@ async function ejecutarContarServiciosSlaVigentesEmpresa(ctx, args) {
         nota_tras_herramienta: 'Primera frase: el número cuenta_vigentes_en_fecha. Si truncado_primer_loteFirestore_800, puede haber SLA activos no contados hasta ampliar la consulta. Si el usuario no pidió ubicación pantalla, no des tutorial largo.',
     };
 }
+function esLegajoActivoComoPantallaRRHH(statusRaw) {
+    const s = String(statusRaw ?? '').trim().toLowerCase();
+    if (!s)
+        return true;
+    if (s === 'activo' || s === 'active')
+        return true;
+    if (s === 'inactivo' || s === 'inactive')
+        return false;
+    return true;
+}
+async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
+    if (!canQueryEmpleadosPlantillaResumen(ctx)) {
+        return { error: 'sin_permiso_legajos_requiere_rrhh_planificacion_operaciones_o_similar' };
+    }
+    const fechaRef = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+    try {
+        parseYmd(fechaRef);
+    }
+    catch (e) {
+        return { error: e?.message ?? 'fecha_invalida' };
+    }
+    const ym = fechaRef.slice(0, 7);
+    const db = admin.firestore();
+    const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+    let activos = 0;
+    let inactivos = 0;
+    const muestra = [];
+    for (const d of qsnap.docs) {
+        const row = d.data();
+        const empE = String(row.empresaId ?? '').trim();
+        if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase())
+            continue;
+        const st = row.status;
+        if (esLegajoActivoComoPantallaRRHH(st))
+            activos++;
+        else
+            inactivos++;
+        if (muestra.length < 12) {
+            const ln = String(row.lastName ?? '').trim();
+            const fn = String(row.firstName ?? '').trim();
+            const name = [ln, fn].filter(Boolean).join(' ').trim() ||
+                String(row.name ?? row.nombre ?? '').trim() ||
+                '(sin nombre)';
+            muestra.push({
+                apellido_nombre: name.slice(0, 80),
+                estado: String(st ?? '(vacío)').slice(0, 24),
+            });
+        }
+    }
+    return {
+        fecha_referencia_para_rotulo: fechaRef,
+        mes_calendario_yyyy_mm: ym,
+        cuenta_legajos_activos_misma_logica_rrhh: activos,
+        cuenta_legajos_inactivos_explicitos: inactivos,
+        cuenta_total_en_lote: activos + inactivos,
+        truncado_loteFirestore_900: qsnap.size >= 900,
+        aclaracion_plantilla: '«Plantilla» aquí = legajos en colección empleados de la empresa: activo = activo/active o sin estado (como pantalla RRHH). No incluye «sólo quienes tienen turno cargado en planificación del mes» salvo que pidan explícitamente ese criterio.',
+        muestra_primeros_legajos: muestra,
+        nota_tras_herramienta: 'Primera oración: número de legajos activos. Si el usuario dijo «este mes» en sentido plantilla general, el dato es al día fecha_referencia; si querían dotación planificada en grilla, decí que es otro informe.',
+    };
+}
 function sanitizeGeminiStruct(value, depth = 0) {
     if (depth > 10)
         return null;
@@ -687,6 +756,11 @@ async function dispatchAssistantToolCall(ctx, name, rawArgs) {
     else if (name === 'contar_servicios_sla_vigentes_empresa') {
         raw = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, {
             fecha: args.fecha != null ? String(args.fecha) : undefined,
+        });
+    }
+    else if (name === 'contar_empleados_plantilla_empresa') {
+        raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
+            fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
         });
     }
     else {
