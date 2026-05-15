@@ -2633,9 +2633,9 @@ export default function PlanificacionPage() {
                 const pos = empDefaultPos[`${e.id}___${selectedObjective}`];
                 if (pos) defaultPositionByEmp[e.id] = pos;
             });
-            await bumpAutoV2Progress(38, 'Generando cronograma (motor COSP, puede tardar varios segundos)…');
-            await new Promise<void>((r) => setTimeout(r, 0));
-            const gen = generateScheduleV2({
+            // Probar hasta cycleLen seeds diferentes y quedarse con la distribución
+            // que minimice los slots de cobertura faltantes (0 = cobertura cerrada).
+            const baseGenCtx = {
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
                     id: e.id,
@@ -2660,7 +2660,18 @@ export default function PlanificacionPage() {
                 codeHoursHint: slaCodeHoursHint,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
-            });
+            };
+            const MAX_SEEDS = 8;
+            let bestGen = generateScheduleV2({ ...baseGenCtx, distributedOffsetSeed: 0 });
+            await bumpAutoV2Progress(40, `Optimizando distribución de francos (1/${MAX_SEEDS})…`);
+            await new Promise<void>((r) => setTimeout(r, 0));
+            for (let seed = 1; seed < MAX_SEEDS && bestGen.coverageViolations > 0; seed++) {
+                await bumpAutoV2Progress(40 + Math.floor(seed * 15 / MAX_SEEDS), `Optimizando distribución de francos (${seed + 1}/${MAX_SEEDS})…`);
+                await new Promise<void>((r) => setTimeout(r, 0));
+                const attempt = generateScheduleV2({ ...baseGenCtx, distributedOffsetSeed: seed });
+                if (attempt.coverageViolations < bestGen.coverageViolations) bestGen = attempt;
+            }
+            const gen = bestGen;
 
             await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');
             // Volcamos a pendingChanges respetando autoOverwrite y celdas bloqueadas

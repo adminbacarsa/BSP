@@ -182,6 +182,12 @@ export interface V2EngineContext {
      * Si > 0 y < cF: el empleado está a mitad de su bloque de descanso y junio arranca con franco.
      */
     prevMonthTrailingRestDays?: Record<string, number>;
+    /**
+     * Semilla de variación para los offsets distribuidos (0..cycleLen-1).
+     * Al probar múltiples seeds en el caller se pueden encontrar distribuciones de francos
+     * que cierren la cobertura sin incidencias.
+     */
+    distributedOffsetSeed?: number;
 }
 
 export interface V2PositionDemand {
@@ -779,6 +785,8 @@ export interface V2GenerateResult {
     stats: V2GenerateStats;
     /** Turnos bloqueados SOLO por el cap de 200h que pasarían el check CCT. Requieren autorización de supervisor. */
     capOverflowSlots: CapOverflowSlot[];
+    /** Suma de slots sin cubrir (días × posición donde la dotación real < qty). 0 = cobertura cerrada. */
+    coverageViolations: number;
 }
 
 const OVERNIGHT_CODES = new Set(['N', 'N12']);
@@ -1068,20 +1076,32 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const empIds12h = empIds.filter(id => has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12);
         const assignOffsets = (group: string[], eCL: number, eCF: number) => {
             const eCycleLen = eCL + eCF;
-            group.forEach((empId, idx) => {
+            const seed = ctx.distributedOffsetSeed ?? 0;
+            // Offsets distribuidos uniformemente: escalonan francos para no caer todos el mismo día.
+            // El seed permite al caller probar variaciones (0..cycleLen-1) y elegir la mejor cobertura.
+            const baseOffsets = group.map((_, idx) =>
+                (Math.floor((idx * eCycleLen) / Math.max(1, group.length)) + seed) % eCycleLen
+            );
+            // Anclar la fase del GRUPO al historial del mes anterior: el primer empleado con datos
+            // reales define el desplazamiento global → todos los offsets se mueven en bloque →
+            // se respeta la continuidad del ciclo cross-mes SIN romper el escalonamiento relativo.
+            let globalShift = 0;
+            for (let i = 0; i < group.length; i++) {
+                const empId = group[i];
                 const tw = ctx.prevMonthTrailingWorkDays?.[empId];
                 const tr = ctx.prevMonthTrailingRestDays?.[empId];
-                let offset: number;
                 if (tw !== undefined && tw > 0) {
-                    // En bloque de trabajo: la fase de ciclo al día 1 = días trabajados al final del mes anterior
-                    offset = tw % eCycleLen;
+                    const desired = tw % eCycleLen;
+                    globalShift = (desired - baseOffsets[i] + eCycleLen) % eCycleLen;
+                    break;
                 } else if (tr !== undefined && tr > 0 && tr < eCF) {
-                    // A mitad del bloque de descanso: el día 1 del mes sigue siendo franco
-                    offset = (eCL + tr) % eCycleLen;
-                } else {
-                    // Sin datos o descanso completo: distribución uniforme para escalonar francos
-                    offset = Math.floor((idx * eCycleLen) / Math.max(1, group.length)) % eCycleLen;
+                    const desired = (eCL + tr) % eCycleLen;
+                    globalShift = (desired - baseOffsets[i] + eCycleLen) % eCycleLen;
+                    break;
                 }
+            }
+            group.forEach((empId, idx) => {
+                const offset = (baseOffsets[idx] + globalShift) % eCycleLen;
                 empGroupIdx[empId] = offset;
                 empCycleLen[empId] = eCycleLen;
                 empCL_map[empId] = eCL;
@@ -1116,16 +1136,22 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const eCycleLen = empCycleLen[emp.id] ?? cycleLen;
             const eCL = empCL_map[emp.id] ?? cL;
             const eCF = eCycleLen - eCL;
-            // Si hay datos del mes anterior, usar la fase real del ciclo
-            const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
-            const tr = ctx.prevMonthTrailingRestDays?.[emp.id];
+            const seed = ctx.distributedOffsetSeed ?? 0;
             let offset: number;
-            if (tw !== undefined && tw > 0) {
-                offset = tw % eCycleLen;
-            } else if (tr !== undefined && tr > 0 && tr < eCF) {
-                offset = (eCL + tr) % eCycleLen;
+            if (empGroupIdx[emp.id] !== undefined) {
+                // Empleado asignado a puesto: offset calculado en PASO 2 (incluye trailing + seed)
+                offset = empGroupIdx[emp.id] % eCycleLen;
             } else {
-                offset = (empGroupIdx[emp.id] ?? globalIdx) % eCycleLen;
+                // Empleado idle: trailing propio si disponible, si no → globalIdx + seed
+                const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
+                const tr = ctx.prevMonthTrailingRestDays?.[emp.id];
+                if (tw !== undefined && tw > 0) {
+                    offset = tw % eCycleLen;
+                } else if (tr !== undefined && tr > 0 && tr < eCF) {
+                    offset = (eCL + tr) % eCycleLen;
+                } else {
+                    offset = (globalIdx + seed) % eCycleLen;
+                }
             }
             ctx.daysInMonth.forEach((day, di) => {
                 const slot = (di + offset) % eCycleLen;
@@ -1544,7 +1570,22 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     stats.totalRetCount = totalRetCount;
     stats.totalRetHoursPotential = totalRetCount * RET_STANDBY_REFERENCE_HOURS;
 
-    return { feasibility, assignments, stats, capOverflowSlots };
+    // Cobertura por ciclo: contar slots faltantes (qty − trabajadores reales por día y puesto).
+    // Un slot faltante = un día en que la dotación del puesto queda por debajo de lo requerido.
+    let coverageViolations = 0;
+    ctx.daysInMonth.forEach(day => {
+        const dateStr = ctx.getDateKey(day);
+        const dayLetter = ctx.getDayLetter(dateStr);
+        ctx.positions.forEach(pos => {
+            if (!positionIsActiveOn(pos, dayLetter)) return;
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const group = positionGroups[pos.positionName] || [];
+            const workers = group.filter(eid => cycleWorkDays[eid]?.has(dateStr)).length;
+            if (workers < qty) coverageViolations += qty - workers;
+        });
+    });
+
+    return { feasibility, assignments, stats, capOverflowSlots, coverageViolations };
 }
 
 /**
