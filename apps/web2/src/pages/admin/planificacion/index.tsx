@@ -365,6 +365,8 @@ export default function PlanificacionPage() {
     const [slaDebug, setSlaDebug] = useState<{ id: string; data: any } | null>(null);
     const [slaDebugLoading, setSlaDebugLoading] = useState(false);
     const [hoursMode, setHoursMode] = useState<'mes' | 'cct'>('mes');
+    const [nameColWidth, setNameColWidth] = useState(150);
+    const nameColResizing = React.useRef<{ startX: number; startW: number } | null>(null);
 
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
@@ -2608,6 +2610,18 @@ export default function PlanificacionPage() {
                             };
                         }
                         setPendingChanges((prev: any) => ({ ...prev, ...overflowChanges }));
+                        // Actualizar el snapshot del LastRun para que "Reprocesar" también conozca
+                        // los turnos autorizados y no los vuelva a pisar con RET/F.
+                        setAutoV2LastRun((prev: any) => {
+                            if (!prev) return prev;
+                            const overMap = new Map(overSlots.map((s: any) => [`${s.empId}__${s.dateStr}`, s]));
+                            const merged = prev.assignments.map((a: any) => {
+                                const ov = overMap.get(`${a.empId}__${a.dateStr}`);
+                                if (!ov) return a;
+                                return { ...a, positionName: ov.positionName, code: ov.code, name: ov.name, hours: ov.hours, startTime: ov.startTime, ...(ov.endTime ? { endTime: ov.endTime } : {}), isFranco: false, isReten: false };
+                            });
+                            return { ...prev, assignments: merged };
+                        });
                         setShowCoverageModal(false);
                         toast.success(`${overSlots.length} turno(s) sobre 200h autorizados y agregados al borrador.`, { duration: 5000 });
                     },
@@ -2718,11 +2732,15 @@ export default function PlanificacionPage() {
 
             // Volcamos las nuevas asignaciones a pendingChanges
             const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
+            const NON_BILLABLE = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
             let written = 0;
             for (const a of result.assignments) {
                 const key = `${a.empId}_${a.dateStr}`;
                 if (isDateLocked(a.dateStr)) continue;
-                // Cuando overwrite está OFF, solo sobreescribimos las celdas que ya venía marcando esta automatización
+                // No pisar un turno facturable autorizado (ej. overflow 200h) con un RET/F del fixer.
+                const existing = pendingChanges[key];
+                if (existing && !existing.isDeleted && !NON_BILLABLE.has(String(existing.code || '').toUpperCase())
+                    && NON_BILLABLE.has(String(a.code || '').toUpperCase())) continue;
                 newChanges[key] = {
                     isTemp: true,
                     employeeId: a.empId,
@@ -2902,8 +2920,27 @@ export default function PlanificacionPage() {
         <table className="border-collapse w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 <tr className="h-6">
-                    <th rowSpan={2} className="sticky left-0 z-40 bg-slate-100 p-2 text-left min-w-[150px] border-b border-r">
+                    <th rowSpan={2} className="sticky left-0 z-40 bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
+                        <div
+                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-indigo-400/60 transition-colors"
+                            title="Arrastrar para cambiar el ancho"
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                nameColResizing.current = { startX: e.clientX, startW: nameColWidth };
+                                const onMove = (ev: MouseEvent) => {
+                                    if (!nameColResizing.current) return;
+                                    setNameColWidth(Math.max(120, Math.min(400, nameColResizing.current.startW + ev.clientX - nameColResizing.current.startX)));
+                                };
+                                const onUp = () => {
+                                    nameColResizing.current = null;
+                                    document.removeEventListener('mousemove', onMove);
+                                    document.removeEventListener('mouseup', onUp);
+                                };
+                                document.addEventListener('mousemove', onMove);
+                                document.addEventListener('mouseup', onUp);
+                            }}
+                        />
                     </th>
                     {daysInMonth.map((d) => {
                         const dateStr = getDateKey(d);
@@ -2959,6 +2996,7 @@ export default function PlanificacionPage() {
                                         onDragStart={(e) => handleRowDragStart(e, idx)}
                                         onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
                                         title="Clic para seleccionar fila completa"
+                                        style={{ width: nameColWidth, minWidth: nameColWidth }}
                                         className={`sticky left-0 z-20 p-2 border-r border-b shadow-sm h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
@@ -3077,7 +3115,7 @@ export default function PlanificacionPage() {
                             {/* FILA SNAPSHOT (HISTÓRICA) - Solo se muestra si hay snapshotData y estamos en modo snapshot */}
                             {isSnapshotView && snapshotData && (
                                 <tr className="bg-amber-50 border-b-2 border-amber-200">
-                                    <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-sm h-8">
+                                    <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-sm h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                                         <span className="text-[9px] font-black uppercase text-amber-700 flex items-center gap-1"><History size={10}/> {emp.name} (Hist)</span>
                                     </td>
                                     {daysInMonth.map((day) => {
@@ -3099,7 +3137,7 @@ export default function PlanificacionPage() {
             </tbody>
             <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
                 <tr>
-                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-sm h-8">
+                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-sm h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
                             <button
                                 type="button"
