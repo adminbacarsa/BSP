@@ -25,6 +25,8 @@ const HOURS_BY_CODE: Record<string, number> = {
     /** Encargada/Admin típico L–V (9 h); el SLA puede traer otras horas en la celda. */
     EN: 9,
     P: 8,
+    /** RET = retén (stand-by, 0h facturables); sin esta entrada el fallback ?? 8 inflaba la racha. */
+    RET: 0,
 };
 
 /** Defaults de reloj si la celda no trae start/end (protocolo 8+8+8 estándar). */

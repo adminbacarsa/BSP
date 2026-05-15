@@ -187,11 +187,41 @@ async function runPlatformAssistant(uid, payload) {
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
     return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
 }
+function extractAssistantTextSafe(response) {
+    try {
+        const t = response.text?.();
+        if (typeof t === 'string' && t.trim())
+            return t.trim();
+    }
+    catch (e) {
+        console.warn('[assistant] response.text()', e?.message);
+    }
+    const cand = response.candidates?.[0];
+    const parts = cand?.content?.parts;
+    if (!Array.isArray(parts))
+        return '';
+    const chunks = [];
+    for (const p of parts) {
+        const tx = typeof p === 'object' && p && 'text' in p ? String(p.text ?? '') : '';
+        if (tx.trim())
+            chunks.push(tx);
+    }
+    return chunks.join('\n').trim();
+}
+function mapGeminiErrorToHint(e) {
+    if (e instanceof generative_ai_1.GoogleGenerativeAIResponseError || e instanceof generative_ai_1.GoogleGenerativeAIFetchError) {
+        return e.message.slice(0, 420);
+    }
+    if (e instanceof Error)
+        return e.message.slice(0, 420);
+    return String(e).slice(0, 420);
+}
 async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx) {
     const modelName = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
     const model = genAI.getGenerativeModel({
         model: modelName,
         systemInstruction,
+        generationConfig: { maxOutputTokens: 8192, temperature: 0.35 },
         ...(toolsEnabled
             ? {
                 tools: [{ functionDeclarations: assistantToolDeclarations_1.ASSISTANT_FUNCTION_DECLARATIONS }],
@@ -200,11 +230,24 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
             : {}),
     });
     const chat = model.startChat({ history: historyFiltered });
-    let result = await chat.sendMessage(lastUser);
+    let result;
+    try {
+        result = await chat.sendMessage(lastUser);
+    }
+    catch (e) {
+        console.error('[assistant] sendMessage(inicial)', mapGeminiErrorToHint(e));
+        throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
+    }
     let rounds = 0;
     while (toolsEnabled && rounds < assistantToolDeclarations_1.ASSISTANT_TOOL_ROUNDS_MAX) {
         rounds++;
-        const calls = result.response.functionCalls?.() ?? [];
+        let calls = [];
+        try {
+            calls = result.response.functionCalls?.() ?? [];
+        }
+        catch {
+            calls = [];
+        }
         if (!calls.length)
             break;
         const responseParts = await Promise.all(calls.map(async (fc) => {
@@ -217,11 +260,26 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
                 },
             };
         }));
-        result = await chat.sendMessage(responseParts);
+        try {
+            result = await chat.sendMessage(responseParts);
+        }
+        catch (e) {
+            console.error('[assistant] sendMessage(herramienta)', mapGeminiErrorToHint(e));
+            throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
+        }
     }
-    const reply = String(result.response.text() ?? '').trim();
+    let reply = extractAssistantTextSafe(result.response);
+    if (!reply && toolsEnabled) {
+        try {
+            result = await chat.sendMessage('Contestá sólo texto al usuario en español, sin invocar herramientas, en unas pocas oraciones.');
+            reply = extractAssistantTextSafe(result.response);
+        }
+        catch (e) {
+            console.warn('[assistant] recuperación texto', mapGeminiErrorToHint(e));
+        }
+    }
     if (!reply) {
-        throw new functions.https.HttpsError('internal', 'Respuesta vacía del modelo.');
+        throw new functions.https.HttpsError('failed-precondition', 'El modelo no devolvió texto. Probá de nuevo en un momento o formulá más corto.');
     }
     return { reply: reply.slice(0, 8000) };
 }

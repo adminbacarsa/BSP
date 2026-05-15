@@ -159,7 +159,7 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
         .where('employeeId', '==', empId)
         .where('startTime', '>=', start)
         .where('startTime', '<=', end)
-        .limit(60)
+        .limit(32)
         .get();
     const turnos = qsnap.docs.map((docSnap) => {
         const t = docSnap.data();
@@ -203,21 +203,46 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
             : undefined,
     };
 }
+function sanitizeGeminiStruct(value, depth = 0) {
+    if (depth > 10)
+        return null;
+    if (value === undefined)
+        return null;
+    if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+    if (typeof value !== 'object')
+        return String(value);
+    if (Array.isArray(value)) {
+        return value.slice(0, 48).map((x) => sanitizeGeminiStruct(x, depth + 1));
+    }
+    const o = value;
+    const entries = Object.entries(o).slice(0, 64);
+    const out = {};
+    for (const [k, v] of entries) {
+        out[k] = sanitizeGeminiStruct(v, depth + 1);
+    }
+    return out;
+}
 async function dispatchAssistantToolCall(ctx, name, rawArgs) {
     const args = typeof rawArgs === 'object' && rawArgs !== null ? rawArgs : {};
+    let raw;
     if (name === 'buscar_empleados_por_nombre') {
-        return ejecutarBuscarEmpleadosPorNombre(ctx, {
+        raw = await ejecutarBuscarEmpleadosPorNombre(ctx, {
             texto: String(args.texto ?? ''),
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
-    if (name === 'consultar_turnos_empleado') {
-        return ejecutarConsultarTurnosEmpleado(ctx, {
+    else if (name === 'consultar_turnos_empleado') {
+        raw = await ejecutarConsultarTurnosEmpleado(ctx, {
             id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
             fecha_desde: String(args.fecha_desde ?? ''),
             fecha_hasta: String(args.fecha_hasta ?? ''),
         });
     }
-    return { error: 'herramienta_desconocida', name };
+    else {
+        raw = { error: 'herramienta_desconocida', name };
+    }
+    return sanitizeGeminiStruct(raw);
 }
 //# sourceMappingURL=assistantDataTools.js.map

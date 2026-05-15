@@ -1451,7 +1451,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             //   - post-noche en 6+1 → F (descanso CCT 35h no cubierto con 1 solo franco)
             //   - cualquier otro → RET (stand-by; si llegan a 200h igual acumulan desde otros objetivos)
             // Día de ciclo-franco o empleado sin puesto → F siempre.
-            const fallbackCode = isWorkDayInCycle && assignedPosForFallback !== null
+            const fallbackCode = isWorkDayInCycle
                 ? (isPostStreakShortCycle ? 'F' : 'RET')
                 : 'F';
             assignments.push({

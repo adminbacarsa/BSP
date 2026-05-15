@@ -1,6 +1,11 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import { FunctionCallingMode, GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  FunctionCallingMode,
+  GoogleGenerativeAI,
+  GoogleGenerativeAIFetchError,
+  GoogleGenerativeAIResponseError,
+} from '@google/generative-ai';
 import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS, operationalGuideForModuleKey } from './cospKnowledge';
 import {
   assistantToolsEnabledForContext,
@@ -239,6 +244,32 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
 }
 
+function extractAssistantTextSafe(response: { text?: () => string; candidates?: unknown }): string {
+  try {
+    const t = response.text?.();
+    if (typeof t === 'string' && t.trim()) return t.trim();
+  } catch (e: any) {
+    console.warn('[assistant] response.text()', e?.message);
+  }
+  const cand = (response as { candidates?: Array<{ content?: { parts?: unknown[] } }> }).candidates?.[0];
+  const parts = cand?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  const chunks: string[] = [];
+  for (const p of parts) {
+    const tx = typeof p === 'object' && p && 'text' in p ? String((p as { text?: string }).text ?? '') : '';
+    if (tx.trim()) chunks.push(tx);
+  }
+  return chunks.join('\n').trim();
+}
+
+function mapGeminiErrorToHint(e: unknown): string {
+  if (e instanceof GoogleGenerativeAIResponseError || e instanceof GoogleGenerativeAIFetchError) {
+    return e.message.slice(0, 420);
+  }
+  if (e instanceof Error) return e.message.slice(0, 420);
+  return String(e).slice(0, 420);
+}
+
 async function runGeminiAssistantChat(
   genAI: GoogleGenerativeAI,
   systemInstruction: string,
@@ -251,6 +282,7 @@ async function runGeminiAssistantChat(
   const model = genAI.getGenerativeModel({
     model: modelName,
     systemInstruction,
+    generationConfig: { maxOutputTokens: 8192, temperature: 0.35 },
     ...(toolsEnabled
       ? {
           tools: [{ functionDeclarations: ASSISTANT_FUNCTION_DECLARATIONS as any }],
@@ -261,12 +293,24 @@ async function runGeminiAssistantChat(
 
   const chat = model.startChat({ history: historyFiltered as any });
 
-  let result = await chat.sendMessage(lastUser);
+  let result;
+  try {
+    result = await chat.sendMessage(lastUser);
+  } catch (e) {
+    console.error('[assistant] sendMessage(inicial)', mapGeminiErrorToHint(e));
+    throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
+  }
+
   let rounds = 0;
 
   while (toolsEnabled && rounds < ASSISTANT_TOOL_ROUNDS_MAX) {
     rounds++;
-    const calls = result.response.functionCalls?.() ?? [];
+    let calls: any[] = [];
+    try {
+      calls = result.response.functionCalls?.() ?? [];
+    } catch {
+      calls = [];
+    }
     if (!calls.length) break;
 
     const responseParts = await Promise.all(
@@ -276,18 +320,38 @@ async function runGeminiAssistantChat(
         return {
           functionResponse: {
             name: fc.name,
-            response: out as Record<string, unknown>,
+            response: out,
           },
         };
       }),
     );
 
-    result = await chat.sendMessage(responseParts as any);
+    try {
+      result = await chat.sendMessage(responseParts as any);
+    } catch (e) {
+      console.error('[assistant] sendMessage(herramienta)', mapGeminiErrorToHint(e));
+      throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
+    }
   }
 
-  const reply = String(result.response.text() ?? '').trim();
+  let reply = extractAssistantTextSafe(result.response as any);
+
+  if (!reply && toolsEnabled) {
+    try {
+      result = await chat.sendMessage(
+        'Contestá sólo texto al usuario en español, sin invocar herramientas, en unas pocas oraciones.',
+      );
+      reply = extractAssistantTextSafe(result.response as any);
+    } catch (e) {
+      console.warn('[assistant] recuperación texto', mapGeminiErrorToHint(e));
+    }
+  }
+
   if (!reply) {
-    throw new functions.https.HttpsError('internal', 'Respuesta vacía del modelo.');
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'El modelo no devolvió texto. Probá de nuevo en un momento o formulá más corto.',
+    );
   }
   return { reply: reply.slice(0, 8000) };
 }

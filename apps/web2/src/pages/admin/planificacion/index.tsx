@@ -549,7 +549,7 @@ export default function PlanificacionPage() {
                 if (NON_WORK.has(code)) continue;
                 const violation = checkRestBetweenShifts({
                     empId: emp.id, targetDateStr: dateStr,
-                    proposed: { code, startTime: sh.startTime || '07:00', hours: Number(sh.hours) || 8 },
+                    proposed: { code, startTime: sh.startTime || undefined, hours: Number(sh.hours) || undefined },
                     getShift, cfg,
                 });
                 if (violation) violated.add(`${emp.id}_${dateStr}`);
@@ -2012,7 +2012,7 @@ export default function PlanificacionPage() {
         const _nonWork = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
         if (!config.isDeleted && !_nonWork.has(_rc)) {
             const _gs = (eid: string, ds: string) => { const k2 = `${eid}_${ds}`; const p2 = newChanges[k2]; if (p2) return p2.isDeleted ? null : p2; return shiftsMap[k2] || null; };
-            const _v = checkRestBetweenShifts({ empId: selectedCell.empId, targetDateStr: selectedCell.dateStr, proposed: { code: _rc, startTime: config.startTime || '07:00', hours: Number(config.hours) || 8 }, getShift: _gs, cfg: { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 } });
+            const _v = checkRestBetweenShifts({ empId: selectedCell.empId, targetDateStr: selectedCell.dateStr, proposed: { code: _rc, startTime: config.startTime || undefined, hours: Number(config.hours) || undefined }, getShift: _gs, cfg: { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 } });
             if (_v) toast.warning(`⚠️ ${_v}`, { duration: 8000 });
         }
         setSelectedCell(null);

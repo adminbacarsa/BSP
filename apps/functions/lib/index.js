@@ -400,8 +400,13 @@ async function chatPlatformAssistantHandler(data, context) {
         if (e instanceof functions.https.HttpsError)
             throw e;
         console.error('[chatPlatformAssistant]', e?.message, e?.stack);
-        throw new functions.https.HttpsError('internal', e?.message ?? 'Error asistente');
+        const hint = truncateMsg(e?.message ?? 'Error asistente', 480);
+        throw new functions.https.HttpsError('failed-precondition', hint);
     }
+}
+function truncateMsg(s, max) {
+    const t = String(s).trim();
+    return t.length <= max ? t : `${t.slice(0, max - 3)}…`;
 }
 exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     ? functions.https.onCall(chatPlatformAssistantHandler)

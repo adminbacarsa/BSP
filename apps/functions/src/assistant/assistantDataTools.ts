@@ -184,7 +184,7 @@ export async function ejecutarConsultarTurnosEmpleado(
     .where('employeeId', '==', empId)
     .where('startTime', '>=', start)
     .where('startTime', '<=', end)
-    .limit(60)
+    .limit(32)
     .get();
 
   const turnos = qsnap.docs.map((docSnap) => {
@@ -236,24 +236,45 @@ export async function ejecutarConsultarTurnosEmpleado(
   };
 }
 
+function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
+  if (depth > 10) return null;
+  if (value === undefined) return null;
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value !== 'object') return String(value);
+  if (Array.isArray(value)) {
+    return value.slice(0, 48).map((x) => sanitizeGeminiStruct(x, depth + 1));
+  }
+  const o = value as Record<string, unknown>;
+  const entries = Object.entries(o).slice(0, 64);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of entries) {
+    out[k] = sanitizeGeminiStruct(v, depth + 1);
+  }
+  return out;
+}
+
 export async function dispatchAssistantToolCall(
   ctx: AssistantToolContext,
   name: string,
   rawArgs: unknown,
 ): Promise<Record<string, unknown>> {
   const args = typeof rawArgs === 'object' && rawArgs !== null ? (rawArgs as Record<string, unknown>) : {};
+  let raw: Record<string, unknown>;
   if (name === 'buscar_empleados_por_nombre') {
-    return ejecutarBuscarEmpleadosPorNombre(ctx, {
+    raw = await ejecutarBuscarEmpleadosPorNombre(ctx, {
       texto: String(args.texto ?? ''),
       limite: args.limite != null ? Number(args.limite) : undefined,
     });
-  }
-  if (name === 'consultar_turnos_empleado') {
-    return ejecutarConsultarTurnosEmpleado(ctx, {
+  } else if (name === 'consultar_turnos_empleado') {
+    raw = await ejecutarConsultarTurnosEmpleado(ctx, {
       id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
       fecha_desde: String(args.fecha_desde ?? ''),
       fecha_hasta: String(args.fecha_hasta ?? ''),
     });
+  } else {
+    raw = { error: 'herramienta_desconocida', name };
   }
-  return { error: 'herramienta_desconocida', name };
+  return sanitizeGeminiStruct(raw) as Record<string, unknown>;
 }
