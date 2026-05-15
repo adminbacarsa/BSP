@@ -42,9 +42,25 @@ function loadFabPos(): FabPos {
   return { bottom: 20, right: 20 };
 }
 
-/** `**paso**` → negritas (solo esto; texto plano en el resto). */
-function formatAssistantSnippet(content: string): React.ReactNode {
-  const chunks = content.split(/(\*\*[^*]+\*\*)/g);
+/** `**negrita**` y saltos de línea / párrafos para respuestas del asistente. */
+function formatAssistantMessage(content: string): React.ReactNode {
+  const normalized = content.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return null;
+  const paragraphs = normalized.split(/\n{2,}/);
+  return paragraphs.map((para, pi) => (
+    <p key={pi} className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed">
+      {para.split('\n').map((line, li) => (
+        <React.Fragment key={li}>
+          {li > 0 ? <br /> : null}
+          {formatAssistantLineWithBold(line)}
+        </React.Fragment>
+      ))}
+    </p>
+  ));
+}
+
+function formatAssistantLineWithBold(line: string): React.ReactNode {
+  const chunks = line.split(/(\*\*[^*]+\*\*)/g);
   return chunks.map((c, idx) => {
     if (/^\*\*.+\*\*$/.test(c)) {
       const inner = c.slice(2, -2);
@@ -271,7 +287,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             bottom: panelBottomCss,
             right: fabRightCss,
           }}
-          className="fixed z-[9999] flex w-[min(100vw-2rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
+          className="fixed z-[9999] flex w-[min(100vw-1.25rem,30rem)] max-w-[calc(100vw-1.25rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-indigo-50 px-3 py-2 dark:border-slate-800 dark:bg-indigo-950/40">
             <div className="min-w-0">
@@ -290,7 +306,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             </button>
           </div>
 
-          <div ref={scrollRef} className="max-h-[min(50vh,320px)] space-y-2 overflow-y-auto px-3 py-2 text-[11px] leading-snug">
+          <div ref={scrollRef} className="max-h-[min(58vh,440px)] space-y-2.5 overflow-y-auto px-3.5 py-2.5 text-[12px] leading-relaxed">
             {msgs.length === 0 && (
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                 Preguntá cómo funciona COSP o el módulo en el que estás. La conversación no se guarda: al cerrar sesión o limpiar, se borra.
@@ -300,13 +316,13 @@ export function AssistantFloatingBubble(): React.ReactNode {
             {msgs.map((m, i) => (
               <div
                 key={i}
-                className={`rounded-xl px-2.5 py-1.5 font-medium ${
+                className={`rounded-xl px-3 py-2 font-medium ${
                   m.role === 'user'
-                    ? 'ml-4 bg-indigo-600 text-white'
-                    : 'mr-2 border border-slate-100 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                    ? 'ml-3 bg-indigo-600 text-white'
+                    : 'mr-1 border border-slate-100 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                 }`}
               >
-                {m.role === 'assistant' ? formatAssistantSnippet(m.content) : m.content}
+                {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
               </div>
             ))}
             {busy && (
@@ -321,7 +337,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
               placeholder="Escribí tu pregunta…"
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[12px] font-bold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
               disabled={busy}
             />
             <button

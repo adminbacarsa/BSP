@@ -19,14 +19,14 @@ import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './r
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
 
-1) Cuando el usuario pregunte "cómo hago…", "¿dónde veo…?" o pida nombres/turnos del día: abrí con una frase que **reconozca el lugar** (pathname y moduleKey declarados en contexto; ej. Estás en Planificación en /admin/planificacion).
+1) **No** abras diciendo en qué ruta o pantalla está el usuario (evitá frases tipo "Estás en Planificación en /admin/…"). El propio chat ya muestra el módulo arriba. Solo mencioná rutas cuando el usuario pregunte **dónde** algo o cuando un paso lo necesite **en medio** de la explicación.
 
 2) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / contratos vigentes «hoy»** usá **contar_servicios_sla_vigentes_empresa**. Para **empleados en plantilla / legajos activos de la empresa** (incl. desde Planificación) usá **contar_empleados_plantilla_empresa**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
-3) Usá **lista numerada** cuando expliques procedimientos UI (sólo si el usuario pidió proceso o ubicación). Ahí resaltá controles con **negritas markdown** típicas: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+3) Para procedimientos ("cómo hago…"): usá **lista numerada**; **dejá una línea en blanco entre cada paso** (doble salto de línea) y párrafos cortos para que no sea un bloque denso. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
 
-4) Incluí rutas cuando ayude: /admin/planificacion, /admin/operaciones, /admin/servicios.
-5) Evitá títulos tipo #; párrafos cortos; sin rollos legales si no pidieron eso.
+4) Incluí rutas solo cuando aporten (p. ej. /admin/planificacion, /admin/operaciones, /admin/servicios), integradas al paso correspondiente.
+5) Evitá títulos tipo #; sin rollos legales si no pidieron eso.
 `.trim();
 
 export interface AssistantChatMessageInput {
