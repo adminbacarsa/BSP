@@ -16,6 +16,19 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'buscar_objetivos_por_nombre',
+    description:
+      'Resuelve nombre de sede/objetivo (o fragmento) a id_objetivo Firestore dentro de los clientes de la empresa (CRM). Usalo antes de listado_franco_ret_dia con id_objetivo_cercania cuando el usuario no pasó el id. Devuelve nombre_cliente y tiene_coordenadas. Si ambigua, pedí aclaración.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto: { type: SchemaType.STRING, description: 'Ej. "Casino", "Ministerio", "Planta Norte"' },
+        limite: { type: SchemaType.NUMBER, description: '1 a 20, default 12.' },
+      },
+      required: ['texto'],
+    },
+  },
+  {
     name: 'consultar_turnos_empleado',
     description:
       'Lista turnos reales desde Firestore de un legajo por idFirestore (colección empleados) en un rango de fechas inclusivo zona AR. Usá esto para saber si estaba planificado, borrador u operativo, y señales de presencia cuando existan.',
@@ -88,7 +101,7 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
         id_objetivo_cercania: {
           type: SchemaType.STRING,
           description:
-            'Id Firestore del objetivo (CRM). Si lo pasás, la respuesta incluye distancia_km por legajo georreferenciado; si falta lat/lng en objetivo o legajo, el tool lo indica.',
+            'Id Firestore del objetivo (CRM). Si el usuario dio sólo el nombre del sitio, llamá antes buscar_objetivos_por_nombre y usá id_objetivo de la coincidencia. Con coordenadas en CRM y legajos, la respuesta ordena por distancia km.',
         },
         limite: { type: SchemaType.NUMBER, description: 'Máximo de filas (8–160, default 80).' },
       },

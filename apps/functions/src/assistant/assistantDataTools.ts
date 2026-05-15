@@ -54,6 +54,15 @@ function canQueryServiciosSlaResumen(ctx: AssistantToolContext): boolean {
   );
 }
 
+/** Objetivos embebidos en clients de la empresa — para resolver nombre → id (cercanía Franco/RET, etc.). */
+function canSearchObjectivesCrm(ctx: AssistantToolContext): boolean {
+  if (ctx.persona !== 'SYSTEM') return false;
+  if (!ctx.empresaId.trim()) return false;
+  return ctx.readableModuleKeys.some((k) =>
+    ['CLIENTS', 'PLANNING', 'OPERATIONS', 'SERVICES', 'ANALYSIS', 'DASHBOARD', 'REPORTS', 'CONFIG'].includes(k),
+  );
+}
+
 /** Legajos `empleados` de la empresa — conteos «cuántos en plantilla». */
 function canQueryEmpleadosPlantillaResumen(ctx: AssistantToolContext): boolean {
   if (ctx.persona !== 'SYSTEM') return false;
@@ -566,7 +575,13 @@ export async function ejecutarListadoFrancoRetDia(
 export function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean {
   if (!ctx.empresaId) return false;
   if (ctx.persona === 'CLIENT') return false;
-  return canQueryShifts(ctx) || canUseEmployeeSearch(ctx) || canQueryServiciosSlaResumen(ctx) || canQueryEmpleadosPlantillaResumen(ctx);
+  return (
+    canQueryShifts(ctx) ||
+    canUseEmployeeSearch(ctx) ||
+    canQueryServiciosSlaResumen(ctx) ||
+    canQueryEmpleadosPlantillaResumen(ctx) ||
+    canSearchObjectivesCrm(ctx)
+  );
 }
 
 function parseYmd(s: string): { y: number; m: number; d: number } {
@@ -725,6 +740,95 @@ export async function ejecutarBuscarEmpleadosPorNombre(
       ambigua && sliced.length <= limite
         ? 'varias personas similares: pedí al usuario aclaración o segundo apellido y volvé a buscar antes de declarar estado de presencia.'
         : undefined,
+  };
+}
+
+export async function ejecutarBuscarObjetivosPorNombre(
+  ctx: AssistantToolContext,
+  args: { texto?: string; limite?: number },
+): Promise<Record<string, unknown>> {
+  if (!canSearchObjectivesCrm(ctx)) {
+    return { error: 'sin_permiso_buscar_objetivos_crm' };
+  }
+  const textoRaw = String(args.texto ?? '').trim();
+  if (textoRaw.length < 2) return { error: 'pedir_fragmento_de_nombre_mas_largo' };
+
+  let limite = Math.floor(Number(args.limite ?? 12));
+  if (!Number.isFinite(limite) || limite < 1) limite = 12;
+  limite = Math.min(20, limite);
+
+  const db = admin.firestore();
+  const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+  const needle = norm(textoRaw);
+
+  type ObjRow = {
+    id_objetivo: string;
+    nombre_objetivo: string;
+    id_cliente: string;
+    nombre_cliente: string;
+    tiene_coordenadas: boolean;
+  };
+  const out: ObjRow[] = [];
+
+  const pushObj = (clientDocId: string, clientName: string, oid: string, oname: string, o: Record<string, unknown>) => {
+    const lat = o?.lat != null ? Number(o.lat) : NaN;
+    const lng = o?.lng != null ? Number(o.lng) : NaN;
+    const has = Number.isFinite(lat) && Number.isFinite(lng);
+    out.push({
+      id_objetivo: oid,
+      nombre_objetivo: oname.slice(0, 120),
+      id_cliente: clientDocId,
+      nombre_cliente: clientName.slice(0, 120),
+      tiene_coordenadas: has,
+    });
+  };
+
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const clientName = String(data.name ?? '').trim() || d.id;
+    const objetivosRaw = data.objetivos ?? data.objectives;
+    const objetivos = Array.isArray(objetivosRaw) ? objetivosRaw : undefined;
+    if (Array.isArray(objetivos)) {
+      for (const o of objetivos as Array<Record<string, unknown>>) {
+        const oid = String(o?.id ?? '').trim();
+        if (!oid) continue;
+        const oname = String(o?.name ?? '').trim() || oid;
+        const nameNorm = norm(oname);
+        const idNorm = norm(oid);
+        if (!nameNorm.includes(needle) && !idNorm.includes(needle) && nameNorm !== needle) continue;
+        pushObj(d.id, clientName, oid, oname, o);
+        if (out.length >= limite * 5) break;
+      }
+    } else if (!objetivos) {
+      const oid = d.id;
+      const oname = clientName;
+      const hay = norm(`${oname} ${oid}`);
+      if (!hay.includes(needle)) continue;
+      pushObj(d.id, clientName, oid, oname, data as Record<string, unknown>);
+    }
+    if (out.length >= limite * 5) break;
+  }
+
+  const sliced = out.slice(0, limite);
+  if (sliced.length === 0) {
+    return { coincidencias: [], nota: 'ningún objetivo; probá otro fragmento del nombre del sitio o del cliente' };
+  }
+
+  const ambigua = sliced.length >= 2;
+  return {
+    coincidencias: sliced.map((r) => ({
+      id_objetivo: r.id_objetivo,
+      nombre_objetivo: r.nombre_objetivo,
+      id_cliente: r.id_cliente,
+      nombre_cliente: r.nombre_cliente,
+      tiene_coordenadas: r.tiene_coordenadas,
+    })),
+    ambigua,
+    nota_tras_herramienta:
+      (ambigua
+        ? 'Varias sedes: pedí aclaración (cliente o parte del nombre) o que el usuario elija id_objetivo antes de listado_franco_ret_dia con id_objetivo_cercania.'
+        : 'Si el usuario sólo dijo el nombre del sitio, usá id_objetivo de la coincidencia en listado_franco_ret_dia(id_objetivo_cercania=…).') +
+      ' No inventes ids.',
   };
 }
 
@@ -1218,6 +1322,11 @@ export async function dispatchAssistantToolCall(
   let raw: Record<string, unknown>;
   if (name === 'buscar_empleados_por_nombre') {
     raw = await ejecutarBuscarEmpleadosPorNombre(ctx, {
+      texto: String(args.texto ?? ''),
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'buscar_objetivos_por_nombre') {
+    raw = await ejecutarBuscarObjetivosPorNombre(ctx, {
       texto: String(args.texto ?? ''),
       limite: args.limite != null ? Number(args.limite) : undefined,
     });
