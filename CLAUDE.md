@@ -159,7 +159,8 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 - UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo).
 - Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**.
-- Variables en **Functions** (producción: secreto/param del proyecto Firebase; **emulador local**: exportar antes de arrancar Functions, ej. PowerShell `$env:GEMINI_API_KEY='tu_key'` — el emulador no carga `.env` solo):
+- Variables en **Functions** (producción: secreto/param del proyecto Firebase).
+- **Laboratorio local (emulador):** crear `apps/functions/.env` (no se commitea) con una línea `GEMINI_API_KEY=tu_api_key` y reiniciar el emulador; con `FUNCTIONS_EMULATOR=true` se carga vía `bootstrap-env.ts`. Alternativa: PowerShell `$env:GEMINI_API_KEY='...'` antes de `firebase emulators`.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).
 - El backend resuelve perfil en Firestore (`system_users` / `client_users` / `empleados` + `roles`) y **no** debe confiar en la ruta del cliente para permisos; el módulo actual se envía sólo como contexto.
