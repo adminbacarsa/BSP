@@ -157,9 +157,12 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 ### Asistente virtual (globo en la app)
 
-- UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo).
+- UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo). El **FAB es arrastrable**; la posición se guarda en `sessionStorage` hasta cerrar pestaña/navegador.
 - Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**.
-- Variables en **Functions** (producción: secreto/param del proyecto Firebase).
+- **Producción (hosting + app real):**
+  1. Desde la raíz del repo: `firebase deploy --only functions` (o el flujo que use el equipo; exige `npm run build` en `apps/functions` vía `predeploy` en `firebase.json`).
+  2. En **Google Cloud Console** → **Cloud Functions** → función `chatPlatformAssistant` → **Editar** → **Runtime environment variables** → agregar `GEMINI_API_KEY` (y opcional `GEMINI_MODEL`). Sin la key, el chat devuelve error de configuración.
+  3. Volver a desplegar la función si cambiás variables.
 - **Laboratorio local (emulador):** crear `apps/functions/.env` (no se commitea) con una línea `GEMINI_API_KEY=tu_api_key` y reiniciar el emulador; con `FUNCTIONS_EMULATOR=true` se carga vía `bootstrap-env.ts`. Alternativa: PowerShell `$env:GEMINI_API_KEY='...'` antes de `firebase emulators`.
   - `GEMINI_API_KEY` — obligatoria para que responda.
   - `GEMINI_MODEL` — opcional (default `gemini-1.5-flash`).

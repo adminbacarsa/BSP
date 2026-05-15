@@ -11,6 +11,37 @@ import { inferModuleKeyFromPath } from '@/lib/assistant/inferModuleKeyFromPath';
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
+const FAB_PX = 56;
+const FAB_GAP_PX = 12;
+const FAB_STORAGE_KEY = 'cosp-assistant-fab-pos';
+const DRAG_THRESHOLD_PX = 10;
+
+type FabPos = { bottom: number; right: number };
+
+function clampFabPos(p: FabPos): FabPos {
+  if (typeof window === 'undefined') return p;
+  const pad = 8;
+  const maxR = Math.max(pad, window.innerWidth - FAB_PX - pad);
+  const maxB = Math.max(pad, window.innerHeight - FAB_PX - pad);
+  return {
+    right: Math.min(maxR, Math.max(pad, p.right)),
+    bottom: Math.min(maxB, Math.max(pad, p.bottom)),
+  };
+}
+
+function loadFabPos(): FabPos {
+  if (typeof sessionStorage === 'undefined') return { bottom: 20, right: 20 };
+  try {
+    const raw = sessionStorage.getItem(FAB_STORAGE_KEY);
+    if (!raw) return { bottom: 20, right: 20 };
+    const j = JSON.parse(raw) as FabPos;
+    if (typeof j.bottom === 'number' && typeof j.right === 'number') return clampFabPos(j);
+  } catch {
+    /* ignore */
+  }
+  return { bottom: 20, right: 20 };
+}
+
 function hideGloboRoute(pathname: string): boolean {
   const base = pathname.split('?')[0];
   if (base === '/') return false;
@@ -28,9 +59,33 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const [fabPos, setFabPos] = useState<FabPos>({ bottom: 20, right: 20 });
+  const fabPosRef = useRef<FabPos>(fabPos);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startBottom: number;
+    startRight: number;
+    moved: boolean;
+  } | null>(null);
 
   useEffect(() => {
     setPortalRoot(document.body);
+  }, []);
+
+  useEffect(() => {
+    setFabPos(loadFabPos());
+  }, []);
+
+  useEffect(() => {
+    fabPosRef.current = fabPos;
+  }, [fabPos]);
+
+  useEffect(() => {
+    const onResize = () => setFabPos((p) => clampFabPos(p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   /** asPath lleva los segmentos reales (ideal para inferir módulo). */
@@ -75,7 +130,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
           : 'No se pudo conectar al asistente. Si estás local, necesitás Functions emulator con GEMINI_API_KEY configurada.';
       const human =
         code === 'functions/not-found'
-          ? 'Functions: la función chatPlatformAssistant aún no está desplegada o el emulador no expone esa versión compilada.'
+          ? 'La función no está disponible: en producción ejecutá `firebase deploy --only functions` desde la raíz del repo; en local, levantá el emulador de Functions con la versión compilada.'
           : msg;
       setMsgs([...next, { role: 'assistant', content: `⚠️ ${human}` }]);
     } finally {
@@ -83,22 +138,81 @@ export function AssistantFloatingBubble(): React.ReactNode {
     }
   }, [busy, empresaId, fullPath, input, msgs, pathname, user]);
 
+  const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
+      const d = dragRef.current;
+      if (!d || e.pointerId !== d.pointerId) return;
+      dragRef.current = null;
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      if (!d) return;
+      if (e.type === 'pointercancel') {
+        if (d.moved) {
+          try {
+            sessionStorage.setItem(FAB_STORAGE_KEY, JSON.stringify(fabPosRef.current));
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+      if (d.moved) {
+        try {
+          sessionStorage.setItem(FAB_STORAGE_KEY, JSON.stringify(fabPosRef.current));
+        } catch {
+          /* ignore */
+        }
+      } else {
+        setOpen((o) => !o);
+      }
+    }, []);
+
   if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) {
     return null;
   }
 
-  const fabBottom = 'max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)))';
-  const fabRight = 'max(1rem, calc(0.75rem + env(safe-area-inset-right, 0px)))';
+  const fabBottomCss = `max(${fabPos.bottom}px, calc(8px + env(safe-area-inset-bottom, 0px)))`;
+  const fabRightCss = `max(${fabPos.right}px, calc(8px + env(safe-area-inset-right, 0px)))`;
+  const panelBottomCss = `calc(${fabBottomCss} + ${FAB_PX + FAB_GAP_PX}px)`;
 
   const overlay = (
     <>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        style={{ bottom: fabBottom, right: fabRight }}
-        className="fixed z-[9999] flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white shadow-[0_10px_40px_-10px_rgba(79,70,229,0.85),0_4px_16px_rgba(0,0,0,0.2)] ring-[3px] ring-white/40 transition hover:scale-105 hover:bg-indigo-500 hover:shadow-[0_14px_44px_-10px_rgba(79,70,229,0.9)] active:scale-95 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
+        style={{ bottom: fabBottomCss, right: fabRightCss, touchAction: 'none' }}
+        className="fixed z-[9999] flex h-14 w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-indigo-600 text-white shadow-[0_10px_40px_-10px_rgba(79,70,229,0.85),0_4px_16px_rgba(0,0,0,0.2)] ring-[3px] ring-white/40 active:cursor-grabbing active:scale-[0.98] focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
         aria-expanded={open}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente COSP'}
+        title="Tocá para abrir/cerrar. Mantené y arrastrá para mover."
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          dragRef.current = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            startBottom: fabPosRef.current.bottom,
+            startRight: fabPosRef.current.right,
+            moved: false,
+          };
+          (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = dragRef.current;
+          if (!d || e.pointerId !== d.pointerId) return;
+          const dx = e.clientX - d.startX;
+          const dy = e.clientY - d.startY;
+          if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD_PX) d.moved = true;
+          if (!d.moved) return;
+          const next = clampFabPos({
+            right: d.startRight - dx,
+            bottom: d.startBottom - dy,
+          });
+          setFabPos(next);
+        }}
+        onPointerUp={(e) => endFabDrag(e, e.currentTarget)}
+        onPointerCancel={(e) => endFabDrag(e, e.currentTarget)}
       >
         {open ? <X size={24} strokeWidth={2.5} /> : <Sparkles size={24} strokeWidth={2.5} />}
       </button>
@@ -108,8 +222,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
           role="dialog"
           aria-label="Asistente COSP"
           style={{
-            bottom: `calc(${fabBottom} + 3.75rem)`,
-            right: fabRight,
+            bottom: panelBottomCss,
+            right: fabRightCss,
           }}
           className="fixed z-[9999] flex w-[min(100vw-2rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
@@ -134,6 +248,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             {msgs.length === 0 && (
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                 Preguntá cómo funciona COSP o el módulo en el que estás. La conversación no se guarda: al cerrar sesión o limpiar, se borra.
+                Podés <strong className="text-slate-700 dark:text-slate-300">arrastrar el botón violeta</strong> para moverlo; la posición se recuerda en esta sesión del navegador.
               </p>
             )}
             {msgs.map((m, i) => (
