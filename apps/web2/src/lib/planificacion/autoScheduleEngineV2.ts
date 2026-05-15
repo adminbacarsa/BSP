@@ -904,10 +904,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
         // si todos los puestos están en o sobre su needed, distribuir como refuerzo
         // dando prioridad al puesto con menor saturación relativa.
+        // Usa el máximo entre el need del ciclo y el need del cap 200h para no
+        // dejar empleados ociosos cuando al incluirlos evitarías horas extras.
         if (!target) {
             let minRatio = Infinity;
             for (const pos of ctx.positions) {
-                const need = Math.max(1, positionNeed[pos.positionName] || 1);
+                const cyclicN = Math.max(1, positionNeed[pos.positionName] || 1);
+                const posPerf = feasibility.perPosition.find(p => p.positionName === pos.positionName);
+                const capN = posPerf && posPerf.monthHours > 0
+                    ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS) + 1
+                    : cyclicN;
+                const need = Math.max(cyclicN, capN);
                 const have = positionGroups[pos.positionName].length;
                 const ratio = have / need;
                 if (ratio < overcapFactor && ratio < minRatio) {
@@ -925,13 +932,19 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     // ── SURPLUS: mover empleados sobrantes a capacidad ociosa real ──────────
-    // Si hay más empleados en un grupo que los que el ciclo necesita
-    // (peopleNeededWithCycle), los sobrantes reales quedan ociosos y acumulan
-    // todos los RETs del mes, en vez de repartirlos entre todo el grupo.
+    // Solo se mueven a ocioso los que superen MAX(need_ciclo, need_cap200h + 1 retén).
+    // El +1 garantiza siempre un retén disponible para cubrir ausentismo.
+    // Con más empleados en el grupo cada uno trabaja menos días y nadie supera 200h.
     const initialGroupSizes: Record<string, number> = {};
     Object.entries(positionGroups).forEach(([pos, g]) => { initialGroupSizes[pos] = g.length; });
     for (const posName of Object.keys(positionGroups)) {
-        const need = Math.max(1, positionNeed[posName] || 1);
+        const cyclicNeed = Math.max(1, positionNeed[posName] || 1);
+        const posPerf = feasibility.perPosition.find(p => p.positionName === posName);
+        // cap-based: mínimo de personas para que nadie supere 200h, más 1 retén de buffer.
+        const capNeed = posPerf && posPerf.monthHours > 0
+            ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS) + 1
+            : cyclicNeed;
+        const need = Math.max(cyclicNeed, capNeed);
         const group = positionGroups[posName];
         if (group.length <= need) continue;
         // Ordenar por score ascendente: los de menor prioridad (más lejos, más ausencias)
