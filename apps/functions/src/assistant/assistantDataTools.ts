@@ -778,6 +778,83 @@ export async function ejecutarBuscarEmpleadosPorNombre(
   };
 }
 
+/**
+ * Lista legajos de la empresa con nombre legible (y opcionalmente filtro como buscar_empleados_por_nombre).
+ * Para «quiénes trabajan acá», «nómina de nombres», «listado de empleados».
+ */
+export async function ejecutarListadoEmpleadosEmpresa(
+  ctx: AssistantToolContext,
+  args: { filtro_texto?: string; limite?: number; solo_activos_nomina_panel?: boolean },
+): Promise<Record<string, unknown>> {
+  if (!canUseEmployeeSearch(ctx)) {
+    return { error: 'sin_permiso_para_buscar_personal' };
+  }
+
+  let limite = Math.floor(Number(args.limite ?? 48));
+  if (!Number.isFinite(limite) || limite < 8) limite = 48;
+  limite = Math.min(120, limite);
+
+  const filtroRaw = String(args.filtro_texto ?? '').trim();
+  const needle = filtroRaw.length >= 2 ? norm(filtroRaw.replace(/,/g, ' ').replace(/\s+/g, ' ')) : '';
+  const soloPanel = args.solo_activos_nomina_panel === true;
+
+  const db = admin.firestore();
+  const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+
+  type Row = { id: string; nombreLegible: string; legajo: string; estado: string; sortKey: string };
+  const rows: Row[] = [];
+
+  for (const d of qsnap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    if (soloPanel && !esEmpleadoNominaTarjetaDashboard(data.status)) continue;
+
+    const ln = String(data.lastName ?? '').trim();
+    const fn = String(data.firstName ?? '').trim();
+    const nombreLegible =
+      [ln, fn].filter(Boolean).join(', ') ||
+      String(data.name ?? data.nombre ?? '').trim() ||
+      '(sin nombre en legajo)';
+
+    const hay = buildEmpleadoSearchHaystack(data);
+    const effectiveHay = hay || norm(nombreLegible.replace(/,/g, ' ').replace(/\s+/g, ' '));
+
+    if (needle) {
+      if (!matchesEmpleadoSearchNeedle(needle, effectiveHay)) continue;
+    }
+
+    const sortKey = norm(`${ln} ${fn} ${nombreLegible}`);
+    rows.push({
+      id: d.id,
+      nombreLegible: nombreLegible.slice(0, 120),
+      legajo: String(data.fileNumber ?? '').trim(),
+      estado: String(data.status ?? '').trim(),
+      sortKey,
+    });
+  }
+
+  rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'es', { sensitivity: 'base' }));
+
+  const sliced = rows.slice(0, limite);
+  const truncadoLista = rows.length > limite;
+  const truncadoFirestore = qsnap.size >= 900;
+
+  return {
+    filtro_texto_usado: filtroRaw || null,
+    solo_activos_nomina_panel: soloPanel,
+    cuenta_en_resultado: rows.length,
+    muestra_empleados: sliced.map((r) => ({
+      id_firestore: r.id,
+      nombre: r.nombreLegible,
+      legajo: r.legajo || undefined,
+      estado: r.estado || undefined,
+    })),
+    truncado_por_limite_muestra: truncadoLista,
+    truncado_loteFirestore_900: truncadoFirestore,
+    nota_tras_herramienta:
+      'Listá nombres tal cual vienen en muestra_empleados; no inventes filas. Si truncado_por_limite_muestra o truncado_loteFirestore_900, pedí acotar con filtro_texto (apellido o legajo) o más contexto en Reportes/RRHH. Para una persona puntual seguí usando buscar_empleados_por_nombre.',
+  };
+}
+
 export async function ejecutarBuscarObjetivosPorNombre(
   ctx: AssistantToolContext,
   args: { texto?: string; limite?: number },
@@ -1662,6 +1739,12 @@ export async function dispatchAssistantToolCall(
     raw = await ejecutarBuscarEmpleadosPorNombre(ctx, {
       texto: String(args.texto ?? ''),
       limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'listado_empleados_empresa') {
+    raw = await ejecutarListadoEmpleadosEmpresa(ctx, {
+      filtro_texto: args.filtro_texto != null ? String(args.filtro_texto) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+      solo_activos_nomina_panel: args.solo_activos_nomina_panel === true,
     });
   } else if (name === 'buscar_objetivos_por_nombre') {
     raw = await ejecutarBuscarObjetivosPorNombre(ctx, {

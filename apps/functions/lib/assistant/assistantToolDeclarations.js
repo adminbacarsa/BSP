@@ -16,6 +16,25 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'listado_empleados_empresa',
+        description: 'Lista nombres de colaboradores de la empresa (legajo apellido/nombre, id Firestore, número de legajo si existe). Usalo cuando pidan «quiénes hay», «nómina de nombres», «empleados de la empresa» sin saber el apellido exacto. Opcional filtro_texto (misma lógica flexible que buscar_empleados_por_nombre). Opcional solo_activos_nomina_panel=true para alinear a la tarjeta de nómina del panel. Si la lista trunca, pedí filtro o ver RRHH.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                filtro_texto: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Opcional. Fragmento apellido/nombre/legajo; si omitís, lista ordenada hasta limite.',
+                },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: '8 a 120 filas, default 48.' },
+                solo_activos_nomina_panel: {
+                    type: generative_ai_1.SchemaType.BOOLEAN,
+                    description: 'Si true, solo status activo/active/activa como tarjeta EMPLEADOS EN NÓMINA del panel.',
+                },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'buscar_objetivos_por_nombre',
         description: 'Resuelve nombre de sede/objetivo (o fragmento) a id_objetivo Firestore dentro de los clientes de la empresa (CRM). Usalo antes de listado_franco_ret_dia con id_objetivo_cercania cuando el usuario no pasó el id. Devuelve nombre_cliente y tiene_coordenadas. Si ambigua, pedí aclaración.',
         parameters: {

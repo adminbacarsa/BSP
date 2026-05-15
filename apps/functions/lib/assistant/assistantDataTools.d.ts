@@ -18,6 +18,11 @@ export declare function ejecutarBuscarEmpleadosPorNombre(ctx: AssistantToolConte
     texto?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarListadoEmpleadosEmpresa(ctx: AssistantToolContext, args: {
+    filtro_texto?: string;
+    limite?: number;
+    solo_activos_nomina_panel?: boolean;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarBuscarObjetivosPorNombre(ctx: AssistantToolContext, args: {
     texto?: string;
     limite?: number;
