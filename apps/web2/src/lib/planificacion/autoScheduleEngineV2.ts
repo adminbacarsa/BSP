@@ -751,10 +751,23 @@ export interface V2GenerateStats {
     cctSchemeCalendarProjection?: CctSchemeCalendarProjectionBlock;
 }
 
+export interface CapOverflowSlot {
+    empId: string;
+    dateStr: string;
+    positionName: string;
+    code: string;
+    name: string;
+    hours: number;
+    startTime: string;
+    endTime?: string;
+}
+
 export interface V2GenerateResult {
     feasibility: V2FeasibilityReport;
     assignments: V2Assignment[];
     stats: V2GenerateStats;
+    /** Turnos bloqueados SOLO por el cap de 200h que pasarían el check CCT. Requieren autorización de supervisor. */
+    capOverflowSlots: CapOverflowSlot[];
 }
 
 const OVERNIGHT_CODES = new Set(['N', 'N12']);
@@ -1232,6 +1245,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         stats.totalBillableHours += sHrs;
     };
 
+    // Mapa de turnos bloqueados SOLO por el cap 200h (key = posName||dateStr||code).
+    // Al final de los dos pases, filtramos los que corresponden a slots que quedaron sin cubrir.
+    const capBlockedMap = new Map<string, CapOverflowSlot[]>();
+    const capBlockedEmpSeen = new Set<string>(); // empId||dateStr||code para deduplicar
+
     // ── GENERACIÓN: loop único día×puesto×banda ──────────────────────────
     // Regla de oro: cada empleado trabaja SOLO su banda asignada todo el mes.
     // No hay cross-banda rescue. Los slots sin cobertura se reportan como vacantes.
@@ -1280,7 +1298,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const used = limitedEmpIds.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    if (used + sHrs > HARD_MAX_HOURS) continue;
+                    if (used + sHrs > HARD_MAX_HOURS) {
+                        // Registrar como candidato a autorización si también pasa el check CCT
+                        const seenKey = `${empId}||${dateStr}||${sCode}`;
+                        if (!capBlockedEmpSeen.has(seenKey) && passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) {
+                            capBlockedEmpSeen.add(seenKey);
+                            const capKey = `${pos.positionName}||${dateStr}||${sCode}`;
+                            if (!capBlockedMap.has(capKey)) capBlockedMap.set(capKey, []);
+                            capBlockedMap.get(capKey)!.push({ empId, dateStr, positionName: pos.positionName, code: sCode, name: sName, hours: sHrs, startTime: sStart, ...(sEnd ? { endTime: sEnd } : {}) });
+                        }
+                        continue;
+                    }
                     if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                     writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
                     covered++;
@@ -1331,7 +1359,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const used2 = limitedEmpIds.has(emp.id)
                     ? runtime[emp.id].cycleCurrentUsed + runtime[emp.id].cycleNextUsed
                     : (inCurr2 ? runtime[emp.id].cycleCurrentUsed : runtime[emp.id].cycleNextUsed);
-                if (used2 + sHrs2 > HARD_MAX_HOURS) continue;
+                if (used2 + sHrs2 > HARD_MAX_HOURS) {
+                    const seenKey2 = `${emp.id}||${dateStr2}||${sCode2}`;
+                    if (!capBlockedEmpSeen.has(seenKey2) && passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) {
+                        capBlockedEmpSeen.add(seenKey2);
+                        const capKey2 = `${posName2}||${dateStr2}||${sCode2}`;
+                        if (!capBlockedMap.has(capKey2)) capBlockedMap.set(capKey2, []);
+                        capBlockedMap.get(capKey2)!.push({ empId: emp.id, dateStr: dateStr2, positionName: posName2, code: sCode2, name: sh2.name || sCode2, hours: sHrs2, startTime: sStart2, ...(sEnd2 ? { endTime: sEnd2 } : {}) });
+                    }
+                    continue;
+                }
                 if (!passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) continue;
                 writeAssignment(emp.id, dateStr2, posName2, sCode2, sh2.name || sCode2, sHrs2, sStart2, inCurr2, sEnd2);
                 // Eliminar del uncoveredSlotsByDay si la brecha se cerró
@@ -1348,6 +1385,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
     }
+
+    // ── CAP OVERFLOW: slots bloqueados por 200h que quedaron sin cubrir ──────
+    const capOverflowSlots: CapOverflowSlot[] = [];
+    const seenEmpDayOverflow = new Set<string>(); // un solo slot por (empId, dateStr)
+    capBlockedMap.forEach((blocked, key) => {
+        const [posName, dateStr, code] = key.split('||');
+        const gapDay = stats.uncoveredSlotsByDay![dateStr];
+        // Solo si el slot quedó efectivamente sin cubrir
+        if (!gapDay?.some(g => g.positionName === posName && g.code === code)) return;
+        for (const entry of blocked) {
+            const empDateKey = `${entry.empId}||${entry.dateStr}`;
+            if (seenEmpDayOverflow.has(empDateKey)) continue;
+            seenEmpDayOverflow.add(empDateKey);
+            capOverflowSlots.push(entry);
+            break; // uno por slot
+        }
+    });
 
     const suvicoWeekBillableOver48: Array<{ empId: string; weekKey: string; hours: number }> = [];
     for (const emp of ctx.employees) {
@@ -1441,7 +1495,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     stats.totalRetCount = totalRetCount;
     stats.totalRetHoursPotential = totalRetCount * RET_STANDBY_REFERENCE_HOURS;
 
-    return { feasibility, assignments, stats };
+    return { feasibility, assignments, stats, capOverflowSlots };
 }
 
 /**
