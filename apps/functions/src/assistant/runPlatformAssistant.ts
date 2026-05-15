@@ -19,14 +19,17 @@ import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './r
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
 
-1) **No** abras diciendo en qué ruta o pantalla está el usuario (evitá frases tipo "Estás en Planificación en /admin/…"). El propio chat ya muestra el módulo arriba. Solo mencioná rutas cuando el usuario pregunte **dónde** algo o cuando un paso lo necesite **en medio** de la explicación.
+1) **No** abras diciendo en qué ruta o pantalla está el usuario (evitá "Estás en…" o URLs). El chat ya muestra el módulo arriba.
 
-2) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / contratos vigentes «hoy»** usá **contar_servicios_sla_vigentes_empresa**. Para **empleados en plantilla / legajos activos de la empresa** (incl. desde Planificación) usá **contar_empleados_plantilla_empresa**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
+2) **No** incluyas rutas técnicas tipo \`/admin/…\`, \`/empleado/…\` ni \`/cliente/…\` en respuestas normales (incluido listados tipo "qué podés responder" o "qué módulos hay"). Referí al lugar por **nombre del ítem del menú lateral** (p. ej. "Servicios y SLA", "Planificación y Turnos", "Operaciones", "Clientes y Objetivos", "RRHH", "Reportes", "Configuración"). **Solo** si el usuario pregunta explícitamente por la **URL**, la **barra de direcciones** o "en qué link", podés mencionar una ruta concreta.
 
-3) Para procedimientos ("cómo hago…"): usá **lista numerada**; **dejá una línea en blanco entre cada paso** (doble salto de línea) y párrafos cortos para que no sea un bloque denso. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+3) Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de obtener datos con herramientas, **respondé ese número en la primera oración**. Para **servicios SLA / contratos vigentes «hoy»** usá **contar_servicios_sla_vigentes_empresa**. Para **empleados en plantilla / legajos activos de la empresa** (incl. desde Planificación) usá **contar_empleados_plantilla_empresa**. Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
-4) Incluí rutas solo cuando aporten (p. ej. /admin/planificacion, /admin/operaciones, /admin/servicios), integradas al paso correspondiente.
-5) Evitá títulos tipo #; sin rollos legales si no pidieron eso.
+4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+
+5) En resúmenes o varios temas seguidos: **un párrafo o un ítem por bloque**, separados con línea en blanco; no amontones todo en un solo párrafo.
+
+6) Evitá títulos tipo #; sin rollos legales si no pidieron eso.
 `.trim();
 
 export interface AssistantChatMessageInput {
@@ -82,14 +85,16 @@ function personaModuleBlurb(persona: AssistantPersona, readableKeys: string[], m
   const parts: string[] = [];
   if (persona === 'SYSTEM') {
     parts.push(`Perfil BACKOFFICE/COSP. Tiene alcance declarado sólo sobre módulos con permiso READ: ${readableKeys.sort().join(', ') || '(ninguno listado)'}.`);
-    parts.push('No describas rutas /admin ni flujos de módulos que no estén en esa lista.');
-    parts.push(`Sugerencias de ruta conocidas:`);
+    parts.push('No describas flujos de módulos que no estén en esa lista. En mensajes al usuario no listes URLs /admin/…; usá nombres del menú.');
+    parts.push(`Referencia interna de módulos (no volcar textual al usuario):`);
     readableKeys.slice(0, 12).forEach((k) => {
       const h = ADMIN_MODULE_ROUTE_HINTS[k];
       if (h) parts.push(`- ${k}: ${h}`);
     });
   } else if (persona === 'EMPLOYEE') {
-    parts.push('Perfil PORTAL EMPLEADO: responder sobre turnos propios, presencia marcada desde portal/ausencias, avisos. No exponer otros empleados por nombre salvo ejemplo genérico. No rutas administrativas salvo mencionar brevemente qué pueden hacer los supervisores en /admin cuando el usuario pregunte cómo reclamar ante la empresa.');
+    parts.push(
+      'Perfil PORTAL EMPLEADO: responder sobre turnos propios, presencia marcada desde portal/ausencias, avisos. No exponer otros empleados por nombre salvo ejemplo genérico. No menciones URLs administrativas salvo que el usuario pregunte explícitamente por el acceso web del personal de oficina.',
+    );
   } else {
     parts.push(
       'Perfil PORTAL CLIENTE: vistas de cliente (accesos, personal autorizado, consultas típicas según desarrollo). Orientar sobre qué hacer si no encuentra función (contactar empresa de seguridad, etc.). Sin datos operativos de otros clientes.',

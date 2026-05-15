@@ -42,13 +42,43 @@ function loadFabPos(): FabPos {
   return { bottom: 20, right: 20 };
 }
 
+/** Parte el texto en bloques legibles: doble salto, ítems numerados o viñetas en líneas aparte. */
+function expandAssistantParagraphBlocks(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+  const coarse = normalized
+    .split(/\n{2,}/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const chunk of coarse) {
+    const numbered = chunk.split(/\n(?=\d+\.\s)/);
+    if (numbered.length > 1) {
+      numbered.forEach((p) => {
+        const t = p.trim();
+        if (t) out.push(t);
+      });
+      continue;
+    }
+    const bullets = chunk.split(/\n(?=[-*•]\s)/);
+    if (bullets.length > 1) {
+      bullets.forEach((p) => {
+        const t = p.trim();
+        if (t) out.push(t);
+      });
+      continue;
+    }
+    out.push(chunk);
+  }
+  return out;
+}
+
 /** `**negrita**` y saltos de línea / párrafos para respuestas del asistente. */
 function formatAssistantMessage(content: string): React.ReactNode {
-  const normalized = content.replace(/\r\n/g, '\n').trim();
-  if (!normalized) return null;
-  const paragraphs = normalized.split(/\n{2,}/);
-  return paragraphs.map((para, pi) => (
-    <p key={pi} className="mb-3 last:mb-0 whitespace-pre-wrap leading-relaxed">
+  const blocks = expandAssistantParagraphBlocks(content);
+  if (blocks.length === 0) return null;
+  return blocks.map((para, pi) => (
+    <p key={pi} className="mb-4 last:mb-0 whitespace-pre-wrap leading-loose">
       {para.split('\n').map((line, li) => (
         <React.Fragment key={li}>
           {li > 0 ? <br /> : null}
@@ -287,7 +317,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             bottom: panelBottomCss,
             right: fabRightCss,
           }}
-          className="fixed z-[9999] flex w-[min(100vw-1.25rem,30rem)] max-w-[calc(100vw-1.25rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
+          className="fixed z-[9999] flex w-[min(100vw-2rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-indigo-50 px-3 py-2 dark:border-slate-800 dark:bg-indigo-950/40">
             <div className="min-w-0">
@@ -306,7 +336,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             </button>
           </div>
 
-          <div ref={scrollRef} className="max-h-[min(58vh,440px)] space-y-2.5 overflow-y-auto px-3.5 py-2.5 text-[12px] leading-relaxed">
+          <div ref={scrollRef} className="max-h-[min(52vh,360px)] space-y-3 overflow-y-auto px-3 py-3 text-[12px] leading-loose">
             {msgs.length === 0 && (
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                 Preguntá cómo funciona COSP o el módulo en el que estás. La conversación no se guarda: al cerrar sesión o limpiar, se borra.
@@ -316,10 +346,10 @@ export function AssistantFloatingBubble(): React.ReactNode {
             {msgs.map((m, i) => (
               <div
                 key={i}
-                className={`rounded-xl px-3 py-2 font-medium ${
+                className={`rounded-xl font-medium ${
                   m.role === 'user'
-                    ? 'ml-3 bg-indigo-600 text-white'
-                    : 'mr-1 border border-slate-100 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                    ? 'ml-3 bg-indigo-600 px-3 py-2 text-white'
+                    : 'mr-1 border border-slate-100 bg-slate-50 px-3 py-2.5 text-slate-800 leading-loose dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                 }`}
               >
                 {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
@@ -337,7 +367,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
               placeholder="Escribí tu pregunta…"
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[12px] font-bold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold leading-normal text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
               disabled={busy}
             />
             <button
