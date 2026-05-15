@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS } from './cospKnowledge';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';

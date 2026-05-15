@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runPlatformAssistant = runPlatformAssistant;
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v1");
 const generative_ai_1 = require("@google/generative-ai");
 const cospKnowledge_1 = require("./cospKnowledge");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");

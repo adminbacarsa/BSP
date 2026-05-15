@@ -3,7 +3,7 @@
  * Duplica la lógica de web2/services/geminiPlanificacion.ts para no llamar Gemini desde el browser.
  */
 
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export interface GeminiCorreccion {

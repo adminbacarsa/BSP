@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runPlanningGeminiOptimize = runPlanningGeminiOptimize;
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v1");
 const generative_ai_1 = require("@google/generative-ai");
 function maxHorasFacturablesDiaPorPuesto(p) {
     const qty = Math.max(1, Number(p?.qty) || 1);

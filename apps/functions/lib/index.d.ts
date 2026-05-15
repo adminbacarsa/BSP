@@ -1,5 +1,5 @@
 import './bootstrap-env';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 export declare const createUser: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduleShift: functions.HttpsFunction & functions.Runnable<any>;
 export declare const manageShifts: functions.HttpsFunction & functions.Runnable<any>;

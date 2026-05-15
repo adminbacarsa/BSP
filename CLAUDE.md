@@ -54,6 +54,7 @@ Funcionalidades principales:
 | Estado | React hooks + Firestore real-time (`onSnapshot`) |
 | UI | Componentes propios + Lucide React icons + Sonner (toasts) |
 
+Firebase **Functions** (`apps/functions`): runtime **Node.js 22** (`engines` en `package.json`). **`firebase-functions` v7+** usa por defecto la API v2; las callables/triggers **de 1ª gen** importan **`firebase-functions/v1`** (`https.onCall`, `runWith`, `region`, etc.). HTTPs que ya usan **`firebase-functions/v2/https`** o **`v2/scheduler`** se mantienen así.
 ---
 
 ## 3. Estructura del repo

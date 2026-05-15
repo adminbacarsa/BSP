@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
 const restore_service_1 = require("./backup/restore.service");

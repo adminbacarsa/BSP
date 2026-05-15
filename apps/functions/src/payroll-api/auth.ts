@@ -27,7 +27,7 @@
  */
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
-import type * as functions from 'firebase-functions';
+import type * as functions from 'firebase-functions/v1';
 
 type Request = functions.https.Request;
 type Response = any;

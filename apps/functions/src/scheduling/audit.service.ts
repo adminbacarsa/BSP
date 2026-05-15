@@ -3,7 +3,7 @@ import * as admin from 'firebase-admin';
 import { GeofencingService } from './geofencing.service';
 import { DataManagementService } from '../data-management/data-management.service'; 
 import { IShift } from '../common/interfaces/shift.interface';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { IObjective } from '../common/interfaces/client.interface'; 
 
 const SHIFTS_COLLECTION = 'turnos';

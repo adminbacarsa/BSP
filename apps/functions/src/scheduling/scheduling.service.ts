@@ -3,7 +3,7 @@ import * as admin from 'firebase-admin';
 import { IShift } from '../common/interfaces/shift.interface';
 import { ShiftOverlapService } from './shift-overlap.service';
 import { WorkloadService } from './workload.service';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 
 const SHIFTS_COLLECTION = 'turnos';
 const ABSENCES_COLLECTION = 'ausencias'; 

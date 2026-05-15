@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.payrollApi = void 0;
 const admin = require("firebase-admin");
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v1");
 const auth_1 = require("./auth");
 const cycle_1 = require("./cycle");
 const calc_1 = require("./calc");

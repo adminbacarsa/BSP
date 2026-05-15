@@ -19,7 +19,7 @@
  *     de Firestore puedan rechazar ediciones posteriores.
  */
 import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { requireApiKey, AuthedRequest } from './auth';
 
 type Request = functions.https.Request;

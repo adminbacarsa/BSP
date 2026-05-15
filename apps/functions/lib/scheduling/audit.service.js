@@ -14,7 +14,7 @@ const common_1 = require("@nestjs/common");
 const admin = require("firebase-admin");
 const geofencing_service_1 = require("./geofencing.service");
 const data_management_service_1 = require("../data-management/data-management.service");
-const functions = require("firebase-functions");
+const functions = require("firebase-functions/v1");
 const SHIFTS_COLLECTION = 'turnos';
 let AuditService = class AuditService {
     constructor(geofencingService, dmService) {

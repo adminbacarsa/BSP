@@ -1,5 +1,5 @@
 import './bootstrap-env';
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { runBackup } from './backup/backup.service';
 import { runRestore, RestoreMode } from './backup/restore.service';
