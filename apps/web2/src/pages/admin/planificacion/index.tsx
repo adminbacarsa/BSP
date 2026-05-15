@@ -528,6 +528,25 @@ export default function PlanificacionPage() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
 
+    // Días RET por empleado → horas de stand-by (8h/día) para mostrar en la columna de dotación.
+    // No se usan para el tope CCT (solo para display/payroll de referencia).
+    const empRetDays = useMemo(() => {
+        const result: Record<string, number> = {};
+        displayedEmployees.forEach((emp: any) => {
+            let count = 0;
+            daysInMonth.forEach(day => {
+                const key = `${emp.id}_${getDateKey(day)}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                const activeShift = pending && !pending.isDeleted ? pending : existing;
+                if (!activeShift || activeShift.isDeleted) return;
+                if (String(activeShift.code || '').toUpperCase() === 'RET') count++;
+            });
+            result[emp.id] = count;
+        });
+        return result;
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+
     // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
     const restViolationCells = useMemo(() => {
         const violated = new Set<string>();
@@ -3045,11 +3064,14 @@ export default function PlanificacionPage() {
                                             const distKm = (empLat && empLng && objLat && objLng) ? haversineKm(empLat, empLng, objLat, objLng) : null;
                                             const monthHours = empMonthlyHours[emp.id] || 0;
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
+                                            const retDays = empRetDays[emp.id] || 0;
+                                            const retRefHours = retDays * 8;
                                             const displayHours = hoursMode === 'cct' ? cctHours : monthHours;
                                             const hoursColor = displayHours >= 200 ? 'text-red-600 font-black'
                                                 : displayHours >= 185 ? 'text-orange-500 font-bold'
                                                 : displayHours >= 160 ? 'text-amber-500'
                                                 : displayHours > 0   ? 'text-slate-500 dark:text-slate-300'
+                                                : retRefHours > 0    ? 'text-amber-800 font-bold'
                                                 : 'text-slate-400 dark:text-slate-500';
                                             return (
                                                 <div className="flex items-center justify-between w-full">
@@ -3057,14 +3079,15 @@ export default function PlanificacionPage() {
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                         {isGuest && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
-                                                        {/* Horas mensuales planificadas */}
+                                                        {/* Horas mensuales planificadas (facturables) + RET de referencia */}
                                                         <span
                                                             title={hoursMode === 'cct'
-                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.`
-                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).`}
+                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.${retRefHours > 0 ? `\n${retDays} días RET (${retRefHours}h stand-by de referencia, no facturados al cliente).` : ''}`
+                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retRefHours > 0 ? `\n${retDays} días RET (${retRefHours}h stand-by de referencia, no facturados al cliente).` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
                                                             {Math.round(displayHours)}h
+                                                            {retRefHours > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET × 8h = ${retRefHours}h stand-by`}>+{retRefHours}★</span>}
                                                             {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
                                                         </span>
                                                         {/* Distancia al objetivo — solo si hay coordenadas */}
