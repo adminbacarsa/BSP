@@ -326,7 +326,7 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>(['6+2']);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     /** Rotar turnos entre ciclos (M→T→N→M…). Si el puesto solo tiene 1 turno, no afecta. */
-    const [autoRotateShifts, setAutoRotateShifts] = useState(true);
+    const [autoRotateShifts, setAutoRotateShifts] = useState(false);
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
@@ -3241,7 +3241,7 @@ export default function PlanificacionPage() {
                                                     : null
                                               ))
                                             : null;
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; setShiftTooltip({ label: shiftLabel, pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{restViolationCells.has(key) && !isLockedDate && !absence && (<div className="absolute top-0 left-0 w-0 h-0 border-l-[7px] border-t-[7px] border-l-orange-500 border-t-orange-500 rounded-tl" title="Descanso insuficiente (< 12h entre turnos)"/>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; setShiftTooltip({ label: shiftLabel, pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -3982,30 +3982,6 @@ export default function PlanificacionPage() {
                                 <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Ver</p>
                             </button>
                         )}
-                        {autoV2Coverage && (() => {
-                            const hardCount = (autoV2Coverage.uncovered?.length || 0)
-                                + (autoV2Coverage.restViolations?.length || 0)
-                                + (autoV2Coverage.licenseConflicts?.length || 0);
-                            const softCount = autoV2Coverage.overHours?.length || 0;
-                            const label = autoV2Coverage.ok
-                                ? '✓ Sin alertas'
-                                : autoV2Coverage.warnings
-                                    ? `${softCount} aviso${softCount !== 1 ? 's' : ''}`
-                                    : `${hardCount} incidencia${hardCount !== 1 ? 's' : ''}`;
-                            return (
-                                <button
-                                    onClick={() => setShowCoverageModal(true)}
-                                    className="text-center px-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded transition-colors"
-                                    title="Verificación de cobertura: slots descubiertos, descansos rotos, conflictos con licencias y horas vs SLA."
-                                >
-                                    <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Verificación</p>
-                                    <p className={`text-sm font-black leading-tight underline decoration-dotted ${
-                                        autoV2Coverage.ok ? 'text-emerald-600'
-                                        : autoV2Coverage.warnings ? 'text-amber-600' : 'text-rose-600'
-                                    }`}>{label}</p>
-                                </button>
-                            );
-                        })()}
                         {slaVendidas > 0 && (
                             <div className="text-center pl-3">
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Vendidas</p>
