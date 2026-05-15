@@ -823,7 +823,7 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
   };
 }
 
-/** Misma regla que RRHH lista: activo/active o sin estado → activo; inactivo/inactive → baja. */
+/** Lista RRHH: activo/active o sin estado → activo; inactivo/inactive → baja. */
 function esLegajoActivoComoPantallaRRHH(statusRaw: unknown): boolean {
   const s = String(statusRaw ?? '').trim().toLowerCase();
   if (!s) return true;
@@ -832,9 +832,15 @@ function esLegajoActivoComoPantallaRRHH(statusRaw: unknown): boolean {
   return true;
 }
 
+/** Igual que tarjeta «EMPLEADOS EN NÓMINA» del panel de control (dashboard.tsx): solo esos tres status explícitos. */
+function esEmpleadoNominaTarjetaDashboard(statusRaw: unknown): boolean {
+  const s = String(statusRaw ?? '').trim().toLowerCase();
+  return ['active', 'activo', 'activa'].includes(s);
+}
+
 /**
- * Conteo de legajos `empleados` por empresa — para «cuántos empleados en plantilla», «cuántos activos», etc.
- * No cuenta turnos planificados del mes (eso sería otro criterio).
+ * Conteo de legajos `empleados` por empresa.
+ * Devuelve el mismo criterio que la tarjeta «EMPLEADOS EN NÓMINA» del panel (status explícito) y el criterio amplio de lista RRHH.
  */
 export async function ejecutarContarEmpleadosPlantillaEmpresa(
   ctx: AssistantToolContext,
@@ -855,8 +861,9 @@ export async function ejecutarContarEmpleadosPlantillaEmpresa(
   const db = admin.firestore();
   const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
 
-  let activos = 0;
-  let inactivos = 0;
+  let activosPanelNomina = 0;
+  let activosRrhhAmplio = 0;
+  let inactivosExplicitos = 0;
   const muestra: Array<{ apellido_nombre: string; estado: string }> = [];
 
   for (const d of qsnap.docs) {
@@ -865,8 +872,9 @@ export async function ejecutarContarEmpleadosPlantillaEmpresa(
     if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase()) continue;
 
     const st = row.status;
-    if (esLegajoActivoComoPantallaRRHH(st)) activos++;
-    else inactivos++;
+    if (esEmpleadoNominaTarjetaDashboard(st)) activosPanelNomina += 1;
+    if (esLegajoActivoComoPantallaRRHH(st)) activosRrhhAmplio += 1;
+    else inactivosExplicitos += 1;
 
     if (muestra.length < 12) {
       const ln = String(row.lastName ?? '').trim();
@@ -885,15 +893,20 @@ export async function ejecutarContarEmpleadosPlantillaEmpresa(
   return {
     fecha_referencia_para_rotulo: fechaRef,
     mes_calendario_yyyy_mm: ym,
-    cuenta_legajos_activos_misma_logica_rrhh: activos,
-    cuenta_legajos_inactivos_explicitos: inactivos,
-    cuenta_total_en_lote: activos + inactivos,
+    cuenta_para_tarjeta_panel_empleados_nomina: activosPanelNomina,
+    cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado: activosRrhhAmplio,
+    cuenta_legajos_inactivos_explicitos: inactivosExplicitos,
+    cuenta_total_en_lote: activosRrhhAmplio + inactivosExplicitos,
     truncado_loteFirestore_900: qsnap.size >= 900,
-    aclaracion_plantilla:
-      '«Plantilla» aquí = legajos en colección empleados de la empresa: activo = activo/active o sin estado (como pantalla RRHH). No incluye «sólo quienes tienen turno cargado en planificación del mes» salvo que pidan explícitamente ese criterio.',
+    criterios: {
+      panel_dashboard:
+        'cuenta_para_tarjeta_panel_empleados_nomina = legajos con status exactamente activo/active/activa (misma regla que tarjeta EMPLEADOS EN NÓMINA del panel).',
+      rrhh_lista:
+        'cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado = activo/active o vacío u otros no marcados inactivo (lista RRHH).',
+    },
     muestra_primeros_legajos: muestra,
     nota_tras_herramienta:
-      'Primera oración: número de legajos activos. Si el usuario dijo «este mes» en sentido plantilla general, el dato es al día fecha_referencia; si querían dotación planificada en grilla, decí que es otro informe.',
+      'Para «cuántos vigiladores», «empleados en nómina», «plantilla» como la tarjeta del panel de control, respondé con **cuenta_para_tarjeta_panel_empleados_nomina**. Usá cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado solo si el usuario pide el criterio amplio de RRHH o comparación con listados que incluyen legajos sin estado cargado.',
   };
 }
 

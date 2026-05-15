@@ -91,7 +91,7 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   {
     name: 'contar_empleados_plantilla_empresa',
     description:
-      'Para «cuántos empleados en plantilla», «cuántos legajos activos», «personal de la empresa este mes» en sentido nómina: cuenta documentos en `empleados` con empresaId actual. Activo = activo/active o sin estado (misma lógica que lista RRHH); inactivo = inactivo/inactive. NO sustituye «cuántos tienen turno cargado en la grilla del mes» salvo que el usuario pida explícitamente planificación.',
+      'Para «cuántos empleados en nómina», «vigiladores en plantilla», tarjeta del panel: devuelve cuenta_para_tarjeta_panel_empleados_nomina (status explícito activo/activo/activa, igual que el dashboard). cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado es el criterio amplio de lista RRHH (incluye legajos sin estado). NO sustituye «cuántos tienen turno hoy en planificación» salvo que lo pidan explícito.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
