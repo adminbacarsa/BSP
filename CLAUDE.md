@@ -159,11 +159,12 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 - UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo). El **FAB es arrastrable**; la posición se guarda en `sessionStorage` hasta cerrar pestaña/navegador.
 - Backend: callable Firebase **`chatPlatformAssistant`** (`apps/functions/src/index.ts` + `assistant/*`) invoca **Gemini** con API key en **servidor**.
+- **IA ajuste fino de planificación:** el front llama la callable **`optimizePlanningGemini`** (`planningGeminiServer.ts` + export en `index.ts`); usa el mismo secreto **`GEMINI_API_KEY`**. No hay `NEXT_PUBLIC_GEMINI_*` en el bundle. Deploy selectivo: `firebase deploy --only functions:optimizePlanningGemini` si el deploy completo de functions timeouta.
 - **Producción (hosting + app real):**
   1. Crear el secreto (una vez): en la raíz del repo ejecutá `firebase functions:secrets:set GEMINI_API_KEY` y pegá la API key cuando pida valor (queda en Google Secret Manager).
   2. Desplegar: `firebase deploy --only functions`. La función `chatPlatformAssistant` ya declara `secrets: ['GEMINI_API_KEY']` y Firebase inyecta `process.env.GEMINI_API_KEY` en runtime.
   3. Si rotás la key: volvé a `secrets:set` con versión nueva y redeploy de functions.
-  4. Si `firebase deploy --only functions` falla por timeout al analizar el código, usá deploy por nombre: `firebase deploy --only functions:chatPlatformAssistant` (u otra export) hasta optimizar la carga del `index`.
+  4. Si `firebase deploy --only functions` falla por timeout al analizar el código, usá deploy por nombre: `firebase deploy --only functions:chatPlatformAssistant`, `firebase deploy --only functions:optimizePlanningGemini`, etc., hasta optimizar la carga del `index`.
   5. Alternativa manual: Cloud Console → Secret Manager / variables de la función — menos alineado con el manifest de Firebase.
 - Front: `getFunctions(app, 'us-central1')` en `firebase.ts` debe coincidir con la región de la callable desplegada.
 - **Laboratorio local (emulador):** el asistente usa la callable **sin** `runWith(secrets)` (en emulador las secrets de prod no vienen cargadas).

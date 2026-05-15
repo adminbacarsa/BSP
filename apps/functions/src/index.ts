@@ -21,6 +21,7 @@ import { LaborAgreementService } from './data-management/labor-agreement.service
 // Interfaces
 import { EmployeeRole } from './common/interfaces/employee.interface';
 import { runPlatformAssistant, type AssistantChatPayload } from './assistant/runPlatformAssistant';
+import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
 
 // Inicialización de Firebase Admin
 if (!admin.apps.length) {
@@ -512,8 +513,36 @@ export const chatPlatformAssistant =
     ? functions.https.onCall(chatPlatformAssistantHandler)
     : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(chatPlatformAssistantHandler);
 
+const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'Manager', 'Scheduler'];
 
+async function optimizePlanningGeminiHandler(
+  data: { context?: Record<string, unknown> },
+  context: functions.https.CallableContext,
+): Promise<GeminiRespuesta> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const role = (context.auth.token.role as string) || '';
+  if (!ALLOWED_PLANNING_AI_ROLES.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
+  }
+  const ctx = data?.context;
+  if (!ctx || typeof ctx !== 'object') {
+    throw new functions.https.HttpsError('invalid-argument', 'Falta payload "context".');
+  }
+  try {
+    return await runPlanningGeminiOptimize(ctx as any);
+  } catch (e: any) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    console.error('[optimizePlanningGemini]', e?.message, e?.stack);
+    throw new functions.https.HttpsError('internal', e?.message ?? 'Error Gemini planificación');
+  }
+}
 
+export const optimizePlanningGemini =
+  process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions.https.onCall(optimizePlanningGeminiHandler)
+    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(optimizePlanningGeminiHandler);
 
 // --- FUNCIONES DE SISTEMA INYECTADAS POR SCRIPT ---
 

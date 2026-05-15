@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
@@ -18,6 +18,7 @@ const absence_service_1 = require("./data-management/absence.service");
 const pattern_service_1 = require("./scheduling/pattern.service");
 const labor_agreement_service_1 = require("./data-management/labor-agreement.service");
 const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
+const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -405,6 +406,32 @@ async function chatPlatformAssistantHandler(data, context) {
 exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     ? functions.https.onCall(chatPlatformAssistantHandler)
     : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(chatPlatformAssistantHandler);
+const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'Manager', 'Scheduler'];
+async function optimizePlanningGeminiHandler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const role = context.auth.token.role || '';
+    if (!ALLOWED_PLANNING_AI_ROLES.includes(role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
+    }
+    const ctx = data?.context;
+    if (!ctx || typeof ctx !== 'object') {
+        throw new functions.https.HttpsError('invalid-argument', 'Falta payload "context".');
+    }
+    try {
+        return await (0, planningGeminiServer_1.runPlanningGeminiOptimize)(ctx);
+    }
+    catch (e) {
+        if (e instanceof functions.https.HttpsError)
+            throw e;
+        console.error('[optimizePlanningGemini]', e?.message, e?.stack);
+        throw new functions.https.HttpsError('internal', e?.message ?? 'Error Gemini planificación');
+    }
+}
+exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions.https.onCall(optimizePlanningGeminiHandler)
+    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(optimizePlanningGeminiHandler);
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
