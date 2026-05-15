@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
 import { Sparkles, X, SendHorizontal, Trash2 } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
@@ -26,6 +27,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setPortalRoot(document.body);
+  }, []);
 
   /** asPath lleva los segmentos reales (ideal para inferir módulo). */
   const pathname = router.pathname || '/';
@@ -77,16 +83,20 @@ export function AssistantFloatingBubble(): React.ReactNode {
     }
   }, [busy, empresaId, fullPath, input, msgs, pathname, user]);
 
-  if (loading || !user || hideGloboRoute(pathname || '')) {
+  if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) {
     return null;
   }
 
-  return (
+  const fabBottom = 'max(1rem, calc(0.75rem + env(safe-area-inset-bottom, 0px)))';
+  const fabRight = 'max(1rem, calc(0.75rem + env(safe-area-inset-right, 0px)))';
+
+  const overlay = (
     <>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-5 right-5 z-[130] flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-xl ring-2 ring-white/30 transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300 dark:ring-slate-900/50"
+        style={{ bottom: fabBottom, right: fabRight }}
+        className="fixed z-[9999] flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white shadow-[0_10px_40px_-10px_rgba(79,70,229,0.85),0_4px_16px_rgba(0,0,0,0.2)] ring-[3px] ring-white/40 transition hover:scale-105 hover:bg-indigo-500 hover:shadow-[0_14px_44px_-10px_rgba(79,70,229,0.9)] active:scale-95 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
         aria-expanded={open}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente COSP'}
       >
@@ -95,9 +105,13 @@ export function AssistantFloatingBubble(): React.ReactNode {
 
       {open && (
         <div
-          className="fixed bottom-[5.25rem] right-5 z-[130] flex w-[min(100vw-2.5rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
           role="dialog"
           aria-label="Asistente COSP"
+          style={{
+            bottom: `calc(${fabBottom} + 3.75rem)`,
+            right: fabRight,
+          }}
+          className="fixed z-[9999] flex w-[min(100vw-2rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-indigo-50 px-3 py-2 dark:border-slate-800 dark:bg-indigo-950/40">
             <div className="min-w-0">
@@ -163,4 +177,6 @@ export function AssistantFloatingBubble(): React.ReactNode {
       )}
     </>
   );
+
+  return createPortal(overlay, portalRoot);
 }
