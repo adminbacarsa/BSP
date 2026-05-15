@@ -264,11 +264,19 @@ export interface V2FeasibilityReport {
         idleEmployeesList?: Array<{ id: string; nombre?: string }>;
         /** Total de asignaciones (slots) a cubrir en el mes: Σ por puesto qty × bandas × días activos. */
         totalSlotsAll: number;
-        /** Comparativa de personas necesarias y buffer por esquema de ciclo (4+2, 5+1, 6+1, 6+2). */
+        /** Comparativa de personas necesarias y buffer por esquema de ciclo (4+2, 5+1, 6+1, 6+2).
+         *  hrsPerPerson = horas facturables reales tras aplicar el tope por turno:
+         *    6+2 × 8h → 180h/mes (22.5d × 8h), 6+1 → 200h, 5+1 → 200h, 4+2 × 12h → 192h (16d × 12h). */
         cycleComparison: Array<{
             cycleKey: string;
+            /** Personas en simultáneo en el pico estructural para este esquema. */
             structuralPeakPeople: number;
+            /** Horas facturables REALES por empleado/mes (después del tope CCT por tipo de turno). */
             hrsPerPerson: number;
+            /** Días de trabajo promedio por mes (puede ser decimal, ej. 22.5 para 6+2). */
+            avgWorkDays: number;
+            /** Horas del turno correspondiente al ciclo (8 ó 12). */
+            shiftHours: number;
             bufferHours: number;
             retEstimate: number;
         }>;
@@ -693,13 +701,19 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
                     const isLim = p.activeDays < ctx.daysInMonth.length;
                     return s + Math.ceil(p.peakConcurrent * (isLim ? 1 : f));
                 }, 0);
-                const workDays = Math.floor((cLc / (cLc + cFc)) * ctx.daysInMonth.length);
-                const hrsPerPerson = Math.min(HARD_MAX_HOURS, workDays * avgHrs);
+                // Días promedio EXACTOS (decimal): 6+2 → 22.5d, 4+2 → 20d, 5+1 → 25d.
+                const avgWorkDays = (cLc / (cLc + cFc)) * ctx.daysInMonth.length;
+                // Tope facturable por tipo de turno: 8h→200h (25d), 12h→192h (16d).
+                // floor(MAX/shiftHrs)*shiftHrs evita fracciones: 200/12=16.67→16×12=192.
+                const billableCap = Math.floor(HARD_MAX_HOURS / avgHrs) * avgHrs;
+                const hrsPerPerson = Math.min(avgWorkDays * avgHrs, billableCap);
                 const buffer = spp * hrsPerPerson - structuralDemandHours;
                 return {
                     cycleKey: ck,
                     structuralPeakPeople: spp,
-                    hrsPerPerson,
+                    hrsPerPerson: Math.round(hrsPerPerson * 10) / 10,
+                    avgWorkDays: Math.round(avgWorkDays * 10) / 10,
+                    shiftHours: avgHrs,
                     bufferHours: Math.round(buffer),
                     retEstimate: Math.max(0, Math.floor(buffer / avgHrs)),
                 };
