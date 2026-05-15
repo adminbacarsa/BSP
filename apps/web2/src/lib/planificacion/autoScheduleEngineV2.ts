@@ -1188,6 +1188,26 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             .map(emp => emp.id)
     );
 
+    // ── PASO 3b: alinear días de ciclo al tope facturable por tipo de turno ──
+    // Fórmula: hardCapDays = floor(HARD_MAX_HOURS / hrsPerShift)
+    //   8h  → 25 días (200h)  — el ciclo 6+2 ya da 22-25, sin recorte en práctica.
+    //   9h  → 22 días (198h)  — ej. EN L-V exento (limitedEmpIds).
+    //   12h → 16 días (192h)  — con 4+2 el ciclo daría 20; recortamos los 4 sobrantes.
+    // Los días "trabajo" del ciclo que exceden el tope pasan a F en el fallback
+    // (no a RET) porque el empleado ya agotó su cuota mensual facturable.
+    ctx.employees.forEach(emp => {
+        if (limitedEmpIds.has(emp.id)) return; // L-V tiene su propio control
+        const sc = (empPrimaryShift[emp.id] || '').toUpperCase();
+        const hrsPerDay = _hint[sc] ?? SHIFT_HRS_DEFAULT[sc] ?? 8;
+        if (hrsPerDay <= 0) return;
+        const hardCapDays = Math.floor(HARD_MAX_HOURS / hrsPerDay);
+        const wdSet = cycleWorkDays[emp.id];
+        if (!wdSet || wdSet.size <= hardCapDays) return;
+        // Ordenar cronológicamente y eliminar los días que exceden el tope.
+        // Los primeros N días del mes quedan como trabajo; el resto pasa a F.
+        [...wdSet].sort().slice(hardCapDays).forEach(d => wdSet.delete(d));
+    });
+
     const assignments: V2Assignment[] = [];
     // Techo de horas facturables en la generación: el MÁXIMO entre vendidas y demanda
     // estructural del SLA en pantalla. Antes usábamos solo `contractedHours` cuando
