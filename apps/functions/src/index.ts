@@ -488,8 +488,12 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
 
 // =========================================================
 // 12b. ASISTENTE VIRTUAL (Gemini vía Functions)
+// Secret Manager: `firebase functions:secrets:set GEMINI_API_KEY` y redeploy.
+// Emulador: sigue valiendo `apps/functions/.env` (bootstrap-env.ts).
 // =========================================================
-export const chatPlatformAssistant = functions.https.onCall(async (data, context) => {
+export const chatPlatformAssistant = functions
+  .runWith({ secrets: ['GEMINI_API_KEY'] })
+  .https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }

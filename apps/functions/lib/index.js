@@ -388,7 +388,9 @@ exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
         };
     }
 });
-exports.chatPlatformAssistant = functions.https.onCall(async (data, context) => {
+exports.chatPlatformAssistant = functions
+    .runWith({ secrets: ['GEMINI_API_KEY'] })
+    .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
     }
