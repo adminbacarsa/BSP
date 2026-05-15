@@ -1052,18 +1052,32 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const empGroupIdx: Record<string, number> = {};
     const shiftRingByPosition: Record<string, string[]> = {};
     const empRotationSlot: Record<string, number> = {};
-    // Ciclo por empleado: D12/N12 → 4+2 (cycleLen=6, cL=4); M/T/N → ciclo 8h global.
     const empCycleLen: Record<string, number> = {};
     const empCL_map: Record<string, number> = {};
-    // Rotación POR CICLO alineada al offset personal del empleado.
-    // Dirección DESCENDENTE: N→T→M→N (slot decrementa con cada ciclo).
-    // Así N nunca va directo a M; siempre pasa por T primero.
-    const expectedShiftForDay = (empId: string, _dateStr: string, posName: string): string | null => {
+    // Índice de día en el mes (di=0 para día 1) — usado para rotación y sort justo.
+    const dayIndexMap: Map<string, number> = new Map(
+        ctx.daysInMonth.map((d, i) => [ctx.getDateKey(d), i])
+    );
+    /**
+     * Banda esperada para un empleado en un día dado.
+     * - rotateShifts=false (default): banda FIJA todo el mes (M siempre M, N siempre N).
+     * - rotateShifts=true: la banda rota cada bloque de ciclo (M→T→N→M…).
+     *   Dirección ascendente dentro del anillo: primer bloque=slot asignado, siguiente=+1, etc.
+     */
+    const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
         if (ring.length === 1) return ring[0];
-        // Banda fija todo el mes: cada empleado queda en su banda inicial (M, T o N).
+        if (ctx.rotateShifts === true) {
+            // Rotación: avanza una posición en el anillo por cada bloque de ciclo completo.
+            const di = dayIndexMap.get(dateStr) ?? 0;
+            const eCycleLen = empCycleLen[empId] ?? cycleLen;
+            const offset = empGroupIdx[empId] ?? 0;
+            const blockNum = Math.floor((di + offset) / eCycleLen);
+            return ring[(slot + blockNum) % ring.length];
+        }
+        // Banda fija (default): el empleado trabaja el mismo turno todo el mes.
         return ring[slot % ring.length];
     };
 
@@ -1442,12 +1456,19 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     return true;
                 });
 
-                // Owner del puesto primero, luego por prioridad
+                // Sort con rotación justa: cada día un empleado diferente toma prioridad,
+                // distribuyendo el RET equitativamente entre quienes comparten banda.
+                // El owner fijo (defaultPos) siempre tiene prioridad absoluta.
+                const di = dayIndexMap.get(dateStr) ?? 0;
+                const eCL = cL;
                 candidates.sort((a, b) => {
                     const ao = defaultPos[a] === pos.positionName ? 1 : 0;
                     const bo = defaultPos[b] === pos.positionName ? 1 : 0;
                     if (ao !== bo) return bo - ao;
-                    return empMeta[b].priorityScore - empMeta[a].priorityScore;
+                    // Orden rotativo: (offset - di) mod cycleLen → diferente líder cada día
+                    const ra = ((empGroupIdx[a] ?? 0) - di % (eCL + cF) + (eCL + cF) * 10) % (eCL + cF);
+                    const rb = ((empGroupIdx[b] ?? 0) - di % (eCL + cF) + (eCL + cF) * 10) % (eCL + cF);
+                    return ra - rb;
                 });
 
                 let covered = 0;

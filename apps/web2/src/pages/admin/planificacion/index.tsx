@@ -5301,6 +5301,22 @@ export default function PlanificacionPage() {
                                 </div>
 
                                 <div>
+                                    <label className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2 block">Modo de turno</label>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        <button type="button" onClick={() => setAutoRotateShifts(false)}
+                                            className={`py-2 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${!autoRotateShifts ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                                            Banda fija
+                                            <div className={`text-[9px] font-bold ${!autoRotateShifts ? 'text-amber-600' : 'text-slate-400'}`}>M todo el mes, T todo el mes, N todo el mes</div>
+                                        </button>
+                                        <button type="button" onClick={() => setAutoRotateShifts(true)}
+                                            className={`py-2 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${autoRotateShifts ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                                            Rotativo
+                                            <div className={`text-[9px] font-bold ${autoRotateShifts ? 'text-amber-600' : 'text-slate-400'}`}>M→T→N→M… cada bloque de ciclo</div>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div>
                                     <label className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2 block">Cupo del empleado</label>
                                     <div className="grid grid-cols-2 gap-1.5">
                                         <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
