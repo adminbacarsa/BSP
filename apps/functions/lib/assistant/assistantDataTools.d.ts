@@ -49,6 +49,12 @@ export declare function ejecutarListadoTurnosOperativosDia(ctx: AssistantToolCon
 export declare function ejecutarContarServiciosSlaVigentesEmpresa(ctx: AssistantToolContext, args: {
     fecha?: string;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarResumenHorasObjetivoSlaPeriodo(ctx: AssistantToolContext, args: {
+    id_objetivo?: string;
+    texto_objetivo?: string;
+    fecha_referencia?: string;
+    id_servicio_sla?: string;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;
 }): Promise<Record<string, unknown>>;

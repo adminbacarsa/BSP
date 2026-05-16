@@ -64,7 +64,14 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
   { id: 42, categoria: 'empleado_turnos', pregunta_usuario: 'Turnos de Maria Lopez del lunes al viernes', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'Cadena buscar + consultar; fechas YYYY-MM-DD AR.' },
   { id: 43, categoria: 'empleado_turnos', pregunta_usuario: '¿Estuvo presente Juan el martes?', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'No afirmar presencia si hay homónimos sin aclaración.' },
   { id: 44, categoria: 'empleado_turnos', pregunta_usuario: 'Busca empleado Pérez', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'texto mínimo 2 chars; listar coincidencias.' },
-  { id: 149, categoria: 'empleado_turnos', pregunta_usuario: 'Romina Romero horas mayo', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'Una sola llamada con texto completo; la búsqueda admite nombre y apellido en cualquier orden y el formato de legajo «APELLIDO, NOMBRE»; no pedir reformulación si ambas partes coinciden con un solo legajo.' },
+  {
+    id: 149,
+    categoria: 'empleado_turnos',
+    pregunta_usuario: 'hora de romero romina en mayo',
+    herramienta_sugerida: 'buscar_empleados_por_nombre',
+    respuesta_ideal_bullet:
+      'Tratar «hora» como «horas»; buscar_empleados con «romero romina» y resumen_horas_empleado_periodo 2026-05-01 a 2026-05-31 (mes de referencia); totales en primera oración; sin mensaje genérico de soporte IT.',
+  },
   { id: 150, categoria: 'rrhh', pregunta_usuario: 'Listame los empleados de la empresa', herramienta_sugerida: 'listado_empleados_empresa', respuesta_ideal_bullet: 'Llamar sin filtro o con solo_activos_nomina_panel si piden nómina panel; advertir truncado; no inventar nombres fuera de la muestra.' },
   { id: 45, categoria: 'empleado_turnos', pregunta_usuario: 'A', herramienta_sugerida: 'buscar_empleados_por_nombre', respuesta_ideal_bullet: 'Error: pedir más letras para búsqueda.' },
   { id: 46, categoria: 'empleado_turnos', pregunta_usuario: 'Turnos empleado id_firestore XYZ fechas 2026-01-01 a 2026-01-07', herramienta_sugerida: 'consultar_turnos_empleado', respuesta_ideal_bullet: 'Si ya tienen id, ir directo a consultar_turnos_empleado.' },
@@ -180,6 +187,43 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
   { id: 146, categoria: 'edge', pregunta_usuario: 'Horas de todos los empleados el mes', herramienta_sugerida: undefined, respuesta_ideal_bullet: 'No hay tool batch: ofrecer repetir por persona o export reportes; no inventar lista.' },
   { id: 147, categoria: 'reportes_horas', pregunta_usuario: 'Horas en un rango de 6 meses', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Si error de rango >98 días, pedir acotar o hacer varias consultas mensuales.' },
   { id: 148, categoria: 'reportes_horas', pregunta_usuario: '¿Los borradores suman horas?', herramienta_sugerida: 'resumen_horas_empleado_periodo', respuesta_ideal_bullet: 'Aclarar en muestra_turnos campo borrador; totales incluyen documentos salvo cancel/novedad — honestidad sobre planificado vs publicado.' },
+  {
+    id: 151,
+    categoria: 'servicios_sla',
+    pregunta_usuario: 'Cuántas horas a planificar? (tras nombrar CASISA - Obrador en junio)',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet:
+      'Seguimiento de hilo: usar texto_objetivo del sitio citado y fecha_referencia en junio; responder vendidas, planificadas y pendientes; no pedir más contexto si el asistente acaba de listar el contrato.',
+  },
+  {
+    id: 152,
+    categoria: 'planificacion_ui',
+    pregunta_usuario: 'Horas vendidas del SLA del obrador en junio',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet: 'buscar_objetivos si hace falta id; totales.horas_vendidas_sla_mes; comparar con planificadas si preguntan gap.',
+  },
+  {
+    id: 153,
+    categoria: 'servicios_sla',
+    pregunta_usuario: '¿Cuánto falta cargar en planificación para este servicio?',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet: 'horas_pendientes_a_planificar = vendidas − ya planificadas; remitir a Planificación para la grilla.',
+  },
+  {
+    id: 154,
+    categoria: 'mixto_datos_ui',
+    pregunta_usuario: 'Después de contar servicios activos: cuántas horas a planificar',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet: 'Encadenar: del turno anterior tomar objetivo de muestra_contratos_en_mes; no responder que falta contexto global de empresa.',
+  },
+  {
+    id: 155,
+    categoria: 'servicios_sla',
+    pregunta_usuario: 'cantidad de horas? (tras CASISA - OBRADOR MALAGUEÑO en junio)',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet:
+      'Seguimiento: texto_objetivo OBRADOR MALAGUEÑO o par cliente-objetivo; fecha_referencia en junio; totales.horas_vendidas_sla_mes y horas_pendientes_a_planificar; sin soporte IT.',
+  },
 ];
 
 export const ASSISTANT_TRAINING_PAIR_COUNT = ASSISTANT_TRAINING_PAIRS.length;

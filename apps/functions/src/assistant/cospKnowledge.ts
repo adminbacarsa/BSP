@@ -14,7 +14,7 @@ Portal empleado (vista guardia): turnos propios, presencia según políticas GPS
 
 Portal cliente: consultas típicas del lado cliente cuando exista ese acceso.
 
-Turnos colección Firestore turnos — campos comunes employeeId, objectiveId, ventanas horarias/fechas según desarrollo, código CCT donde aplique, presencia/isAbsent/isCompleted, borradores (draft). El servidor puede **totalizar horas planificadas de cobertura y horas reales fichadas** por colaborador y rango con la herramienta **resumen_horas_empleado_periodo** (aproximación operativa; liquidación fina con nocturnas/feriados sigue en **Reportes y liquidación**).
+Turnos colección Firestore turnos — campos comunes employeeId, objectiveId, ventanas horarias/fechas según desarrollo, código CCT donde aplique, presencia/isAbsent/isCompleted, borradores (draft). El servidor puede **totalizar horas planificadas de cobertura y horas reales fichadas** por colaborador y rango con **resumen_horas_empleado_periodo**; y **horas vendidas del SLA vs horas ya planificadas en la grilla** por objetivo/mes con **resumen_horas_objetivo_sla_periodo** (mismo criterio que comparar «Vendidas» vs «Hs. Plan.» en Planificación). Liquidación fina con nocturnas/feriados sigue en **Reportes y liquidación**.
 
 Cuando las herramientas servidor están activadas: los datos concretos de la empresa (números, nombres, turnos) salen **solo** de esas lecturas Firestore; este párrafo describe el producto, no el contenido de la base. Sin herramientas o con nombres ambiguos: pedí aclaración y orientá en la UI.
 

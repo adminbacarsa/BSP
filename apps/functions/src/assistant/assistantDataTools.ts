@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
 import type { AssistantPersona } from './resolveAssistantUser';
 
 /** Zona operativa alineada al planificador web (Argentina). */
@@ -158,7 +159,19 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
 ): Promise<{ rows: OperacionesDiaRowPublico[]; truncadoConsultaTurnos: boolean }> {
   const objectiveIds = new Set(objectiveMap.keys());
   const { start, end } = monitorWideWindow(fecha);
-  const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
+  let qsnap: FirebaseFirestore.QuerySnapshot;
+  try {
+    qsnap = await db
+      .collection('turnos')
+      .where('startTime', '>=', start)
+      .where('startTime', '<=', end)
+      .limit(2800)
+      .get();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] queryTurnosVisiblesOperacionesEmpresaDia', { fecha, msg });
+    throw new Error(`error_consulta_turnos_operaciones: ${msg.slice(0, 240)}`);
+  }
 
   type PreCand = {
     oid: string;
@@ -179,8 +192,8 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
 
   for (const docSnap of qsnap.docs) {
     const shift = docSnap.data() as Record<string, unknown>;
-    const st = shift.startTime;
-    if (!(st instanceof admin.firestore.Timestamp)) continue;
+    const st = readFirestoreTs(shift, 'startTime');
+    if (!st) continue;
     const shiftDateObj = st.toDate();
     if (!isSameCordobaCalendarDay(shiftDateObj, fecha)) continue;
 
@@ -239,14 +252,9 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
 
   const pubMap = new Map<string, boolean>();
   const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
-  const chunk = 100;
-  for (let i = 0; i < refs.length; i += chunk) {
-    const slice = refs.slice(i, i + chunk);
-    if (slice.length === 0) continue;
-    const snaps = await db.getAll(...slice);
-    for (let j = 0; j < snaps.length; j++) {
-      pubMap.set(slice[j].id, snaps[j].exists);
-    }
+  const snaps = await firestoreGetAllRefs(db, refs);
+  for (let j = 0; j < snaps.length; j++) {
+    pubMap.set(refs[j].id, snaps[j].exists);
   }
 
   const rows: OperacionesDiaRowSorted[] = [];
@@ -447,22 +455,18 @@ async function empleadosCoordsBatch(
 ): Promise<Map<string, { lat: number; lng: number }>> {
   const out = new Map<string, { lat: number; lng: number }>();
   const uniq = [...new Set(empIds)].filter(Boolean);
-  const chunk = 100;
-  for (let i = 0; i < uniq.length; i += chunk) {
-    const slice = uniq.slice(i, i + chunk);
-    const refs = slice.map((id) => db.collection('empleados').doc(id));
-    const snaps = await db.getAll(...refs);
-    for (let j = 0; j < snaps.length; j++) {
-      const s = snaps[j];
-      if (!s.exists) continue;
-      const row = s.data() as Record<string, unknown>;
-      const empE = String(row.empresaId ?? '').trim();
-      if (empE && empE.toLowerCase() !== empresaId.toLowerCase()) continue;
-      const lat = row.lat != null ? Number(row.lat) : NaN;
-      const lng = row.lng != null ? Number(row.lng) : NaN;
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        out.set(s.id, { lat, lng });
-      }
+  const refs = uniq.map((id) => db.collection('empleados').doc(id));
+  const snaps = await firestoreGetAllRefs(db, refs);
+  for (let j = 0; j < snaps.length; j++) {
+    const s = snaps[j];
+    if (!s.exists) continue;
+    const row = s.data() as Record<string, unknown>;
+    const empE = String(row.empresaId ?? '').trim();
+    if (empE && empE.toLowerCase() !== empresaId.toLowerCase()) continue;
+    const lat = row.lat != null ? Number(row.lat) : NaN;
+    const lng = row.lng != null ? Number(row.lng) : NaN;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      out.set(s.id, { lat, lng });
     }
   }
   return out;
@@ -1081,6 +1085,22 @@ const ASSISTANT_SHIFT_HOURS_LOOKUP: Record<string, number> = {
   RET: 0,
 };
 
+/** Firestore Admin: getAll admite como máximo ~10 referencias por llamada. */
+async function firestoreGetAllRefs(
+  db: FirebaseFirestore.Firestore,
+  refs: FirebaseFirestore.DocumentReference[],
+): Promise<FirebaseFirestore.DocumentSnapshot[]> {
+  const out: FirebaseFirestore.DocumentSnapshot[] = [];
+  const BATCH = 10;
+  for (let i = 0; i < refs.length; i += BATCH) {
+    const slice = refs.slice(i, i + BATCH);
+    if (slice.length === 0) continue;
+    const snaps = await db.getAll(...slice);
+    out.push(...snaps);
+  }
+  return out;
+}
+
 function readFirestoreTs(row: Record<string, unknown>, key: string): admin.firestore.Timestamp | null {
   const v = row[key];
   if (v instanceof admin.firestore.Timestamp) return v;
@@ -1090,7 +1110,45 @@ function readFirestoreTs(row: Record<string, unknown>, key: string): admin.fires
     const n = Number(o.nanoseconds ?? 0);
     if (Number.isFinite(s)) return new admin.firestore.Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
   }
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim())) {
+    const core = v.trim().slice(0, 10);
+    const t0 = Date.parse(`${core}T12:00:00.000${AR_DAY_OFFSET}`);
+    if (Number.isFinite(t0)) return admin.firestore.Timestamp.fromMillis(t0);
+  }
   return null;
+}
+
+/** Consulta turnos por legajo en rango; si falla el índice compuesto, filtra en memoria por employeeId. */
+async function queryTurnosEmpleadoEnRango(
+  db: FirebaseFirestore.Firestore,
+  empId: string,
+  start: admin.firestore.Timestamp,
+  end: admin.firestore.Timestamp,
+  lim: number,
+): Promise<{ docs: FirebaseFirestore.QueryDocumentSnapshot[]; uso_fallback: boolean }> {
+  try {
+    const qsnap = await db
+      .collection('turnos')
+      .where('employeeId', '==', empId)
+      .where('startTime', '>=', start)
+      .where('startTime', '<=', end)
+      .limit(lim)
+      .get();
+    return { docs: qsnap.docs, uso_fallback: false };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[assistant] queryTurnosEmpleadoEnRango fallback', { empId, msg: msg.slice(0, 200) });
+    const qsnap = await db.collection('turnos').where('employeeId', '==', empId).limit(Math.min(900, lim * 3)).get();
+    const t0 = start.toMillis();
+    const t1 = end.toMillis();
+    const docs = qsnap.docs.filter((d) => {
+      const st = readFirestoreTs(d.data() as Record<string, unknown>, 'startTime');
+      if (!st) return false;
+      const ms = st.toMillis();
+      return ms >= t0 && ms <= t1;
+    });
+    return { docs: docs.slice(0, lim), uso_fallback: true };
+  }
 }
 
 function plannedCoverageHoursFromShiftRow(row: Record<string, unknown>): number {
@@ -1169,13 +1227,17 @@ export async function ejecutarResumenHorasEmpleadoPeriodo(
   }
 
   const LIM = 400;
-  const qsnap = await db
-    .collection('turnos')
-    .where('employeeId', '==', empId)
-    .where('startTime', '>=', start)
-    .where('startTime', '<=', end)
-    .limit(LIM)
-    .get();
+  let turnoDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+  let usoFallback = false;
+  try {
+    const q = await queryTurnosEmpleadoEnRango(db, empId, start, end, LIM);
+    turnoDocs = q.docs;
+    usoFallback = q.uso_fallback;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] resumen_horas query turnos', { empId, desde, hasta, msg });
+    return { error: 'error_consulta_turnos_firestore', detalle: msg.slice(0, 280) };
+  }
 
   let horasPlanCobertura = 0;
   let horasReales = 0;
@@ -1185,7 +1247,7 @@ export async function ejecutarResumenHorasEmpleadoPeriodo(
 
   const muestra: Array<Record<string, unknown>> = [];
 
-  for (const docSnap of qsnap.docs) {
+  for (const docSnap of turnoDocs) {
     const row = docSnap.data() as Record<string, unknown>;
     const st = String(row.status ?? '').toLowerCase();
     if (st.includes('cancel') || st.includes('delet')) {
@@ -1230,21 +1292,31 @@ export async function ejecutarResumenHorasEmpleadoPeriodo(
     .sort((a, b) => b.horas_plan_cobertura - a.horas_plan_cobertura)
     .slice(0, 16);
 
+  const er = empRow as Record<string, unknown>;
+  const ln = String(er.lastName ?? '').trim();
+  const fn = String(er.firstName ?? '').trim();
+  const nombreLegible =
+    [ln, fn].filter(Boolean).join(', ') ||
+    String(er.name ?? er.nombre ?? '').trim() ||
+    [fn, ln].filter(Boolean).join(' ') ||
+    '(sin nombre en legajo)';
+
   return {
     empleado: {
       idFirestore: empId,
-      nombreLegible: String((empRow as any).name ?? (empRow as any).nombre ?? '') || '(sin nombre en legajo)',
+      nombreLegible,
     },
     rango: { desde_inclusive: desde, hasta_inclusive: hasta },
     totales: {
       horas_planificadas_cobertura: Math.round(horasPlanCobertura * 10) / 10,
       horas_reales_fichadas_sumadas: Math.round(horasReales * 10) / 10,
-      turnos_considerados: qsnap.size - omitidos,
+      turnos_considerados: turnoDocs.length - omitidos,
       turnos_omitidos_cancelados_o_novedad: omitidos,
       turnos_con_horas_reales: turnosConReal,
     },
     por_codigo: porCodigoArr,
-    truncado_consulta_turnos_limite: qsnap.size >= LIM,
+    truncado_consulta_turnos_limite: turnoDocs.length >= LIM,
+    consulta_turnos_uso_fallback_sin_indice_compuesto: usoFallback,
     muestra_turnos: muestra,
     criterios: {
       horas_planificadas_cobertura:
@@ -1301,7 +1373,18 @@ export async function ejecutarResumenPresenciasObjetivosDia(
     };
   }
 
-  const { rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha);
+  let visibleRows: OperacionesDiaRowPublico[];
+  let truncadoConsultaTurnos: boolean;
+  try {
+    ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(
+      db,
+      objectiveMap,
+      fecha,
+    ));
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: 'error_consulta_turnos_operaciones', detalle: msg.slice(0, 280) };
+  }
 
   type PerObj = {
     objetivo_id: string;
@@ -1396,17 +1479,35 @@ export async function ejecutarListadoTurnosOperativosDia(
   lim = Math.max(8, Math.min(120, lim));
 
   const db = admin.firestore();
-  const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+  let objectiveMap: Map<string, { name: string; clientId: string; clientName: string }>;
+  try {
+    objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: 'error_consulta_objetivos', detalle: msg.slice(0, 280) };
+  }
   if (objectiveMap.size === 0) {
     return {
       fecha_referencia: fecha,
       nota: filterObj ? 'objetivo_no_encontrado_en_empresa' : 'sin_objetivos_para_esta_empresa',
-      cuenta_total_visible: 0,
+      cuenta_total_turnos_visibles: 0,
       muestra_turnos: [],
     };
   }
 
-  const { rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha);
+  let visibleRows: OperacionesDiaRowPublico[];
+  let truncadoConsultaTurnos: boolean;
+  try {
+    ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(
+      db,
+      objectiveMap,
+      fecha,
+    ));
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] ejecutarListadoTurnosOperativosDia', { fecha, msg });
+    return { error: 'error_consulta_turnos_operaciones', detalle: msg.slice(0, 280) };
+  }
 
   const muestra = visibleRows.slice(0, lim).map((r) => ({
     cliente: r.cliente,
@@ -1542,6 +1643,240 @@ export async function ejecutarContarServiciosSlaVigentesEmpresa(
     muestra_activos_sin_fechas: incompletosMuestra,
     nota_tras_herramienta:
       'Respondé con cuenta_para_tarjeta_servicios_activos_del_mes cuando la pregunta sea «cuántos servicios activos» como en el panel o la tarjeta del mes (coincide con el KPI del módulo Servicios). Usá cuenta_objetivos_distintos_con_sla_en_ese_mes si hablan de «objetivos» o tarjetas por sitio. Usá cuenta_contratos_vigentes_en_el_dia_referencia solo si piden explícitamente vigentes «hoy» / en esa fecha con sentido contractual estricto. No inventes cifras. Si listan nombres de contratos o SLA, usá solo los textos del array muestra_contratos_en_mes (campos cliente y objetivo); si la muestra no alcanza, decí que hay más y que vean Servicios y SLA; no inventes títulos comerciales.',
+  };
+}
+
+async function loadServiciosSlaDocsEmpresa(
+  db: FirebaseFirestore.Firestore,
+  empresaId: string,
+): Promise<Array<{ id: string; row: Record<string, unknown> }>> {
+  const clientIds = await empresaClientIdsSet(db, empresaId);
+  if (clientIds.size === 0) return [];
+  const idList = Array.from(clientIds);
+  const byDocId = new Map<string, QueryDocumentSnapshot>();
+  for (const batch of chunkIds(idList, 10)) {
+    const qs = await db.collection('servicios_sla').where('clientId', 'in', batch).limit(500).get();
+    for (const d of qs.docs) {
+      if (!byDocId.has(d.id)) byDocId.set(d.id, d);
+    }
+  }
+  return Array.from(byDocId.values()).map((d) => ({ id: d.id, row: d.data() as Record<string, unknown> }));
+}
+
+/**
+ * Horas vendidas del SLA del objetivo en un mes + horas ya cargadas en turnos (planificación).
+ * Alineado a Planificación («Vendidas» vs «Hs. Plan.») y pantalla Servicios.
+ */
+export async function ejecutarResumenHorasObjetivoSlaPeriodo(
+  ctx: AssistantToolContext,
+  args: {
+    id_objetivo?: string;
+    texto_objetivo?: string;
+    fecha_referencia?: string;
+    id_servicio_sla?: string;
+  },
+): Promise<Record<string, unknown>> {
+  if (!canQueryServiciosSlaResumen(ctx)) {
+    return { error: 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ' };
+  }
+  if (!canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_consultar_turnos' };
+  }
+
+  const fecha = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+
+  let objectiveId = String(args.id_objetivo ?? '').trim();
+  const textoObj = String(args.texto_objetivo ?? '').trim();
+  const slaIdFilter = String(args.id_servicio_sla ?? '').trim();
+
+  if (!objectiveId && textoObj.length >= 2) {
+    const found = await ejecutarBuscarObjetivosPorNombre(ctx, { texto: textoObj, limite: 6 });
+    if (String(found.error ?? '').trim()) return found;
+    const coincidencias = (found.coincidencias ?? []) as Array<{ id_objetivo?: string; nombre_objetivo?: string }>;
+    if (coincidencias.length === 0) {
+      return { error: 'objetivo_no_encontrado', texto_buscado: textoObj };
+    }
+    if (found.ambigua === true && coincidencias.length >= 2) {
+      return {
+        error: 'objetivo_ambiguo',
+        coincidencias: coincidencias.slice(0, 6).map((c) => ({
+          id_objetivo: c.id_objetivo,
+          nombre: c.nombre_objetivo,
+        })),
+      };
+    }
+    objectiveId = String(coincidencias[0].id_objetivo ?? '').trim();
+  }
+
+  const db = admin.firestore();
+  const allSla = await loadServiciosSlaDocsEmpresa(db, ctx.empresaId);
+  const matches: Array<{ id: string; row: Record<string, unknown>; vendidas: ReturnType<typeof slaHorasVendidasMesCalendario> }> = [];
+
+  const needleNorm = textoObj.length >= 2 ? norm(textoObj.replace(/,/g, ' ')) : '';
+  let metaNameNorm = '';
+  if (objectiveId) {
+    const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId);
+    metaNameNorm = norm(String(objMeta.get(objectiveId)?.name ?? ''));
+  }
+
+  const slaMatchesObjective = (row: Record<string, unknown>): boolean => {
+    const oid = String(row.objectiveId ?? '').trim();
+    if (objectiveId && oid && oid === objectiveId) return true;
+    if (!needleNorm && !metaNameNorm) return false;
+    const oname = norm(String(row.objectiveName ?? '').replace(/,/g, ' '));
+    const cliente = norm(String(row.clientName ?? row.cliente ?? '').replace(/,/g, ' '));
+    const combo = `${cliente} ${oname}`.trim();
+    if (metaNameNorm && oname && (oname.includes(metaNameNorm) || metaNameNorm.includes(oname))) return true;
+    if (needleNorm) {
+      if (oname && (oname.includes(needleNorm) || needleNorm.includes(oname))) return true;
+      if (combo && (combo.includes(needleNorm) || needleNorm.includes(combo))) return true;
+    }
+    return false;
+  };
+
+  for (const { id, row } of allSla) {
+    if (slaIdFilter && !id.startsWith(slaIdFilter) && id !== slaIdFilter) continue;
+    if (!slaMatchesObjective(row)) continue;
+    const desde = slaCampoFechaYmD(row.startDate ?? row.desde ?? row.inicioContrato ?? '');
+    const hasta = slaCampoFechaYmD(row.endDate ?? row.hasta ?? row.finContrato ?? '');
+    if (!desde || !hasta) continue;
+    if (!servicioSlaSolapaMesReferencia(desde, hasta, fecha)) continue;
+    const positions = Array.isArray(row.positions) ? (row.positions as unknown[]) : [];
+    const vendidas = slaHorasVendidasMesCalendario(positions, desde, hasta, fecha);
+    if (!objectiveId) {
+      const oid = String(row.objectiveId ?? '').trim();
+      if (oid) objectiveId = oid;
+    }
+    matches.push({ id, row, vendidas });
+  }
+
+  if (!objectiveId && matches.length === 0 && !textoObj) {
+    return { error: 'falta_id_objetivo_o_texto_objetivo' };
+  }
+
+  if (matches.length === 0) {
+    return {
+      error: 'sin_sla_activo_para_objetivo_en_ese_mes',
+      id_objetivo: objectiveId || undefined,
+      texto_buscado: textoObj || undefined,
+      mes_yyyy_mm: fecha.slice(0, 7),
+    };
+  }
+
+  if (!objectiveId) {
+    objectiveId = String(matches[0].row.objectiveId ?? '').trim();
+  }
+  if (!objectiveId) {
+    return {
+      error: 'sla_sin_id_objetivo_en_firestore',
+      nota: 'El contrato existe pero no tiene objectiveId; revisá Servicios y SLA.',
+      mes_yyyy_mm: fecha.slice(0, 7),
+    };
+  }
+
+  const pick =
+    matches.length === 1
+      ? matches[0]
+      : matches.find((m) => slaStatusOperativoComoPantallaServicios(m.row)) ?? matches[0];
+
+  const mesStart = `${fecha.slice(0, 7)}-01`;
+  const refParts = parseYmd(fecha);
+  const lastD = new Date(refParts.y, refParts.m, 0).getDate();
+  const mesEnd = `${fecha.slice(0, 7)}-${String(lastD).padStart(2, '0')}`;
+
+  let horasPlanificadas = 0;
+  let turnosConsiderados = 0;
+  let truncadoTurnos = false;
+  const LIM = 500;
+
+  try {
+    const { start, end } = arRangeTimestamps(mesStart, mesEnd);
+    let turnoDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      const qsnap = await db
+        .collection('turnos')
+        .where('objectiveId', '==', objectiveId)
+        .where('startTime', '>=', start)
+        .where('startTime', '<=', end)
+        .limit(LIM)
+        .get();
+      turnoDocs = qsnap.docs;
+      truncadoTurnos = qsnap.size >= LIM;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[assistant] resumen_horas_objetivo fallback turnos', { objectiveId, msg: msg.slice(0, 200) });
+      const qsnap = await db.collection('turnos').where('objectiveId', '==', objectiveId).limit(Math.min(900, LIM * 3)).get();
+      const t0 = start.toMillis();
+      const t1 = end.toMillis();
+      turnoDocs = qsnap.docs.filter((d) => {
+        const st = readFirestoreTs(d.data() as Record<string, unknown>, 'startTime');
+        if (!st) return false;
+        const ms = st.toMillis();
+        return ms >= t0 && ms <= t1;
+      });
+      truncadoTurnos = turnoDocs.length >= LIM;
+      turnoDocs = turnoDocs.slice(0, LIM);
+    }
+    for (const docSnap of turnoDocs) {
+      const row = docSnap.data() as Record<string, unknown>;
+      const hp = plannedCoverageHoursFromShiftRow(row);
+      if (hp <= 0) continue;
+      horasPlanificadas += hp;
+      turnosConsiderados += 1;
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: 'error_consulta_turnos_firestore', detalle: msg.slice(0, 280) };
+  }
+
+  horasPlanificadas = Math.round(horasPlanificadas * 10) / 10;
+  const vendidas = pick.vendidas.horas_vendidas_mes;
+  const pendiente = Math.round(Math.max(0, vendidas - horasPlanificadas) * 10) / 10;
+  const exceso = Math.round(Math.max(0, horasPlanificadas - vendidas) * 10) / 10;
+
+  const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId);
+  const meta = objMeta.get(objectiveId);
+
+  return {
+    objetivo: {
+      id_objetivo: objectiveId,
+      nombre: meta?.name ?? String(pick.row.objectiveName ?? objectiveId),
+      cliente: meta?.clientName ?? String(pick.row.clientName ?? ''),
+    },
+    mes_yyyy_mm: pick.vendidas.mes_yyyy_mm,
+    fecha_referencia: fecha,
+    contrato_sla: {
+      id_firestore_corto: pick.id.slice(0, 14),
+      vigencia_desde: slaCampoFechaYmD(pick.row.startDate ?? pick.row.desde ?? ''),
+      vigencia_hasta: slaCampoFechaYmD(pick.row.endDate ?? pick.row.hasta ?? ''),
+      puestos_en_contrato: Array.isArray(pick.row.positions) ? (pick.row.positions as unknown[]).length : 0,
+      otros_contratos_mismo_objetivo_mes: matches.length > 1 ? matches.length - 1 : 0,
+    },
+    totales: {
+      horas_vendidas_sla_mes: vendidas,
+      horas_nocturnas_vendidas_sla_mes: pick.vendidas.horas_nocturnas_mes,
+      dias_contrato_en_mes: pick.vendidas.dias_contrato_en_mes,
+      horas_ya_planificadas_turnos_mes: horasPlanificadas,
+      turnos_cobertura_considerados: turnosConsiderados,
+      horas_pendientes_a_planificar: pendiente,
+      horas_planificadas_sobre_vendidas: exceso,
+    },
+    truncado_consulta_turnos_limite: truncadoTurnos,
+    criterios: {
+      horas_vendidas_sla_mes:
+        'Suma diaria de puestos del contrato servicios_sla (coverageType / allowedShiftTypes), mismo motor que la pantalla Servicios y SLA, solo días del mes que caen dentro del rango startDate–endDate del contrato.',
+      horas_ya_planificadas_turnos_mes:
+        'Suma horas de cobertura en turnos del objetivo en el mes calendario (excluye F/FF/RET/licencias; incluye borradores publicados en Firestore).',
+      horas_pendientes_a_planificar:
+        'max(0, vendidas − planificadas); referencia operativa para «cuántas horas faltan cargar» vs el SLA.',
+    },
+    nota_tras_herramienta:
+      'Respondé con totales.horas_vendidas_sla_mes (vendidas del contrato) y totales.horas_pendientes_a_planificar si preguntan «horas a planificar». Mencioná horas_ya_planificadas_turnos_mes para lo ya cargado en la grilla. Si horas_planificadas_sobre_vendidas>0, hay más horas planificadas que vendidas (revisar en Planificación). Si truncado_consulta_turnos_limite=true, el total planificado puede estar incompleto.',
   };
 }
 
@@ -1735,6 +2070,22 @@ export async function dispatchAssistantToolCall(
 ): Promise<Record<string, unknown>> {
   const args = typeof rawArgs === 'object' && rawArgs !== null ? (rawArgs as Record<string, unknown>) : {};
   let raw: Record<string, unknown>;
+  try {
+    raw = await dispatchAssistantToolCallInner(ctx, name, args);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] dispatch tool exception', { name, msg });
+    return { error: 'excepcion_interna_herramienta', herramienta: name, detalle: msg.slice(0, 320) };
+  }
+  return sanitizeGeminiStruct(raw) as Record<string, unknown>;
+}
+
+async function dispatchAssistantToolCallInner(
+  ctx: AssistantToolContext,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let raw: Record<string, unknown>;
   if (name === 'buscar_empleados_por_nombre') {
     raw = await ejecutarBuscarEmpleadosPorNombre(ctx, {
       texto: String(args.texto ?? ''),
@@ -1784,13 +2135,33 @@ export async function dispatchAssistantToolCall(
       fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
     });
   } else if (name === 'resumen_horas_empleado_periodo') {
+    let fechaDesde = String(args.fecha_desde ?? '').trim();
+    let fechaHasta = String(args.fecha_hasta ?? '').trim();
+    if (!fechaDesde || !fechaHasta) {
+      try {
+        const p = parseYmd(ctx.referenceDateYsMmDd);
+        const mm = String(p.m).padStart(2, '0');
+        const lastD = new Date(p.y, p.m, 0).getDate();
+        fechaDesde = `${p.y}-${mm}-01`;
+        fechaHasta = `${p.y}-${mm}-${String(lastD).padStart(2, '0')}`;
+      } catch {
+        /* ejecutarResumenHoras devolverá fecha_invalida */
+      }
+    }
     raw = await ejecutarResumenHorasEmpleadoPeriodo(ctx, {
       id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
-      fecha_desde: String(args.fecha_desde ?? ''),
-      fecha_hasta: String(args.fecha_hasta ?? ''),
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+    });
+  } else if (name === 'resumen_horas_objetivo_sla_periodo') {
+    raw = await ejecutarResumenHorasObjetivoSlaPeriodo(ctx, {
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+      id_servicio_sla: args.id_servicio_sla != null ? String(args.id_servicio_sla) : undefined,
     });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
-  return sanitizeGeminiStruct(raw) as Record<string, unknown>;
+  return raw;
 }

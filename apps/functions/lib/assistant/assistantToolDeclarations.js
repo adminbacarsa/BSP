@@ -134,6 +134,32 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'resumen_horas_objetivo_sla_periodo',
+        description: 'Para «cuántas horas a planificar», «horas vendidas del SLA», «hs planificadas vs vendidas» de un objetivo/servicio en un mes: calcula horas_vendidas_sla_mes desde servicios_sla (mismo motor que Servicios y SLA) y horas_ya_planificadas_turnos_mes desde turnos del objetivo; devuelve horas_pendientes_a_planificar = vendidas − planificadas. Usar cuando ya nombraron el sitio/contrato (ej. tras contar_servicios_sla) o con texto_objetivo / id_objetivo. fecha_referencia = cualquier día del mes (ej. junio → 2026-06-15). Si el hilo previo citó **CLIENTE - OBJETIVO**, pasá texto_objetivo con el nombre del objetivo.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                id_objetivo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Id Firestore del objetivo (CRM). Preferible si ya lo tenés de buscar_objetivos_por_nombre.',
+                },
+                texto_objetivo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Fragmento del nombre del objetivo/sede si no tenés id (ej. "Obrador Malagueño", "CASISA").',
+                },
+                fecha_referencia: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'YYYY-MM-DD dentro del mes a analizar; omitir = hoy del cliente.',
+                },
+                id_servicio_sla: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Opcional. Id o prefijo del doc servicios_sla si hay varios contratos para el mismo objetivo.',
+                },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'resumen_horas_empleado_periodo',
         description: 'Para «cuántas horas trabajó / tiene planificadas» un colaborador en un rango (semana, quincena, mes): agrega turnos Firestore del legajo con totales horas_planificadas_cobertura (excluye francos/licencias/RET según códigos estándar) y horas_reales_fichadas_sumadas cuando hay fichada y turno completado. Usar después de buscar_empleados_por_nombre si no hay id. Rango máximo ~98 días. No es liquidación legal: remitir a Reportes si piden noche/feriado/CCT fino.',
         parameters: {

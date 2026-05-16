@@ -22,7 +22,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: string[];
     };
@@ -52,7 +54,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: any[];
     };
@@ -82,7 +86,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: string[];
     };
@@ -109,7 +115,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: any[];
     };
@@ -139,7 +147,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: any[];
     };
@@ -172,7 +182,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             id_objetivo?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: any[];
     };
@@ -196,7 +208,44 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             fecha_referencia?: undefined;
+            id_servicio_sla?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            id_objetivo: {
+                type: SchemaType;
+                description: string;
+            };
+            texto_objetivo: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_referencia: {
+                type: SchemaType;
+                description: string;
+            };
+            id_servicio_sla: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            limite?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
         };
         required: any[];
     };
@@ -221,6 +270,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
         };
         required: any[];
     };

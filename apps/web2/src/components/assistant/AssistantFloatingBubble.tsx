@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
-import { Sparkles, X, SendHorizontal, Trash2 } from 'lucide-react';
+import { X, SendHorizontal, Trash2 } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -11,9 +11,25 @@ import { inferModuleKeyFromPath, moduleTitleEs } from '@/lib/assistant/inferModu
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
-const FAB_PX = 56;
-const FAB_GAP_PX = 12;
+const FAB_PX = 64;
+const FAB_GAP_PX = 14;
+const PANEL_W = 'min(100vw - 1.5rem, 28rem)';
+/** Escudo COSP (mismo asset que PWA / manifest). */
+const COSP_SHIELD_SRC = '/icons/icon.svg';
 const FAB_STORAGE_KEY = 'cosp-assistant-fab-pos';
+
+function CospShieldLogo({ size, className = '' }: { size: number; className?: string }) {
+  return (
+    <img
+      src={COSP_SHIELD_SRC}
+      alt=""
+      width={size}
+      height={size}
+      className={`shrink-0 rounded-xl object-cover shadow-sm ring-1 ring-indigo-100 dark:ring-slate-600 ${className}`}
+      aria-hidden
+    />
+  );
+}
 const DRAG_THRESHOLD_PX = 10;
 
 type FabPos = { bottom: number; right: number };
@@ -78,7 +94,7 @@ function formatAssistantMessage(content: string): React.ReactNode {
   const blocks = expandAssistantParagraphBlocks(content);
   if (blocks.length === 0) return null;
   return blocks.map((para, pi) => (
-    <p key={pi} className="mb-4 last:mb-0 whitespace-pre-wrap leading-loose">
+    <p key={pi} className="mb-2.5 last:mb-0 whitespace-pre-wrap leading-relaxed">
       {para.split('\n').map((line, li) => (
         <React.Fragment key={li}>
           {li > 0 ? <br /> : null}
@@ -274,7 +290,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
       <button
         type="button"
         style={{ bottom: fabBottomCss, right: fabRightCss, touchAction: 'none' }}
-        className="fixed z-[9999] flex h-14 w-14 shrink-0 cursor-grab items-center justify-center rounded-full bg-indigo-600 text-white shadow-[0_10px_40px_-10px_rgba(79,70,229,0.85),0_4px_16px_rgba(0,0,0,0.2)] ring-[3px] ring-white/40 active:cursor-grabbing active:scale-[0.98] focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
+        className="fixed z-[9999] flex h-16 w-16 shrink-0 cursor-grab items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-700 text-white shadow-[0_12px_44px_-10px_rgba(79,70,229,0.9),0_4px_18px_rgba(0,0,0,0.22)] ring-[3px] ring-white/50 active:cursor-grabbing active:scale-[0.98] focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
         aria-expanded={open}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente COSP'}
         title="Tocá para abrir/cerrar. Mantené y arrastrá para mover."
@@ -306,7 +322,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
         onPointerUp={(e) => endFabDrag(e, e.currentTarget)}
         onPointerCancel={(e) => endFabDrag(e, e.currentTarget)}
       >
-        {open ? <X size={24} strokeWidth={2.5} /> : <Sparkles size={24} strokeWidth={2.5} />}
+        {open ? (
+          <X size={26} strokeWidth={2.5} />
+        ) : (
+          <CospShieldLogo size={40} className="ring-2 ring-white/40" />
+        )}
       </button>
 
       {open && (
@@ -316,68 +336,87 @@ export function AssistantFloatingBubble(): React.ReactNode {
           style={{
             bottom: panelBottomCss,
             right: fabRightCss,
+            width: PANEL_W,
           }}
-          className="fixed z-[9999] flex w-[min(100vw-2rem,22rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.35)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
+          className="fixed z-[9999] flex flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_28px_60px_-14px_rgba(0,0,0,0.38)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-indigo-50 px-3 py-2 dark:border-slate-800 dark:bg-indigo-950/40">
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-wide text-indigo-800 dark:text-indigo-200">Asistente</p>
-              <p className="truncate text-[9px] font-bold text-slate-500 dark:text-slate-400" title={fullPath}>
-                {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
-              </p>
+          <div className="flex items-center justify-between gap-2 border-b border-indigo-100/80 bg-gradient-to-r from-indigo-50 to-violet-50 px-3 py-2 dark:border-slate-800 dark:from-indigo-950/50 dark:to-violet-950/30">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <CospShieldLogo size={36} />
+              <div className="min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-wide text-indigo-900 dark:text-indigo-100">
+                  Asistente COSP
+                </p>
+                <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400" title={fullPath}>
+                  {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setMsgs([])}
-              className="shrink-0 rounded-lg p-1.5 text-slate-500 hover:bg-white/80 dark:hover:bg-slate-800"
+              className="shrink-0 rounded-xl p-2 text-slate-500 hover:bg-white/90 dark:hover:bg-slate-800"
               title="Limpiar conversación (sesión temporal)"
             >
-              <Trash2 size={14} />
+              <Trash2 size={16} />
             </button>
           </div>
 
-          <div ref={scrollRef} className="max-h-[min(52vh,360px)] space-y-3 overflow-y-auto px-3 py-3 text-[12px] leading-loose">
+          <div
+            ref={scrollRef}
+            className="max-h-[min(58vh,360px)] space-y-2.5 overflow-y-auto px-3 py-3 text-[13px] leading-relaxed"
+          >
             {msgs.length === 0 && (
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                Preguntá cómo funciona COSP o el módulo en el que estás. La conversación no se guarda: al cerrar sesión o limpiar, se borra.
-                Podés <strong className="text-slate-700 dark:text-slate-300">arrastrar el botón violeta</strong> para moverlo; la posición se recuerda en esta sesión del navegador.
-              </p>
+              <div className="rounded-xl border border-indigo-100/90 bg-indigo-50/50 px-3 py-2.5 dark:border-indigo-900/40 dark:bg-indigo-950/25">
+                <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-400">
+                  Datos de la empresa o ayuda con este módulo. Por ejemplo:{' '}
+                  <span className="text-slate-700 dark:text-slate-300">
+                    «¿Cuántos empleados?» · «Horas de X en mayo» · «¿Quién está de turno hoy?»
+                  </span>
+                </p>
+                <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
+                  La charla no se guarda al cerrar sesión.
+                </p>
+              </div>
             )}
             {msgs.map((m, i) => (
-              <div
-                key={i}
-                className={`rounded-xl font-medium ${
-                  m.role === 'user'
-                    ? 'ml-3 bg-indigo-600 px-3 py-2 text-white'
-                    : 'mr-1 border border-slate-100 bg-slate-50 px-3 py-2.5 text-slate-800 leading-loose dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                }`}
-              >
-                {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
+              <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div
+                  className={`min-w-0 max-w-[92%] rounded-2xl font-medium ${
+                    m.role === 'user'
+                      ? 'bg-indigo-600 px-3 py-2 text-[13px] text-white shadow-sm'
+                      : 'border border-slate-100 bg-slate-50 px-3 py-2.5 text-slate-800 leading-relaxed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                  }`}
+                >
+                  {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
+                </div>
               </div>
             ))}
             {busy && (
-              <p className="text-[10px] font-bold text-slate-400 italic">Pensando…</p>
+              <p className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[12px] font-medium text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200">
+                Consultando datos…
+              </p>
             )}
           </div>
 
-          <div className="flex gap-1 border-t border-slate-100 p-2 dark:border-slate-800">
+          <div className="flex gap-2 border-t border-slate-100 p-2.5 dark:border-slate-800">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
               placeholder="Escribí tu pregunta…"
-              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold leading-normal text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium leading-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-indigo-900"
               disabled={busy}
             />
             <button
               type="button"
               onClick={() => void send()}
               disabled={busy || !input.trim()}
-              className="shrink-0 rounded-xl bg-indigo-600 p-2 text-white disabled:opacity-40"
+              className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2.5 text-white shadow-sm disabled:opacity-40"
               aria-label="Enviar"
             >
-              <SendHorizontal size={18} />
+              <SendHorizontal size={20} />
             </button>
           </div>
         </div>
