@@ -22,7 +22,8 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
-import { runAutoScheduleV2, generateScheduleV2 } from '@/lib/planificacion/autoScheduleEngineV2';
+import { runAutoScheduleV2 } from '@/lib/planificacion/autoScheduleEngineV2';
+import { generateScheduleV3 } from '@/lib/planificacion/autoScheduleEngineV3';
 import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
@@ -2674,17 +2675,9 @@ export default function PlanificacionPage() {
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
             };
-            const MAX_SEEDS = 8;
-            let bestGen = generateScheduleV2({ ...baseGenCtx, distributedOffsetSeed: 0 });
-            await bumpAutoV2Progress(40, `Optimizando distribución de francos (1/${MAX_SEEDS})…`);
+            await bumpAutoV2Progress(40, 'Generando cronograma (V3)…');
             await new Promise<void>((r) => setTimeout(r, 0));
-            for (let seed = 1; seed < MAX_SEEDS && bestGen.coverageViolations > 0; seed++) {
-                await bumpAutoV2Progress(40 + Math.floor(seed * 15 / MAX_SEEDS), `Optimizando distribución de francos (${seed + 1}/${MAX_SEEDS})…`);
-                await new Promise<void>((r) => setTimeout(r, 0));
-                const attempt = generateScheduleV2({ ...baseGenCtx, distributedOffsetSeed: seed });
-                if (attempt.coverageViolations < bestGen.coverageViolations) bestGen = attempt;
-            }
-            const gen = bestGen;
+            const gen = generateScheduleV3(baseGenCtx);
 
             await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');
             // Volcamos a pendingChanges respetando autoOverwrite y celdas bloqueadas
