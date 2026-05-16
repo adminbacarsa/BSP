@@ -294,31 +294,59 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             return null;
         };
 
-        // Asignación de offsets con el modelo de grupos desfasados:
-        //   - Grupo regular i (banda bands[i]) → offset ideal = i * eCF
-        //   - Grupo FLEX (numBands) → offset ideal = numBands * eCF
-        // Si el empleado tiene historia cross-mes, su offset real viene de ahí.
-        // Si no, toma el offset ideal de su grupo ajustado para evitar colisiones.
+        // Asignación de offsets con el modelo de grupos desfasados.
+        //
+        // Restricción clave: en un grupo de N empleados con ciclo de longitud C,
+        // el máximo de francos simultáneos es N × cF/C.
+        // Para garantizarlo: cada offset puede usarse ≤ ceil(N/C) veces.
+        //
+        // Bug previo: usedOffsets:Set impedía reusar cualquier offset. Con N > C
+        // (ej. 16 empleados, C=8) los últimos empleados acumulaban en offsets 6-7
+        // produciendo 5+ francos el primer día del mes.
 
-        const usedOffsets = new Set<number>();
+        const maxPerOffset = Math.ceil(empIds.length / eCycleLen);
+        const offsetCounts = new Array<number>(eCycleLen).fill(0);
 
-        // Primera pasada: empleados con historia (offset exacto del mes anterior)
+        // Elige el offset más cercano al ideal que aún no alcanzó el cupo.
+        const pickOffset = (idealRaw: number): number => {
+            const start = ((idealRaw % eCycleLen) + eCycleLen) % eCycleLen;
+            for (let i = 0; i < eCycleLen; i++) {
+                const o = (start + i) % eCycleLen;
+                if (offsetCounts[o] < maxPerOffset) return o;
+            }
+            // Todos colmados: elegir el menos cargado
+            let best = start, minC = offsetCounts[start];
+            for (let i = 1; i < eCycleLen; i++) {
+                const o = (start + i) % eCycleLen;
+                if (offsetCounts[o] < minC) { minC = offsetCounts[o]; best = o; }
+            }
+            return best;
+        };
+
+        // Primera pasada: empleados con historia cross-mes
         empIds.forEach(eid => {
             const off = histOffset(eid);
             if (off === null) return;
-            let o = off;
-            let tries = 0;
-            while (usedOffsets.has(o) && tries < eCycleLen) { o = (o + 1) % eCycleLen; tries++; }
-            if (tries >= eCycleLen) o = off % eCycleLen; // colisión total: reutilizar offset
-            usedOffsets.add(o);
+            const o = pickOffset(off);
+            offsetCounts[o]++;
             empOffset[eid] = o;
             empCycleLen[eid] = eCycleLen;
             empCL[eid] = eCL;
         });
 
-        // Segunda pasada: empleados sin historia → offset ideal del grupo
-        // Dentro de la misma banda, los empleados se espacian por (numBands+1)*eCF
-        // para que no todos descansen al mismo tiempo.
+        // Segunda pasada: empleados sin historia → offset ideal del grupo.
+        //
+        // Fórmula: idealOff = (bIdx + si) * eCF % eCycleLen
+        //   - bIdx: índice de banda (M=0, T=1, N=2)
+        //   - si:   sub-índice del empleado dentro de la banda
+        //
+        // Con 4 empleados por banda, eCF=2, cycleLen=8:
+        //   M → {0,2,4,6},  T → {2,4,6,0},  N → {4,6,0,2},  FLEX → {6,0,2,4}
+        // → distribución uniforme: exactamente 2 empleados por offset.
+        // → francos día 1 = offsets {6,7} × 2 empleados = 4 francos. ✓
+        //
+        // Bug previo: ((bIdx + si*(numBands+1))*eCF) % cycleLen colapsaba a 0
+        // cuando (numBands+1)*eCF era múltiplo de cycleLen (ej. 4×2=8).
         const bandSubIdx: Record<string, number> = {};
         let flexSubIdx = 0;
 
@@ -330,20 +358,14 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 const bIdx = bands.indexOf(band);
                 const si = bandSubIdx[band] ?? 0;
                 bandSubIdx[band] = si + 1;
-                // grupo i → offset i*eCF; empleados adicionales de la misma banda
-                // se desfasan por (numBands+1)*eCF para no coincidir con otros grupos
-                idealOff = ((bIdx + si * (numBands + 1)) * eCF) % eCycleLen;
+                idealOff = ((bIdx + si) * eCF) % eCycleLen;
             } else {
-                // FLEX: grupo numBands
-                idealOff = ((numBands + flexSubIdx * (numBands + 1)) * eCF) % eCycleLen;
+                idealOff = ((numBands + flexSubIdx) * eCF) % eCycleLen;
                 flexSubIdx++;
             }
 
-            // Evitar colisión avanzando de a 1
-            let o = idealOff;
-            let tries = 0;
-            while (usedOffsets.has(o) && tries < eCycleLen) { o = (o + 1) % eCycleLen; tries++; }
-            usedOffsets.add(o);
+            const o = pickOffset(idealOff);
+            offsetCounts[o]++;
             empOffset[eid] = o;
             empCycleLen[eid] = eCycleLen;
             empCL[eid] = eCL;
