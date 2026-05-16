@@ -732,8 +732,9 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── Días sobrantes: F o RET ────────────────────────────────────────────
+    // ── Días sobrantes: rescate de cobertura + F o RET ────────────────────
     //
+    // - FLEX en día de trabajo con slots sin cubrir → intenta cubrir antes de asignar RET
     // - Día de ciclo-trabajo sin turno → RET (stand-by)
     // - Día de ciclo-franco, o empleado sin puesto → F
     // - Excepción 6+1: tras noche, el único franco da ~32h < 35h mínimo CCT → forzar F extra
@@ -751,6 +752,40 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const isWorkDay = !ownerInactive && cycleWorkDays[emp.id]?.has(dateStr);
             const lastCode = (st.lastShiftCode ?? '').toUpperCase();
             const shortCyclePostNight = cF === 1 && (lastCode === 'N' || lastCode === 'N12');
+            const inCurrent = day.getDate() <= cutoff;
+
+            // Rescate FLEX: si hay slots sin cubrir, intentar asignar antes de dar RET
+            if (isWorkDay && !shortCyclePostNight && flexSet.has(emp.id)) {
+                const dayGaps = stats.uncoveredSlotsByDay![dateStr];
+                if (dayGaps && dayGaps.length > 0) {
+                    let rescued = false;
+                    for (const gap of dayGaps) {
+                        if (gap.missing <= 0) continue;
+                        const gapPos = ctx.positions.find(p => p.positionName === gap.positionName);
+                        if (!gapPos || !positionIsActiveOn(gapPos, dayLetter)) continue;
+                        const gapBands = effectiveShiftsForPositionDay(gapPos, dayLetter, ctx.autoCycles);
+                        const sh = gapBands.find(s => String(s.code ?? '').toUpperCase() === gap.code);
+                        if (!sh) continue;
+                        const sHrs = shiftHrs(sh, _hint);
+                        const sStart = sh.startTime || SH_START[gap.code] || '07:00';
+                        const sEnd = sh.endTime || SH_END[gap.code] || undefined;
+                        const used = limitedEmps.has(emp.id)
+                            ? st.cycleCurrentUsed + st.cycleNextUsed
+                            : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
+                        if (used + sHrs > HARD_MAX_HOURS) continue;
+                        if (!passesRest(emp.id, dateStr, gap.code, sStart, sHrs)) continue;
+                        writeAssign(emp.id, dateStr, gap.positionName, gap.code,
+                            sh.name || gap.code, sHrs, sStart, inCurrent, sEnd);
+                        gap.missing--;
+                        if (gap.missing <= 0)
+                            stats.uncoveredSlots = Math.max(0, (stats.uncoveredSlots ?? 0) - 1);
+                        rescued = true;
+                        break;
+                    }
+                    if (rescued) continue;
+                }
+            }
+
             const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : 'RET') : 'F';
             assignments.push({
                 empId: emp.id, dateStr, positionName: '',
@@ -761,7 +796,6 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 isReten: fallback === 'RET',
             });
             st.assignedDays.add(dateStr);
-            // No actualizamos lastShiftCode para F/RET (no son turnos trabajados)
         }
     }
 
