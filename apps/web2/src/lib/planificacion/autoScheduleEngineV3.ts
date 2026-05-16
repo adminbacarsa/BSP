@@ -264,7 +264,9 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const off = histOffset(eid);
             if (off === null) return;
             let o = off;
-            while (usedOffsets.has(o)) o = (o + 1) % eCycleLen;
+            let tries = 0;
+            while (usedOffsets.has(o) && tries < eCycleLen) { o = (o + 1) % eCycleLen; tries++; }
+            if (tries >= eCycleLen) o = off % eCycleLen; // colisión total: reutilizar offset
             usedOffsets.add(o);
             empOffset[eid] = o;
             empCycleLen[eid] = eCycleLen;
