@@ -33,6 +33,18 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 // ─── Constantes locales ─────────────────────────────────────────────────────
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
+
+// Ciclos CCT válidos ordenados de MENOR a MAYOR intensidad (más descanso primero).
+// El auto-selector elige el primero que provee cobertura teórica ≥ 100%.
+// Si ninguno alcanza, se intenta el más intenso disponible (6+1).
+const CCT_CYCLES_8H = [
+    { cL: 4, cF: 2 },  // 67 % — máximo descanso
+    { cL: 5, cF: 2 },  // 71 %
+    { cL: 6, cF: 2 },  // 75 % — estándar CCT 422/05
+    { cL: 4, cF: 1 },  // 80 %
+    { cL: 5, cF: 1 },  // 83 %
+    { cL: 6, cF: 1 },  // 86 % — máxima intensidad
+] as const;
 const SH_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
 const SH_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 const SH_END: Record<string, string>   = { M: '14:00', T: '22:00', N: '06:00', D12: '19:00', N12: '07:00' };
@@ -43,6 +55,29 @@ const SHIFT_ALIAS: Record<string, string[]> = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Elige el ciclo CCT óptimo para una posición 24/7 de 8 h dado el tamaño del grupo.
+ *
+ * Lógica: elige el ciclo con MÁS descanso que aún garantiza cobertura teórica ≥ 1.
+ *   empCount × cL  ≥  slotsPerDay × cycleLen
+ *
+ * Si ningún ciclo lo logra (posición subdotada) devuelve el más intenso (6+1)
+ * e informa al supervisor vía slots sin cubrir.
+ *
+ * Para posiciones limitadas (L-V) o 12 h se usa el ciclo del SLA sin alterar.
+ */
+function autoSelectCycle(
+    empCount: number,
+    slotsPerDay: number,
+    hint: { cL: number; cF: number },
+): { cL: number; cF: number } {
+    if (empCount <= 0 || slotsPerDay <= 0) return hint;
+    for (const c of CCT_CYCLES_8H) {
+        if (empCount * c.cL >= slotsPerDay * (c.cL + c.cF)) return c;
+    }
+    return { cL: 6, cF: 1 };
+}
 
 function isNonWork(code: string): boolean {
     return FRANCO_SET.has(String(code ?? '').toUpperCase());
@@ -195,10 +230,18 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         const numBands = bands.length;
         const qty = Math.max(1, Number(pos.qty) || 1);
 
-        // Ciclo efectivo: 4+2 para 12h, ciclo global para 8h
+        // Ciclo efectivo:
+        //   - L-V: no aplica ciclo rotativo → usa hint SLA
+        //   - 12h: siempre 4+2 (CCT estándar para D12/N12)
+        //   - 8h 24/7: auto-selección basada en dotación (busca el ciclo con más descanso
+        //     que aún garantiza cobertura teórica completa, sin que el usuario tenga
+        //     que elegir el esquema manualmente)
         const is12h = numBands > 0 && shiftHrs({ code: bands[0] }, _hint) >= 12;
-        const eCL = is12h ? 4 : cL;
-        const eCF = is12h ? 2 : cF;
+        const autoC = limited ? { cL, cF }
+            : is12h     ? { cL: 4, cF: 2 }
+            : autoSelectCycle(empIds.length, qty * numBands, { cL, cF });
+        const eCL = autoC.cL;
+        const eCF = autoC.cF;
         const eCycleLen = eCL + eCF;
 
         // Asignación de banda a cada empleado
@@ -491,11 +534,16 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         stats.totalBillableHours += hrs;
     };
 
+    // Pool de flotantes empresa (sin objetivo asignado): un solo slot por día por empleado.
+    const retPool = ctx.globalRetPool ?? [];
+    const retPoolUsedDays = new Map<string, Set<string>>();
+
     // ── Loop principal: día × puesto ─────────────────────────────────────────
     //
-    // Dos fases por día × puesto:
+    // Tres fases por día × puesto:
     //   Fase 1: asignar regulares en TODAS las bandas.
     //   Fase 2: asignar FLEX a las bandas con déficit, ordenadas de mayor a menor déficit.
+    //   Fase 3: flotantes de la empresa (globalRetPool) para slots aún sin cubrir.
     //
     // Así los FLEX no se consumen todos en la primera banda cuando hay varias con faltante.
 
@@ -592,7 +640,43 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
-            // Registrar slots sin cubrir tras ambas fases
+            // ── Fase 3: Flotantes empresa (globalRetPool) ───────────────────
+            //
+            // Último recurso: empleados de la empresa sin objetivo asignado en el
+            // período. Se los convoca como RET ad-hoc; no se les aplica cap CCT.
+            // Un flotante cubre un solo slot por día en este objetivo.
+            if (retPool.length > 0) {
+                const stillShort = bandsWithDeficit.filter(({ sCode }) => coveredByBand[sCode] < qty);
+                for (const { sh, sCode } of stillShort) {
+                    if (coveredByBand[sCode] >= qty) continue;
+                    const sHrs = shiftHrs(sh, _hint);
+                    const sStart = sh.startTime || SH_START[sCode] || '07:00';
+                    const sEnd = sh.endTime || SH_END[sCode] || undefined;
+                    const sName = sh.name || sCode;
+
+                    for (const retEmp of retPool) {
+                        if (coveredByBand[sCode] >= qty) break;
+                        if (retPoolUsedDays.get(retEmp.id)?.has(dateStr)) continue;
+                        if (!retPoolUsedDays.has(retEmp.id)) retPoolUsedDays.set(retEmp.id, new Set());
+                        retPoolUsedDays.get(retEmp.id)!.add(dateStr);
+                        assignments.push({
+                            empId: retEmp.id,
+                            dateStr,
+                            positionName: pos.positionName,
+                            code: sCode,
+                            name: sName,
+                            hours: sHrs,
+                            startTime: sStart,
+                            ...(sEnd ? { endTime: sEnd } : {}),
+                        });
+                        stats.totalAssignments++;
+                        stats.totalBillableHours += sHrs;
+                        coveredByBand[sCode]++;
+                    }
+                }
+            }
+
+            // Registrar slots sin cubrir tras las tres fases
             for (const sh of dayBands) {
                 const sCode = String(sh.code ?? '').toUpperCase();
                 if (coveredByBand[sCode] < qty) {

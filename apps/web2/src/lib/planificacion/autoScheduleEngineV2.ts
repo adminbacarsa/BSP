@@ -194,6 +194,14 @@ export interface V2EngineContext {
      * que cierren la cobertura sin incidencias.
      */
     distributedOffsetSeed?: number;
+    /**
+     * Pool de empleados de la empresa que NO están asignados al objetivo en curso.
+     * El motor V3 los usa como flotantes de último recurso (Fase 3) para cubrir slots
+     * que quedan sin personal tras la pasada de regulares y FLEX.
+     * No se les aplica cap CCT ni verificación de descanso; se los registra con el
+     * código de turno del slot (M/T/N/etc.) en el objetivo pedido.
+     */
+    globalRetPool?: Array<{ id: string; nombre?: string; name?: string }>;
 }
 
 export interface V2PositionDemand {

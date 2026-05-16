@@ -448,10 +448,12 @@ export default function PlanificacionPage() {
         // Excluir empleados inactivos (dados de baja)
         let list = employees.filter(e => e.status !== 'inactivo');
         if (selectedObjective && !forceShowAll) {
-            // Solo shifts guardados en Firestore determinan si un invitado/desvinculado sigue visible.
-            // Los pendingChanges no cuentan: si desvinculás a alguien sin guardar, desaparece.
+            // Shifts guardados en Firestore + pendingChanges determinan si un invitado/flotante
+            // es visible en la grilla. Incluir pendingChanges permite ver flotantes RET asignados
+            // por el motor antes de guardar (borrador inmediato).
             const activeGuestIds = new Set();
             Object.values(shiftsMap).forEach((shift: any) => { if (shift.objectiveId === selectedObjective) activeGuestIds.add(shift.employeeId); });
+            Object.values(pendingChanges).forEach((change: any) => { if (change.objectiveId === selectedObjective && !change.isDeleted) activeGuestIds.add(change.employeeId); });
             list = list.filter(e =>
                 e.preferredObjectiveId === selectedObjective ||
                 slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
@@ -2646,8 +2648,18 @@ export default function PlanificacionPage() {
                 const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
                 if (shift) defaultShiftByEmp[e.id] = shift;
             });
-            // Probar hasta cycleLen seeds diferentes y quedarse con la distribución
-            // que minimice los slots de cobertura faltantes (0 = cobertura cerrada).
+            // Flotantes de empresa: empleados activos sin objetivo asignado.
+            // El motor V3 los usa como refuerzo (Fase 3) cuando quedan slots sin cubrir
+            // tras los regulares y los FLEX del objetivo en curso.
+            const displayedIds = new Set(displayedEmployees.map((e: any) => e.id));
+            const globalRetPool = employees
+                .filter((e: any) =>
+                    e.status !== 'inactivo' &&
+                    !displayedIds.has(e.id) &&
+                    (!e.preferredObjectiveId || e.preferredObjectiveId === '')
+                )
+                .map((e: any) => ({ id: e.id, nombre: e.nombre || e.name }));
+
             const baseGenCtx = {
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
@@ -2674,6 +2686,7 @@ export default function PlanificacionPage() {
                 codeHoursHint: slaCodeHoursHint,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
+                globalRetPool,
             };
             await bumpAutoV2Progress(40, 'Generando cronograma (V3)…');
             await new Promise<void>((r) => setTimeout(r, 0));
