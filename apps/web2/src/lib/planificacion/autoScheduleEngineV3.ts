@@ -307,68 +307,71 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         const maxPerOffset = Math.ceil(empIds.length / eCycleLen);
         const offsetCounts = new Array<number>(eCycleLen).fill(0);
 
-        // Elige el offset más cercano al ideal que aún no alcanzó el cupo.
-        const pickOffset = (idealRaw: number): number => {
+        // Tracking por-banda: evita que dos empleados de la misma banda compartan offset
+        // (lo que causaría Franco simultáneo y gap de cobertura).
+        // maxPerBand = ceil(bandCount / cycleLen) — normalmente 1 para bandas pequeñas.
+        const bandOffsetCounts = new Map<string | null, number[]>();
+        [...bands, null as string | null].forEach(b => {
+            bandOffsetCounts.set(b, new Array<number>(eCycleLen).fill(0));
+        });
+
+        const pickOffsetForBand = (idealRaw: number, band: string | null): number => {
+            const bc = bandOffsetCounts.get(band) ?? bandOffsetCounts.get(null)!;
+            const bandCount = empIds.filter(e => empBand[e] === band).length;
+            const maxPerBand = Math.max(1, Math.ceil(bandCount / eCycleLen));
             const start = ((idealRaw % eCycleLen) + eCycleLen) % eCycleLen;
             for (let i = 0; i < eCycleLen; i++) {
                 const o = (start + i) % eCycleLen;
-                if (offsetCounts[o] < maxPerOffset) return o;
+                if (offsetCounts[o] < maxPerOffset && bc[o] < maxPerBand) return o;
             }
-            // Todos colmados: elegir el menos cargado
-            let best = start, minC = offsetCounts[start];
+            // Fallback: menor carga global, penalizando solapamiento de banda
+            let best = start, minScore = bc[start] * 1000 + offsetCounts[start];
             for (let i = 1; i < eCycleLen; i++) {
                 const o = (start + i) % eCycleLen;
-                if (offsetCounts[o] < minC) { minC = offsetCounts[o]; best = o; }
+                const score = bc[o] * 1000 + offsetCounts[o];
+                if (score < minScore) { minScore = score; best = o; }
             }
             return best;
         };
 
-        // Primera pasada: empleados con historia cross-mes
-        empIds.forEach(eid => {
-            const off = histOffset(eid);
-            if (off === null) return;
-            const o = pickOffset(off);
+        const assignOffset = (eid: string, band: string | null, idealRaw: number) => {
+            const o = pickOffsetForBand(idealRaw, band);
             offsetCounts[o]++;
+            (bandOffsetCounts.get(band) ?? bandOffsetCounts.get(null)!)[o]++;
             empOffset[eid] = o;
             empCycleLen[eid] = eCycleLen;
             empCL[eid] = eCL;
-        });
+        };
 
-        // Segunda pasada: empleados sin historia → offset ideal del grupo.
+        // Pasada única: hist tiene prioridad sobre fórmula ideal, pero dentro de cada
+        // banda se aplica el cupo por offset para evitar clustering de Francos.
         //
-        // Fórmula: idealOff = (bIdx + si) * eCF % eCycleLen
-        //   - bIdx: índice de banda (M=0, T=1, N=2)
-        //   - si:   sub-índice del empleado dentro de la banda
-        //
-        // Con 4 empleados por banda, eCF=2, cycleLen=8:
+        // Fórmula ideal: idealOff = (bIdx + si) * eCF % eCycleLen
+        //   Con 4 empleados/banda, eCF=2, cycleLen=8:
         //   M → {0,2,4,6},  T → {2,4,6,0},  N → {4,6,0,2},  FLEX → {6,0,2,4}
-        // → distribución uniforme: exactamente 2 empleados por offset.
-        // → francos día 1 = offsets {6,7} × 2 empleados = 4 francos. ✓
-        //
-        // Bug previo: ((bIdx + si*(numBands+1))*eCF) % cycleLen colapsaba a 0
-        // cuando (numBands+1)*eCF era múltiplo de cycleLen (ej. 4×2=8).
+        //   → distribución uniforme, sin francos simultáneos dentro de la misma banda.
         const bandSubIdx: Record<string, number> = {};
         let flexSubIdx = 0;
 
-        empIds.filter(eid => empOffset[eid] === undefined).forEach(eid => {
+        empIds.forEach(eid => {
             const band = empBand[eid];
-            let idealOff: number;
+            const hist = histOffset(eid);
+            let idealRaw: number;
 
-            if (band !== null) {
+            if (hist !== null) {
+                // Historia cross-mes: usarla como punto de partida pero respetar cupo de banda
+                idealRaw = hist;
+            } else if (band !== null) {
                 const bIdx = bands.indexOf(band);
                 const si = bandSubIdx[band] ?? 0;
                 bandSubIdx[band] = si + 1;
-                idealOff = ((bIdx + si) * eCF) % eCycleLen;
+                idealRaw = ((bIdx + si) * eCF) % eCycleLen;
             } else {
-                idealOff = ((numBands + flexSubIdx) * eCF) % eCycleLen;
+                idealRaw = ((numBands + flexSubIdx) * eCF) % eCycleLen;
                 flexSubIdx++;
             }
 
-            const o = pickOffset(idealOff);
-            offsetCounts[o]++;
-            empOffset[eid] = o;
-            empCycleLen[eid] = eCycleLen;
-            empCL[eid] = eCL;
+            assignOffset(eid, band, idealRaw);
         });
     }
 
@@ -441,6 +444,25 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         const wdT2 = [...wdSet].filter(d => parseInt(d.split('-')[2]) > cutoff).sort();
         const capT2 = Math.floor(HARD_MAX_HOURS / hrsPerDay);
         if (wdT2.length > capT2) wdT2.slice(capT2).forEach(d => wdSet.delete(d));
+    });
+
+    // ── PASO 3c: Tope mensual para puestos limitados (L-V u otros no rotativos) ──
+    //
+    // PASO 3b ya aplica el cap por tramo para rotativos.
+    // Para puestos limitados (sin tramos CCT) el cap es sobre el mes completo:
+    // máximo floor((200 - priorHoras) / hrsPerDía) días hábiles en total.
+    ctx.employees.forEach(emp => {
+        if (!limitedEmps.has(emp.id)) return;
+        const band = empBand[emp.id];
+        const code = (band ?? '').toUpperCase();
+        const hrsPerDay = _hint[code] ?? SH_HRS[code] ?? 8;
+        if (hrsPerDay <= 0) return;
+        const wdSet = cycleWorkDays[emp.id];
+        if (!wdSet || wdSet.size === 0) return;
+        const prior = Math.max(0, ctx.empMonthlyInitial[emp.id] ?? 0);
+        const totalCap = Math.floor(Math.max(0, HARD_MAX_HOURS - prior) / hrsPerDay);
+        const allDays = [...wdSet].sort();
+        if (allDays.length > totalCap) allDays.slice(totalCap).forEach(d => wdSet.delete(d));
     });
 
     // ── GENERACIÓN ─────────────────────────────────────────────────────────
@@ -754,13 +776,16 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const shortCyclePostNight = cF === 1 && (lastCode === 'N' || lastCode === 'N12');
             const inCurrent = day.getDate() <= cutoff;
 
-            // Rescate FLEX: si hay slots sin cubrir, intentar asignar antes de dar RET
-            if (isWorkDay && !shortCyclePostNight && flexSet.has(emp.id)) {
+            // Rescate: si hay slots sin cubrir, intentar asignar antes de dar RET.
+            // FLEX puede cubrir cualquier banda; regulares solo su propia banda.
+            if (isWorkDay && !shortCyclePostNight) {
                 const dayGaps = stats.uncoveredSlotsByDay![dateStr];
                 if (dayGaps && dayGaps.length > 0) {
                     let rescued = false;
                     for (const gap of dayGaps) {
                         if (gap.missing <= 0) continue;
+                        // Regulares solo rescatan su propia banda; FLEX puede cruzar bandas
+                        if (!flexSet.has(emp.id) && empBand[emp.id] !== null && gap.code !== empBand[emp.id]) continue;
                         const gapPos = ctx.positions.find(p => p.positionName === gap.positionName);
                         if (!gapPos || !positionIsActiveOn(gapPos, dayLetter)) continue;
                         const gapBands = effectiveShiftsForPositionDay(gapPos, dayLetter, ctx.autoCycles);
