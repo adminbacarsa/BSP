@@ -448,12 +448,12 @@ export default function PlanificacionPage() {
         // Excluir empleados inactivos (dados de baja)
         let list = employees.filter(e => e.status !== 'inactivo');
         if (selectedObjective && !forceShowAll) {
-            // Shifts guardados en Firestore + pendingChanges determinan si un invitado/flotante
-            // es visible en la grilla. Incluir pendingChanges permite ver flotantes RET asignados
-            // por el motor antes de guardar (borrador inmediato).
+            // Solo shifts guardados en Firestore determinan si un invitado/desvinculado sigue visible.
+            // Los pendingChanges no cuentan: agregar esa dependencia aquí haría recalcular
+            // displayedEmployees en cada cambio de borrador, lo que dispara re-registros rápidos
+            // de onSnapshot y produce el assert interno de Firestore (ID: ca9).
             const activeGuestIds = new Set();
             Object.values(shiftsMap).forEach((shift: any) => { if (shift.objectiveId === selectedObjective) activeGuestIds.add(shift.employeeId); });
-            Object.values(pendingChanges).forEach((change: any) => { if (change.objectiveId === selectedObjective && !change.isDeleted) activeGuestIds.add(change.employeeId); });
             list = list.filter(e =>
                 e.preferredObjectiveId === selectedObjective ||
                 slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
