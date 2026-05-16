@@ -491,13 +491,13 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         stats.totalBillableHours += hrs;
     };
 
-    // ── Loop principal: día × puesto × banda ──────────────────────────────
+    // ── Loop principal: día × puesto ─────────────────────────────────────────
     //
-    // Pasada única. Orden de prioridad para cubrir un slot:
-    //   1. Empleados regulares (banda fija == sCode, día de trabajo del ciclo)
-    //   2. Empleados FLEX (sin banda fija, día de trabajo del ciclo)
+    // Dos fases por día × puesto:
+    //   Fase 1: asignar regulares en TODAS las bandas.
+    //   Fase 2: asignar FLEX a las bandas con déficit, ordenadas de mayor a menor déficit.
     //
-    // Sin segunda pasada ni cruce de bandas.
+    // Así los FLEX no se consumen todos en la primera banda cuando hay varias con faltante.
 
     for (const day of ctx.daysInMonth) {
         const dateStr = ctx.getDateKey(day);
@@ -510,6 +510,13 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const dayBands = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
             const group = positionGroups[pos.positionName] ?? [];
 
+            // Cobertura acumulada por banda (se llena en fase 1, se completa en fase 2)
+            const coveredByBand: Record<string, number> = {};
+            dayBands.forEach(sh => {
+                coveredByBand[String(sh.code ?? '').toUpperCase()] = 0;
+            });
+
+            // ── Fase 1: Regulares en todas las bandas ────────────────────────
             for (const sh of dayBands) {
                 const sCode = String(sh.code ?? '').toUpperCase();
                 const sHrs = shiftHrs(sh, _hint);
@@ -517,7 +524,6 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 const sEnd = sh.endTime || SH_END[sCode] || undefined;
                 const sName = sh.name || sCode;
 
-                // Candidatos regulares: banda fija == sCode + día de trabajo
                 const regular = group.filter(eid => {
                     if (rt[eid].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[eid]?.has(dateStr)) return false;
@@ -525,10 +531,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                     return empBand[eid] === sCode;
                 });
 
-                let covered = 0;
-
                 for (const empId of regular) {
-                    if (covered >= qty) break;
+                    if (coveredByBand[sCode] >= qty) break;
                     const st = rt[empId];
                     const used = limitedEmps.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
@@ -549,32 +553,50 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                     }
                     if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
-                    covered++;
+                    coveredByBand[sCode]++;
                 }
+            }
 
-                // FLEX cubre la banda faltante (sin banda fija, día de trabajo del ciclo)
-                if (covered < qty) {
-                    const flex = group.filter(eid => {
-                        if (!flexSet.has(eid)) return false;
-                        if (rt[eid].assignedDays.has(dateStr)) return false;
-                        if (ctx.absences[eid]?.has(dateStr)) return false;
-                        return cycleWorkDays[eid]?.has(dateStr);
-                    });
-                    for (const empId of flex) {
-                        if (covered >= qty) break;
-                        const st = rt[empId];
-                        const used = limitedEmps.has(empId)
-                            ? st.cycleCurrentUsed + st.cycleNextUsed
-                            : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
-                        if (used + sHrs > HARD_MAX_HOURS) continue;
-                        if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
-                        writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
-                        covered++;
-                    }
+            // ── Fase 2: FLEX a las bandas con déficit, orden de mayor déficit ──
+            //
+            // Ordenar bandas por cobertura ascendente = déficit descendente.
+            // Así el primer FLEX disponible va a la banda más crítica.
+            const bandsWithDeficit = dayBands
+                .map(sh => ({ sh, sCode: String(sh.code ?? '').toUpperCase() }))
+                .filter(({ sCode }) => coveredByBand[sCode] < qty)
+                .sort((a, b) => coveredByBand[a.sCode] - coveredByBand[b.sCode]);
+
+            for (const { sh, sCode } of bandsWithDeficit) {
+                const sHrs = shiftHrs(sh, _hint);
+                const sStart = sh.startTime || SH_START[sCode] || '07:00';
+                const sEnd = sh.endTime || SH_END[sCode] || undefined;
+                const sName = sh.name || sCode;
+
+                const flex = group.filter(eid => {
+                    if (!flexSet.has(eid)) return false;
+                    if (rt[eid].assignedDays.has(dateStr)) return false;
+                    if (ctx.absences[eid]?.has(dateStr)) return false;
+                    return cycleWorkDays[eid]?.has(dateStr);
+                });
+
+                for (const empId of flex) {
+                    if (coveredByBand[sCode] >= qty) break;
+                    const st = rt[empId];
+                    const used = limitedEmps.has(empId)
+                        ? st.cycleCurrentUsed + st.cycleNextUsed
+                        : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
+                    if (used + sHrs > HARD_MAX_HOURS) continue;
+                    if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                    writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
+                    coveredByBand[sCode]++;
                 }
+            }
 
-                if (covered < qty) {
-                    const missing = qty - covered;
+            // Registrar slots sin cubrir tras ambas fases
+            for (const sh of dayBands) {
+                const sCode = String(sh.code ?? '').toUpperCase();
+                if (coveredByBand[sCode] < qty) {
+                    const missing = qty - coveredByBand[sCode];
                     stats.uncoveredSlots = (stats.uncoveredSlots ?? 0) + missing;
                     if (!stats.uncoveredSlotsByDay![dateStr]) stats.uncoveredSlotsByDay![dateStr] = [];
                     stats.uncoveredSlotsByDay![dateStr].push({
