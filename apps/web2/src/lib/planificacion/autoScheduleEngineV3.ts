@@ -792,11 +792,12 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
-            const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : 'RET') : 'F';
+            const bandCode = limitedEmps.has(emp.id) && empBand[emp.id] ? empBand[emp.id]! : 'RET';
+            const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
             assignments.push({
                 empId: emp.id, dateStr, positionName: '',
                 code: fallback,
-                name: fallback === 'RET' ? 'Retén' : 'Franco',
+                name: fallback === 'RET' ? 'Retén' : fallback === 'F' ? 'Franco' : fallback,
                 hours: 0, startTime: '00:00',
                 isFranco: fallback === 'F',
                 isReten: fallback === 'RET',

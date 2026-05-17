@@ -2836,11 +2836,46 @@ export default function PlanificacionPage() {
                 getDayLetter,
                 getDateKey,
             } as any;
-            const coverage = verifyScheduleCoverage(verifyCtx, gen.assignments, gen.stats);
+            let finalAssignments = gen.assignments;
+            let coverage = verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
+
+            // ── Auto-reproceso: si hay slots sin cubrir, ejecutar el fixer inline ──
+            if (coverage.coverage.uncoveredSlots > 0) {
+                await bumpAutoV2Progress(88, 'Reprocesando slots sin cubrir automáticamente…');
+                await new Promise<void>((r) => setTimeout(r, 0));
+                const fixResult = fixScheduleIssues(verifyCtx, finalAssignments, gen.stats, coverage, 5);
+                finalAssignments = fixResult.assignments;
+                coverage = fixResult.report;
+
+                const NON_BILLABLE_FIX = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
+                for (const a of fixResult.assignments) {
+                    const key = `${a.empId}_${a.dateStr}`;
+                    if (isDateLocked(a.dateStr)) continue;
+                    const existing = newChanges[key];
+                    if (existing && !existing.isDeleted
+                        && !NON_BILLABLE_FIX.has(String(existing.code || '').toUpperCase())
+                        && NON_BILLABLE_FIX.has(String(a.code || '').toUpperCase())) continue;
+                    newChanges[key] = {
+                        isTemp: true,
+                        employeeId: a.empId,
+                        objectiveId: selectedObjective,
+                        positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
+                        code: a.code,
+                        name: a.name,
+                        hours: a.hours,
+                        startTime: a.startTime,
+                        ...(a.endTime ? { endTime: a.endTime } : {}),
+                        ...(a.isFranco ? { isFranco: true } : {}),
+                        ...(a.isReten ? { isReten: true } : {}),
+                    };
+                }
+                // Actualizar pendingChanges con las correcciones del fixer
+                setPendingChanges({ ...newChanges });
+            }
+
             setAutoV2Coverage(coverage);
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, gen.assignments, gen.stats));
-            // Snapshot para reprocesar (cuando el usuario hace click en "Reprocesar errores")
-            setAutoV2LastRun({ assignments: gen.assignments, stats: gen.stats, ctx: verifyCtx });
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
+            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
 
             await bumpAutoV2Progress(100, 'Listo');
             await new Promise<void>((r) => setTimeout(r, 180));
@@ -2854,7 +2889,6 @@ export default function PlanificacionPage() {
             } else if (written === 0) {
                 toast.error('No se generó el cronograma. Revisá ciclos, ausencias y dotación.', { duration: 6000 });
             } else {
-                // Mostrar resultado inline en el wizard (no cerrar el modal)
                 setAutoWizardStep('done');
             }
         } catch (e:any) {
