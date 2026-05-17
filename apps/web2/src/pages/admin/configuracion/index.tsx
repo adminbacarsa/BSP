@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Settings, Users, Shield, Database, Building2, HardDrive } from 'lucide-react';
+import { Settings, Users, Shield, Database, Building2, HardDrive, Bot } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import UsersTab from '@/components/admin/config/UsersTab';
 import RolesTab from '@/components/admin/config/RolesTab';
 import GeneralTab from '@/components/admin/config/GeneralTab';
 import EmpresasTab from '@/components/admin/config/EmpresasTab';
 import BackupTab from '@/components/admin/config/BackupTab';
+import AssistantLogTab from '@/components/admin/config/AssistantLogTab';
 import { useAuth } from '@/context/AuthContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
-    const [activeTab, setActiveTab] = useState<'GENERAL' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP'>('GENERAL');
+    const [activeTab, setActiveTab] = useState<'GENERAL' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule } = useAuth();
 
@@ -56,6 +57,7 @@ export default function ConfigPage() {
                             { id: 'ROLES',     label: 'Roles y Permisos', icon: Shield },
                             { id: 'EMPRESAS',  label: 'Empresas',         icon: Building2 },
                             { id: 'BACKUP',    label: 'Backups',          icon: HardDrive },
+                            { id: 'ASSISTANT', label: 'AI Asistente',     icon: Bot },
                         ]}
                         active={activeTab}
                         onChange={id => setActiveTab(id as typeof activeTab)}
@@ -66,6 +68,7 @@ export default function ConfigPage() {
                         {activeTab === 'ROLES'    && <RolesTab />}
                         {activeTab === 'EMPRESAS' && <EmpresasTab />}
                         {activeTab === 'BACKUP'   && <BackupTab />}
+                        {activeTab === 'ASSISTANT' && <AssistantLogTab />}
                     </div>
                 </div>
             </PageShell>

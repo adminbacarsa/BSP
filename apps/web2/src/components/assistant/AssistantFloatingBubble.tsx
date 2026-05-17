@@ -7,6 +7,7 @@ import { X, SendHorizontal, Trash2 } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 import { inferModuleKeyFromPath, moduleTitleEs } from '@/lib/assistant/inferModuleKeyFromPath';
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
@@ -147,7 +148,8 @@ function hideGloboRoute(pathname: string): boolean {
 
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
-  const { user, loading, empresaId } = useAuth();
+  const { user, loading } = useAuth();
+  const { empresaId: empresaCtxId } = useEmpresa();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -212,7 +214,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         messages: next.map((m) => ({ role: m.role, content: m.content })),
         pathname: fullPath || pathname,
         moduleKey,
-        empresaId: empresaId || '',
+        empresaId: empresaCtxId || '',
         clientToday: clientLocalTodayYsMmDd(),
       });
       const data = res.data as { reply?: string };
@@ -244,7 +246,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [busy, empresaId, fullPath, input, msgs, pathname, user]);
+  }, [busy, empresaCtxId, fullPath, input, msgs, pathname, user]);
 
   const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
       const d = dragRef.current;

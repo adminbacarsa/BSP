@@ -1,4 +1,5 @@
 import type { AssistantPersona } from './resolveAssistantUser';
+export declare const ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
 export type AssistantToolContext = {
     persona: AssistantPersona;
     empresaId: string;
@@ -55,8 +56,17 @@ export declare function ejecutarResumenHorasObjetivoSlaPeriodo(ctx: AssistantToo
     fecha_referencia?: string;
     id_servicio_sla?: string;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarResumenHorasSlaVariosObjetivos(ctx: AssistantToolContext, args: {
+    textos_objetivo?: string[];
+    fecha_referencia?: string;
+    todos_servicios_activos_mes?: boolean;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;
 }): Promise<Record<string, unknown>>;
-export declare function buildEmpresaMetricsSnapshotForPrompt(ctx: AssistantToolContext): Promise<string>;
+export type EmpresaMetricsSnapshotOptions = {
+    includeOperationsDay?: boolean;
+};
+export declare function buildEmpresaMetricsSnapshotForPrompt(ctx: AssistantToolContext, options?: EmpresaMetricsSnapshotOptions): Promise<string>;
 export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;

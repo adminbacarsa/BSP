@@ -15,7 +15,11 @@ import {
   type AssistantToolContext,
 } from './assistantDataTools';
 import { ASSISTANT_FUNCTION_DECLARATIONS, ASSISTANT_TOOL_ROUNDS_MAX } from './assistantToolDeclarations';
-import { tryDeterministicDataReply } from './assistantDeterministicRouter';
+import {
+  shouldPrefetchMetricsSnapshot,
+  shouldPrefetchOperationsMetricsInSnapshot,
+  tryDeterministicDataReply,
+} from './assistantDeterministicRouter';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
 
 const ASSISTANT_RESPONSE_STYLE = `
@@ -27,7 +31,7 @@ Cómo responder (subir calidad sin inventar datos):
 
 2) **No** incluyas rutas técnicas tipo \`/admin/…\`, \`/empleado/…\` ni \`/cliente/…\` en respuestas normales (incluido listados tipo "qué podés responder" o "qué módulos hay"). Referí al lugar por **nombre del ítem del menú lateral** (p. ej. "Servicios y SLA", "Planificación y Turnos", "Operaciones", "Clientes y Objetivos", "RRHH", "Reportes", "Configuración"). **Solo** si el usuario pregunta explícitamente por la **URL**, la **barra de direcciones** o "en qué link", podés mencionar una ruta concreta.
 
-3) Cumpliendo la regla 0): si al inicio del mensaje de sistema aparece el bloque **MÉTRICAS YA CALCULADAS EN ESTE TURNO**, **usá esas cifras** para totales de nómina panel, SLA del mes u operaciones del día de referencia cuando la pregunta coincida; no inventes otros totales genéricos. Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de datos de herramientas o de ese bloque, **respondé ese número en la primera oración**. Para **horas de un colaborador en un período** (semana, mes, «cuántas hs trabajó») usá **resumen_horas_empleado_periodo** (totales y por código; no es liquidación legal — remití a Reportes si piden noche/feriado/CCT fino). Para **«cuántas horas a planificar»**, **horas vendidas del SLA** o **planificado vs vendidas** de un objetivo/servicio en un mes (también si es seguimiento de un contrato que acabás de nombrar, ej. CASISA - Obrador): usá **resumen_horas_objetivo_sla_periodo** con texto_objetivo o id_objetivo y fecha_referencia en ese mes; respondé con horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **empleados en nómina / vigiladores en plantilla** como la tarjeta del panel usá **contar_empleados_plantilla_empresa** y **cuenta_para_tarjeta_panel_empleados_nomina**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para **buscar persona por nombre** usá **buscar_empleados_por_nombre** con el texto tal cual lo dijo el usuario (nombre y apellido en cualquier orden, o legajo); no exijas «nombre completo» si ya dio apellido y nombre en una sola frase. Para **listado de nombres de la empresa** o «quiénes son los empleados» usá **listado_empleados_empresa** (opcional filtro y solo_activos_nomina_panel). Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
+3) Cumpliendo la regla 0): si al inicio del mensaje de sistema aparece el bloque **MÉTRICAS YA CALCULADAS EN ESTE TURNO**, **usá esas cifras** para SLA del mes u operaciones del día de referencia cuando la pregunta coincida; no inventes otros totales genéricos. Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de datos de herramientas o de ese bloque, **respondé ese número en la primera oración**. Para **horas de un colaborador en un período** (semana, mes, «cuántas hs trabajó») usá **resumen_horas_empleado_periodo** (totales y por código; no es liquidación legal — remití a Reportes si piden noche/feriado/CCT fino). Para **«cuántas horas a planificar»**, **horas vendidas del SLA** o **planificado vs vendidas** de un objetivo/servicio en un mes (también si es seguimiento de un contrato que acabás de nombrar, ej. CASISA - Obrador): usá **resumen_horas_objetivo_sla_periodo** con texto_objetivo o id_objetivo y fecha_referencia en ese mes; respondé con horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **«cuántos empleados en nómina/plantilla»** o la tarjeta del panel: **no** des un número ni cites Firestore; indicá la tarjeta **Empleados en nómina** del **Panel principal** o **RRHH y legajos**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para **buscar persona por nombre** usá **buscar_empleados_por_nombre** con el texto tal cual lo dijo el usuario (nombre y apellido en cualquier orden, o legajo); no exijas «nombre completo» si ya dio apellido y nombre en una sola frase. Para **listado de nombres de la empresa** o «quiénes son los empleados» usá **listado_empleados_empresa** (opcional filtro y solo_activos_nomina_panel). Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
 4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
 
@@ -39,7 +43,13 @@ Cómo responder (subir calidad sin inventar datos):
 
 8) Si en el hilo anterior listaste un contrato SLA (cliente - objetivo) y el usuario pregunta «cantidad de horas», «cuántas horas», «las horas» o similar, usá **resumen_horas_objetivo_sla_periodo** con el **nombre del objetivo** del mensaje previo y **fecha_referencia** en ese mes (ej. junio → 2026-06-15). Respondé vendidas, planificadas y pendientes; no digas que falta contexto.
 
+8b) Si listaste **varios** contratos (varias líneas «CLIENTE - OBJETIVO») y preguntan **«qué SLA tiene cada uno»**, **horas de cada servicio**, etc.: usá **resumen_horas_sla_varios_objetivos** con **textos_objetivo** (nombre del objetivo de cada línea) o **todos_servicios_activos_mes=true** si piden todos los activos del mes. **Nunca** respondas «inconveniente técnico» o «no puedo consultar» sin haber invocado esa herramienta.
+
 9) Para **«quién tiene turno hoy»**, **«quién trabaja hoy»** o similar: usá **listado_turnos_operativos_dia** con fecha = fechaReferenciaCliente (hoy). Agrupá por cliente/objetivo; no digas error interno ni soporte IT si la herramienta devolvió datos o un error concreto.
+
+10) **Nunca** le digas al usuario que estás «llamando», «esperando» o «consultando» una herramienta, ni muestres nombres técnicos de tools ni JSON de parámetros. Las herramientas se ejecutan en el servidor en el mismo turno: o invocás la función (function call) y respondés con el resultado, o no afirmes datos. Si el usuario pregunta «no hay nadie?» tras turnos de hoy, respondé con el listado o el total, no con «todavía espero».
+
+11) **Reportes y análisis:** para exportes, liquidación y columnas de reportes orientá a **Reportes y liquidación**; para métricas agregadas a **Análisis operativo**. El chat puede dar **totales y listas** vía herramientas (turnos, SLA, horas por persona, presencias del día); no reemplaza cada pantalla de exportación. Si piden algo que no tiene herramienta, decilo y indicá el módulo correcto.
 `.trim();
 
 export interface AssistantChatMessageInput {
@@ -273,9 +283,17 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   }
 
   let metricsVerifiedBlock = '';
-  if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
+  const recentForPrefetch = priorRaw.map((m) => ({ role: m.role, content: m.content }));
+  if (
+    toolsEnabled &&
+    profile.persona === 'SYSTEM' &&
+    empresaForTools.trim() &&
+    shouldPrefetchMetricsSnapshot(lastUser, moduleKey, recentForPrefetch)
+  ) {
     try {
-      metricsVerifiedBlock = await buildEmpresaMetricsSnapshotForPrompt(toolCtx);
+      metricsVerifiedBlock = await buildEmpresaMetricsSnapshotForPrompt(toolCtx, {
+        includeOperationsDay: shouldPrefetchOperationsMetricsInSnapshot(lastUser),
+      });
     } catch (e) {
       console.warn('[assistant] buildEmpresaMetricsSnapshotForPrompt', e);
     }
@@ -291,7 +309,32 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   );
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx);
+  return runGeminiAssistantChat(
+    genAI,
+    systemInstruction,
+    toolsEnabled,
+    historyFiltered,
+    lastUser,
+    toolCtx,
+    recentForPrefetch,
+  );
+}
+
+function normAssistantText(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function looksLikeFakeToolNarration(text: string): boolean {
+  const t = normAssistantText(text);
+  return (
+    (/\b(esperando|llamando|voy a consultar|parametros|parámetros)\b/.test(t) &&
+      /\b(herramienta|listado_turnos|function|tool)\b/.test(t)) ||
+    /\blistado_turnos_operativos_dia\b/.test(t)
+  );
 }
 
 function extractAssistantTextSafe(response: { text?: () => string; candidates?: unknown }): string {
@@ -327,6 +370,7 @@ async function runGeminiAssistantChat(
   historyFiltered: { role: 'user' | 'model'; parts: { text: string }[] }[],
   lastUser: string,
   toolCtx: AssistantToolContext,
+  recentMessages: { role: 'user' | 'assistant'; content: string }[] = [],
 ): Promise<{ reply: string }> {
   const modelName = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
   const model = genAI.getGenerativeModel({
@@ -385,6 +429,30 @@ async function runGeminiAssistantChat(
   }
 
   let reply = extractAssistantTextSafe(result.response as any);
+
+  if (reply && toolsEnabled && looksLikeFakeToolNarration(reply)) {
+    try {
+      const recovered = await tryDeterministicDataReply(
+        lastUser,
+        toolCtx,
+        true,
+        null,
+        '',
+        recentMessages,
+      );
+      if (recovered?.trim()) return { reply: recovered.trim() };
+    } catch (e) {
+      console.warn('[assistant] recover fake tool narration', e);
+    }
+    try {
+      result = await chat.sendMessage(
+        'Respondé al usuario en español con datos concretos. Invocá la herramienta necesaria (function call); no digas que estás esperando ni nombres de tools.',
+      );
+      reply = extractAssistantTextSafe(result.response as any);
+    } catch (e) {
+      console.warn('[assistant] retry tras narración falsa', mapGeminiErrorToHint(e));
+    }
+  }
 
   if (!reply && toolsEnabled) {
     try {

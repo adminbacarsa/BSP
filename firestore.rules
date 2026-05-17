@@ -189,5 +189,11 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create, update, delete: if isAdmin() || isClientUser();
     }
+
+    // 16. Log del asistente IA (solo escritura desde Cloud Functions)
+    match /assistant_interaction_logs/{logId} {
+      allow read: if isAdmin() || isSystemUserDoc();
+      allow create, update, delete: if false;
+    }
   }
 }

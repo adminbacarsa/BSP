@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = void 0;
 exports.ejecutarListadoFrancoRetDia = ejecutarListadoFrancoRetDia;
 exports.assistantToolsEnabledForContext = assistantToolsEnabledForContext;
 exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
@@ -12,12 +13,14 @@ exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetiv
 exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.ejecutarContarServiciosSlaVigentesEmpresa = ejecutarContarServiciosSlaVigentesEmpresa;
 exports.ejecutarResumenHorasObjetivoSlaPeriodo = ejecutarResumenHorasObjetivoSlaPeriodo;
+exports.ejecutarResumenHorasSlaVariosObjetivos = ejecutarResumenHorasSlaVariosObjetivos;
 exports.ejecutarContarEmpleadosPlantillaEmpresa = ejecutarContarEmpleadosPlantillaEmpresa;
 exports.buildEmpresaMetricsSnapshotForPrompt = buildEmpresaMetricsSnapshotForPrompt;
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const assistantSlaHours_1 = require("./assistantSlaHours");
 const AR_DAY_OFFSET = '-03:00';
+exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
 function norm(s) {
     return s
         .normalize('NFD')
@@ -132,7 +135,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
             .collection('turnos')
             .where('startTime', '>=', start)
             .where('startTime', '<=', end)
-            .limit(2800)
+            .limit(exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT)
             .get();
     }
     catch (e) {
@@ -232,7 +235,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
         return a.shiftTsMs - b.shiftTsMs;
     });
     const outMapped = rows.map(({ shiftTsMs, ...rest }) => rest);
-    return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= 2800 };
+    return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
 }
 async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
     const out = new Map();
@@ -321,7 +324,12 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 }
 async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
     const { start, end } = monitorWideWindow(fecha);
-    const qsnap = await db.collection('turnos').where('startTime', '>=', start).where('startTime', '<=', end).limit(2800).get();
+    const qsnap = await db
+        .collection('turnos')
+        .where('startTime', '>=', start)
+        .where('startTime', '<=', end)
+        .limit(exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT)
+        .get();
     const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
     const rows = [];
     for (const docSnap of qsnap.docs) {
@@ -366,7 +374,7 @@ async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
             return c0;
         return a.empleado_etiqueta.localeCompare(b.empleado_etiqueta, 'es');
     });
-    return { rows, truncado: qsnap.size >= 2800 };
+    return { rows, truncado: qsnap.size >= exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
 }
 async function empleadosCoordsBatch(db, empresaId, empIds) {
     const out = new Map();
@@ -1612,6 +1620,101 @@ async function ejecutarResumenHorasObjetivoSlaPeriodo(ctx, args) {
         nota_tras_herramienta: 'Respondé con totales.horas_vendidas_sla_mes (vendidas del contrato) y totales.horas_pendientes_a_planificar si preguntan «horas a planificar». Mencioná horas_ya_planificadas_turnos_mes para lo ya cargado en la grilla. Si horas_planificadas_sobre_vendidas>0, hay más horas planificadas que vendidas (revisar en Planificación). Si truncado_consulta_turnos_limite=true, el total planificado puede estar incompleto.',
     };
 }
+function compactSlaHorasItemFromResumen(textoBusqueda, r) {
+    const err = String(r.error ?? '').trim();
+    if (err) {
+        return {
+            texto_busqueda: textoBusqueda,
+            error: err,
+            detalle: String(r.detalle ?? '').slice(0, 200),
+            coincidencias: r.coincidencias,
+        };
+    }
+    const obj = (r.objetivo ?? {});
+    const tot = (r.totales ?? {});
+    const contrato = (r.contrato_sla ?? {});
+    return {
+        texto_busqueda: textoBusqueda,
+        cliente: String(obj.cliente ?? ''),
+        objetivo: String(obj.nombre ?? textoBusqueda),
+        horas_vendidas_sla_mes: tot.horas_vendidas_sla_mes,
+        horas_ya_planificadas_turnos_mes: tot.horas_ya_planificadas_turnos_mes,
+        horas_pendientes_a_planificar: tot.horas_pendientes_a_planificar,
+        horas_planificadas_sobre_vendidas: tot.horas_planificadas_sobre_vendidas,
+        puestos_en_contrato: contrato.puestos_en_contrato,
+        vigencia_desde: contrato.vigencia_desde,
+        vigencia_hasta: contrato.vigencia_hasta,
+        truncado_consulta_turnos_limite: r.truncado_consulta_turnos_limite === true,
+    };
+}
+async function ejecutarResumenHorasSlaVariosObjetivos(ctx, args) {
+    if (!canQueryServiciosSlaResumen(ctx)) {
+        return { error: 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ' };
+    }
+    if (!canQueryShifts(ctx)) {
+        return { error: 'sin_permiso_consultar_turnos' };
+    }
+    const fecha = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+    try {
+        parseYmd(fecha);
+    }
+    catch (e) {
+        return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+    }
+    const limite = Math.min(20, Math.max(1, Number(args.limite) || 12));
+    let textos = (args.textos_objetivo ?? [])
+        .map((s) => String(s).trim())
+        .filter((s) => s.length >= 2);
+    if (args.todos_servicios_activos_mes === true || textos.length === 0) {
+        const cnt = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, { fecha });
+        if (String(cnt.error ?? '').trim())
+            return cnt;
+        const muestra = (cnt.muestra_contratos_en_mes ?? []);
+        const fromMuestra = muestra
+            .map((m) => {
+            const obj = String(m.objetivo ?? '').trim();
+            if (obj.length >= 2)
+                return obj;
+            const cli = String(m.cliente ?? '').trim();
+            return cli.length >= 2 ? cli : '';
+        })
+            .filter((s) => s.length >= 2);
+        if (fromMuestra.length > 0)
+            textos = fromMuestra;
+    }
+    const uniq = [];
+    const seen = new Set();
+    for (const tx of textos) {
+        const k = norm(tx);
+        if (seen.has(k))
+            continue;
+        seen.add(k);
+        uniq.push(tx);
+        if (uniq.length >= limite)
+            break;
+    }
+    if (uniq.length === 0) {
+        return { error: 'sin_objetivos_a_consultar', fecha_referencia: fecha };
+    }
+    const resultados = await Promise.all(uniq.map(async (texto) => {
+        const r = await ejecutarResumenHorasObjetivoSlaPeriodo(ctx, {
+            texto_objetivo: texto,
+            fecha_referencia: fecha,
+        });
+        return compactSlaHorasItemFromResumen(texto, r);
+    }));
+    const ok = resultados.filter((r) => !String(r.error ?? '').trim()).length;
+    const fail = resultados.length - ok;
+    return {
+        fecha_referencia: fecha,
+        mes_yyyy_mm: fecha.slice(0, 7),
+        consultados: resultados.length,
+        con_datos: ok,
+        con_error: fail,
+        resultados,
+        nota_tras_herramienta: 'Listá cada objetivo con horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Si con_error>0, indicá el error por ítem sin decir «error técnico» genérico.',
+    };
+}
 function esLegajoActivoComoPantallaRRHH(statusRaw) {
     const s = String(statusRaw ?? '').trim().toLowerCase();
     if (!s)
@@ -1681,33 +1784,14 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
             rrhh_lista: 'cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado = activo/active o vacío u otros no marcados inactivo (lista RRHH).',
         },
         muestra_primeros_legajos: muestra,
-        nota_tras_herramienta: 'Para «cuántos vigiladores», «empleados en nómina», «plantilla» como la tarjeta del panel de control, respondé con **cuenta_para_tarjeta_panel_empleados_nomina**. Usá cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado solo si el usuario pide el criterio amplio de RRHH o comparación con listados que incluyen legajos sin estado cargado.',
+        nota_tras_herramienta: 'Herramienta retirada del asistente: orientá al usuario a la tarjeta Empleados en nómina del Panel principal o RRHH y legajos; no devuelvas cifras desde el chat.',
     };
 }
-async function buildEmpresaMetricsSnapshotForPrompt(ctx) {
+async function buildEmpresaMetricsSnapshotForPrompt(ctx, options = {}) {
     if (ctx.persona !== 'SYSTEM' || !ctx.empresaId.trim())
         return '';
+    const includeOps = options.includeOperationsDay === true;
     const jobs = [];
-    if (canQueryEmpleadosPlantillaResumen(ctx)) {
-        jobs.push((async () => {
-            try {
-                const r = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {});
-                if (String(r.error ?? '').trim())
-                    return [`- Empleados/nómina: error (${String(r.error)}).`];
-                const lines = [
-                    `- Empleados en nómina (tarjeta panel «EMPLEADOS EN NÓMINA», status activo explícito): ${String(r.cuenta_para_tarjeta_panel_empleados_nomina ?? '—')}`,
-                    `- Legajos activos criterio amplio RRHH (incluye sin estado): ${String(r.cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado ?? '—')}`,
-                ];
-                if (r.truncado_loteFirestore_900) {
-                    lines.push('- Aviso: consulta con límite 900 legajos; el conteo puede estar incompleto.');
-                }
-                return lines;
-            }
-            catch {
-                return ['- Empleados/nómina: no disponible en este turno.'];
-            }
-        })());
-    }
     if (canQueryServiciosSlaResumen(ctx)) {
         jobs.push((async () => {
             try {
@@ -1724,7 +1808,7 @@ async function buildEmpresaMetricsSnapshotForPrompt(ctx) {
             }
         })());
     }
-    if (canQueryOperationsDaySummary(ctx)) {
+    if (includeOps && canQueryOperationsDaySummary(ctx)) {
         jobs.push((async () => {
             try {
                 const r = await ejecutarResumenPresenciasObjetivosDia(ctx, {});
@@ -1747,9 +1831,9 @@ async function buildEmpresaMetricsSnapshotForPrompt(ctx) {
     const blocks = await Promise.all(jobs);
     const flat = blocks.flatMap((b) => (b ?? []).filter(Boolean));
     return [
-        '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para totales alineados al panel; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
+        '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para SLA u operaciones del día cuando coincidan; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
         ...flat,
-        'Si preguntan «cuántos empleados somos» en sentido plantilla/nómina del dashboard o RRHH, el número es el de «Empleados en nómina» arriba; el criterio amplio RRHH es distinto y solo aplica si lo piden explícito.',
+        'Para «cuántos empleados en nómina/plantilla», no des un número desde el chat: indicá la tarjeta **Empleados en nómina** del **Panel principal** o **RRHH y legajos**.',
     ].join('\n');
 }
 function sanitizeGeminiStruct(value, depth = 0) {
@@ -1841,9 +1925,10 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
         });
     }
     else if (name === 'contar_empleados_plantilla_empresa') {
-        raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
-            fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
-        });
+        raw = {
+            no_disponible_en_asistente: true,
+            orientacion: 'El total de empleados en nómina no se consulta desde el chat. Indicá al usuario la tarjeta Empleados en nómina del Panel principal o el módulo RRHH y legajos.',
+        };
     }
     else if (name === 'resumen_horas_empleado_periodo') {
         let fechaDesde = String(args.fecha_desde ?? '').trim();
@@ -1871,6 +1956,20 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
             texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
             fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
             id_servicio_sla: args.id_servicio_sla != null ? String(args.id_servicio_sla) : undefined,
+        });
+    }
+    else if (name === 'resumen_horas_sla_varios_objetivos') {
+        const rawTextos = args.textos_objetivo;
+        const textosArr = Array.isArray(rawTextos)
+            ? rawTextos.map((x) => String(x))
+            : rawTextos != null
+                ? [String(rawTextos)]
+                : undefined;
+        raw = await ejecutarResumenHorasSlaVariosObjetivos(ctx, {
+            textos_objetivo: textosArr,
+            fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+            todos_servicios_activos_mes: args.todos_servicios_activos_mes === true,
+            limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
     else {

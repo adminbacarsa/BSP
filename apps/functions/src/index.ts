@@ -21,6 +21,11 @@ import { LaborAgreementService } from './data-management/labor-agreement.service
 // Interfaces
 import { EmployeeRole } from './common/interfaces/employee.interface';
 import { runPlatformAssistant, type AssistantChatPayload } from './assistant/runPlatformAssistant';
+import {
+  classifyAssistantOutcome,
+  extractLastUserQuestion,
+  writeAssistantInteractionLog,
+} from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
 
 // Inicialización de Firebase Admin
@@ -499,13 +504,54 @@ async function chatPlatformAssistantHandler(
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }
+
+  const t0 = Date.now();
+  const uid = context.auth.uid;
+  const question = extractLastUserQuestion(data.messages ?? []);
+  const empresaId = String(data.empresaId ?? '').trim();
+  const moduleKey = typeof data.moduleKey === 'string' ? data.moduleKey.trim() : null;
+  const pathname = String(data.pathname ?? '').slice(0, 400);
+  const userEmail =
+    (context.auth.token?.email as string | undefined) ||
+    (context.auth.token?.email_verified != null ? String(context.auth.token?.email ?? '') : null) ||
+    null;
+
+  let reply: string | undefined;
+  let hadError = false;
+  let errorCode: string | null = null;
+  let errorMessage: string | null = null;
+
   try {
-    return await runPlatformAssistant(context.auth.uid, data);
+    const result = await runPlatformAssistant(uid, data);
+    reply = result.reply;
+    return result;
   } catch (e: any) {
-    if (e instanceof functions.https.HttpsError) throw e;
+    hadError = true;
+    if (e instanceof functions.https.HttpsError) {
+      errorCode = String(e.code ?? 'https-error');
+      errorMessage = truncateMsg(String(e.message ?? ''), 480);
+      throw e;
+    }
     console.error('[chatPlatformAssistant]', e?.message, e?.stack);
     const hint = truncateMsg(e?.message ?? 'Error asistente', 480);
+    errorCode = 'internal';
+    errorMessage = hint;
     throw new functions.https.HttpsError('failed-precondition', hint);
+  } finally {
+    const outcome = classifyAssistantOutcome(reply, hadError);
+    void writeAssistantInteractionLog({
+      empresaId,
+      uid,
+      userEmail,
+      question,
+      reply: reply ?? null,
+      moduleKey,
+      pathname,
+      outcome,
+      errorCode: hadError ? errorCode : null,
+      errorMessage: hadError ? errorMessage : null,
+      durationMs: Date.now() - t0,
+    });
   }
 }
 

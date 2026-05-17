@@ -12,7 +12,7 @@ exports.ASSISTANT_TRAINING_PAIRS = [
     { id: 8, categoria: 'servicios_sla', pregunta_usuario: '¿Tenemos más de 10 servicios vigentes?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Comparar umbral con dato real; sí/no fundamentado.' },
     { id: 9, categoria: 'servicios_sla', pregunta_usuario: 'cuantos servicios', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Pedir aclaración mínima solo si falta “hoy” vs “histórico”; si puede inferirse hoy, usar tool y responder.' },
     { id: 10, categoria: 'servicios_sla', pregunta_usuario: '¿Dónde veo los servicios y cuántos hay hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Primero el número; después una línea /admin/servicios.' },
-    { id: 136, categoria: 'rrhh', pregunta_usuario: 'cuantos empleados este mes hay en la plantilla', herramienta_sugerida: 'contar_empleados_plantilla_empresa', respuesta_ideal_bullet: 'Primera oración: cuenta_para_tarjeta_panel_empleados_nomina si alineás al panel; aclarar criterio RRHH amplio si aporta. No confundir con turnos en grilla salvo que lo pidan explícito.' },
+    { id: 136, categoria: 'rrhh', pregunta_usuario: 'cuantos empleados este mes hay en la plantilla', herramienta_sugerida: '(ninguna — orientar UI)', respuesta_ideal_bullet: 'No dar número desde el chat. Indicar tarjeta Empleados en nómina del Panel principal o RRHH y legajos. No confundir con turnos en grilla.' },
     { id: 11, categoria: 'servicios_sla', pregunta_usuario: 'Servicios inactivos cuántos hay', herramienta_sugerida: undefined, respuesta_ideal_bullet: 'No hay tool para inactivos: explicar que el listado está en Servicios con filtro estado; no inventar cifra.' },
     { id: 12, categoria: 'servicios_sla', pregunta_usuario: '¿El servicio del cliente X está vigente hoy?', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Si no hay id de cliente, pedir nombre o usar listado de muestra de la tool y cruzar por nombre aproximado sin afirmar si hay ambigüedad.' },
     { id: 13, categoria: 'servicios_sla', pregunta_usuario: 'Resumen SLA empresa', herramienta_sugerida: 'contar_servicios_sla_vigentes_empresa', respuesta_ideal_bullet: 'Cifra + hasta 5 ejemplos de la muestra; no listar 50.' },
@@ -192,6 +192,13 @@ exports.ASSISTANT_TRAINING_PAIRS = [
         pregunta_usuario: 'cantidad de horas? (tras CASISA - OBRADOR MALAGUEÑO en junio)',
         herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
         respuesta_ideal_bullet: 'Seguimiento: texto_objetivo OBRADOR MALAGUEÑO o par cliente-objetivo; fecha_referencia en junio; totales.horas_vendidas_sla_mes y horas_pendientes_a_planificar; sin soporte IT.',
+    },
+    {
+        id: 156,
+        categoria: 'servicios_sla',
+        pregunta_usuario: 'que sla tiene cada uno (tras listar 4 servicios activos cliente - objetivo)',
+        herramienta_sugerida: 'resumen_horas_sla_varios_objetivos',
+        respuesta_ideal_bullet: 'Una sola tool con textos_objetivo de cada línea del listado; responder vendidas/planificadas/pendiente por sitio; nunca error técnico genérico.',
     },
 ];
 exports.ASSISTANT_TRAINING_PAIR_COUNT = exports.ASSISTANT_TRAINING_PAIRS.length;

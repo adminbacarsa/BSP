@@ -135,7 +135,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'resumen_horas_objetivo_sla_periodo',
-        description: 'Para «cuántas horas a planificar», «horas vendidas del SLA», «hs planificadas vs vendidas» de un objetivo/servicio en un mes: calcula horas_vendidas_sla_mes desde servicios_sla (mismo motor que Servicios y SLA) y horas_ya_planificadas_turnos_mes desde turnos del objetivo; devuelve horas_pendientes_a_planificar = vendidas − planificadas. Usar cuando ya nombraron el sitio/contrato (ej. tras contar_servicios_sla) o con texto_objetivo / id_objetivo. fecha_referencia = cualquier día del mes (ej. junio → 2026-06-15). Si el hilo previo citó **CLIENTE - OBJETIVO**, pasá texto_objetivo con el nombre del objetivo.',
+        description: 'Para **un** objetivo: «cuántas horas a planificar», horas vendidas SLA vs planificadas en un mes. Si son **varios** contratos listados en el chat, usá **resumen_horas_sla_varios_objetivos** en su lugar. fecha_referencia = cualquier día del mes (ej. junio → 2026-06-15). texto_objetivo = nombre del sitio.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -160,6 +160,33 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'resumen_horas_sla_varios_objetivos',
+        description: 'Cuando el usuario pide SLA/horas de **varios** contratos a la vez (ej. tras listar «CASISA - Obrador», «Lotería - …» y pregunta «qué SLA tiene cada uno», «horas de cada servicio»): devuelve por cada objetivo horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Pasá textos_objetivo con el nombre del **objetivo** de cada línea (o cliente+objetivo). Si no tenés la lista, usá todos_servicios_activos_mes=true para todos los SLA activos del mes. fecha_referencia = día del mes a analizar.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                textos_objetivo: {
+                    type: generative_ai_1.SchemaType.ARRAY,
+                    items: { type: generative_ai_1.SchemaType.STRING },
+                    description: 'Nombres de objetivo/sede, uno por contrato listado en el chat.',
+                },
+                fecha_referencia: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'YYYY-MM-DD dentro del mes; omitir = hoy del cliente.',
+                },
+                todos_servicios_activos_mes: {
+                    type: generative_ai_1.SchemaType.BOOLEAN,
+                    description: 'Si true, consulta todos los contratos SLA del mes (hasta limite).',
+                },
+                limite: {
+                    type: generative_ai_1.SchemaType.NUMBER,
+                    description: 'Máximo de objetivos a consultar (default 12, máx 20).',
+                },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'resumen_horas_empleado_periodo',
         description: 'Para «cuántas horas trabajó / tiene planificadas» un colaborador en un rango (semana, quincena, mes): agrega turnos Firestore del legajo con totales horas_planificadas_cobertura (excluye francos/licencias/RET según códigos estándar) y horas_reales_fichadas_sumadas cuando hay fichada y turno completado. Usar después de buscar_empleados_por_nombre si no hay id. Rango máximo ~98 días. No es liquidación legal: remitir a Reportes si piden noche/feriado/CCT fino.',
         parameters: {
@@ -175,20 +202,6 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
             required: ['fecha_desde', 'fecha_hasta'],
         },
     },
-    {
-        name: 'contar_empleados_plantilla_empresa',
-        description: 'Para «cuántos empleados en nómina», «vigiladores en plantilla», tarjeta del panel: devuelve cuenta_para_tarjeta_panel_empleados_nomina (status explícito activo/activo/activa, igual que el dashboard). cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado es el criterio amplio de lista RRHH (incluye legajos sin estado). NO sustituye «cuántos tienen turno hoy en planificación» salvo que lo pidan explícito.',
-        parameters: {
-            type: generative_ai_1.SchemaType.OBJECT,
-            properties: {
-                fecha_referencia: {
-                    type: generative_ai_1.SchemaType.STRING,
-                    description: 'YYYY-MM-DD para rotular «hoy» / mes (default fechaReferenciaCliente). No filtra altas/bajas históricas por fecha si el legajo no tiene esos campos.',
-                },
-            },
-            required: [],
-        },
-    },
 ];
-exports.ASSISTANT_TOOL_ROUNDS_MAX = 6;
+exports.ASSISTANT_TOOL_ROUNDS_MAX = 4;
 //# sourceMappingURL=assistantToolDeclarations.js.map
