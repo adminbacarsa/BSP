@@ -446,25 +446,6 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         if (wdT2.length > capT2) wdT2.slice(capT2).forEach(d => wdSet.delete(d));
     });
 
-    // ── PASO 3c: Tope mensual para puestos limitados (L-V u otros no rotativos) ──
-    //
-    // PASO 3b ya aplica el cap por tramo para rotativos.
-    // Para puestos limitados (sin tramos CCT) el cap es sobre el mes completo:
-    // máximo floor((200 - priorHoras) / hrsPerDía) días hábiles en total.
-    ctx.employees.forEach(emp => {
-        if (!limitedEmps.has(emp.id)) return;
-        const band = empBand[emp.id];
-        const code = (band ?? '').toUpperCase();
-        const hrsPerDay = _hint[code] ?? SH_HRS[code] ?? 8;
-        if (hrsPerDay <= 0) return;
-        const wdSet = cycleWorkDays[emp.id];
-        if (!wdSet || wdSet.size === 0) return;
-        const prior = Math.max(0, ctx.empMonthlyInitial[emp.id] ?? 0);
-        const totalCap = Math.floor(Math.max(0, HARD_MAX_HOURS - prior) / hrsPerDay);
-        const allDays = [...wdSet].sort();
-        if (allDays.length > totalCap) allDays.slice(totalCap).forEach(d => wdSet.delete(d));
-    });
-
     // ── GENERACIÓN ─────────────────────────────────────────────────────────
     const assignments: V2Assignment[] = [];
     const rt: Record<string, EmpState> = {};

@@ -368,6 +368,8 @@ export default function PlanificacionPage() {
         ctx: import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext;
     } | null>(null);
     const [autoV2Fixing, setAutoV2Fixing] = useState(false);
+    const [autoWizardStep, setAutoWizardStep] = useState<'idle'|'detecting'|'verified'|'done'>('idle');
+    const [autoWizardPersonalize, setAutoWizardPersonalize] = useState(false);
     const [slaDebug, setSlaDebug] = useState<{ id: string; data: any } | null>(null);
     const [slaDebugLoading, setSlaDebugLoading] = useState(false);
     const [hoursMode, setHoursMode] = useState<'mes' | 'cct'>('mes');
@@ -2493,9 +2495,10 @@ export default function PlanificacionPage() {
     /**
      * Viabilidad del cronograma (motor COSP) antes de generar.
      */
-    const generateAutoScheduleV2 = async () => {
+    const generateAutoScheduleV2 = async (cyclesOverride?: string[]) => {
         if (!selectedObjective) return;
-        if (!autoCycles.length) { toast.error('Seleccioná al menos un esquema de turnos'); return; }
+        const cyclesToUse = cyclesOverride ?? autoCycles;
+        if (!cyclesToUse.length) { toast.error('Seleccioná al menos un esquema de turnos'); return; }
         if (!positionStructure.length) { toast.error('No hay puestos/SLA configurados para este objetivo'); return; }
         if (!displayedEmployees.length) { toast.error('No hay empleados en la dotación'); return; }
 
@@ -2552,7 +2555,7 @@ export default function PlanificacionPage() {
                 empMonthlyInitial,
                 absences,
                 slaVendidas,
-                autoCycles,
+                autoCycles: cyclesToUse,
                 budgetMode: autoV2BudgetMode,
                 objectiveId: selectedObjective,
                 objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
@@ -2565,13 +2568,9 @@ export default function PlanificacionPage() {
             await new Promise<void>((r) => setTimeout(r, 150));
             setAutoV2Report(result.feasibility);
 
-            if (!result.feasibility.ok) {
-                toast.error('Plan no viable — revisá el diagnóstico antes de generar', { duration: 4000 });
-            } else {
-                toast.success(
-                    `Viabilidad OK: objetivo ${Math.round(result.feasibility.metrics.effectiveTargetHours)}h vs oferta ${Math.round(result.feasibility.metrics.offerHours)}h. Podés generar el cronograma.`,
-                    { duration: 4500 }
-                );
+            // Auto-seleccionar el ciclo óptimo detectado (solo si no está en modo personalizar)
+            if (!autoWizardPersonalize && result.feasibility.metrics.cycleUsed) {
+                setAutoCycles([result.feasibility.metrics.cycleUsed]);
             }
         } catch (e:any) {
             toast.error('Error al analizar viabilidad');
@@ -2581,6 +2580,22 @@ export default function PlanificacionPage() {
             setAutoV2Progress(null);
         }
     };
+
+    // Auto-run viabilidad cuando el wizard abre; resetea al cerrar
+    useEffect(() => {
+        if (!showAutoV2Modal) {
+            setAutoWizardStep('idle');
+            setAutoWizardPersonalize(false);
+            setAutoV2Report(null);
+            setAutoV2GenStats(null);
+            return;
+        }
+        setAutoWizardStep('detecting');
+        generateAutoScheduleV2(['4+2','5+1','6+1','6+2'])
+            .then(() => setAutoWizardStep('verified'))
+            .catch(() => setAutoWizardStep('idle'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showAutoV2Modal]);
 
     /**
      * Genera asignaciones y las vuelca a pendingChanges (motor COSP).
@@ -2829,35 +2844,18 @@ export default function PlanificacionPage() {
 
             await bumpAutoV2Progress(100, 'Listo');
             await new Promise<void>((r) => setTimeout(r, 180));
-            setShowAutoV2Modal(false);
-
-            const uncov = coverage.coverage.uncoveredSlots > 0 ? ` · ⚠ ${coverage.coverage.uncoveredSlots} slots sin cubrir` : '';
-            const over  = coverage.overHours.length > 0 ? ` · ⚠ ${coverage.overHours.length} empleados >200h ciclo` : '';
-            const idleN = gen.stats.idleEmployeeIds?.length || 0;
-            const idle  = idleN > 0 ? ` · 💤 ${idleN} en RET mes entero` : '';
-            const lic   = coverage.licenseConflicts.length > 0 ? ` · ⛔ ${coverage.licenseConflicts.length} conflictos con licencias` : '';
-            const rest  = coverage.restViolations.length > 0 ? ` · ⛔ ${coverage.restViolations.length} descansos rotos` : '';
 
             if (written === 0 && skipped > 0) {
                 toast.error(
                     `No se generó nada: las ${skipped} celdas calculadas ya estaban ocupadas. ` +
-                    `Activá "Sobreescribir celdas ya asignadas" en Automatizar y ejecutá de nuevo.`,
+                    `Activá "Sobreescribir" en Personalizar y ejecutá de nuevo.`,
                     { duration: 8000 }
                 );
             } else if (written === 0) {
-                toast.error('No se generó el cronograma. Revisá ciclos seleccionados, ausencias y dotación.', { duration: 6000 });
-            } else if (!coverage.ok) {
-                // Hay slots/descansos/licencias rotos: avisamos y abrimos el reporte
-                toast.warning(
-                    `${written} celdas generadas con avisos. Revisá la Verificación de cobertura.${uncov}${over}${lic}${rest}`,
-                    { duration: 7500 }
-                );
-                setShowCoverageModal(true);
+                toast.error('No se generó el cronograma. Revisá ciclos, ausencias y dotación.', { duration: 6000 });
             } else {
-                toast.success(
-                    `Automático: ${written} celdas · ${Math.round(gen.stats.totalBillableHours)}h facturables (objetivo ${Math.round(gen.stats.targetHours)}h)${skipped>0?` · ${skipped} omitidas`:''}${idle}. Cobertura ✓`,
-                    { duration: 6500 }
-                );
+                // Mostrar resultado inline en el wizard (no cerrar el modal)
+                setAutoWizardStep('done');
             }
         } catch (e:any) {
             toast.error('Error al generar el cronograma automático');
@@ -5306,66 +5304,117 @@ export default function PlanificacionPage() {
                                 <span className="text-slate-800">Automatizar cronograma</span>
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">COSP</span>
                             </h3>
-                            <p className="text-xs text-slate-400 font-medium mb-4">
-                                Primero se calcula la <strong>viabilidad</strong> (dotación, CCT 200h, SLA). Si no cierra, ves el diagnóstico y no se modifica la grilla. Si cierra, podés <strong>generar</strong> el mes en pendientes (revisá antes de guardar).
-                            </p>
+                            {/* Indicador de etapas */}
+                            <div className="flex items-center mt-2 mb-4">
+                                {(['Detectar','Verificar','Generar','Listo'] as const).map((label, i) => {
+                                    const stepNum = autoV2Generating ? 2 : ({'idle':-1,'detecting':0,'verified':1,'done':3} as Record<string,number>)[autoWizardStep] ?? -1;
+                                    const done = i < stepNum; const active = i === stepNum;
+                                    return (
+                                        <React.Fragment key={label}>
+                                            {i > 0 && <div className={`flex-1 h-0.5 mx-1 ${done ? 'bg-emerald-400' : 'bg-slate-200'}`}/>}
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${active ? 'bg-amber-500 text-white' : done ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>{done ? '✓' : i+1}</div>
+                                                <span className={`text-[9px] font-bold whitespace-nowrap ${active ? 'text-amber-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>{label}</span>
+                                            </div>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
 
                             <div className="space-y-4">
-                                <div>
-                                    <label className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2 block">Esquema de ciclo (4+2, 6+1, etc.)</label>
-                                    <div className="grid grid-cols-4 gap-1.5">
-                                        {['4+2','5+1','6+1','6+2'].map(key => {
-                                            const checked = autoCycles.includes(key);
-                                            return (
-                                                <button key={key} type="button"
-                                                    onClick={() => setAutoCycles(prev => checked ? prev.filter(c => c!==key) : [...prev, key])}
-                                                    className={`py-1.5 rounded-lg text-xs font-black border-2 transition-colors ${checked ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
-                                                    {key}
+
+                            {/* Etapa 1: detectando */}
+                            {autoWizardStep === 'detecting' && (
+                                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                                    <Loader2 size={32} className="animate-spin text-amber-400"/>
+                                    <p className="text-sm font-bold text-slate-600">Detectando configuración óptima…</p>
+                                    <p className="text-[11px] text-slate-400">Analizando dotación, SLA y ciclos CCT 422/05</p>
+                                </div>
+                            )}
+
+                            {/* Configuración detectada */}
+                            {(autoWizardStep === 'verified' || autoWizardStep === 'done') && autoV2Report && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-wide text-amber-700 mb-0.5">Configuración detectada</div>
+                                            <div className="text-sm font-black text-slate-800">
+                                                Ciclo {autoV2Report.metrics.cycleUsed}
+                                                <span className="text-slate-400 font-medium mx-1">·</span>
+                                                {autoRotateShifts ? 'Rotativo' : 'Banda fija'}
+                                                <span className="text-slate-400 font-medium mx-1">·</span>
+                                                {autoV2BudgetMode === 'cct' ? 'CCT por tramos' : 'Calendario'}
+                                            </div>
+                                        </div>
+                                        <button type="button"
+                                            onClick={() => setAutoWizardPersonalize(p => !p)}
+                                            className="text-[11px] font-black text-amber-700 hover:text-amber-900 flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg hover:bg-amber-100 transition-colors">
+                                            {autoWizardPersonalize ? <ChevronUp size={11}/> : <ChevronDown size={11}/>} Personalizar
+                                        </button>
+                                    </div>
+                                    {autoWizardPersonalize && (
+                                        <div className="mt-3 pt-3 border-t border-amber-200 space-y-2">
+                                            <div>
+                                                <label className="text-[10px] font-black text-amber-900 uppercase tracking-wide mb-1.5 block">Esquema de ciclo</label>
+                                                <div className="grid grid-cols-4 gap-1.5">
+                                                    {['4+2','5+1','6+1','6+2'].map(key => {
+                                                        const checked = autoCycles.includes(key);
+                                                        return (
+                                                            <button key={key} type="button"
+                                                                onClick={() => setAutoCycles(prev => checked ? prev.filter(c => c!==key) : [...prev, key])}
+                                                                className={`py-1.5 rounded-lg text-xs font-black border-2 transition-colors ${checked ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600 hover:border-amber-400'}`}>
+                                                                {key}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {autoCycles.length === 0 && <p className="text-[11px] text-red-500 font-bold mt-1">Seleccioná al menos un esquema.</p>}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                <button type="button" onClick={() => setAutoRotateShifts(false)}
+                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${!autoRotateShifts ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
+                                                    Banda fija<div className={`text-[9px] font-bold ${!autoRotateShifts ? 'opacity-80' : 'opacity-50'}`}>M todo el mes, T todo el mes…</div>
                                                 </button>
-                                            );
-                                        })}
-                                    </div>
-                                    {autoCycles.length === 0 && <p className="text-[11px] text-red-500 font-bold mt-1">Seleccioná al menos un esquema.</p>}
+                                                <button type="button" onClick={() => setAutoRotateShifts(true)}
+                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoRotateShifts ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
+                                                    Rotativo<div className={`text-[9px] font-bold ${autoRotateShifts ? 'opacity-80' : 'opacity-50'}`}>M→T→N→M… por ciclo</div>
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
+                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
+                                                    CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>1→25 cola + 26→fin nuevo</div>
+                                                </button>
+                                                <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
+                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
+                                                    Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas (sin cola)</div>
+                                                </button>
+                                            </div>
+                                            <div className="flex items-center gap-2 py-0.5">
+                                                <span className="text-[10px] font-black text-amber-900 flex-1">Sobreescribir celdas ya asignadas</span>
+                                                <button type="button" onClick={() => setAutoOverwrite(p => !p)}
+                                                    className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
+                                                    <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
+                                                </button>
+                                            </div>
+                                            <button type="button"
+                                                onClick={() => {
+                                                    setAutoWizardStep('detecting');
+                                                    generateAutoScheduleV2()
+                                                        .then(() => setAutoWizardStep('verified'))
+                                                        .catch(() => setAutoWizardStep('idle'));
+                                                }}
+                                                disabled={autoV2Loading || autoCycles.length === 0}
+                                                className="w-full py-1.5 rounded-lg text-[11px] font-black text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                                <RefreshCw size={11}/> Recalcular con esta configuración
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
+                            )}
 
-                                <div>
-                                    <label className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2 block">Modo de turno</label>
-                                    <div className="grid grid-cols-2 gap-1.5">
-                                        <button type="button" onClick={() => setAutoRotateShifts(false)}
-                                            className={`py-2 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${!autoRotateShifts ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                            Banda fija
-                                            <div className={`text-[9px] font-bold ${!autoRotateShifts ? 'text-amber-600' : 'text-slate-400'}`}>M todo el mes, T todo el mes, N todo el mes</div>
-                                        </button>
-                                        <button type="button" onClick={() => setAutoRotateShifts(true)}
-                                            className={`py-2 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${autoRotateShifts ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                            Rotativo
-                                            <div className={`text-[9px] font-bold ${autoRotateShifts ? 'text-amber-600' : 'text-slate-400'}`}>M→T→N→M… cada bloque de ciclo</div>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="text-xs font-black text-slate-500 uppercase tracking-wide mb-2 block">Cupo del empleado</label>
-                                    <div className="grid grid-cols-2 gap-1.5">
-                                        <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
-                                            className={`py-1.5 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                            CCT por tramos
-                                            <div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'text-amber-600' : 'text-slate-400'}`}>1→25 con cola + 26→fin ciclo nuevo</div>
-                                        </button>
-                                        <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
-                                            className={`py-1.5 rounded-lg text-[11px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                                            Calendario simple
-                                            <div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'text-amber-600' : 'text-slate-400'}`}>200h netas por persona (sin cola)</div>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <button onClick={generateAutoScheduleV2} disabled={autoV2Loading || autoCycles.length === 0}
-                                    className="w-full py-2.5 rounded-xl text-sm font-black text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-                                    {autoV2Loading ? <><Loader2 size={14} className="animate-spin"/> Analizando viabilidad...</> : <>Calcular viabilidad</>}
-                                </button>
-
-                                {autoV2Report && (
+                            {/* Etapa 2: reporte de viabilidad */}
+                            {autoWizardStep === 'verified' && autoV2Report && (
                                     <div className={`rounded-xl p-3 border-2 ${autoV2Report.ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50'}`}>
                                         <p className={`text-sm font-black mb-1 ${autoV2Report.ok ? 'text-emerald-800' : 'text-rose-800'}`}>
                                             {autoV2Report.ok ? '✓ Plan viable' : '✗ Plan NO viable'}
@@ -5614,6 +5663,46 @@ export default function PlanificacionPage() {
                                         )}
                                     </div>
                                 )}
+
+                            {/* Etapa 4: cronograma generado — resumen inline */}
+                            {autoWizardStep === 'done' && (
+                                <div className={`rounded-xl p-3 border-2 ${autoV2Coverage?.ok !== false ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+                                    <p className={`text-sm font-black mb-2 ${autoV2Coverage?.ok !== false ? 'text-emerald-800' : 'text-amber-800'}`}>
+                                        {autoV2Coverage?.ok !== false ? '✓ Cronograma generado y verificado' : '⚠ Cronograma generado con avisos'}
+                                    </p>
+                                    {autoV2GenStats && (
+                                        <div className="grid grid-cols-3 gap-2 mb-2">
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
+                                                <div className="text-[9px] font-black uppercase text-slate-500">Hs facturables</div>
+                                                <div className="text-base font-black text-indigo-700">{Math.round(autoV2GenStats.totalBillableHours)}<span className="text-xs">h</span></div>
+                                            </div>
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
+                                                <div className="text-[9px] font-black uppercase text-slate-500">Slots cubiertos</div>
+                                                <div className={`text-base font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                    {autoV2Coverage ? `${autoV2Coverage.coverage.coveredSlots}/${autoV2Coverage.coverage.totalSlots}` : '—'}
+                                                </div>
+                                            </div>
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
+                                                <div className="text-[9px] font-black uppercase text-slate-500">Sin cubrir</div>
+                                                <div className={`text-base font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                                    {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {autoV2Coverage && !autoV2Coverage.ok && autoV2Coverage.coverage.uncoveredSlots > 0 && (
+                                        <p className="text-[11px] font-bold text-amber-800 mb-1">
+                                            {autoV2Coverage.coverage.uncoveredSlots} slot(s) sin cubrir. Usá "Reprocesar errores" para intentar resolverlos.
+                                        </p>
+                                    )}
+                                    {autoV2Coverage && (autoV2Coverage.restViolations.length > 0 || autoV2Coverage.licenseConflicts.length > 0) && (
+                                        <p className="text-[11px] font-bold text-rose-700 mb-1">
+                                            ⛔ {autoV2Coverage.restViolations.length + autoV2Coverage.licenseConflicts.length} conflictos de descanso/licencia. Verificá la grilla.
+                                        </p>
+                                    )}
+                                    <p className="text-[10px] text-slate-500 font-bold mt-1">El cronograma está en pendientes. Revisá la grilla y guardá cuando estés listo.</p>
+                                </div>
+                            )}
                             </div>
 
                             <div className="mt-4 border-t border-slate-200 pt-3">
@@ -5668,14 +5757,25 @@ export default function PlanificacionPage() {
                                 >
                                     Cerrar
                                 </button>
-                                <button
-                                    onClick={applyAutoScheduleV2}
-                                    disabled={!autoV2Report?.ok || autoV2Generating}
-                                    title={autoV2Report?.ok ? 'Generar plan respetando 200h por ciclo CCT' : 'Calculá viabilidad y debe dar VIABLE'}
-                                    className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    {autoV2Generating ? <><Loader2 size={14} className="animate-spin"/> Generando…</> : <>Generar cronograma</>}
-                                </button>
+                                {autoWizardStep !== 'done' && (
+                                    <button
+                                        onClick={applyAutoScheduleV2}
+                                        disabled={!autoV2Report?.ok || autoV2Generating || autoWizardStep !== 'verified'}
+                                        title={autoV2Report?.ok ? 'Generar plan respetando 200h por ciclo CCT' : 'Esperá a que termine la detección'}
+                                        className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {autoV2Generating ? <><Loader2 size={14} className="animate-spin"/> Generando…</> : <>Generar cronograma</>}
+                                    </button>
+                                )}
+                                {autoWizardStep === 'done' && autoV2Coverage && !autoV2Coverage.ok && autoV2LastRun && (
+                                    <button
+                                        onClick={reprocessAutoIssues}
+                                        disabled={autoV2Fixing}
+                                        className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-amber-600 hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {autoV2Fixing ? <><Loader2 size={14} className="animate-spin"/> Reprocesando…</> : <>Reprocesar errores</>}
+                                    </button>
+                                )}
                             </div>
                             </div>
                         </div>
