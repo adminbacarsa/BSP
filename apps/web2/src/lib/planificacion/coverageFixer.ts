@@ -33,6 +33,19 @@ const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 }
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
+const WEEK_HARD_CAP = 48; // CCT 422/05 — nunca superar 48h en una semana ISO
+
+function isoWeekKey(dateStr: string): string {
+    const d = new Date(dateStr);
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const day = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - day + 3);
+    const ft = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const wn = 1 + Math.round(
+        ((t.getTime() - ft.getTime()) / 86400000 - 3 + ((ft.getUTCDay() + 6) % 7)) / 7
+    );
+    return `${t.getUTCFullYear()}-W${String(wn).padStart(2, '0')}`;
+}
 
 function billableHoursByEmp(assignments: V2Assignment[]): Map<string, number> {
     const m = new Map<string, number>();
@@ -120,7 +133,7 @@ function makeGetShift(
     };
 }
 
-/** Verifica si un empleado puede tomar un turno en una fecha sin romper descansos ni licencias. */
+/** Verifica si un empleado puede tomar un turno en una fecha sin romper descansos, licencias ni el tope semanal. */
 function canTakeShift(
     empId: string,
     dateStr: string,
@@ -130,14 +143,26 @@ function canTakeShift(
     cfg: AgreementRestConfig,
 ): boolean {
     const code = String(shiftCode || '').toUpperCase();
-    // No puede si está con licencia activa
     if (ctx.absences[empId]?.has(dateStr)) return false;
+
+    // Tope 48h/semana CCT 422/05
+    const shiftHrs = SHIFT_HRS[code] || 8;
+    const targetWeek = isoWeekKey(dateStr);
+    let weekUsed = 0;
+    for (const a of assignments) {
+        if (a.empId !== empId) continue;
+        if (isoWeekKey(a.dateStr) !== targetWeek) continue;
+        const c = String(a.code || '').toUpperCase();
+        if (c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c)) continue;
+        weekUsed += Number(a.hours) || SHIFT_HRS[c] || 0;
+    }
+    if (weekUsed + shiftHrs > WEEK_HARD_CAP + 1e-6) return false;
+
     const startResolved = DEFAULT_START[code] || '07:00';
-    const hrs = SHIFT_HRS[code] || 8;
     const violation = checkRestBetweenShifts({
         empId,
         targetDateStr: dateStr,
-        proposed: { code, startTime: startResolved, hours: hrs },
+        proposed: { code, startTime: startResolved, hours: shiftHrs },
         getShift: makeGetShift(assignments, ctx.absences),
         cfg,
     });

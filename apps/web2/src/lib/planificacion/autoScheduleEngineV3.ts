@@ -530,6 +530,13 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         }) === null;
     };
 
+    // CCT 422/05: tope duro 48h/semana — se aplica antes de cualquier writeAssign.
+    const passesWeekCap = (empId: string, dateStr: string, hrs: number): boolean => {
+        const wk = isoWeekKey(new Date(dateStr));
+        const used = rt[empId]?.weekHours[wk] ?? 0;
+        return used + hrs <= 48 + 1e-6;
+    };
+
     const capBlockedMap = new Map<string, CapOverflowSlot[]>();
     const capBlockedSeen = new Set<string>();
 
@@ -625,6 +632,7 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         continue;
                     }
                     if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                    if (!passesWeekCap(empId, dateStr, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
                     coveredByBand[sCode]++;
                 }
@@ -660,6 +668,7 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
                     if (used + sHrs > HARD_MAX_HOURS) continue;
                     if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
+                    if (!passesWeekCap(empId, dateStr, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
                     coveredByBand[sCode]++;
                 }
@@ -780,6 +789,7 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                             : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
                         if (used + sHrs > HARD_MAX_HOURS) continue;
                         if (!passesRest(emp.id, dateStr, gap.code, sStart, sHrs)) continue;
+                        if (!passesWeekCap(emp.id, dateStr, sHrs)) continue;
                         writeAssign(emp.id, dateStr, gap.positionName, gap.code,
                             sh.name || gap.code, sHrs, sStart, inCurrent, sEnd);
                         gap.missing--;
@@ -792,7 +802,10 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
-            const bandCode = limitedEmps.has(emp.id) && empBand[emp.id] ? empBand[emp.id]! : 'RET';
+            const rawBand = limitedEmps.has(emp.id) && empBand[emp.id] ? empBand[emp.id]! : 'RET';
+            const bandHrs = isNonWork(rawBand) ? 0 : (SH_HRS[rawBand.toUpperCase()] ?? _hint[rawBand.toUpperCase()] ?? 8);
+            const bandOk = bandHrs === 0 || passesWeekCap(emp.id, dateStr, bandHrs);
+            const bandCode = bandOk ? rawBand : 'RET';
             const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
             assignments.push({
                 empId: emp.id, dateStr, positionName: '',
