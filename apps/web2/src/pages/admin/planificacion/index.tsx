@@ -5307,7 +5307,7 @@ export default function PlanificacionPage() {
                             {/* Indicador de etapas */}
                             <div className="flex items-center mt-2 mb-4">
                                 {(['Detectar','Verificar','Generar','Listo'] as const).map((label, i) => {
-                                    const stepNum = autoV2Generating ? 2 : ({'idle':-1,'detecting':0,'verified':1,'done':3} as Record<string,number>)[autoWizardStep] ?? -1;
+                                    const stepNum = autoV2Generating ? 2 : ({'idle':-1,'detecting':0,'verified':1,'done':4} as Record<string,number>)[autoWizardStep] ?? -1;
                                     const done = i < stepNum; const active = i === stepNum;
                                     return (
                                         <React.Fragment key={label}>
