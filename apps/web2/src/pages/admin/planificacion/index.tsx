@@ -2839,15 +2839,24 @@ export default function PlanificacionPage() {
             let finalAssignments = gen.assignments;
             let coverage = verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
 
-            // ── Auto-reproceso: si hay slots sin cubrir, ejecutar el fixer inline ──
-            if (coverage.coverage.uncoveredSlots > 0) {
-                await bumpAutoV2Progress(88, 'Reprocesando slots sin cubrir automáticamente…');
+            // ── Auto-reproceso: loop hasta converger (slots + descansos + licencias) ──
+            const NON_BILLABLE_FIX = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
+            const countIssues = (r: typeof coverage) =>
+                r.coverage.uncoveredSlots + r.restViolations.length + r.licenseConflicts.length;
+
+            let prevIssues = countIssues(coverage);
+            const MAX_REPRO_PASSES = 6;
+            for (let pass = 0; pass < MAX_REPRO_PASSES && prevIssues > 0; pass++) {
+                await bumpAutoV2Progress(
+                    Math.min(97, 88 + pass * 2),
+                    `Reprocesando (${pass + 1}/${MAX_REPRO_PASSES})…`,
+                );
                 await new Promise<void>((r) => setTimeout(r, 0));
+
                 const fixResult = fixScheduleIssues(verifyCtx, finalAssignments, gen.stats, coverage, 5);
                 finalAssignments = fixResult.assignments;
                 coverage = fixResult.report;
 
-                const NON_BILLABLE_FIX = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
                 for (const a of fixResult.assignments) {
                     const key = `${a.empId}_${a.dateStr}`;
                     if (isDateLocked(a.dateStr)) continue;
@@ -2869,8 +2878,11 @@ export default function PlanificacionPage() {
                         ...(a.isReten ? { isReten: true } : {}),
                     };
                 }
-                // Actualizar pendingChanges con las correcciones del fixer
                 setPendingChanges({ ...newChanges });
+
+                const newIssues = countIssues(coverage);
+                if (newIssues >= prevIssues) break; // sin progreso: detener
+                prevIssues = newIssues;
             }
 
             setAutoV2Coverage(coverage);
