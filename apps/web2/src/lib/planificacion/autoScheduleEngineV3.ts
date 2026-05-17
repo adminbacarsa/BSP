@@ -103,7 +103,7 @@ function shiftHrs(s: V2ShiftDef, hint?: Record<string, number>): number {
 }
 
 function isoWeekKey(d: Date): string {
-    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
     const day = (t.getUTCDay() + 6) % 7;
     t.setUTCDate(t.getUTCDate() - day + 3);
     const ft = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
@@ -804,7 +804,10 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
 
             const rawBand = limitedEmps.has(emp.id) && empBand[emp.id] ? empBand[emp.id]! : 'RET';
             const bandHrs = isNonWork(rawBand) ? 0 : (SH_HRS[rawBand.toUpperCase()] ?? _hint[rawBand.toUpperCase()] ?? 8);
-            const bandOk = bandHrs === 0 || passesWeekCap(emp.id, dateStr, bandHrs);
+            const bandStart = SH_START[rawBand.toUpperCase()] ?? '07:00';
+            const bandOk = bandHrs === 0
+                || (passesWeekCap(emp.id, dateStr, bandHrs)
+                    && passesRest(emp.id, dateStr, rawBand, bandStart, bandHrs));
             const bandCode = bandOk ? rawBand : 'RET';
             const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
             assignments.push({

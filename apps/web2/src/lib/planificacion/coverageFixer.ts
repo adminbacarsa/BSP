@@ -37,7 +37,7 @@ const WEEK_HARD_CAP = 48; // CCT 422/05 — nunca superar 48h en una semana ISO
 
 function isoWeekKey(dateStr: string): string {
     const d = new Date(dateStr);
-    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
     const day = (t.getUTCDay() + 6) % 7;
     t.setUTCDate(t.getUTCDate() - day + 3);
     const ft = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
@@ -123,6 +123,8 @@ function makeGetShift(
         const a = idx.get(`${empId}__${dateStr}`);
         if (!a) return null;
         const c = String(a.code || '').toUpperCase();
+        // Sin puesto asignado → registro informativo (standby/banda), tratar como RET
+        if (!a.positionName) return { code: 'RET', startTime: '00:00', hours: 0 };
         // RET / francos no son turnos trabajados: 0 horas, sin start laboral
         const isNonWork = c === 'RET' || FRANCO_CODES.has(c);
         return {

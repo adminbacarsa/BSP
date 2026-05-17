@@ -142,6 +142,8 @@ export function buildAssignmentGetShift(assignments: V2Assignment[], absences: V
         const a = byKey.get(`${empId}__${dateStr}`);
         if (!a) return null;
         const c = String(a.code || '').toUpperCase();
+        // Sin puesto asignado → es un registro informativo (standby/banda), no cuenta como turno trabajado
+        if (!a.positionName) return { code: 'RET', startTime: '00:00', hours: 0 };
         // RET / francos / licencias no son turnos trabajados: 0 horas
         const isNonWork = c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c);
         return {
@@ -228,6 +230,8 @@ export function verifyScheduleCoverage(
     assignments.forEach((a) => {
         const c = String(a.code || '').toUpperCase();
         if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c) || c === 'RET') return;
+        // Assignments sin puesto son registros informativos (standby/banda), no cuentan para descanso
+        if (!a.positionName) return;
         const startResolved = a.startTime || DEFAULT_START[c] || '07:00';
         const hrs = Number(a.hours) || SHIFT_HRS[c] || 8;
         // Puestos L-V/custom: su horario está fijo por el servicio, no aplica tope consecutivo del ciclo.
