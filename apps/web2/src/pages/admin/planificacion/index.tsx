@@ -344,6 +344,7 @@ export default function PlanificacionPage() {
     /** Barra de progreso en el modal de automatización (viabilidad / generar). */
     const [autoV2Progress, setAutoV2Progress] = useState<{ pct: number; label: string } | null>(null);
     const [autoV2Report, setAutoV2Report] = useState<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
+    const autoV2ReportRef = React.useRef<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const [autoV2BudgetMode, setAutoV2BudgetMode] = useState<'cct'|'calendar'>('cct');
     const [autoV2ShowEmpDetail, setAutoV2ShowEmpDetail] = useState(false);
     // Stats post-generación (capacidad CCT por empleado)
@@ -2589,6 +2590,7 @@ export default function PlanificacionPage() {
 
             await bumpAutoV2Progress(100, 'Listo');
             await new Promise<void>((r) => setTimeout(r, 150));
+            autoV2ReportRef.current = result.feasibility;
             setAutoV2Report(result.feasibility);
 
             // Auto-seleccionar el ciclo óptimo detectado (solo si no está en modo personalizar)
@@ -2622,6 +2624,7 @@ export default function PlanificacionPage() {
         if (!showAutoV2Modal) {
             setAutoWizardStep('idle');
             setAutoWizardPersonalize(false);
+            autoV2ReportRef.current = null;
             setAutoV2Report(null);
             setAutoV2GenStats(null);
             return;
@@ -2635,7 +2638,7 @@ export default function PlanificacionPage() {
      */
     const applyAutoScheduleV2 = async () => {
         if (!selectedObjective) return;
-        if (!autoV2Report?.ok) { toast.error('Calculá viabilidad primero (debe dar viable)'); return; }
+        if (!autoV2ReportRef.current?.ok) { toast.error('Calculá viabilidad primero (debe dar viable)'); return; }
         setAutoV2Generating(true);
         setAutoV2Progress({ pct: 4, label: 'Iniciando generación…' });
         try {
