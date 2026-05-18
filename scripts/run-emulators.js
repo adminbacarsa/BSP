@@ -88,6 +88,45 @@ if (process.platform === 'win32') {
 const skipFunctions =
   process.argv.includes('--without-functions') || process.env.COSP_EMULATORS_NO_FUNCTIONS === '1';
 
+const functionsDir = path.join(projectRoot, 'apps', 'functions');
+
+function functionsEnvHasGeminiKey() {
+  for (const name of ['.env', '.env.local']) {
+    const p = path.join(functionsDir, name);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const text = fs.readFileSync(p, 'utf8');
+      const m = text.match(/^\s*GEMINI_API_KEY\s*=\s*(\S+)/m);
+      if (m && m[1] && m[1] !== 'your-key-here') return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return Boolean((process.env.GEMINI_API_KEY || '').trim());
+}
+
+if (!skipFunctions) {
+  if (!functionsEnvHasGeminiKey()) {
+    logErr(
+      '[emulators] AVISO: sin GEMINI_API_KEY en apps/functions/.env — el asistente COSP y optimizePlanningGemini no responderán.',
+    );
+    logErr(
+      '[emulators] Local: firebase functions:secrets:access GEMINI_API_KEY > apps/functions/.env (línea GEMINI_API_KEY=...)',
+    );
+  }
+  logErr('[emulators] Compilando Functions (tsc)...');
+  const build = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
+    cwd: functionsDir,
+    env,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (build.status !== 0) {
+    logErr('[emulators] ERROR: falló npm run build en apps/functions');
+    process.exit(build.status ?? 1);
+  }
+}
+
 const backupsDir = path.join(projectRoot, 'backups');
 const latestDir = path.join(backupsDir, 'latest');
 fs.mkdirSync(backupsDir, { recursive: true });
