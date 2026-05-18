@@ -76,7 +76,9 @@ function autoSelectCycle(
     for (const c of CCT_CYCLES_8H) {
         if (empCount * c.cL >= slotsPerDay * (c.cL + c.cF)) return c;
     }
-    return { cL: 6, cF: 1 };
+    // Posición subdotada: ningún ciclo garantiza cobertura perfecta.
+    // Se respeta la selección del usuario en lugar de forzar 6+1.
+    return hint;
 }
 
 function isNonWork(code: string): boolean {
@@ -582,6 +584,36 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         return used + hrs <= 48 + 1e-6;
     };
 
+    // Códigos que reinician el bloque F-a-F (francos reales y licencias; RET no reinicia).
+    const FRANCO_BREAK_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+
+    // Horas facturadas desde el último franco (perspectiva jornada F-a-F).
+    // Permite detectar si el bloque ya llegó a 48 h → el día restante debe ser F, no RET.
+    const blockHoursSinceLastFranco = (empId: string, beforeDate: string): number => {
+        // Paso 1: encontrar el último franco antes de beforeDate
+        let lastFrancoDate: string | null = null;
+        for (const a of assignments) {
+            if (a.empId !== empId || a.dateStr >= beforeDate) continue;
+            if (FRANCO_BREAK_SET.has(a.code?.toUpperCase() ?? '')) {
+                if (lastFrancoDate === null || a.dateStr > lastFrancoDate) {
+                    lastFrancoDate = a.dateStr;
+                }
+            }
+        }
+        // Paso 2: sumar horas del bloque posterior al último franco
+        let hrs = 0;
+        for (const a of assignments) {
+            if (a.empId !== empId || a.dateStr >= beforeDate) continue;
+            if (lastFrancoDate !== null && a.dateStr <= lastFrancoDate) continue;
+            hrs += a.hours ?? 0;
+        }
+        // Si no se encontró franco en el mes actual, sumar horas arrastradas del mes anterior
+        if (lastFrancoDate === null) {
+            hrs += (ctx.prevMonthTrailingWorkDays?.[empId] ?? 0) * 8;
+        }
+        return hrs;
+    };
+
     const capBlockedMap = new Map<string, CapOverflowSlot[]>();
     const capBlockedSeen = new Set<string>();
 
@@ -983,8 +1015,11 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const bandOk = bandHrs === 0
                 || (passesWeekCap(emp.id, dateStr, bandHrs)
                     && passesRest(emp.id, dateStr, rawBand, bandStart, bandHrs));
-            // RET = 8h pasivas activables; si el cap semanal ya está lleno tampoco puede ser RET, va a F
-            const retCapOk = passesWeekCap(emp.id, dateStr, 8);
+            // RET = 8h pasivas activables; solo válido si:
+            // (a) el cap ISO-semana permite 8h más, Y
+            // (b) el bloque F-a-F aún no llegó a 48h (después de 48h el día restante es F, no RET).
+            const retCapOk = passesWeekCap(emp.id, dateStr, 8)
+                && blockHoursSinceLastFranco(emp.id, dateStr) < 48;
             const bandCode = bandOk ? rawBand : (retCapOk ? 'RET' : 'F');
             const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
             assignments.push({

@@ -16,7 +16,7 @@ const DEFAULT_LONG_REST = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
 /**
  * Códigos que ROMPEN la racha de trabajo consecutivo (francos reales y licencias).
  * RET (retén) NO está aquí: no es un franco — el empleado sigue disponible/comprometido.
- * En workStreakStatsBackward/Forward los turnos RET se saltean sin contar ni cortar.
+ * En workStreakStatsBackward/Forward los turnos RET cuentan como 1 día de trabajo (no cortan la racha).
  */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
 
