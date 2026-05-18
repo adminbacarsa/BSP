@@ -15,20 +15,42 @@ type ChatMsg = { role: 'user' | 'assistant'; content: string };
 const FAB_PX = 64;
 const FAB_GAP_PX = 14;
 const PANEL_W = 'min(100vw - 1.5rem, 28rem)';
-/** Escudo COSP (mismo asset que PWA / manifest). */
-const COSP_SHIELD_SRC = '/icons/icon.svg';
 const FAB_STORAGE_KEY = 'cosp-assistant-fab-pos';
 
-function CospShieldLogo({ size, className = '' }: { size: number; className?: string }) {
+/** Escudo COSP (SVG inline: no depende de /icons/* en public). */
+function CospShieldIcon({
+  size,
+  className = '',
+}: {
+  size: number;
+  className?: string;
+}) {
   return (
-    <img
-      src={COSP_SHIELD_SRC}
-      alt=""
+    <svg
       width={size}
       height={size}
-      className={`shrink-0 rounded-xl object-cover shadow-sm ring-1 ring-indigo-100 dark:ring-slate-600 ${className}`}
+      viewBox="0 0 48 48"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`shrink-0 ${className}`}
       aria-hidden
-    />
+    >
+      <path
+        d="M24 3.5 8.5 9.8v12.4c0 10.6 6.9 20.5 15.5 22.3 8.6-1.8 15.5-11.7 15.5-22.3V9.8L24 3.5z"
+        fill="currentColor"
+        fillOpacity={0.22}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M17.5 23.5 22 28l9.5-11.5"
+        stroke="currentColor"
+        strokeWidth="2.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 const DRAG_THRESHOLD_PX = 10;
@@ -327,7 +349,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         {open ? (
           <X size={26} strokeWidth={2.5} />
         ) : (
-          <CospShieldLogo size={40} className="ring-2 ring-white/40" />
+          <CospShieldIcon size={40} className="text-white drop-shadow-sm" />
         )}
       </button>
 
@@ -344,7 +366,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         >
           <div className="flex items-center justify-between gap-2 border-b border-indigo-100/80 bg-gradient-to-r from-indigo-50 to-violet-50 px-3 py-2 dark:border-slate-800 dark:from-indigo-950/50 dark:to-violet-950/30">
             <div className="flex min-w-0 items-center gap-2.5">
-              <CospShieldLogo size={36} />
+              <CospShieldIcon size={36} className="text-indigo-600 dark:text-indigo-300" />
               <div className="min-w-0">
                 <p className="text-[11px] font-black uppercase tracking-wide text-indigo-900 dark:text-indigo-100">
                   Asistente COSP
