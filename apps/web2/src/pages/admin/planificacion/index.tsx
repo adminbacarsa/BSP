@@ -28,6 +28,10 @@ import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCo
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
+import {
+    buildPlanningSnapshotFromGrid,
+    diffPlanningSnapshots,
+} from '@/lib/planificacion/planningSnapshotDiff';
 
 // --- CONFIGURACIÓN VISUAL ---
 const SHIFT_STYLES: any = {
@@ -302,6 +306,8 @@ export default function PlanificacionPage() {
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [historyVersions, setHistoryVersions] = useState<any[]>([]);
     const [comparingSnapshot, setComparingSnapshot] = useState<any | null>(null);
+    const [compareShowOnlyDiffs, setCompareShowOnlyDiffs] = useState(false);
+    const [compareShowDiffList, setCompareShowDiffList] = useState(true);
 
     const [francoMode, setFrancoMode] = useState<'NONE' | 'FT_SELECTION' | 'FF_WIZARD'>('NONE');
     const [showSwapModal, setShowSwapModal] = useState(false);
@@ -1673,7 +1679,10 @@ export default function PlanificacionPage() {
 
     const loadHistory = async () => { if (!selectedObjective) { toast.error("Seleccione un objetivo"); return; } try { const q = query(collection(db, 'planificaciones_historial'), where('period', '==', `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`)); const snap = await getDocs(q); const versions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((v: any) => v.objectiveId === selectedObjective).sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds); setHistoryVersions(versions); setShowHistoryModal(true); } catch (e) { toast.error("Error historial"); } };
     const handleViewSnapshot = (v: any) => { try { const data = JSON.parse(v.snapshot); setComparingSnapshot({ id: v.id, date: new Date(v.timestamp.seconds*1000), user: v.user, data: data }); setShowHistoryModal(false); } catch(e) { toast.error("Error al cargar versión histórica"); } };
-    const exitSnapshotMode = () => setComparingSnapshot(null);
+    const exitSnapshotMode = () => {
+        setComparingSnapshot(null);
+        setCompareShowOnlyDiffs(false);
+    };
 
     const handleRowDragStart = (e: React.DragEvent, idx: number) => {
         e.dataTransfer.effectAllowed = 'move';
@@ -2586,16 +2595,29 @@ export default function PlanificacionPage() {
             if (!autoWizardPersonalize && result.feasibility.metrics.cycleUsed) {
                 setAutoCycles([result.feasibility.metrics.cycleUsed]);
             }
+            return result.feasibility.ok;
         } catch (e:any) {
             toast.error('Error al analizar viabilidad');
             console.error('[autoScheduleCOSP]', e);
+            return false;
         } finally {
             setAutoV2Loading(false);
             setAutoV2Progress(null);
         }
     };
 
-    // Auto-run viabilidad cuando el wizard abre; resetea al cerrar
+    // Flujo completo: detectar → si ok generar automáticamente; si no ok, mostrar error
+    const runFullGeneration = (cycles?: string[]) => {
+        setAutoWizardStep('detecting');
+        generateAutoScheduleV2(cycles)
+            .then(ok => {
+                if (ok) return applyAutoScheduleV2();
+                setAutoWizardStep('verified'); // muestra estado infeasible para ajuste
+            })
+            .catch(() => setAutoWizardStep('idle'));
+    };
+
+    // Auto-run cuando el wizard abre; resetea al cerrar
     useEffect(() => {
         if (!showAutoV2Modal) {
             setAutoWizardStep('idle');
@@ -2604,10 +2626,7 @@ export default function PlanificacionPage() {
             setAutoV2GenStats(null);
             return;
         }
-        setAutoWizardStep('detecting');
-        generateAutoScheduleV2(['4+2','5+1','6+1','6+2'])
-            .then(() => setAutoWizardStep('verified'))
-            .catch(() => setAutoWizardStep('idle'));
+        runFullGeneration(['4+2','5+1','6+1','6+2']);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showAutoV2Modal]);
 
@@ -3106,7 +3125,39 @@ export default function PlanificacionPage() {
         return map;
     }, [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective, activePosition, dominantPosition]);
 
-    const renderGrid = (isSnapshotView: boolean, snapshotData?: any) => (
+    const planningCompareDiff = useMemo(() => {
+        if (!comparingSnapshot?.data || !selectedObjective) return null;
+        const dateKeys = daysInMonth.map((d) => getDateKey(d));
+        const employeeIds = displayedEmployees.map((e: { id: string }) => e.id);
+        const currentSnap = buildPlanningSnapshotFromGrid({
+            employeeIds,
+            dateKeys,
+            shiftsMap,
+            pendingChanges,
+            objectiveId: selectedObjective,
+        });
+        return diffPlanningSnapshots(comparingSnapshot.data, currentSnap);
+    }, [comparingSnapshot, daysInMonth, displayedEmployees, shiftsMap, pendingChanges, selectedObjective]);
+
+    const compareGridEmployees = useMemo(() => {
+        if (!comparingSnapshot || !compareShowOnlyDiffs || !planningCompareDiff?.changedKeys.size) {
+            return displayedEmployees;
+        }
+        const ids = new Set<string>();
+        for (const key of planningCompareDiff.changedKeys) {
+            ids.add(key.split('_')[0]!);
+        }
+        return displayedEmployees.filter((e: { id: string }) => ids.has(e.id));
+    }, [comparingSnapshot, compareShowOnlyDiffs, planningCompareDiff, displayedEmployees]);
+
+    const renderGrid = (
+        isSnapshotView: boolean,
+        snapshotData?: any,
+        compareChangedKeys?: Set<string> | null,
+        employeesForRows?: typeof displayedEmployees,
+    ) => {
+        const gridEmployees = employeesForRows ?? displayedEmployees;
+        return (
         <table className="border-collapse w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 <tr className="h-6">
@@ -3167,7 +3218,7 @@ export default function PlanificacionPage() {
                 </tr>
             </thead>
             <tbody>
-                {displayedEmployees.map((emp, idx) => {
+                {gridEmployees.map((emp, idx) => {
                     const isGuest = selectedObjective && emp.preferredObjectiveId !== selectedObjective;
                     const homeObjectiveName = getObjectiveName(emp.preferredObjectiveId);
                     
@@ -3293,6 +3344,11 @@ export default function PlanificacionPage() {
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
                                         if (absence) { const absCodes: Record<string,string> = {'Vacaciones':'V','Enfermedad':'E','ART':'A','Injustificada':'AA','Licencia Esp.':'L','PG Permiso Gremial':'PG'}; const absCode = absCodes[absence.type] || 'AA'; content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+                                        if (compareChangedKeys?.has(key)) {
+                                            style += isSnapshotView
+                                                ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
+                                                : ' ring-2 ring-violet-600 ring-offset-1 z-20';
+                                        }
                                         const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || null;
                                         const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : null;
                                         const activeShift = (p && !p.isDeleted) ? p : s;
@@ -3322,6 +3378,10 @@ export default function PlanificacionPage() {
                                             content = snapShift.code;
                                             style = `${SHIFT_STYLES[snapShift.code] || 'bg-slate-200'} opacity-70 grayscale`;
                                             if (snapShift.isFrancoTrabajado) { content = "FT"; style = SHIFT_STYLES['FT']; }
+                                            else if (snapShift.isFrancoCompensatorio) { content = "FF"; style = SHIFT_STYLES['FF']; }
+                                        }
+                                        if (compareChangedKeys?.has(key)) {
+                                            style += ' ring-2 ring-amber-600 ring-offset-1 z-20 opacity-100';
                                         }
                                         return <td key={`snap_${key}`} className="border-b border-r p-0.5 text-center bg-amber-50/50"><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-bold ${style}`}>{content}</div></td>;
                                     })}
@@ -3480,7 +3540,10 @@ export default function PlanificacionPage() {
                 </tr>
             </tfoot>
         </table>
-    );
+        );
+    };
+
+    const compareDiffKeys = planningCompareDiff?.changedKeys ?? null;
 
     return (
         <DashboardLayout>
@@ -3609,7 +3672,7 @@ export default function PlanificacionPage() {
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
                             <div className="flex items-center gap-4">
                                 <div className="p-2 bg-amber-100 rounded-lg text-amber-700"><Split size={20}/></div>
-                                <div><p className="text-xs font-black text-amber-800 uppercase">Modo Comparación Activado</p><p className="text-[10px] text-amber-600">Comparando Actualidad vs. Versión del {comparingSnapshot.date.toLocaleString()}</p></div>
+                                <div><p className="text-xs font-black text-amber-800 uppercase">Modo Comparación Activado</p><p className="text-[10px] text-amber-600">Histórico ({new Date(comparingSnapshot.date).toLocaleString()}) vs actual — {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s)</p></div>
                             </div>
                             <button onClick={exitSnapshotMode} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black hover:bg-amber-700 shadow-sm flex items-center gap-2"><X size={14}/> CERRAR COMPARACIÓN</button>
                         </div>
@@ -3917,22 +3980,65 @@ export default function PlanificacionPage() {
                             <div className="flex flex-col h-full gap-4 p-2 bg-slate-100/50">
                                 <div className="flex-1 overflow-auto border-2 border-amber-300 bg-amber-50/30 rounded-xl shadow-sm relative">
                                     <div className="sticky top-0 z-50 bg-amber-100/90 backdrop-blur-sm px-4 py-1 text-[10px] font-black text-amber-800 uppercase mb-2 border-b border-amber-200 flex items-center justify-center gap-2">
-                                        <History size={12}/> VERSIÓN HISTÓRICA ({new Date(comparingSnapshot.date).toLocaleString()}) - SOLO LECTURA
+                                        <History size={12}/> VERSIÓN HISTÓRICA ({new Date(comparingSnapshot.date).toLocaleString()}) — borde ámbar = cambió vs actual
                                     </div>
-                                    {renderGrid(true, comparingSnapshot.data)}
+                                    {renderGrid(true, comparingSnapshot.data, compareDiffKeys, compareGridEmployees)}
                                 </div>
-                                
-                                <div className="flex items-center justify-center -my-2 z-10">
-                                    <div className="bg-white p-1.5 rounded-full shadow-md border border-slate-300 text-slate-400">
-                                        <ArrowDownWideNarrow size={16} />
+
+                                <div className="shrink-0 mx-2 rounded-xl border border-slate-300 bg-white shadow-sm overflow-hidden z-10">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
+                                        <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-700">
+                                            <ArrowLeftRight size={14} className="text-indigo-600"/>
+                                            Diferencias histórico → actual
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${planningCompareDiff?.changedCount ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                                                {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s)
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCompareShowOnlyDiffs((v) => !v)}
+                                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${compareShowOnlyDiffs ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200'}`}
+                                            >
+                                                Solo filas con cambios
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCompareShowDiffList((v) => !v)}
+                                                className="px-2 py-1 rounded-lg text-[10px] font-bold border bg-white text-slate-600 border-slate-200"
+                                            >
+                                                {compareShowDiffList ? 'Ocultar detalle' : 'Ver detalle'}
+                                            </button>
+                                        </div>
                                     </div>
+                                    {compareShowDiffList && planningCompareDiff && planningCompareDiff.changedCount > 0 && (
+                                        <div className="max-h-28 overflow-y-auto custom-scrollbar px-3 py-2 text-[10px] space-y-1">
+                                            {planningCompareDiff.cells.slice(0, 40).map((c) => {
+                                                const emp = displayedEmployees.find((e: { id: string }) => e.id === c.empId);
+                                                const label = emp?.name || c.empId.slice(0, 8);
+                                                const arrow = c.histLabel && c.currentLabel ? `${c.histLabel} → ${c.currentLabel}` : c.currentLabel ? `∅ → ${c.currentLabel}` : `${c.histLabel} → ∅`;
+                                                return (
+                                                    <div key={c.key} className="flex justify-between gap-2 text-slate-700">
+                                                        <span className="truncate font-bold">{label} · {c.date.split('-').reverse().join('/')}</span>
+                                                        <span className="shrink-0 font-mono text-indigo-700">{arrow}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                            {planningCompareDiff.cells.length > 40 && (
+                                                <p className="text-slate-400 italic">… y {planningCompareDiff.cells.length - 40} más en la grilla (borde ámbar/violeta).</p>
+                                            )}
+                                        </div>
+                                    )}
+                                    {compareShowDiffList && planningCompareDiff?.changedCount === 0 && (
+                                        <p className="px-3 py-2 text-[10px] text-emerald-700 font-bold">Sin diferencias: la versión actual coincide con el snapshot histórico.</p>
+                                    )}
                                 </div>
 
                                 <div className="flex-1 overflow-auto border-2 border-indigo-500 bg-white rounded-xl shadow-lg relative">
                                     <div className="sticky top-0 z-50 bg-indigo-600 px-4 py-1 text-[10px] font-black text-white uppercase mb-2 flex items-center justify-center gap-2 shadow-sm">
-                                        <Activity size={12}/> VERSIÓN ACTUAL (EN VIVO)
+                                        <Activity size={12}/> VERSIÓN ACTUAL (EN VIVO) — borde violeta = cambió vs histórico
                                     </div>
-                                    {renderGrid(false)}
+                                    {renderGrid(false, undefined, compareDiffKeys, compareGridEmployees)}
                                 </div>
                             </div>
                         ) : (
@@ -4872,7 +4978,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
                 {showRRHHModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px]"><h3 className="font-black text-lg mb-4">Registrar Novedad RRHH</h3><div className="space-y-4"><div><label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Novedad</label><select className="w-full border p-2 rounded-lg" value={rrhhData.type} onChange={e => setRrhhData({...rrhhData, type: e.target.value})}><option>Vacaciones</option><option>Enfermedad</option><option>ART</option><option>Injustificada</option><option>Licencia Esp.</option></select></div><div><label className="text-xs font-bold text-slate-500 block mb-1">Detalle / Motivo</label><textarea className="w-full border p-2 rounded-lg h-24 text-sm" value={rrhhData.reason} onChange={e => setRrhhData({...rrhhData, reason: e.target.value})} placeholder="Especifique el motivo..."></textarea></div><button onClick={handleRRHHSubmit} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Guardar Novedad</button><button onClick={() => setShowRRHHModal(false)} className="w-full text-slate-400 text-xs font-bold py-2">Cancelar</button></div></div></div>)}
-                {showHistoryModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}><div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}><div className="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 className="font-black text-lg flex items-center gap-2"><History className="text-indigo-600"/> Historial de Versiones</h3><button onClick={() => setShowHistoryModal(false)}><X size={20}/></button></div><div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">{historyVersions.map(v => (<div key={v.id} className="border p-4 rounded-xl flex items-center justify-between hover:bg-slate-50 transition-colors group"><div><p className="font-black text-slate-800 text-sm">{new Date(v.timestamp.seconds*1000).toLocaleString()}</p><p className="text-xs text-slate-500 font-mono mt-1">Modificado por: <span className="font-bold text-indigo-600">{v.user}</span></p><div className="mt-2 flex gap-2"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 border border-slate-200">{v.count} cambios</span></div></div><button onClick={() => handleViewSnapshot(v)} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-black shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">Ver Versión</button></div>))}{historyVersions.length === 0 && <div className="text-center text-slate-400 py-10">No hay versiones guardadas para este periodo.</div>}</div></div></div>)}
+                {showHistoryModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}><div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}><div className="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 className="font-black text-lg flex items-center gap-2"><History className="text-indigo-600"/> Historial de Versiones</h3><button onClick={() => setShowHistoryModal(false)}><X size={20}/></button></div><p className="px-4 py-2 text-[10px] text-slate-500 border-b bg-slate-50">Cada versión se compara con la <span className="font-bold text-indigo-600">planificación activa</span> (guardada + pendientes).</p><div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">{historyVersions.map(v => (<div key={v.id} className="border p-4 rounded-xl flex items-center justify-between hover:bg-slate-50 transition-colors group"><div><p className="font-black text-slate-800 text-sm">{new Date(v.timestamp.seconds*1000).toLocaleString()}</p><p className="text-xs text-slate-500 font-mono mt-1">Modificado por: <span className="font-bold text-indigo-600">{v.user}</span></p><div className="mt-2 flex gap-2"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 border border-slate-200">{v.count} cambios</span></div></div><button onClick={() => handleViewSnapshot(v)} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-black shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">Comparar vs actual</button></div>))}{historyVersions.length === 0 && <div className="text-center text-slate-400 py-10">No hay versiones guardadas para este periodo.</div>}</div></div></div>)}
 
                 {/* MODAL AUTORIZACIÓN SUPERVISOR 200H */}
                 {authModal.pendingFn && createPortal(
@@ -5322,553 +5428,255 @@ export default function PlanificacionPage() {
 
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
-                        <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                            <div className="flex-1 min-h-0 overflow-y-auto px-6 pt-6 pb-2">
-                            <h3 className="font-black text-lg mb-1 flex items-center gap-2 flex-wrap">
-                                <Wand2 size={20} className="text-amber-600 shrink-0"/>
-                                <span className="text-slate-800">Automatizar cronograma</span>
-                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">COSP</span>
-                            </h3>
-                            {/* Indicador de etapas */}
-                            <div className="flex items-center mt-2 mb-4">
-                                {(['Detectar','Verificar','Generar','Listo'] as const).map((label, i) => {
-                                    const stepNum = autoV2Generating ? 2 : ({'idle':-1,'detecting':0,'verified':1,'done':4} as Record<string,number>)[autoWizardStep] ?? -1;
-                                    const done = i < stepNum; const active = i === stepNum;
-                                    return (
-                                        <React.Fragment key={label}>
-                                            {i > 0 && <div className={`flex-1 h-0.5 mx-1 ${done ? 'bg-emerald-400' : 'bg-slate-200'}`}/>}
-                                            <div className="flex flex-col items-center gap-0.5">
-                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${active ? 'bg-amber-500 text-white' : done ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>{done ? '✓' : i+1}</div>
-                                                <span className={`text-[9px] font-bold whitespace-nowrap ${active ? 'text-amber-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>{label}</span>
-                                            </div>
-                                        </React.Fragment>
-                                    );
-                                })}
+                    <div className=”fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm” onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
+                        <div className=”bg-white rounded-2xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden” onClick={e => e.stopPropagation()}>
+
+                            {/* Header */}
+                            <div className=”flex items-center justify-between px-5 pt-5 pb-3 shrink-0”>
+                                <div className=”flex items-center gap-2”>
+                                    <Wand2 size={18} className=”text-amber-600 shrink-0”/>
+                                    <h3 className=”font-black text-base text-slate-800”>Automatizar cronograma</h3>
+                                    <span className=”text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700”>COSP</span>
+                                </div>
+                                <button type=”button” onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }} disabled={autoV2Loading || autoV2Generating} className=”text-slate-400 hover:text-slate-700 disabled:opacity-30 transition-colors”>
+                                    <X size={18}/>
+                                </button>
                             </div>
 
-                            <div className="space-y-4">
+                            {/* Content */}
+                            <div className=”flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3”>
 
-                            {/* Etapa 1: detectando */}
-                            {autoWizardStep === 'detecting' && (
-                                <div className="flex flex-col items-center justify-center py-10 gap-3">
-                                    <Loader2 size={32} className="animate-spin text-amber-400"/>
-                                    <p className="text-sm font-bold text-slate-600">Detectando configuración óptima…</p>
-                                    <p className="text-[11px] text-slate-400">Analizando dotación, SLA y ciclos CCT 422/05</p>
-                                </div>
-                            )}
-
-                            {/* Configuración detectada */}
-                            {(autoWizardStep === 'verified' || autoWizardStep === 'done') && autoV2Report && (
-                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div>
-                                            <div className="text-[10px] font-black uppercase tracking-wide text-amber-700 mb-0.5">Configuración detectada</div>
-                                            <div className="text-sm font-black text-slate-800">
-                                                Ciclo {autoV2Report.metrics.cycleUsed}
-                                                <span className="text-slate-400 font-medium mx-1">·</span>
-                                                {autoRotateShifts ? 'Rotativo' : 'Banda fija'}
-                                                <span className="text-slate-400 font-medium mx-1">·</span>
-                                                {autoV2BudgetMode === 'cct' ? 'CCT por tramos' : 'Calendario'}
-                                            </div>
-                                        </div>
-                                        <button type="button"
-                                            onClick={() => setAutoWizardPersonalize(p => !p)}
-                                            className="text-[11px] font-black text-amber-700 hover:text-amber-900 flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg hover:bg-amber-100 transition-colors">
-                                            {autoWizardPersonalize ? <ChevronUp size={11}/> : <ChevronDown size={11}/>} Personalizar
-                                        </button>
-                                    </div>
-                                    {autoWizardPersonalize && (
-                                        <div className="mt-3 pt-3 border-t border-amber-200 space-y-2">
-                                            <div>
-                                                <label className="text-[10px] font-black text-amber-900 uppercase tracking-wide mb-1.5 block">Esquema de ciclo</label>
-                                                <div className="grid grid-cols-4 gap-1.5">
-                                                    {['4+2','5+1','6+1','6+2'].map(key => {
-                                                        const checked = autoCycles.includes(key);
-                                                        return (
-                                                            <button key={key} type="button"
-                                                                onClick={() => setAutoCycles(prev => checked ? prev.filter(c => c!==key) : [...prev, key])}
-                                                                className={`py-1.5 rounded-lg text-xs font-black border-2 transition-colors ${checked ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600 hover:border-amber-400'}`}>
-                                                                {key}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                                {autoCycles.length === 0 && <p className="text-[11px] text-red-500 font-bold mt-1">Seleccioná al menos un esquema.</p>}
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                <button type="button" onClick={() => setAutoRotateShifts(false)}
-                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${!autoRotateShifts ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
-                                                    Banda fija<div className={`text-[9px] font-bold ${!autoRotateShifts ? 'opacity-80' : 'opacity-50'}`}>M todo el mes, T todo el mes…</div>
-                                                </button>
-                                                <button type="button" onClick={() => setAutoRotateShifts(true)}
-                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoRotateShifts ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
-                                                    Rotativo<div className={`text-[9px] font-bold ${autoRotateShifts ? 'opacity-80' : 'opacity-50'}`}>M→T→N→M… por ciclo</div>
-                                                </button>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
-                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
-                                                    CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>1→25 cola + 26→fin nuevo</div>
-                                                </button>
-                                                <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
-                                                    className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-amber-200 text-amber-600'}`}>
-                                                    Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas (sin cola)</div>
-                                                </button>
-                                            </div>
-                                            <div className="flex items-center gap-2 py-0.5">
-                                                <span className="text-[10px] font-black text-amber-900 flex-1">Sobreescribir celdas ya asignadas</span>
-                                                <button type="button" onClick={() => setAutoOverwrite(p => !p)}
-                                                    className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
-                                                    <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
-                                                </button>
-                                            </div>
-                                            <button type="button"
-                                                onClick={() => {
-                                                    setAutoWizardStep('detecting');
-                                                    generateAutoScheduleV2()
-                                                        .then(() => setAutoWizardStep('verified'))
-                                                        .catch(() => setAutoWizardStep('idle'));
-                                                }}
-                                                disabled={autoV2Loading || autoCycles.length === 0}
-                                                className="w-full py-1.5 rounded-lg text-[11px] font-black text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
-                                                <RefreshCw size={11}/> Recalcular con esta configuración
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Etapa 2: reporte de viabilidad */}
-                            {autoWizardStep === 'verified' && autoV2Report && (
-                                    <div className={`rounded-xl p-3 border-2 ${autoV2Report.ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50'}`}>
-                                        <p className={`text-sm font-black mb-1 ${autoV2Report.ok ? 'text-emerald-800' : 'text-rose-800'}`}>
-                                            {autoV2Report.ok ? '✓ Plan viable' : '✗ Plan NO viable'}
-                                        </p>
-                                        {autoV2Report.ok && autoV2Report.warnings?.length > 0 && (
-                                            <p className="text-[10px] font-bold text-emerald-900/80 mb-2">
-                                                Hay avisos abajo en amarillo: son informativos y no cambian el resultado viable.
-                                            </p>
-                                        )}
-
-                                        {/* Métricas en bloques claros */}
-                                        <div className="grid grid-cols-2 gap-2 mb-3">
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
-                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Horas a cubrir (SLA)</div>
-                                                <div className="text-base font-black text-indigo-700">{Math.round(autoV2Report.metrics.contractedHours)}<span className="text-xs">h</span></div>
-                                            </div>
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
-                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Cobertura disponible</div>
-                                                <div className={`text-base font-black ${autoV2Report.metrics.offerHours >= autoV2Report.metrics.effectiveTargetHours ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                                    {Math.round(autoV2Report.metrics.offerHours)}<span className="text-xs">h</span>
-                                                </div>
-                                                {(() => {
-                                                    const diff = autoV2Report.metrics.offerHours - autoV2Report.metrics.effectiveTargetHours;
-                                                    return (
-                                                        <div className={`text-[9px] font-black mt-0.5 ${diff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                                            {diff >= 0 ? `+${Math.round(diff)}h sobrantes` : `${Math.round(diff)}h faltantes`}
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </div>
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
-                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Mín. personas (horas ÷ 192 promedio)</div>
-                                                <div className={`text-base font-black ${autoV2Report.metrics.peopleAvailable >= autoV2Report.metrics.peopleNeededForTarget ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                                    {autoV2Report.metrics.peopleNeededForTarget}
-                                                </div>
-                                                <div className="text-[9px] text-slate-400 font-bold mt-0.5">Sugerido ciclo {autoV2Report.metrics.cycleUsed}: ~{autoV2Report.metrics.peopleSuggestedWithCycle}</div>
-                                            </div>
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
-                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Personas disponibles</div>
-                                                <div className="text-base font-black text-slate-800">{autoV2Report.metrics.peopleAvailable}</div>
-                                                {(() => {
-                                                    const idle = autoV2Report.metrics.idleEmployees ?? 0;
-                                                    if (idle <= 0) return (
-                                                        <div className="text-[9px] text-slate-400 font-bold mt-0.5">Sin capacidad ociosa</div>
-                                                    );
-                                                    return (
-                                                        <div className="text-[9px] font-black text-amber-600 mt-0.5" title="Empleados que sobran tras cubrir todos los puestos. Quedarán todo el mes en RET / Franco, sin turnos salpicados.">
-                                                            Capacidad ociosa: {idle} → RET / F mes entero
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </div>
-
-                                        {autoV2BudgetMode === 'cct' ? (
-                                            <div className="bg-white border border-slate-200 rounded-lg p-2 mb-2">
-                                                <div className="text-[9px] font-black uppercase text-slate-500 mb-1">Oferta por tramo del ciclo CCT (corte día {autoV2Report.metrics.cctCutoffDay} · tope 200h por ciclo)</div>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <div className="text-[10px] font-bold text-slate-700">
-                                                        Tramo 1→{autoV2Report.metrics.cctCutoffDay} (ciclo en curso)<br/>
-                                                        <span className="text-base font-black text-slate-900">{Math.round(autoV2Report.metrics.offerHoursCurrentCycle)}h</span>
-                                                        <span className="text-[9px] font-bold text-slate-400 ml-1">(tope 200h − cola)</span>
-                                                    </div>
-                                                    <div className="text-[10px] font-bold text-slate-700">
-                                                        Tramo {autoV2Report.metrics.cctCutoffDay+1}→fin (ciclo siguiente)<br/>
-                                                        <span className="text-base font-black text-slate-900">{Math.round(autoV2Report.metrics.offerHoursNextCycle)}h</span>
-                                                        <span className="text-[9px] font-bold text-slate-400 ml-1">(arranca de cero)</span>
-                                                    </div>
-                                                </div>
-                                                <div className="text-[9px] text-slate-400 font-bold mt-1">
-                                                    Cola CCT equipo (Σ): {Math.round(autoV2Report.metrics.totalPriorHoursTeam)}h ·
-                                                    Ausencias est. (Σ): {Math.round(autoV2Report.metrics.totalAbsenceHoursTeam)}h
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <p className="text-[10px] text-slate-500 font-bold mb-2">
-                                                Modo calendario: 200h netas por persona en el mes, sin descontar cola CCT.
-                                                Ausencias est. (Σ): <span className="text-slate-800">{Math.round(autoV2Report.metrics.totalAbsenceHoursTeam)}h</span>
-                                            </p>
-                                        )}
-                                        <div className="text-[9px] font-bold text-slate-600 mb-1">
-                                            Todos los cálculos son solo del mes en pantalla:{' '}
-                                            <span className="text-slate-900 font-black capitalize">
-                                                {currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
+                                {/* Progreso — detectando o generando */}
+                                {(autoWizardStep === 'detecting' || autoV2Loading || autoV2Generating) && (
+                                    <div className=”rounded-xl bg-slate-900 px-4 py-4 text-white shadow-inner ring-1 ring-slate-700/80”>
+                                        <div className=”flex justify-between items-center mb-2”>
+                                            <span className=”text-[11px] font-black uppercase tracking-wide text-amber-300”>
+                                                {autoV2Generating ? 'Generando cronograma…' : 'Analizando configuración…'}
                                             </span>
-                                            . No se suman horas de otros meses (Mayo + Junio, etc.).
+                                            <span className=”text-[11px] font-mono font-bold text-slate-300”>{Math.round(autoV2Progress?.pct ?? 0)}%</span>
                                         </div>
-                                        <div className="text-[10px] font-bold text-slate-500 mb-2 flex flex-wrap gap-x-3 gap-y-1">
-                                            <span>Demanda estructural (solo ese mes): <span className="text-slate-800">{Math.round(autoV2Report.metrics.structuralDemandHours)}h</span></span>
-                                            <span>Pico simultáneo: <span className="text-slate-800">{autoV2Report.metrics.peakConcurrent}</span></span>
-                                            <span>Req. para 100% estructura: <span className="text-slate-800">{autoV2Report.metrics.peopleNeededForStructure}</span></span>
-                                            <span className="font-black text-indigo-700">Turnos a cubrir: <span>{autoV2Report.metrics.totalSlotsAll}</span></span>
+                                        <div className=”h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2”>
+                                            <div className={`h-full rounded-full bg-gradient-to-r transition-[width] duration-300 ease-out ${autoV2Generating ? 'from-emerald-500 to-emerald-300' : 'from-amber-500 to-amber-300'}`}
+                                                style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}/>
                                         </div>
+                                        <p className=”text-[11px] font-medium text-slate-300 leading-snug”>{autoV2Progress?.label ?? 'Procesando…'}</p>
+                                    </div>
+                                )}
 
-                                        {autoV2Report.metrics.cycleComparison && autoV2Report.metrics.cycleComparison.length > 0 && (
-                                            <div className="mb-3">
-                                                <div className="text-[10px] font-black uppercase text-slate-600 mb-1">Dotación por esquema de ciclo</div>
-                                                <div className="border border-slate-200 rounded-lg overflow-hidden">
-                                                    <table className="w-full text-[10px]">
-                                                        <thead className="bg-slate-100">
-                                                            <tr className="text-slate-600">
-                                                                <th className="text-left px-2 py-1 font-black">Ciclo</th>
-                                                                <th className="text-right px-2 py-1 font-black">Personas</th>
-                                                                <th className="text-right px-2 py-1 font-black">Hs/persona</th>
-                                                                <th className="text-right px-2 py-1 font-black">Colchón</th>
-                                                                <th className="text-right px-2 py-1 font-black">RETs est.</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody className="bg-white">
-                                                            {autoV2Report.metrics.cycleComparison.map(c => {
-                                                                const isSelected = autoV2Report.metrics.cycleUsed === c.cycleKey;
-                                                                const bufferOk = c.bufferHours >= 0;
-                                                                return (
-                                                                    <tr key={c.cycleKey} className={`border-t border-slate-100 ${isSelected ? 'bg-indigo-50' : ''}`}>
-                                                                        <td className={`px-2 py-0.5 font-black ${isSelected ? 'text-indigo-700' : 'text-slate-700'}`}>{c.cycleKey}{isSelected ? ' ✓' : ''}</td>
-                                                                        <td className="text-right px-2 py-0.5 font-bold text-slate-800">{c.structuralPeakPeople}</td>
-                                                                        <td className="text-right px-2 py-0.5 text-slate-600">{c.hrsPerPerson}h</td>
-                                                                        <td className={`text-right px-2 py-0.5 font-bold ${bufferOk ? 'text-emerald-700' : 'text-rose-700'}`}>{c.bufferHours >= 0 ? '+' : ''}{c.bufferHours}h</td>
-                                                                        <td className="text-right px-2 py-0.5 text-slate-600">{c.retEstimate}</td>
-                                                                    </tr>
-                                                                );
-                                                            })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                                <div className="text-[9px] text-slate-400 mt-0.5">Personas = pico simultáneo × factor ciclo. Colchón = capacidad − demanda estructural. RETs est. = colchón / hs turno.</div>
+                                {/* No viable */}
+                                {autoWizardStep === 'verified' && autoV2Report && !autoV2Report.ok && (
+                                    <div className=”rounded-xl border-2 border-rose-300 bg-rose-50 p-3”>
+                                        <p className=”text-sm font-black text-rose-800 mb-3”>✗ Dotación insuficiente para cubrir el SLA</p>
+                                        <div className=”grid grid-cols-2 gap-2 mb-3”>
+                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
+                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Demanda SLA</div>
+                                                <div className=”text-lg font-black text-rose-700”>{Math.round(autoV2Report.metrics.contractedHours)}<span className=”text-xs”>h</span></div>
                                             </div>
-                                        )}
-
-                                        {autoV2Report.metrics.cctSchemeCalendarProjection && (
-                                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2 mb-2">
-                                                <div className="text-[10px] font-black uppercase text-indigo-900 mb-1">
-                                                    Proyección calendario 2026 — {autoV2Report.metrics.cctSchemeCalendarProjection.monthNameEs}
-                                                </div>
-                                                <table className="w-full text-[10px]">
-                                                    <thead>
-                                                        <tr className="text-indigo-800">
-                                                            <th className="text-left px-1 py-0.5 font-black">Ciclo</th>
-                                                            <th className="text-right px-1 py-0.5 font-black">Días</th>
-                                                            <th className="text-right px-1 py-0.5 font-black">Hs mes</th>
-                                                            <th className="text-left px-1 py-0.5 font-black">Estado</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {autoV2Report.metrics.cctSchemeCalendarProjection.rows.map((r) => (
-                                                            <tr key={r.cycleKey} className="border-t border-indigo-100">
-                                                                <td className="px-1 py-0.5 font-bold text-indigo-950">{r.cycleKey}</td>
-                                                                <td className="text-right px-1 py-0.5 text-indigo-900">{r.workDays}</td>
-                                                                <td className="text-right px-1 py-0.5 font-black text-indigo-950">{r.billableHours}h</td>
-                                                                <td className="px-1 py-0.5 text-indigo-900 font-bold">
-                                                                    {r.overHardCap ? '>200h ref. cal.' : r.overSoftWarn ? 'Alerta ref. cal.' : 'OK ref.'}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                                <p className="text-[9px] text-indigo-800/90 mt-1 leading-snug">
-                                                    Referencia de carga si todo el mes se trabajara a ritmo del esquema; el tope operativo del motor sigue siendo el ciclo CCT (corte día {autoV2Report.metrics.cctCutoffDay}) más la cola por persona.
-                                                </p>
+                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
+                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Oferta disponible</div>
+                                                <div className=”text-lg font-black text-rose-700”>{Math.round(autoV2Report.metrics.offerHours)}<span className=”text-xs”>h</span></div>
+                                                <div className=”text-[9px] font-black text-rose-600 mt-0.5”>{Math.round(autoV2Report.metrics.offerHours - autoV2Report.metrics.effectiveTargetHours)}h faltantes</div>
                                             </div>
-                                        )}
-
-                                        {autoV2Report.warnings && autoV2Report.warnings.length > 0 && (
-                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">
-                                                <div className="text-[10px] font-black uppercase text-amber-800 mb-1">Avisos (no bloquean)</div>
-                                                <p className="text-[9px] font-bold text-amber-800/90 mb-1.5">Opcional: mejoran datos o comodidad; no hace falta “arreglar” nada para seguir planificando.</p>
-                                                <ul className="list-disc list-inside space-y-1 text-[11px] font-bold text-amber-900">
-                                                    {autoV2Report.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                                                </ul>
+                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
+                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Personas necesarias</div>
+                                                <div className=”text-lg font-black text-rose-700”>{autoV2Report.metrics.peopleNeededForTarget}</div>
+                                                <div className=”text-[9px] text-slate-400 font-bold mt-0.5”>ciclo {autoV2Report.metrics.cycleUsed}: ~{autoV2Report.metrics.peopleSuggestedWithCycle}</div>
                                             </div>
-                                        )}
-
+                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
+                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Personas disponibles</div>
+                                                <div className=”text-lg font-black text-slate-800”>{autoV2Report.metrics.peopleAvailable}</div>
+                                            </div>
+                                        </div>
                                         {autoV2Report.reasons.length > 0 && (
-                                            <div className="bg-white border border-rose-200 rounded-lg p-2">
-                                                <div className="text-[10px] font-black uppercase text-rose-700 mb-1">Bloqueos</div>
-                                                <ul className="list-disc list-inside space-y-1 text-[11px] font-bold text-rose-800">
-                                                    {autoV2Report.reasons.map((r, i) => <li key={i}>{r}</li>)}
-                                                </ul>
-                                            </div>
-                                        )}
-
-                                        {autoV2Report.perEmployee.length > 0 && (
-                                            <details className="mt-3" open={autoV2ShowEmpDetail} onToggle={(e:any) => setAutoV2ShowEmpDetail(e.currentTarget.open)}>
-                                                <summary className="cursor-pointer text-[11px] font-black text-slate-900">Detalle por empleado ({autoV2Report.perEmployee.length})</summary>
-                                                <div className="max-h-48 overflow-y-auto mt-2 border border-slate-300 rounded-lg bg-white">
-                                                    <table className="w-full text-[10px]">
-                                                        <thead className="bg-slate-100 sticky top-0">
-                                                            <tr className="text-slate-700">
-                                                                <th className="text-left px-2 py-1 font-black">Empleado</th>
-                                                                <th className="text-right px-2 py-1 font-black">Cola</th>
-                                                                <th className="text-right px-2 py-1 font-black">Aus.</th>
-                                                                <th className="text-right px-2 py-1 font-black" title="Oferta tramo ciclo actual (1→cutoff)">Ofer. T1</th>
-                                                                <th className="text-right px-2 py-1 font-black" title="Oferta tramo ciclo siguiente (cutoff+1→fin)">Ofer. T2</th>
-                                                                <th className="text-right px-2 py-1 font-black">Total</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody className="bg-white">
-                                                            {[...autoV2Report.perEmployee]
-                                                                .sort((a,b) => a.availableHours - b.availableHours)
-                                                                .map(e => (
-                                                                <tr key={e.id} className="border-t border-slate-100">
-                                                                    <td className="px-2 py-0.5 text-slate-900 font-bold truncate max-w-[160px]">{e.nombre || e.id}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(e.priorHours)}h</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{e.absenceDays}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(e.availableCurrentCycle)}h</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(e.availableNextCycle)}h</td>
-                                                                    <td className={`text-right px-2 py-0.5 font-black ${e.availableHours >= 160 ? 'text-emerald-700' : e.availableHours >= 100 ? 'text-amber-700' : 'text-rose-700'}`}>{Math.round(e.availableHours)}h</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </details>
-                                        )}
-
-                                        {autoV2Report.perPosition.length > 0 && (
-                                            <details className="mt-2">
-                                                <summary className="cursor-pointer text-[11px] font-black text-slate-900">Detalle por puesto</summary>
-                                                <div className="mt-2 border border-slate-300 rounded-lg bg-white overflow-hidden">
-                                                    <table className="w-full text-[10px]">
-                                                        <thead className="bg-slate-100">
-                                                            <tr className="text-slate-700">
-                                                                <th className="text-left px-2 py-1 font-black">Puesto</th>
-                                                                <th className="text-right px-2 py-1 font-black text-slate-500">Días</th>
-                                                                <th className="text-right px-2 py-1 font-black text-indigo-700">Turnos</th>
-                                                                <th className="text-right px-2 py-1 font-black">Horas</th>
-                                                                <th className="text-right px-2 py-1 font-black">Pico</th>
-                                                                <th className="text-right px-2 py-1 font-black">Personas</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody className="bg-white">
-                                                            {autoV2Report.perPosition.map(p => (
-                                                                <tr key={p.positionName} className="border-t border-slate-100">
-                                                                    <td className="px-2 py-0.5 text-slate-900 font-bold">{p.positionName}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-500 font-bold">{p.activeDays}</td>
-                                                                    <td className="text-right px-2 py-0.5 font-black text-indigo-700">{p.totalSlots}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{Math.round(p.monthHours)}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{p.peakConcurrent}</td>
-                                                                    <td className="text-right px-2 py-0.5 text-slate-700 font-bold">{p.peopleNeededWithCycle}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </details>
+                                            <ul className=”list-disc list-inside space-y-0.5 text-[11px] font-bold text-rose-800”>
+                                                {autoV2Report.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                                            </ul>
                                         )}
                                     </div>
                                 )}
 
-                            {/* Etapa 4: cronograma generado — resumen inline */}
-                            {autoWizardStep === 'done' && (
-                                <div className={`rounded-xl p-3 border-2 ${autoV2Coverage?.ok !== false ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
-                                    <p className={`text-sm font-black mb-2 ${autoV2Coverage?.ok !== false ? 'text-emerald-800' : 'text-amber-800'}`}>
-                                        {autoV2Coverage?.ok !== false ? '✓ Cronograma generado y verificado' : '⚠ Cronograma generado con avisos'}
-                                    </p>
-                                    {autoV2GenStats && (
-                                        <div className="grid grid-cols-3 gap-2 mb-2">
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
-                                                <div className="text-[9px] font-black uppercase text-slate-500">Hs facturables</div>
-                                                <div className="text-base font-black text-indigo-700">{Math.round(autoV2GenStats.totalBillableHours)}<span className="text-xs">h</span></div>
-                                            </div>
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
-                                                <div className="text-[9px] font-black uppercase text-slate-500">Slots cubiertos</div>
-                                                <div className={`text-base font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                                    {autoV2Coverage ? `${autoV2Coverage.coverage.coveredSlots}/${autoV2Coverage.coverage.totalSlots}` : '—'}
-                                                </div>
-                                            </div>
-                                            <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
-                                                <div className="text-[9px] font-black uppercase text-slate-500">Sin cubrir</div>
-                                                <div className={`text-base font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                                    {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
-                                                </div>
+                                {/* Resultado: 3 tarjetas */}
+                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && (
+                                    <div className=”grid grid-cols-3 gap-2”>
+                                        <div className=”bg-white rounded-xl p-3 border-2 border-slate-200 text-center”>
+                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Hs facturables</div>
+                                            <div className=”text-2xl font-black text-indigo-700”>{Math.round(autoV2GenStats.totalBillableHours)}<span className=”text-sm”>h</span></div>
+                                        </div>
+                                        <div className=”bg-white rounded-xl p-3 border-2 border-slate-200 text-center”>
+                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Cubiertos</div>
+                                            <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                {autoV2Coverage ? `${autoV2Coverage.coverage.coveredSlots}/${autoV2Coverage.coverage.totalSlots}` : '—'}
                                             </div>
                                         </div>
-                                    )}
-                                    {autoV2Coverage && !autoV2Coverage.ok && autoV2Coverage.coverage.uncoveredSlots > 0 && (
-                                        <p className="text-[11px] font-bold text-amber-800 mb-1">
-                                            {autoV2Coverage.coverage.uncoveredSlots} slot(s) sin cubrir.
-                                            {capOverflowEmps.length > 0 && ' Algunos requieren autorización de 200h (ver abajo).'}
-                                        </p>
-                                    )}
-                                    {autoV2Coverage && (autoV2Coverage.restViolations.length > 0 || autoV2Coverage.licenseConflicts.length > 0) && (
-                                        <p className="text-[11px] font-bold text-rose-700 mb-1">
-                                            ⛔ {autoV2Coverage.restViolations.length + autoV2Coverage.licenseConflicts.length} conflictos de descanso/licencia. Verificá la grilla.
-                                        </p>
-                                    )}
-                                    <p className="text-[10px] text-slate-500 font-bold mt-1">El cronograma está en pendientes. Revisá la grilla y guardá cuando estés listo.</p>
-                                </div>
-                            )}
+                                        <div className={`bg-white rounded-xl p-3 border-2 text-center ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'border-emerald-300' : 'border-rose-300'}`}>
+                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Sin cubrir</div>
+                                            <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                                {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
-                            {/* Panel de autorización 200h — aparece en step done cuando hay empleados bloqueados */}
-                            {autoWizardStep === 'done' && capOverflowEmps.length > 0 && (
-                                <div className="mt-3 rounded-xl border-2 border-orange-300 bg-orange-50 p-3">
-                                    <p className="text-[11px] font-black text-orange-800 mb-2">
-                                        ⚠ {capOverflowEmps.length} empleado{capOverflowEmps.length > 1 ? 's' : ''} alcanzaron el tope CCT de 200h
-                                    </p>
-                                    <p className="text-[10px] text-orange-700 font-bold mb-2">
-                                        Seleccioná quiénes autorizás a superar el límite y confirmá con PIN de supervisor. El motor re-generará incluyéndolos.
-                                    </p>
-                                    <div className="space-y-1 mb-3">
-                                        {capOverflowEmps.map(e => (
-                                            <label key={e.empId} className="flex items-center gap-2 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={over200AuthChecked[e.empId] ?? false}
-                                                    onChange={ev => setOver200AuthChecked(prev => ({ ...prev, [e.empId]: ev.target.checked }))}
-                                                    className="w-3.5 h-3.5 accent-orange-600"
-                                                />
-                                                <span className="text-[11px] font-bold text-slate-800">{e.nombre}</span>
-                                                {authorizedOver200Ids.has(e.empId) && (
-                                                    <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">ya autorizado</span>
+                                {autoWizardStep === 'done' && !autoV2Generating && (
+                                    <>
+                                        {/* Conflictos / descansos */}
+                                        {autoV2Coverage && (autoV2Coverage.licenseConflicts.length > 0 || autoV2Coverage.restViolations.length > 0) && (
+                                            <div className=”flex flex-wrap gap-2”>
+                                                {autoV2Coverage.licenseConflicts.length > 0 && (
+                                                    <span className=”text-[11px] font-black text-rose-700 bg-rose-100 px-2 py-1 rounded-lg”>
+                                                        ⛔ {autoV2Coverage.licenseConflicts.length} conflicto{autoV2Coverage.licenseConflicts.length > 1 ? 's' : ''} de licencia
+                                                    </span>
                                                 )}
-                                            </label>
-                                        ))}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="password"
-                                            value={over200AuthPin}
-                                            onChange={e => { setOver200AuthPin(e.target.value); setOver200AuthError(''); }}
-                                            placeholder="PIN supervisor"
-                                            maxLength={20}
-                                            className="flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400"
-                                        />
-                                        <button
-                                            type="button"
-                                            disabled={autoV2Generating || !over200AuthPin}
-                                            onClick={() => {
-                                                if (over200AuthPin.length < 4) {
-                                                    setOver200AuthError('PIN mínimo 4 caracteres');
-                                                    return;
-                                                }
-                                                const toAuthorize = capOverflowEmps
-                                                    .filter(e => over200AuthChecked[e.empId])
-                                                    .map(e => e.empId);
-                                                if (toAuthorize.length === 0) {
-                                                    setOver200AuthError('Seleccioná al menos un empleado');
-                                                    return;
-                                                }
-                                                // Actualizar ref síncronamente antes de llamar al engine
-                                                const next = new Set(authorizedOver200IdsRef.current);
-                                                toAuthorize.forEach(id => next.add(id));
-                                                authorizedOver200IdsRef.current = next;
-                                                setAuthorizedOver200Ids(next);
-                                                setCapOverflowEmps([]);
-                                                setOver200AuthPin('');
-                                                setOver200AuthError('');
-                                                applyAutoScheduleV2();
-                                            }}
-                                            className="shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-orange-600 hover:bg-orange-700 transition-colors disabled:opacity-50"
-                                        >
-                                            Autorizar y re-generar
+                                                {autoV2Coverage.restViolations.length > 0 && (
+                                                    <span className=”text-[11px] font-black text-amber-700 bg-amber-100 px-2 py-1 rounded-lg”>
+                                                        ⚠ {autoV2Coverage.restViolations.length} descanso{autoV2Coverage.restViolations.length > 1 ? 's' : ''} roto{autoV2Coverage.restViolations.length > 1 ? 's' : ''}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        <p className=”text-[11px] text-slate-500 font-bold”>
+                                            {autoV2Coverage?.ok !== false
+                                                ? 'Cronograma listo. Revisá la grilla y guardá cuando estés listo.'
+                                                : 'Cronograma con avisos. Revisá la grilla antes de guardar.'}
+                                        </p>
+
+                                        {/* Autorización 200h */}
+                                        {capOverflowEmps.length > 0 && (
+                                            <div className=”rounded-xl border-2 border-orange-300 bg-orange-50 p-3”>
+                                                <p className=”text-[11px] font-black text-orange-800 mb-1”>
+                                                    ⚠ {capOverflowEmps.length} empleado{capOverflowEmps.length > 1 ? 's' : ''} alcanzaron el tope de 200h
+                                                </p>
+                                                <p className=”text-[10px] text-orange-700 font-bold mb-2”>
+                                                    Autorizá quiénes pueden superarlo con PIN de supervisor. El motor re-generará.
+                                                </p>
+                                                <div className=”space-y-1 mb-3”>
+                                                    {capOverflowEmps.map(e => (
+                                                        <label key={e.empId} className=”flex items-center gap-2 cursor-pointer”>
+                                                            <input type=”checkbox”
+                                                                checked={over200AuthChecked[e.empId] ?? false}
+                                                                onChange={ev => setOver200AuthChecked(prev => ({ ...prev, [e.empId]: ev.target.checked }))}
+                                                                className=”w-3.5 h-3.5 accent-orange-600”/>
+                                                            <span className=”text-[11px] font-bold text-slate-800”>{e.nombre}</span>
+                                                            {authorizedOver200Ids.has(e.empId) && (
+                                                                <span className=”text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full”>ya autorizado</span>
+                                                            )}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                                <div className=”flex items-center gap-2”>
+                                                    <input type=”password”
+                                                        value={over200AuthPin}
+                                                        onChange={e => { setOver200AuthPin(e.target.value); setOver200AuthError(''); }}
+                                                        placeholder=”PIN supervisor (mín. 4 dígitos)”
+                                                        maxLength={20}
+                                                        className=”flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400”/>
+                                                    <button type=”button”
+                                                        disabled={autoV2Generating || !over200AuthPin}
+                                                        onClick={() => {
+                                                            if (over200AuthPin.length < 4) { setOver200AuthError('PIN mínimo 4 caracteres'); return; }
+                                                            const toAuthorize = capOverflowEmps.filter(e => over200AuthChecked[e.empId]).map(e => e.empId);
+                                                            if (toAuthorize.length === 0) { setOver200AuthError('Seleccioná al menos un empleado'); return; }
+                                                            const next = new Set(authorizedOver200IdsRef.current);
+                                                            toAuthorize.forEach(id => next.add(id));
+                                                            authorizedOver200IdsRef.current = next;
+                                                            setAuthorizedOver200Ids(next);
+                                                            setCapOverflowEmps([]);
+                                                            setOver200AuthPin(''); setOver200AuthError('');
+                                                            applyAutoScheduleV2();
+                                                        }}
+                                                        className=”shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-orange-600 hover:bg-orange-700 transition-colors disabled:opacity-50”>
+                                                        Autorizar y re-generar
+                                                    </button>
+                                                </div>
+                                                {over200AuthError && <p className=”text-[10px] font-bold text-rose-700 mt-1”>{over200AuthError}</p>}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {/* Ajustar configuración — colapsible, visible en verified (no viable) y done */}
+                                {(autoWizardStep === 'verified' || autoWizardStep === 'done') && !autoV2Generating && (
+                                    <div className=”border border-slate-200 rounded-xl overflow-hidden”>
+                                        <button type=”button”
+                                            onClick={() => setAutoWizardPersonalize(p => !p)}
+                                            className=”w-full flex items-center justify-between px-3 py-2 text-[11px] font-black text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors”>
+                                            <span>Ajustar configuración</span>
+                                            {autoWizardPersonalize ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
                                         </button>
+                                        {autoWizardPersonalize && (
+                                            <div className=”px-3 pb-3 pt-2 bg-white space-y-3”>
+                                                <div>
+                                                    <label className=”text-[10px] font-black text-slate-600 uppercase tracking-wide block mb-1.5”>Esquema de ciclo</label>
+                                                    <div className=”grid grid-cols-4 gap-1.5”>
+                                                        {['4+2','5+1','6+1','6+2'].map(key => {
+                                                            const checked = autoCycles.includes(key);
+                                                            return (
+                                                                <button key={key} type=”button”
+                                                                    onClick={() => setAutoCycles(prev => checked ? prev.filter(c => c!==key) : [...prev, key])}
+                                                                    className={`py-1.5 rounded-lg text-xs font-black border-2 transition-colors ${checked ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-amber-300'}`}>
+                                                                    {key}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    {autoCycles.length === 0 && <p className=”text-[10px] text-rose-500 font-bold mt-1”>Seleccioná al menos un esquema.</p>}
+                                                </div>
+                                                <div className=”grid grid-cols-2 gap-1.5”>
+                                                    <button type=”button” onClick={() => setAutoV2BudgetMode('cct')}
+                                                        className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
+                                                        CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>cola + nuevo desde día {autoV2Report?.metrics.cctCutoffDay ?? 25}</div>
+                                                    </button>
+                                                    <button type=”button” onClick={() => setAutoV2BudgetMode('calendar')}
+                                                        className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
+                                                        Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas sin cola</div>
+                                                    </button>
+                                                </div>
+                                                <div className=”flex items-center gap-2”>
+                                                    <span className=”text-[10px] font-black text-slate-700 flex-1”>Sobreescribir celdas ya asignadas</span>
+                                                    <button type=”button” onClick={() => setAutoOverwrite(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                <button type=”button”
+                                                    onClick={() => { setAutoWizardPersonalize(false); runFullGeneration(autoCycles.length > 0 ? autoCycles : undefined); }}
+                                                    disabled={autoV2Loading || autoV2Generating || autoCycles.length === 0}
+                                                    className=”w-full py-2 rounded-lg text-[11px] font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5”>
+                                                    <RefreshCw size={11}/> Re-generar
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
-                                    {over200AuthError && <p className="text-[10px] font-bold text-rose-700 mt-1">{over200AuthError}</p>}
-                                </div>
-                            )}
+                                )}
+
                             </div>
 
-                            <div className="mt-4 border-t border-slate-200 pt-3">
-                                <button
-                                    type="button"
-                                    onClick={fetchSlaDebug}
-                                    disabled={slaDebugLoading || !selectedObjective}
-                                    className="text-[11px] font-black text-slate-500 hover:text-slate-800 underline disabled:opacity-50"
-                                >
-                                    {slaDebugLoading ? 'Cargando JSON…' : '🔧 Ver JSON del SLA del mes en pantalla'}
-                                </button>
+                            {/* Footer */}
+                            <div className=”shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3 flex flex-col gap-2 rounded-b-2xl”>
                                 {slaDebug && (
-                                    <div className="mt-2 bg-slate-900 text-slate-100 text-[10px] rounded-lg p-2 max-h-72 overflow-y-auto">
-                                        <div className="flex items-center justify-between mb-1.5">
-                                            <span className="font-black text-emerald-300">doc id: {slaDebug.id}</span>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(slaDebug, null, 2)); toast.success('JSON copiado'); }} className="text-[10px] font-bold text-slate-300 hover:text-white">copiar</button>
-                                                <button onClick={() => setSlaDebug(null)} className="text-[10px] font-bold text-slate-300 hover:text-white">cerrar</button>
+                                    <div className=”bg-slate-900 text-slate-100 text-[10px] rounded-lg p-2 max-h-60 overflow-y-auto”>
+                                        <div className=”flex items-center justify-between mb-1.5”>
+                                            <span className=”font-black text-emerald-300”>doc id: {slaDebug.id}</span>
+                                            <div className=”flex gap-2”>
+                                                <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(slaDebug, null, 2)); toast.success('JSON copiado'); }} className=”text-[10px] font-bold text-slate-300 hover:text-white”>copiar</button>
+                                                <button onClick={() => setSlaDebug(null)} className=”text-[10px] font-bold text-slate-300 hover:text-white”>cerrar</button>
                                             </div>
                                         </div>
-                                        <pre className="whitespace-pre-wrap break-all leading-tight">{JSON.stringify(slaDebug.data, null, 2)}</pre>
+                                        <pre className=”whitespace-pre-wrap break-all leading-tight”>{JSON.stringify(slaDebug.data, null, 2)}</pre>
                                     </div>
                                 )}
-                            </div>
+                                <div className=”flex items-center justify-between gap-3”>
+                                    <button type=”button” onClick={fetchSlaDebug} disabled={slaDebugLoading || !selectedObjective}
+                                        className=”text-[11px] font-black text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors”>
+                                        {slaDebugLoading ? 'Cargando…' : '🔧 SLA JSON'}
+                                    </button>
+                                    <button type=”button” onClick={() => setShowAutoV2Modal(false)} disabled={autoV2Loading || autoV2Generating}
+                                        className=”px-5 py-2 rounded-xl text-sm font-black text-slate-600 bg-slate-200 hover:bg-slate-300 transition-colors disabled:opacity-50”>
+                                        Cerrar
+                                    </button>
+                                </div>
                             </div>
 
-                            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4 space-y-3 rounded-b-2xl">
-                            {(autoV2Loading || autoV2Generating) && (
-                                <div className="rounded-xl bg-slate-900 px-4 py-3 text-white shadow-inner ring-1 ring-slate-700/80" role="progressbar" aria-valuenow={Math.round(autoV2Progress?.pct ?? 0)} aria-valuemin={0} aria-valuemax={100} aria-label={autoV2Progress?.label || 'Procesando'}>
-                                    <div className="flex justify-between items-center mb-2 gap-2">
-                                        <span className="text-[11px] font-black uppercase tracking-wide text-amber-300 shrink-0">Progreso</span>
-                                        <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
-                                    </div>
-                                    <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2">
-                                        <div
-                                            className={`h-full rounded-full bg-gradient-to-r transition-[width] duration-300 ease-out ${
-                                                autoV2Generating ? 'from-emerald-500 to-emerald-300' : 'from-amber-500 to-amber-300'
-                                            }`}
-                                            style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}
-                                        />
-                                    </div>
-                                    <p className="text-[11px] font-medium text-slate-300 leading-snug">{autoV2Progress?.label ?? 'Procesando…'}</p>
-                                </div>
-                            )}
-                            <div className="flex gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAutoV2Modal(false)}
-                                    disabled={autoV2Loading || autoV2Generating}
-                                    title={autoV2Loading || autoV2Generating ? 'Esperá a que termine el proceso' : undefined}
-                                    className="flex-1 py-2.5 rounded-xl text-sm font-black text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Cerrar
-                                </button>
-                                {autoWizardStep !== 'done' && (
-                                    <button
-                                        onClick={applyAutoScheduleV2}
-                                        disabled={!autoV2Report?.ok || autoV2Generating || autoWizardStep !== 'verified'}
-                                        title={autoV2Report?.ok ? 'Generar plan respetando 200h por ciclo CCT' : 'Esperá a que termine la detección'}
-                                        className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                                    >
-                                        {autoV2Generating ? <><Loader2 size={14} className="animate-spin"/> Generando…</> : <>Generar cronograma</>}
-                                    </button>
-                                )}
-                                {autoWizardStep === 'done' && autoV2Generating && (
-                                    <div className="flex-1 py-2.5 flex items-center justify-center gap-2 text-sm font-bold text-slate-500">
-                                        <Loader2 size={14} className="animate-spin text-amber-500"/> Re-generando…
-                                    </div>
-                                )}
-                            </div>
-                            </div>
                         </div>
                     </div>
                 , document.body)}
