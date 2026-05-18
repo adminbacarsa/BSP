@@ -202,6 +202,12 @@ export interface V2EngineContext {
      * código de turno del slot (M/T/N/etc.) en el objetivo pedido.
      */
     globalRetPool?: Array<{ id: string; nombre?: string; name?: string }>;
+    /**
+     * IDs de empleados autorizados por supervisor para superar el tope CCT de 200h.
+     * El motor omite el chequeo `used + hrs > HARD_MAX_HOURS` para estos empleados.
+     * El límite semanal de 48h sigue aplicando.
+     */
+    authorizedOver200Ids?: Set<string>;
 }
 
 export interface V2PositionDemand {

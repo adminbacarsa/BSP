@@ -452,6 +452,7 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
 
     ctx.employees.forEach(emp => {
         if (limitedEmps.has(emp.id)) return;
+        if (ctx.authorizedOver200Ids?.has(emp.id)) return; // bypass cap for authorized employees
         const band = empBand[emp.id];
         const code = (band ?? '').toUpperCase();
         const hrsPerDay = _hint[code] ?? SH_HRS[code] ?? 8;
@@ -714,14 +715,15 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
 
                     if (extCode !== sCode) {
                         // Modo extensión: intentar 12 h; caída a 8 h si el cap lo impide
-                        const canDo12 = (used + extHrs <= HARD_MAX_HOURS)
+                        const auth200 = ctx.authorizedOver200Ids?.has(empId) ?? false;
+                        const canDo12 = (auth200 || used + extHrs <= HARD_MAX_HOURS)
                             && passesRest(empId, dateStr, extCode, extStart, extHrs)
                             && passesWeekCap(empId, dateStr, extHrs);
-                        const canDo8  = (used + baseHrs <= HARD_MAX_HOURS)
+                        const canDo8  = (auth200 || used + baseHrs <= HARD_MAX_HOURS)
                             && passesRest(empId, dateStr, sCode, sStart, baseHrs)
                             && passesWeekCap(empId, dateStr, baseHrs);
                         if (!canDo12 && !canDo8) {
-                            if (used + baseHrs > HARD_MAX_HOURS) {
+                            if (!auth200 && used + baseHrs > HARD_MAX_HOURS) {
                                 const sk = `${empId}||${dateStr}||${sCode}`;
                                 if (!capBlockedSeen.has(sk)) {
                                     capBlockedSeen.add(sk);
@@ -740,7 +742,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         coveredByBand[sCode]++;
                     } else {
                         // Normal 8 h
-                        if (used + baseHrs > HARD_MAX_HOURS) {
+                        const auth200 = ctx.authorizedOver200Ids?.has(empId) ?? false;
+                        if (!auth200 && used + baseHrs > HARD_MAX_HOURS) {
                             const sk = `${empId}||${dateStr}||${sCode}`;
                             if (!capBlockedSeen.has(sk) && passesRest(empId, dateStr, sCode, sStart, baseHrs)) {
                                 capBlockedSeen.add(sk);
@@ -786,7 +789,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                     const used = limitedEmps.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    if (used + sHrs > HARD_MAX_HOURS) continue;
+                    const auth200flex = ctx.authorizedOver200Ids?.has(empId) ?? false;
+                    if (!auth200flex && used + sHrs > HARD_MAX_HOURS) continue;
                     if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                     if (!passesWeekCap(empId, dateStr, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
@@ -922,7 +926,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         const used = limitedEmps.has(emp.id)
                             ? st.cycleCurrentUsed + st.cycleNextUsed
                             : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
-                        if (used + sHrs > HARD_MAX_HOURS) continue;
+                        const auth200gap = ctx.authorizedOver200Ids?.has(emp.id) ?? false;
+                        if (!auth200gap && used + sHrs > HARD_MAX_HOURS) continue;
                         if (!passesRest(emp.id, dateStr, gap.code, sStart, sHrs)) continue;
                         if (!passesWeekCap(emp.id, dateStr, sHrs)) continue;
                         writeAssign(emp.id, dateStr, gap.positionName, gap.code,
