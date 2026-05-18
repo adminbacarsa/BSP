@@ -675,6 +675,9 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 ).length;
                 extensionMode = tInCycle === 0;
             }
+            // Rastreo de asignaciones extendidas a D12/N12 en esta posición/día
+            const extD12Assigns: V2Assignment[] = [];
+            const extN12Assigns: V2Assignment[] = [];
 
             // ── Fase 1: Regulares en todas las bandas ────────────────────────
             for (const sh of dayBands) {
@@ -739,6 +742,11 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         const useStart = canDo12 ? extStart : sStart;
                         const useEnd   = canDo12 ? extEnd   : sEnd;
                         writeAssign(empId, dateStr, pos.positionName, useCode, sh.name || useCode, useHrs, useStart, inCurrent, useEnd);
+                        if (canDo12) {
+                            const last = assignments[assignments.length - 1];
+                            if (useCode === 'D12') extD12Assigns.push(last);
+                            else if (useCode === 'N12') extN12Assigns.push(last);
+                        }
                         coveredByBand[sCode]++;
                     } else {
                         // Normal 8 h
@@ -795,6 +803,33 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                     if (!passesWeekCap(empId, dateStr, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
                     coveredByBand[sCode]++;
+                }
+            }
+
+            // ── D12/N12 deben ir en par; si solo uno se extendió, revertir a 8h ──
+            if (extensionMode && (extD12Assigns.length > 0) !== (extN12Assigns.length > 0)) {
+                const toRevert = extD12Assigns.length > 0 ? extD12Assigns : extN12Assigns;
+                const isD12Side = extD12Assigns.length > 0;
+                const baseCode = isD12Side ? 'M' : 'N';
+                const baseSh = dayBands.find(sh => String(sh.code ?? '').toUpperCase() === baseCode);
+                const baseHrsRev = baseSh ? shiftHrs(baseSh, _hint) : 8;
+                const baseStartRev = baseSh?.startTime || SH_START[baseCode] || '07:00';
+                const baseEndRev = baseSh?.endTime || SH_END[baseCode] || undefined;
+                for (const a of toRevert) {
+                    const diff = a.hours - baseHrsRev;
+                    const st = rt[a.empId];
+                    const wk = isoWeekKey(new Date(a.dateStr));
+                    const inCur = parseInt(a.dateStr.split('-')[2]) <= cutoff;
+                    st.weekHours[wk] = (st.weekHours[wk] ?? 0) - diff;
+                    if (inCur) { st.cycleCurrentUsed -= diff; stats.employeeCycleHours.current[a.empId] = st.cycleCurrentUsed; }
+                    else { st.cycleNextUsed -= diff; stats.employeeCycleHours.next[a.empId] = st.cycleNextUsed; }
+                    st.monthHours -= diff;
+                    stats.employeeMonthlyHours[a.empId] = st.monthHours;
+                    stats.totalBillableHours -= diff;
+                    a.code = baseCode; a.name = baseSh?.name || baseCode;
+                    a.hours = baseHrsRev; a.startTime = baseStartRev;
+                    if (baseEndRev) a.endTime = baseEndRev; else delete a.endTime;
+                    st.lastShiftCode = baseCode;
                 }
             }
 
