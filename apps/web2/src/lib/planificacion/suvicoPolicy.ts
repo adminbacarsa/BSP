@@ -11,7 +11,7 @@
 export const SUVICO_POLICY = {
     REST: {
         /** Descanso mínimo entre fin de un turno e inicio del siguiente (interjornada). */
-        DAILY_MIN_HOURS: 9,
+        DAILY_MIN_HOURS: 8,
         /** Horas trabajadas en racha (con interjornadas de 12h entre medias) que disparan el descanso prolongado. */
         STREAK_HOURS_FOR_LONG_REST: 48,
         /**

@@ -690,17 +690,13 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 const sEnd     = sh.endTime   || SH_END[sCode]   || undefined;
                 const sName    = sh.name || sCode;
 
-                // En modo extensión M/N mantienen su código pero trabajan 12 h:
-                //   M-ext: 06:00→18:00 → siguiente M a 06:00 = 12 h descanso exacto ✓
-                //   N-ext: 18:00→06:00 → siguiente N a 22:00 = 16 h descanso ✓
-                const isExtBand = extensionMode && (sCode === 'M' || sCode === 'N');
-                const extHrs   = isExtBand ? 12 : baseHrs;
-                const extStart = isExtBand && sCode === 'M' ? '06:00'
-                               : isExtBand && sCode === 'N' ? '18:00'
-                               : sStart;
-                const extEnd   = isExtBand && sCode === 'M' ? '18:00'
-                               : isExtBand && sCode === 'N' ? '06:00'
-                               : sEnd;
+                // Parámetros extendidos (D12 para M, N12 para N) en modo extensión
+                const extCode  = (extensionMode && sCode === 'M') ? 'D12'
+                               : (extensionMode && sCode === 'N') ? 'N12'
+                               : sCode;
+                const extHrs   = extCode !== sCode ? (SH_HRS[extCode]   ?? 12) : baseHrs;
+                const extStart = extCode !== sCode ? (SH_START[extCode] ?? sStart) : sStart;
+                const extEnd   = extCode !== sCode ? (SH_END[extCode]   ?? sEnd)   : sEnd;
 
                 const regular = group.filter(eid => {
                     if (rt[eid].assignedDays.has(dateStr)) return false;
@@ -716,10 +712,10 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
 
-                    if (isExtBand) {
+                    if (extCode !== sCode) {
                         // Modo extensión: intentar 12 h; caída a 8 h si el cap lo impide
                         const canDo12 = (used + extHrs <= HARD_MAX_HOURS)
-                            && passesRest(empId, dateStr, sCode, extStart, extHrs)
+                            && passesRest(empId, dateStr, extCode, extStart, extHrs)
                             && passesWeekCap(empId, dateStr, extHrs);
                         const canDo8  = (used + baseHrs <= HARD_MAX_HOURS)
                             && passesRest(empId, dateStr, sCode, sStart, baseHrs)
@@ -736,10 +732,11 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                             }
                             continue;
                         }
+                        const useCode  = canDo12 ? extCode  : sCode;
                         const useHrs   = canDo12 ? extHrs   : baseHrs;
                         const useStart = canDo12 ? extStart : sStart;
                         const useEnd   = canDo12 ? extEnd   : sEnd;
-                        writeAssign(empId, dateStr, pos.positionName, sCode, sName, useHrs, useStart, inCurrent, useEnd);
+                        writeAssign(empId, dateStr, pos.positionName, useCode, sh.name || useCode, useHrs, useStart, inCurrent, useEnd);
                         coveredByBand[sCode]++;
                     } else {
                         // Normal 8 h
