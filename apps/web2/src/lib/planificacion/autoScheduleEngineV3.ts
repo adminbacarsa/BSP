@@ -943,7 +943,9 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             const bandOk = bandHrs === 0
                 || (passesWeekCap(emp.id, dateStr, bandHrs)
                     && passesRest(emp.id, dateStr, rawBand, bandStart, bandHrs));
-            const bandCode = bandOk ? rawBand : 'RET';
+            // RET = 8h pasivas activables; si el cap semanal ya está lleno tampoco puede ser RET, va a F
+            const retCapOk = passesWeekCap(emp.id, dateStr, 8);
+            const bandCode = bandOk ? rawBand : (retCapOk ? 'RET' : 'F');
             const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
             assignments.push({
                 empId: emp.id, dateStr, positionName: '',
