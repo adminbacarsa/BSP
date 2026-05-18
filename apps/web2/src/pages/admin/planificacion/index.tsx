@@ -272,6 +272,7 @@ export default function PlanificacionPage() {
     const [slaVendidas, setSlaVendidas] = useState<number>(0);
     const [showDiagnostic, setShowDiagnostic] = useState<boolean>(false);
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
+    const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
     const [isPublishing, setIsPublishing] = useState(false);
     const [correctionMode, setCorrectionMode] = useState(false);
     const [cellEditMode, setCellEditMode] = useState(false);
@@ -1880,6 +1881,9 @@ export default function PlanificacionPage() {
                 }
                 setPendingChanges({});
                 setPendingNovedades({});
+                if (isPublished) {
+                    setNeedsRepublishMap(prev => ({ ...prev, [publishKey]: true }));
+                }
                 toast.success("Guardado exitoso");
             } catch(e) {
                 console.error(e);
@@ -1944,6 +1948,7 @@ export default function PlanificacionPage() {
             });
             // 4. Actualizar estado local
             setPublishStatusMap(prev => ({ ...prev, [publishKey]: { publishedAt: new Date(), publishedBy: actorName } }));
+            setNeedsRepublishMap(prev => ({ ...prev, [publishKey]: false }));
             toast.success(`Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s)`);
         } catch (e) {
             console.error(e);
@@ -3722,6 +3727,7 @@ export default function PlanificacionPage() {
                             {selectedObjective && (() => {
                                 const publishKey = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
                                 const published = publishStatusMap[publishKey];
+                                const needsRepublish = !!needsRepublishMap[publishKey];
                                 return (
                                     <div className="flex items-center gap-2 no-print">
                                         {published ? (
@@ -3733,14 +3739,16 @@ export default function PlanificacionPage() {
                                                 <Ghost size={12}/> BORRADOR
                                             </span>
                                         )}
-                                        <button
-                                            onClick={handlePublish}
-                                            disabled={isPublishing}
-                                            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow"
-                                        >
-                                            {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
-                                            {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
-                                        </button>
+                                        {(!published || needsRepublish) && (
+                                            <button
+                                                onClick={handlePublish}
+                                                disabled={isPublishing}
+                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                            >
+                                                {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
+                                                {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
+                                            </button>
+                                        )}
                                         {published && isSuperAdmin && (
                                             <button
                                                 onClick={() => setCorrectionMode(v => !v)}
