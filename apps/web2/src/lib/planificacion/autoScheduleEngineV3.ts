@@ -655,13 +655,46 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 coveredByBand[String(sh.code ?? '').toUpperCase()] = 0;
             });
 
+            // ── Modo extensión M/N → D12/N12 ─────────────────────────────────
+            // Cuando el grupo T está 100 % en franco ese día, M y N extienden a
+            // 12 h (D12 07-19, N12 19-07) para mantener cobertura 24 h sin FLEX
+            // adicional.  Respeta el tope 48 h/semana: si el empleado ya no cabe
+            // en 12 h trabaja 8 h normal en su banda.
+            let extensionMode = false;
+            if (dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'T') &&
+                dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'M') &&
+                dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'N')) {
+                const tInCycle = group.filter(eid =>
+                    !rt[eid].assignedDays.has(dateStr) &&
+                    !ctx.absences[eid]?.has(dateStr) &&
+                    cycleWorkDays[eid]?.has(dateStr) &&
+                    empBand[eid] === 'T'
+                ).length;
+                extensionMode = tInCycle === 0;
+            }
+
             // ── Fase 1: Regulares en todas las bandas ────────────────────────
             for (const sh of dayBands) {
                 const sCode = String(sh.code ?? '').toUpperCase();
-                const sHrs = shiftHrs(sh, _hint);
-                const sStart = sh.startTime || SH_START[sCode] || '07:00';
-                const sEnd = sh.endTime || SH_END[sCode] || undefined;
-                const sName = sh.name || sCode;
+
+                // Extensión: T en franco → marcado como cubierto por D12+N12
+                if (extensionMode && sCode === 'T') {
+                    coveredByBand['T'] = qty;
+                    continue;
+                }
+
+                const baseHrs  = shiftHrs(sh, _hint);
+                const sStart   = sh.startTime || SH_START[sCode] || '07:00';
+                const sEnd     = sh.endTime   || SH_END[sCode]   || undefined;
+                const sName    = sh.name || sCode;
+
+                // Parámetros extendidos (D12 para M, N12 para N) en modo extensión
+                const extCode  = (extensionMode && sCode === 'M') ? 'D12'
+                               : (extensionMode && sCode === 'N') ? 'N12'
+                               : sCode;
+                const extHrs   = extCode !== sCode ? (SH_HRS[extCode]   ?? 12) : baseHrs;
+                const extStart = extCode !== sCode ? (SH_START[extCode] ?? sStart) : sStart;
+                const extEnd   = extCode !== sCode ? (SH_END[extCode]   ?? sEnd)   : sEnd;
 
                 const regular = group.filter(eid => {
                     if (rt[eid].assignedDays.has(dateStr)) return false;
@@ -676,24 +709,50 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                     const used = limitedEmps.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    if (used + sHrs > HARD_MAX_HOURS) {
-                        const sk = `${empId}||${dateStr}||${sCode}`;
-                        if (!capBlockedSeen.has(sk) && passesRest(empId, dateStr, sCode, sStart, sHrs)) {
-                            capBlockedSeen.add(sk);
-                            const ck = `${pos.positionName}||${dateStr}||${sCode}`;
-                            if (!capBlockedMap.has(ck)) capBlockedMap.set(ck, []);
-                            capBlockedMap.get(ck)!.push({
-                                empId, dateStr, positionName: pos.positionName,
-                                code: sCode, name: sName, hours: sHrs, startTime: sStart,
-                                ...(sEnd ? { endTime: sEnd } : {}),
-                            });
+
+                    if (extCode !== sCode) {
+                        // Modo extensión: intentar 12 h; caída a 8 h si el cap lo impide
+                        const canDo12 = (used + extHrs <= HARD_MAX_HOURS)
+                            && passesRest(empId, dateStr, extCode, extStart, extHrs)
+                            && passesWeekCap(empId, dateStr, extHrs);
+                        const canDo8  = (used + baseHrs <= HARD_MAX_HOURS)
+                            && passesRest(empId, dateStr, sCode, sStart, baseHrs)
+                            && passesWeekCap(empId, dateStr, baseHrs);
+                        if (!canDo12 && !canDo8) {
+                            if (used + baseHrs > HARD_MAX_HOURS) {
+                                const sk = `${empId}||${dateStr}||${sCode}`;
+                                if (!capBlockedSeen.has(sk)) {
+                                    capBlockedSeen.add(sk);
+                                    const ck = `${pos.positionName}||${dateStr}||${sCode}`;
+                                    if (!capBlockedMap.has(ck)) capBlockedMap.set(ck, []);
+                                    capBlockedMap.get(ck)!.push({ empId, dateStr, positionName: pos.positionName, code: sCode, name: sName, hours: baseHrs, startTime: sStart, ...(sEnd ? { endTime: sEnd } : {}) });
+                                }
+                            }
+                            continue;
                         }
-                        continue;
+                        const useCode  = canDo12 ? extCode  : sCode;
+                        const useHrs   = canDo12 ? extHrs   : baseHrs;
+                        const useStart = canDo12 ? extStart : sStart;
+                        const useEnd   = canDo12 ? extEnd   : sEnd;
+                        writeAssign(empId, dateStr, pos.positionName, useCode, sh.name || useCode, useHrs, useStart, inCurrent, useEnd);
+                        coveredByBand[sCode]++;
+                    } else {
+                        // Normal 8 h
+                        if (used + baseHrs > HARD_MAX_HOURS) {
+                            const sk = `${empId}||${dateStr}||${sCode}`;
+                            if (!capBlockedSeen.has(sk) && passesRest(empId, dateStr, sCode, sStart, baseHrs)) {
+                                capBlockedSeen.add(sk);
+                                const ck = `${pos.positionName}||${dateStr}||${sCode}`;
+                                if (!capBlockedMap.has(ck)) capBlockedMap.set(ck, []);
+                                capBlockedMap.get(ck)!.push({ empId, dateStr, positionName: pos.positionName, code: sCode, name: sName, hours: baseHrs, startTime: sStart, ...(sEnd ? { endTime: sEnd } : {}) });
+                            }
+                            continue;
+                        }
+                        if (!passesRest(empId, dateStr, sCode, sStart, baseHrs)) continue;
+                        if (!passesWeekCap(empId, dateStr, baseHrs)) continue;
+                        writeAssign(empId, dateStr, pos.positionName, sCode, sName, baseHrs, sStart, inCurrent, sEnd);
+                        coveredByBand[sCode]++;
                     }
-                    if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
-                    if (!passesWeekCap(empId, dateStr, sHrs)) continue;
-                    writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
-                    coveredByBand[sCode]++;
                 }
             }
 

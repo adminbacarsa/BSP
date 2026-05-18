@@ -192,7 +192,10 @@ export function verifyScheduleCoverage(
     };
 
     // 2. Index de asignaciones reales por slot
-    const assignKey = (a: V2Assignment) => `${a.dateStr}__${a.positionName}__${String(a.code || '').toUpperCase()}`;
+    // D12 ≡ M y N12 ≡ N para matching: en modo extensión el motor asigna D12/N12
+    // cuando T está en franco; el slot de demanda sigue siendo M/N.
+    const normCode = (c: string): string => c === 'D12' ? 'M' : c === 'N12' ? 'N' : c;
+    const assignKey = (a: V2Assignment) => `${a.dateStr}__${a.positionName}__${normCode(String(a.code || '').toUpperCase())}`;
     const realCount: Record<string, number> = {};
     assignments.forEach((a) => {
         const c = String(a.code || '').toUpperCase();
@@ -200,6 +203,29 @@ export function verifyScheduleCoverage(
         if (!a.positionName) return;
         const k = assignKey(a);
         realCount[k] = (realCount[k] || 0) + 1;
+    });
+
+    // Inferencia de extensión: si D12 cubre M qty Y N12 cubre N qty ese día,
+    // la franja T (14-22) queda físicamente cubierta (D12 07→19, N12 19→07).
+    // Solo aplica con 12 h reales (D12+N12), NO con M+N de 8 h que dejan un hueco.
+    const ext12Count: Record<string, number> = {};
+    assignments.forEach((a) => {
+        const c = String(a.code || '').toUpperCase();
+        if (!a.positionName || (c !== 'D12' && c !== 'N12')) return;
+        const k = `${a.dateStr}__${a.positionName}__${c}`;
+        ext12Count[k] = (ext12Count[k] || 0) + 1;
+    });
+    ctx.positions.forEach((pos) => {
+        const pqty = Math.max(1, Number(pos.qty) || 1);
+        ctx.daysInMonth.forEach((d) => {
+            const dateStr = ctx.getDateKey(d);
+            const kD12 = `${dateStr}__${pos.positionName}__D12`;
+            const kN12 = `${dateStr}__${pos.positionName}__N12`;
+            const kT   = `${dateStr}__${pos.positionName}__T`;
+            if ((ext12Count[kD12] ?? 0) >= pqty && (ext12Count[kN12] ?? 0) >= pqty && !(realCount[kT] > 0)) {
+                realCount[kT] = pqty;
+            }
+        });
     });
 
     const uncovered: UncoveredSlot[] = [];
