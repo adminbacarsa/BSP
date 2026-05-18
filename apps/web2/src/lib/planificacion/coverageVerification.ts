@@ -142,8 +142,12 @@ export function buildAssignmentGetShift(assignments: V2Assignment[], absences: V
         const a = byKey.get(`${empId}__${dateStr}`);
         if (!a) return null;
         const c = String(a.code || '').toUpperCase();
-        // Sin puesto asignado → es un registro informativo (standby/banda), no cuenta como turno trabajado
-        if (!a.positionName) return { code: 'RET', startTime: '00:00', hours: 0 };
+        // Sin puesto: preservar francos/ausencias para que rompan la racha de días consecutivos.
+        // Solo los standby sin clasificar se tratan como RET.
+        if (!a.positionName) {
+            if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c)) return { code: c, startTime: '00:00', hours: 0 };
+            return { code: 'RET', startTime: '00:00', hours: 0 };
+        }
         // RET / francos / licencias no son turnos trabajados: 0 horas
         const isNonWork = c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c);
         return {

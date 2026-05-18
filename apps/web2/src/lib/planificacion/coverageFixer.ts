@@ -123,8 +123,11 @@ function makeGetShift(
         const a = idx.get(`${empId}__${dateStr}`);
         if (!a) return null;
         const c = String(a.code || '').toUpperCase();
-        // Sin puesto asignado → registro informativo (standby/banda), tratar como RET
-        if (!a.positionName) return { code: 'RET', startTime: '00:00', hours: 0 };
+        // Sin puesto: preservar francos/ausencias para que rompan la racha de días consecutivos.
+        if (!a.positionName) {
+            if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c)) return { code: c, startTime: '00:00', hours: 0 };
+            return { code: 'RET', startTime: '00:00', hours: 0 };
+        }
         // RET / francos no son turnos trabajados: 0 horas, sin start laboral
         const isNonWork = c === 'RET' || FRANCO_CODES.has(c);
         return {
