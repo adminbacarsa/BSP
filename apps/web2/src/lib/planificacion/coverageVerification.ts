@@ -164,6 +164,26 @@ export function verifyScheduleCoverage(
     const totalSlots = demand.reduce((s, d) => s + d.qty, 0);
     const bandsExpected = Array.from(new Set(demand.map((d) => d.shiftCode))).sort();
 
+    // ── DIAGNÓSTICO ── (quitar antes de producción)
+    {
+        const posNames = [...new Set(demand.map(d => d.positionName))];
+        const codes = [...new Set(demand.map(d => d.shiftCode))];
+        console.log('[VERIFY DIAG] autoCycles:', ctx.autoCycles, 'totalSlots:', totalSlots);
+        console.log('[VERIFY DIAG] demand positionNames:', posNames, 'shiftCodes:', codes);
+        const namedAssigns = assignments.filter(a => !!a.positionName && a.hours > 0);
+        const assignPosNames = [...new Set(namedAssigns.map(a => a.positionName))];
+        const assignCodes = [...new Set(namedAssigns.map(a => a.code.toUpperCase()))];
+        console.log('[VERIFY DIAG] named assignments count:', namedAssigns.length);
+        console.log('[VERIFY DIAG] assignment positionNames:', assignPosNames);
+        console.log('[VERIFY DIAG] assignment codes:', assignCodes);
+        // Check first 3 demand slots vs matching assigns
+        demand.slice(0, 3).forEach(slot => {
+            const k = `${slot.dateStr}__${slot.positionName}__${slot.shiftCode}`;
+            const matches = namedAssigns.filter(a => a.dateStr === slot.dateStr && a.positionName === slot.positionName && String(a.code||'').toUpperCase() === slot.shiftCode);
+            console.log(`[VERIFY DIAG] slot ${k} qty=${slot.qty} → matches=${matches.length}`);
+        });
+    }
+
     // Tope HARD de días seguidos según el ciclo elegido (6+2 → 6, 4+2 → 4, etc.)
     const { cL: maxConsDays } = pickRepresentativeCycle(ctx.autoCycles || []);
     const VERIFY_REST_CFG: AgreementRestConfig = {

@@ -131,6 +131,19 @@ interface EmpState {
 // ─── Motor principal ──────────────────────────────────────────────────────────
 
 export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
+    // ── DIAGNÓSTICO V3 ── (quitar antes de producción)
+    const _DBG = true;
+    if (_DBG) {
+        console.group('[V3 DIAG] generateScheduleV3');
+        console.log('autoCycles:', ctx.autoCycles);
+        console.log('employees count:', ctx.employees.length);
+        console.log('positions:', ctx.positions.map(p => ({
+            name: p.positionName, qty: p.qty,
+            shifts: (p.shifts || []).map((s: any) => `${s.code}(${s.hours ?? '?'}h)`),
+            activeDays: p.activeDays,
+        })));
+    }
+
     const feasibility = checkFeasibility(ctx);
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleLen = cL + cF;
@@ -189,6 +202,14 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         const only = ids[0];
         if (!defaultPos[only]) defaultPos[only] = posName;
     });
+
+    if (_DBG) {
+        console.log('[V3 DIAG] PASO 1 - positionGroups:', Object.fromEntries(
+            Object.entries(positionGroups).map(([k, v]) => [k, v.length])
+        ));
+        const idleCount = Object.values(empAssignedTo).filter(v => v === null).length;
+        console.log('[V3 DIAG] PASO 1 - idle employees:', idleCount, '/', ctx.employees.length);
+    }
 
     // ── PASO 2: Banda fija + offset de ciclo por empleado ──────────────────
     //
@@ -446,6 +467,29 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
         if (wdT2.length > capT2) wdT2.slice(capT2).forEach(d => wdSet.delete(d));
     });
 
+    if (_DBG) {
+        // Resumen de bandas asignadas
+        const bandDist: Record<string, number> = {};
+        ctx.employees.forEach(emp => {
+            const b = empBand[emp.id] ?? 'FLEX';
+            bandDist[b] = (bandDist[b] ?? 0) + 1;
+        });
+        console.log('[V3 DIAG] PASO 2 - empBand distribution:', bandDist);
+        console.log('[V3 DIAG] PASO 2 - flexSet size:', flexSet.size);
+        // cycleWorkDays sizes
+        const wdSizes = ctx.employees.map(emp => cycleWorkDays[emp.id]?.size ?? 0);
+        const minWd = Math.min(...wdSizes), maxWd = Math.max(...wdSizes);
+        const avgWd = wdSizes.reduce((s, v) => s + v, 0) / (wdSizes.length || 1);
+        console.log(`[V3 DIAG] PASO 3b - cycleWorkDays: min=${minWd} max=${maxWd} avg=${avgWd.toFixed(1)}`);
+        // empMonthlyInitial stats
+        const initHours = Object.values(ctx.empMonthlyInitial);
+        if (initHours.length) {
+            const maxInit = Math.max(...initHours);
+            const avgInit = initHours.reduce((s,v) => s+v, 0) / initHours.length;
+            console.log(`[V3 DIAG] empMonthlyInitial: max=${maxInit} avg=${avgInit.toFixed(1)}`);
+        }
+    }
+
     // ── GENERACIÓN ─────────────────────────────────────────────────────────
     const assignments: V2Assignment[] = [];
     const rt: Record<string, EmpState> = {};
@@ -579,16 +623,31 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
     //
     // Así los FLEX no se consumen todos en la primera banda cuando hay varias con faltante.
 
+    let _dbgDayCount = 0;
     for (const day of ctx.daysInMonth) {
         const dateStr = ctx.getDateKey(day);
         const dayLetter = ctx.getDayLetter(dateStr);
         const inCurrent = day.getDate() <= cutoff;
+        _dbgDayCount++;
 
         for (const pos of ctx.positions) {
             if (!positionIsActiveOn(pos, dayLetter)) continue;
             const qty = Math.max(1, Number(pos.qty) || 1);
             const dayBands = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
             const group = positionGroups[pos.positionName] ?? [];
+
+            if (_DBG && _dbgDayCount === 1) {
+                console.log(`[V3 DIAG] Día 1 ${dateStr}(${dayLetter}) pos="${pos.positionName}" qty=${qty} dayBands=[${dayBands.map(s => s.code).join(',')}] group=${group.length}`);
+                const inCycleCount = group.filter(eid => cycleWorkDays[eid]?.has(dateStr)).length;
+                const flexInCycle = group.filter(eid => flexSet.has(eid) && cycleWorkDays[eid]?.has(dateStr)).length;
+                console.log(`[V3 DIAG]   inCycle=${inCycleCount}/${group.length} flexInCycle=${flexInCycle}`);
+                dayBands.forEach(sh => {
+                    const sCode = String(sh.code ?? '').toUpperCase();
+                    const withBand = group.filter(eid => empBand[eid] === sCode).length;
+                    const withBandInCycle = group.filter(eid => empBand[eid] === sCode && cycleWorkDays[eid]?.has(dateStr)).length;
+                    console.log(`[V3 DIAG]   band ${sCode}: empBand match ${withBand} total, ${withBandInCycle} inCycle`);
+                });
+            }
 
             // Cobertura acumulada por banda (se llena en fase 1, se completa en fase 2)
             const coveredByBand: Record<string, number> = {};
@@ -723,6 +782,21 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
         }
+    }
+
+    if (_DBG) {
+        const namedAssigns = assignments.filter(a => !!a.positionName && a.hours > 0);
+        const posNameCount: Record<string, number> = {};
+        const codeCount: Record<string, number> = {};
+        namedAssigns.forEach(a => {
+            posNameCount[a.positionName] = (posNameCount[a.positionName] ?? 0) + 1;
+            codeCount[a.code] = (codeCount[a.code] ?? 0) + 1;
+        });
+        console.log(`[V3 DIAG] POST-LOOP named assigns=${namedAssigns.length} totalBillableHours=${stats.totalBillableHours}`);
+        console.log('[V3 DIAG] POST-LOOP by positionName:', posNameCount);
+        console.log('[V3 DIAG] POST-LOOP by code:', codeCount);
+        console.log('[V3 DIAG] stats.uncoveredSlots:', stats.uncoveredSlots);
+        console.groupEnd();
     }
 
     // ── CAP OVERFLOW: slots bloqueados por 200h que quedaron sin cubrir ────
