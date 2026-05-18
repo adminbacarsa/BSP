@@ -8,6 +8,7 @@ import {
   ejecutarResumenHorasObjetivoSlaPeriodo,
   ejecutarResumenHorasSlaVariosObjetivos,
   ejecutarResumenHorasLiquidacionEmpresaPeriodo,
+  ejecutarListadoEmpleadosHorasPlanificadasUmbral,
   ejecutarResumenPresenciasObjetivosDia,
   ejecutarListadoFrancoRetDia,
   ejecutarBuscarObjetivosPorNombre,
@@ -57,6 +58,204 @@ function parseRefYmd(s: string): { y: number; m: number; d: number } {
   const rex = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
   if (!rex) throw new Error('fecha_ref_invalida');
   return { y: Number(rex[1]), m: Number(rex[2]), d: Number(rex[3]) };
+}
+
+function ymdToString(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function addDaysToYmd(refYmd: string, days: number): string {
+  const { y, m, d } = parseRefYmd(refYmd);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return ymdToString(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+}
+
+/** «solo casisa», «servicios activos de casisa», etc. */
+function extractClientFilterFromQuery(t: string): string | null {
+  const n = normText(t);
+  const solo = n.match(
+    /\bsolo\s+(?:los?\s+)?(?:servicios?\s+activos?\s+(?:de\s+)?)?([a-z0-9][a-z0-9\s.-]{2,40})/,
+  );
+  if (solo?.[1]) {
+    const name = solo[1].trim();
+    if (!/^(servicios?|activos?|contratos?|de|del)$/i.test(name)) return name;
+  }
+  const de = n.match(/\b(?:servicios?\s+activos?\s+)?(?:de|del)\s+(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/);
+  if (de?.[1]) return de[1];
+  if (/^\s*solo\s+(casisa|loteria|ministerio|bacarsa)\s*$/i.test(n)) {
+    const m = n.match(/\b(casisa|loteria|ministerio|bacarsa)\b/);
+    if (m?.[1]) return m[1];
+  }
+  if (/\b(solo|unicamente|únicamente)\b/.test(n)) {
+    const known = n.match(/\b(casisa|loteria|ministerio|bacarsa)\b/);
+    if (known?.[1]) return known[1];
+  }
+  return null;
+}
+
+function clientNameMatchesFilter(cliente: string, filter: string): boolean {
+  const c = normText(cliente);
+  const f = normText(normalizeClientFilterName(filter));
+  if (!c || !f) return false;
+  return c.includes(f) || f.includes(c);
+}
+
+/** Evita filtros tipo «casisa horas» heredados de frases sueltas en el hilo. */
+function normalizeClientFilterName(raw: string): string {
+  const n = normText(raw)
+    .replace(/\b(horas?|sla|servicios?|activos?|contratos?)\s*$/g, '')
+    .trim();
+  const known = n.match(/\b(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/);
+  if (known?.[1]) return known[1];
+  return raw.trim();
+}
+
+function resolveClientFilterFromQuery(t: string): string | null {
+  const direct = extractClientFilterFromQuery(t);
+  return direct ? normalizeClientFilterName(direct) : null;
+}
+
+function parseOpsAggregateFromRecent(recent: AssistantRecentMessage[]): {
+  total: number;
+  presentes: number;
+  ausentes: number;
+  sinMarcacion: number;
+  fecha: string;
+} | null {
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 8; i--) {
+    const c = recent[i].content || '';
+    const m =
+      c.match(/\*\*(\d+)\*\*\s+turnos?\s+visibles/i) ||
+      c.match(/(\d+)\s+turnos?\s+visibles/i);
+    if (!m?.[1]) continue;
+    if (!/\b(sin\s+marcaci|presentes|ausentes|operaciones|firestore)\b/i.test(c)) continue;
+    const pres = c.match(/\*\*(\d+)\*\*\s+presentes/i) || c.match(/(\d+)\s+presentes/i);
+    const aus = c.match(/\*\*(\d+)\*\*\s+ausentes/i) || c.match(/(\d+)\s+ausentes/i);
+    const sin =
+      c.match(/\*\*(\d+)\*\*\s+sin\s+marcaci/i) || c.match(/(\d+)\s+sin\s+marcaci/i);
+    const iso = c.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+    return {
+      total: Number(m[1]),
+      presentes: Number(pres?.[1] ?? 0),
+      ausentes: Number(aus?.[1] ?? 0),
+      sinMarcacion: Number(sin?.[1] ?? 0),
+      fecha: iso?.[1] ?? '',
+    };
+  }
+  return null;
+}
+
+/** «vigiladores con más de 200 hs planificadas en mayo», etc. */
+function extractPlannedHoursThresholdFromQuery(t: string): number | null {
+  const n = normText(t);
+  let m = n.match(
+    /\b(?:mas|más)\s+de\s+(\d{2,4})\s*(?:hs?|horas?)\b|\b(?:superan|superen|supera|exceden|excedan)\s+(?:las?\s+)?(\d{2,4})\s*(?:hs?|horas?)\b/,
+  );
+  if (m?.[1]) return Number(m[1]);
+  if (m?.[2]) return Number(m[2]);
+  m = n.match(/\b(\d{2,4})\s*(?:hs?|horas?)\s+(?:o\s+)?(?:mas|más)\b/);
+  if (m?.[1]) return Number(m[1]);
+  if (/\b200\s*(?:hs?|horas?)\b/.test(n) || /\bmas\s+de\s+200\b/.test(n)) return 200;
+  return null;
+}
+
+function matchEmployeePlannedHoursThresholdIntent(t: string): boolean {
+  const umbral = extractPlannedHoursThresholdFromQuery(t);
+  if (umbral == null || !Number.isFinite(umbral)) return false;
+  if (/\b(sla|contrato\s+sla|horas?\s+vendid|objetivo\s+distinto)\b/.test(t) && !/\bpor\s+empleado\b/.test(t)) {
+    return false;
+  }
+  if (
+    /\b(empleados?|vigiladores?|guardias?|legajos?|colaboradores?|personal|nomina|nómina)\b/.test(t) ||
+    /\bpor\s+empleado\b/.test(t) ||
+    /\bplanificad/.test(t)
+  ) {
+    return true;
+  }
+  return /\b(mas|más)\s+de\s+\d{2,4}\s*(?:hs?|horas?)\b/.test(t);
+}
+
+function recentPlannedHoursThresholdThread(
+  recent: AssistantRecentMessage[],
+): { umbral: number; mesLabel: string } | null {
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+    const c = recent[i].content || '';
+    const u = extractPlannedHoursThresholdFromQuery(normText(c));
+    if (u == null) continue;
+    if (
+      !/\b(planificad|vigilador|empleado|200|horas?)\b/i.test(c) &&
+      !/\bbolsa|fichad|liquidaci\b/i.test(c)
+    ) {
+      continue;
+    }
+    const mes = c.match(/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+20\d{2}\b/i);
+    const iso = c.match(/\b(20\d{2}-\d{2})\b/);
+    const mesLabel = mes?.[0] ?? (iso?.[1] ? iso[1] : '');
+    return { umbral: u, mesLabel };
+  }
+  return null;
+}
+
+function matchEmployeePlannedHoursThresholdFollowUp(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (!recentPlannedHoursThresholdThread(recent)) return false;
+  const trimmed = t.trim();
+  if (/^(detalle|lista|listado|nombres|mostrame|mostrá|decime)\b/i.test(trimmed)) return true;
+  if (/\b(detalle|listado|nombres)\b/.test(t) && /\b(empleados?|vigiladores?|legajos?)\b/.test(t)) return true;
+  if (/^(si|sí|dale|ok)\.?$/i.test(trimmed)) return true;
+  return false;
+}
+
+function looksLikeObjectiveHintFalsePositive(hint: string): boolean {
+  const h = normText(hint);
+  if (/^\d{2,4}\s*hs?$/.test(h)) return true;
+  if (/\bpor\s+empleado\b/.test(h)) return true;
+  if (h.length < 4) return true;
+  return false;
+}
+
+function extractDayYmdFromQuery(t: string, refYmd: string, recent: AssistantRecentMessage[]): string {
+  const blob = normText([t, ...recent.slice(-4).map((m) => m.content)].join(' '));
+  if (/\b(pasado\s+manana|pasado\s+mañana)\b/.test(blob)) return addDaysToYmd(refYmd, 2);
+  if (/\b(manana|mañana|el\s+dia\s+de\s+manana)\b/.test(blob)) return addDaysToYmd(refYmd, 1);
+  if (/\bayer\b/.test(blob)) return addDaysToYmd(refYmd, -1);
+  if (/\b(hoy|este\s+dia|este\s+día)\b/.test(blob)) return refYmd;
+  const iso = t.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso?.[1]) return iso[1];
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 6; i--) {
+    const isoR = (recent[i].content || '').match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+    if (isoR?.[1] && /\b(manana|mañana|ayer|hoy)\b/.test(blob)) return isoR[1];
+  }
+  return refYmd;
+}
+
+function matchTurnosPlanificadosDiaIntent(t: string): boolean {
+  if (!/\b(turnos?|trunos?|planificad|guardias?|personal)\b/.test(t)) return false;
+  return /\b(hoy|manana|mañana|ayer|pasado\s+manana|pasado\s+mañana|20\d{2}-\d{2}-\d{2})\b/.test(t);
+}
+
+function recentOpsAggregateThread(recent: AssistantRecentMessage[]): { count: number; fecha: string } | null {
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 6; i--) {
+    const c = recent[i].content || '';
+    const m =
+      c.match(/\*\*(\d+)\*\*\s+turnos?\s+visibles/i) ||
+      c.match(/(\d+)\s+turnos?\s+visibles/i);
+    if (!m?.[1]) continue;
+    if (!/\b(sin\s+marcaci|presentes|ausentes|operaciones|firestore)\b/i.test(c)) continue;
+    const iso = c.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+    return { count: Number(m[1]), fecha: iso?.[1] ?? '' };
+  }
+  return null;
+}
+
+function matchOpsTurnoCountFollowUpIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  const ctx = recentOpsAggregateThread(recent);
+  if (!ctx) return false;
+  const trimmed = t.trim();
+  if (/^(quienes?|quiénes?|quien|quién)\s*(son|es|estan|están)?\.?$/i.test(trimmed)) return true;
+  const m = t.match(/\b(?:son\s+)?(?:los?\s+)?(\d+)\b/);
+  if (m?.[1] && Number(m[1]) === ctx.count) return true;
+  return false;
 }
 
 function monthRangeYsMmDd(year: number, month1to12: number): { desde: string; hasta: string; label: string } {
@@ -236,6 +435,7 @@ function formatTurnosDetailReply(nombre: string, rangeLabel: string, data: Recor
 }
 
 function matchLiquidacionEmpresaIntent(t: string): boolean {
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   if (matchLiquidacionEmpresaIntentExcludeEmployee(t)) return false;
   if (/\b(diurna|nocturna|liquidaci|liquidar|extras?|al\s*100|100\s*%|ft\s+trabaj|franco\s+trabaj|bolsa|al\s*50|feriado)\b/.test(t)) {
     return true;
@@ -555,6 +755,8 @@ function recentTurnosHoyThread(recent: AssistantRecentMessage[]): boolean {
 
 /** Seguimiento: «no hay nadie?», «si» tras preguntar turnos de hoy, etc. */
 function matchTurnosHoyFollowUpIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (matchOpsTurnoCountFollowUpIntent(t, recent)) return true;
+  if (matchTurnosPlanificadosDiaIntent(t)) return true;
   if (matchWhoOnShiftTodayIntent(t)) return true;
   if (/^(si|sí|dale|ok|bueno|perfecto)\.?$/i.test(t.trim()) && recentTurnosHoyThread(recent)) return true;
   if (
@@ -697,6 +899,11 @@ function matchWhoOnShiftTodayIntent(t: string): boolean {
 /** Preguntas abiertas (listados genéricos, cómo…) — dejan de lado el atajo y va el LLM + tools. */
 function shouldSkipDeterministicRouter(raw: string, recent: AssistantRecentMessage[] = []): boolean {
   const t = normText(raw);
+  if (matchOpsTurnoCountFollowUpIntent(t, recent)) return false;
+  if (matchTurnosPlanificadosDiaIntent(t)) return false;
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
+  if (matchEmployeePlannedHoursThresholdFollowUp(t, recent)) return false;
+  if (resolveClientFilterFromQuery(t)) return false;
   if (matchWhoOnShiftTodayIntent(t)) return false;
   if (matchFrancoRetDiaIntent(t, recent)) return false;
   if (matchAffirmativeShortIntent(t) && recentOffersSlaAllObjectivesBatch(recent)) return false;
@@ -897,6 +1104,7 @@ function recentOffersSlaAllObjectivesBatch(recent: AssistantRecentMessage[]): bo
 }
 
 function matchSlaAllActiveServicesIntent(t: string, recent: AssistantRecentMessage[] = []): boolean {
+  if (resolveClientFilterFromQuery(t)) return false;
   const blob = normText([t, ...recent.slice(-5).map((m) => m.content)].join(' '));
   if (
     /\b(todos los servicios|todos los contratos|todos los objetivos|cada servicio activo|servicios activos)\b/.test(
@@ -912,10 +1120,11 @@ function matchSlaAllActiveServicesIntent(t: string, recent: AssistantRecentMessa
 
 /** Seguimiento corto tras listar un SLA («cantidad de horas?», «las horas», etc.). */
 function matchSlaContractHoursIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   if (matchMultiSlaFromListIntent(t, recent) || matchSlaAllActiveServicesIntent(t, recent)) return false;
   if (/\b(que|qué)\s+sla\b/.test(t) && recentMentionsSlaOrContrato(recent)) return true;
   if (!new RegExp(RE_HORA).test(t)) return false;
-  if (matchHoursToPlanIntent(t)) return true;
+  if (matchHoursToPlanIntent(t) && !matchEmployeePlannedHoursThresholdIntent(t)) return true;
   if (/\bhoras?\s+(?:del|de)\s+(?:servicio|contrato|sla)\b/.test(t)) return true;
   if (/\b(cantidad|cuantas|cuántas|cuanto|cuánto|total|numero|número)\b/.test(t) && /\bhoras?\b/.test(t)) {
     return recentMentionsSlaOrContrato(recent);
@@ -959,21 +1168,116 @@ function extractMonthRefYmdFromRecentMessages(recent: AssistantRecentMessage[], 
   return fallbackYmd;
 }
 
-function formatMultiSlaHoursReply(batch: Record<string, unknown>): string {
+function formatPlannedHoursThresholdReply(
+  data: Record<string, unknown>,
+  rangeLabel: string,
+  umbral: number,
+): string {
+  const cuenta = Number(data.cuenta_sobre_umbral ?? 0);
+  const muestra = (data.muestra_empleados_sobre_umbral ?? []) as Array<Record<string, unknown>>;
+  const trunc = data.truncado_por_limite_muestra === true || data.truncado_consulta_turnos_limite === true;
+
+  if (cuenta === 0) {
+    return (
+      `Según **Firestore** (turnos planificados de cobertura, **${rangeLabel}**), **ningún** vigilador supera **${umbral}** h planificadas en ese período.\n\n` +
+      `*Criterio:* suma de horas de turnos con código de cobertura (sin francos/licencias/RET). No es la bolsa 200 de liquidación ni horas fichadas.*`
+    ).trim();
+  }
+
+  let body = `Según **Firestore** (**${rangeLabel}**), hay **${cuenta}** vigilador(es) con **más de ${umbral}** h planificadas de cobertura:\n\n`;
+  for (const e of muestra) {
+    const leg = e.legajo ? ` (legajo **${e.legajo}**)` : '';
+    body += `- **${e.nombre}**${leg}: **${e.horas_planificadas_cobertura}** h planificadas`;
+    const exc = Number(e.exceso_sobre_umbral ?? 0);
+    if (exc > 0) body += ` (+${exc} h sobre el umbral)`;
+    body += '\n';
+  }
+  if (trunc) {
+    body += `\n*Nota:* lista acotada o consulta de turnos al límite; para volcado completo usá **Reportes y liquidación**.\n`;
+  }
+  body += `\n*No confundir con horas fichadas ni bolsa 200 de liquidación.*`;
+  return body.trim();
+}
+
+async function tryDeterministicPlannedHoursThresholdReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[],
+): Promise<string | null> {
+  const follow = matchEmployeePlannedHoursThresholdFollowUp(t, recent);
+  if (!matchEmployeePlannedHoursThresholdIntent(t) && !follow) return null;
+
+  const umbral =
+    extractPlannedHoursThresholdFromQuery(t) ?? recentPlannedHoursThresholdThread(recent)?.umbral ?? 200;
+
+  let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
+  if (!range) {
+    range = extractMonthRangeFromHoursQuery(
+      recent
+        .slice(-6)
+        .map((m) => m.content)
+        .join(' '),
+      toolCtx.referenceDateYsMmDd,
+    );
+  }
+  if (!range) {
+    try {
+      const ref = parseRefYmd(extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd));
+      range = monthRangeYsMmDd(ref.y, ref.m);
+    } catch {
+      return null;
+    }
+  }
+
+  const data = await ejecutarListadoEmpleadosHorasPlanificadasUmbral(toolCtx, {
+    umbral_horas: umbral,
+    fecha_desde: range.desde,
+    fecha_hasta: range.hasta,
+    limite: 48,
+  });
+
+  const err = String(data.error ?? '').trim();
+  if (err) {
+    if (err === 'sin_permiso_para_consultar_turnos') {
+      return 'Tu perfil no tiene permiso para consultar turnos planificados. Necesitás lectura en **Planificación**, **Operaciones** o **Reportes**.';
+    }
+    return `No pude listar empleados por horas planificadas (${err}).`;
+  }
+
+  const reply = formatPlannedHoursThresholdReply(data, range.label, umbral);
+  console.info('[assistant] deterministic planned hours threshold', {
+    umbral,
+    range: range.label,
+    cuenta: data.cuenta_sobre_umbral,
+  });
+  return reply.slice(0, 7500);
+}
+
+function formatMultiSlaHoursReply(
+  batch: Record<string, unknown>,
+  clientFilter?: string | null,
+): string {
   const mes = String(batch.mes_yyyy_mm ?? '');
-  const resultados = (batch.resultados ?? []) as Array<Record<string, unknown>>;
+  let resultados = (batch.resultados ?? []) as Array<Record<string, unknown>>;
+  if (clientFilter) {
+    resultados = resultados.filter((r) => clientNameMatchesFilter(String(r.cliente ?? ''), clientFilter));
+  }
   if (resultados.length === 0) {
+    if (clientFilter) {
+      return `No encontré contratos SLA del mes **${mes}** para el cliente **${clientFilter}**. Revisá **Servicios y SLA** o el nombre comercial en **Clientes y Objetivos**.`;
+    }
     return 'No encontré contratos SLA para comparar en ese mes. Revisá **Servicios y SLA**.';
   }
 
-  let body = `Horas **SLA** del mes **${mes}** (vendidas del contrato vs ya planificadas en turnos):\n\n`;
+  const filtroLabel = clientFilter ? ` — solo **${normalizeClientFilterName(clientFilter)}**` : '';
+  let body = `Horas **SLA** del mes **${mes}**${filtroLabel} (vendidas del contrato vs ya planificadas en turnos):\n\n`;
   for (const r of resultados) {
     const err = String(r.error ?? '').trim();
     const cliente = String(r.cliente ?? '').trim();
     const objetivo = String(r.objetivo ?? r.texto_busqueda ?? '—');
     const titulo = cliente ? `**${cliente}** — **${objetivo}**` : `**${objetivo}**`;
     if (err) {
-      const msg = formatSlaHoursToolError(String(r.texto_busqueda ?? objetivo), err, r);
+      const msg = formatSlaHoursToolError(String(r.texto_busqueda ?? objetivo), err, r, clientFilter);
       body += `${titulo}\n- ${msg ?? err}\n\n`;
       continue;
     }
@@ -1023,12 +1327,36 @@ function formatDeterministicSlaHoursToPlanReply(resumen: Record<string, unknown>
   return body;
 }
 
-function formatSlaHoursToolError(objHint: string, err: string, resumen: Record<string, unknown>): string | null {
+function formatSlaHoursToolError(
+  objHint: string,
+  err: string,
+  resumen: Record<string, unknown>,
+  clientFilter?: string | null,
+): string | null {
   const detalle = String(resumen.detalle ?? '').trim();
   if (err === 'objetivo_ambiguo') {
-    const coincidencias = (resumen.coincidencias ?? []) as Array<{ nombre?: string }>;
-    const lista = coincidencias.map((c) => `**${c.nombre ?? '?'}**`).join(', ');
-    return `Hay varios objetivos similares a «${objHint}»: ${lista}. Decime el nombre exacto del sitio.`;
+    let coincidencias = (resumen.coincidencias ?? []) as Array<{
+      nombre?: string;
+      nombre_objetivo?: string;
+      nombre_cliente?: string;
+    }>;
+    if (clientFilter) {
+      coincidencias = coincidencias.filter((c) =>
+        clientNameMatchesFilter(String(c.nombre_cliente ?? ''), clientFilter),
+      );
+    }
+    const lista = coincidencias
+      .map((c) => {
+        const obj = c.nombre ?? c.nombre_objetivo ?? '?';
+        const cli = String(c.nombre_cliente ?? '').trim();
+        return cli ? `**${cli}** — **${obj}**` : `**${obj}**`;
+      })
+      .join(', ');
+    const scope = clientFilter ? ` (solo **${clientFilter}**)` : '';
+    if (!lista) {
+      return `Hay varios sitios parecidos a «${objHint}»${scope}; probá el nombre exacto como en **Servicios y SLA**.`;
+    }
+    return `Hay varios objetivos similares a «${objHint}»${scope}: ${lista}. Decime el nombre exacto del sitio.`;
   }
   if (err === 'objetivo_no_encontrado') {
     return `No encontré el objetivo «${objHint}» en **Firestore**. Probá el nombre del sitio como en **Servicios y SLA**.`;
@@ -1078,6 +1406,78 @@ function formatDeterministicTurnosHoyReply(fecha: string, r: Record<string, unkn
     body += `*Nota:* la lista está acotada; para el detalle completo abrí **Operaciones**.\n`;
   }
   return body.trim();
+}
+
+function formatDeterministicTurnosPlanificadosDiaReply(
+  fecha: string,
+  r: Record<string, unknown>,
+  opsFollowUp?: {
+    total: number;
+    presentes: number;
+    ausentes: number;
+    sinMarcacion: number;
+  },
+): string {
+  const total = Number(r.cuenta_total_turnos_visibles ?? 0);
+  const muestra = (r.muestra_turnos ?? []) as Array<Record<string, unknown>>;
+  const truncLista = r.muestra_truncada_vs_total === true;
+  const truncQuery = r.truncado_limite_turnos_consultados === true;
+
+  if (total === 0) {
+    return `Según **Firestore** (misma regla de visibilidad que **Operaciones**), para **${fecha}** no hay turnos visibles con guardia asignado o vacante reportada a planificación.`;
+  }
+
+  let body = '';
+  if (opsFollowUp) {
+    body += `Son los **${opsFollowUp.total}** turnos visibles del **${fecha}**`;
+    body += ` (**${opsFollowUp.presentes}** presentes, **${opsFollowUp.ausentes}** ausentes, **${opsFollowUp.sinMarcacion}** sin marcación relevante):\n\n`;
+    if (opsFollowUp.ausentes === 0 && opsFollowUp.sinMarcacion > 0) {
+      body += `*No hay ausentes registrados; la lista son guardias con turno visible sin fichada todavía.*\n\n`;
+    }
+  } else {
+    body += `Según **Firestore** (turnos visibles como en **Operaciones**), para **${fecha}** hay **${total}** turno(s) planificado(s)/visible(s):\n\n`;
+  }
+
+  const bySite = new Map<string, Map<string, Array<{ persona: string; codigo: string }>>>();
+  for (const row of muestra) {
+    const cliente = String(row.cliente ?? '—').trim();
+    const objetivo = String(row.objetivo ?? '—').trim();
+    const siteKey = `${cliente} — ${objetivo}`;
+    const hora = String(row.hora_inicio_cor ?? '—');
+    const site = bySite.get(siteKey) ?? new Map();
+    const arr = site.get(hora) ?? [];
+    arr.push({
+      persona: String(row.persona ?? '—'),
+      codigo: String(row.codigo ?? '—'),
+    });
+    site.set(hora, arr);
+    bySite.set(siteKey, site);
+  }
+
+  for (const [siteKey, horasMap] of bySite) {
+    body += `**${siteKey}**\n`;
+    const horasOrdenadas = [...horasMap.keys()].sort((a, b) => a.localeCompare(b, 'es'));
+    for (const hora of horasOrdenadas) {
+      body += `*   **${hora}**\n`;
+      for (const p of horasMap.get(hora) ?? []) {
+        body += `    *   ${p.persona} (Código ${p.codigo})\n`;
+      }
+    }
+    body += '\n';
+  }
+
+  if (truncLista || truncQuery) {
+    body += `*Nota:* la lista está acotada; para el detalle completo abrí **Operaciones** o **Planificación y Turnos**.\n`;
+  }
+  return body.trim();
+}
+
+/** Gemini a veces dice «no hay turnos» sin consultar Firestore. */
+export function looksLikeFalseEmptyTurnosReply(text: string): boolean {
+  const t = normText(text);
+  if (/\bsegun\s+firestore\b/.test(t)) return false;
+  if (!/\bno\s+hay\s+turnos?\b/.test(t)) return false;
+  return /\b(planificad|manana|mañana|ayer|hoy|trunos?)\b/.test(t);
 }
 
 async function tryDeterministicCrmReply(t: string, toolCtx: AssistantToolContext): Promise<string | null> {
@@ -1144,7 +1544,11 @@ async function tryDeterministicTurnosHoyReply(
 ): Promise<string | null> {
   if (!matchTurnosHoyFollowUpIntent(t, recent) && !matchTurnosObjetivoHoyIntent(t)) return null;
 
-  const fecha = extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
+  const opsCtx = recentOpsAggregateThread(recent);
+  const fecha =
+    (opsCtx?.fecha && matchOpsTurnoCountFollowUpIntent(t, recent) ? opsCtx.fecha : null) ||
+    extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent) ||
+    extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
   const siteHint = extractObjectiveSiteFromQuery(t) || extractObjectiveHintFromRecentMessages(recent);
   let idObj: string | undefined;
   if (siteHint && siteHint.length >= 3) {
@@ -1168,7 +1572,23 @@ async function tryDeterministicTurnosHoyReply(
   }
 
   const fechaOut = String(r.fecha_referencia ?? fecha);
-  const reply = formatDeterministicTurnosHoyReply(fechaOut, r);
+  const opsFollow = matchOpsTurnoCountFollowUpIntent(t, recent) ? parseOpsAggregateFromRecent(recent) : null;
+  const usePlanFormat =
+    matchTurnosPlanificadosDiaIntent(t) || matchOpsTurnoCountFollowUpIntent(t, recent);
+  const reply = usePlanFormat
+    ? formatDeterministicTurnosPlanificadosDiaReply(
+        fechaOut,
+        r,
+        opsFollow
+          ? {
+              total: opsFollow.total,
+              presentes: opsFollow.presentes,
+              ausentes: opsFollow.ausentes,
+              sinMarcacion: opsFollow.sinMarcacion,
+            }
+          : undefined,
+      )
+    : formatDeterministicTurnosHoyReply(fechaOut, r);
   console.info('[assistant] deterministic turnos hoy', { fecha: fechaOut, total: r.cuenta_total_turnos_visibles });
   return reply.slice(0, 7500);
 }
@@ -1202,6 +1622,7 @@ export function shouldPrefetchMetricsSnapshot(
   if (!raw) return false;
   if (/^(si|sí|dale|ok|bueno)\.?$/i.test(raw)) return false;
   const t = normText(raw);
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   const recent = recentMessages.slice(-8);
   if (matchTurnosHoyFollowUpIntent(t, recent)) return false;
   if (matchPlanningUiOnlyIntent(t, typeof moduleKey === 'string' ? moduleKey.trim() || null : null)) return false;
@@ -1226,17 +1647,53 @@ async function tryDeterministicMultiSlaHoursReply(
   toolCtx: AssistantToolContext,
   recent: AssistantRecentMessage[],
 ): Promise<string | null> {
-  const pairs = extractClienteObjetivoPairsFromRecent(recent);
-  const allActive = matchSlaAllActiveServicesIntent(t, recent);
-  if (!matchMultiSlaFromListIntent(t, recent) && !allActive) return null;
-  if (!allActive && pairs.length < 2) return null;
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return null;
+
+  const pairsRaw = extractClienteObjetivoPairsFromRecent(recent);
+  const clientFilter = resolveClientFilterFromQuery(t);
+  let allActive = matchSlaAllActiveServicesIntent(t, recent);
+  if (clientFilter) allActive = false;
+
+  let pairs = pairsRaw;
+  if (clientFilter) {
+    pairs = pairsRaw.filter((p) => clientNameMatchesFilter(p.cliente, clientFilter));
+  }
+
+  if (!matchMultiSlaFromListIntent(t, recent) && !allActive && !clientFilter) return null;
+  if (!allActive && !clientFilter && pairs.length < 2) return null;
 
   const fechaRef = extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd);
+
+  let textosObjetivo: string[] | undefined = allActive ? undefined : pairs.map((p) => p.texto);
+  let todosActivos = allActive;
+
+  if (clientFilter) {
+    const cnt = await ejecutarContarServiciosSlaVigentesEmpresa(toolCtx, { fecha: fechaRef });
+    const cntErr = String(cnt.error ?? '').trim();
+    if (cntErr) {
+      return `No pude listar los servicios SLA de **${clientFilter}** en **${fechaRef.slice(0, 7)}** (${cntErr}). Revisá **Servicios y SLA**.`;
+    }
+    const muestra = (cnt.muestra_contratos_en_mes ?? []) as Array<{ cliente?: string; objetivo?: string }>;
+    const filtered = muestra.filter((m) => clientNameMatchesFilter(String(m.cliente ?? ''), clientFilter));
+    textosObjetivo = filtered
+      .map((m) => {
+        const obj = String(m.objetivo ?? '').trim();
+        const cli = String(m.cliente ?? '').trim();
+        return cli && obj ? `${cli} ${obj}` : obj;
+      })
+      .filter((s) => s.length >= 2);
+    todosActivos = false;
+    if (textosObjetivo.length === 0) {
+      return `No hay servicios SLA activos en **${fechaRef.slice(0, 7)}** para **${clientFilter}**. Revisá **Servicios y SLA**.`;
+    }
+  }
+
   const batch = await ejecutarResumenHorasSlaVariosObjetivos(toolCtx, {
-    textos_objetivo: allActive ? undefined : pairs.map((p) => p.texto),
+    textos_objetivo: todosActivos ? undefined : textosObjetivo,
     fecha_referencia: fechaRef,
-    todos_servicios_activos_mes: allActive,
-    limite: Math.max(pairs.length, 12),
+    todos_servicios_activos_mes: todosActivos,
+    texto_cliente: clientFilter ?? undefined,
+    limite: Math.max(textosObjetivo?.length ?? pairs.length, 12),
   });
 
   const err = String(batch.error ?? '').trim();
@@ -1244,14 +1701,18 @@ async function tryDeterministicMultiSlaHoursReply(
     if (err === 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ') {
       return 'Tu perfil no tiene permiso para consultar contratos SLA. Necesitás lectura en **Servicios y SLA** o **Planificación**.';
     }
+    if (err === 'sin_sla_activo_para_cliente_en_ese_mes' && clientFilter) {
+      return `No hay servicios SLA activos en **${fechaRef.slice(0, 7)}** para **${clientFilter}**. Revisá **Servicios y SLA**.`;
+    }
     return `No pude consultar los SLA del mes (${err}). Revisá **Servicios y SLA**.`;
   }
 
-  const reply = formatMultiSlaHoursReply(batch);
+  const reply = formatMultiSlaHoursReply(batch, clientFilter);
   console.info('[assistant] deterministic multi sla', {
     consultados: batch.consultados,
     con_datos: batch.con_datos,
     mes: batch.mes_yyyy_mm,
+    clientFilter: clientFilter ?? null,
   });
   return reply.slice(0, 7500);
 }
@@ -1263,14 +1724,16 @@ async function tryDeterministicSlaHoursToPlanReply(
   recent: AssistantRecentMessage[],
 ): Promise<string | null> {
   if (!matchSlaContractHoursIntent(t, recent)) return null;
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return null;
 
-  const objHint =
+  let objHint =
     extractObjectiveHintFromRecentMessages(recent) ||
     (() => {
       const m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?(?:objetivo\s+)?([a-záéíóúñ0-9][a-záéíóúñ0-9\s]{3,50}?)(?:\s+en\s+|\s*$)/);
       return m?.[1]?.trim() || null;
     })();
 
+  if (objHint && looksLikeObjectiveHintFalsePositive(objHint)) objHint = null;
   if (!objHint || objHint.length < 3) return null;
 
   const fechaRef = extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd);
@@ -1282,7 +1745,7 @@ async function tryDeterministicSlaHoursToPlanReply(
 
   const err = String(resumen.error ?? '').trim();
   if (err) {
-    const msg = formatSlaHoursToolError(objHint, err, resumen);
+    const msg = formatSlaHoursToolError(objHint, err, resumen, resolveClientFilterFromQuery(t));
     if (msg) {
       console.warn('[assistant] deterministic sla hours error', { err, objHint, fechaRef });
       return msg;
@@ -1348,6 +1811,13 @@ export async function tryDeterministicDataReply(
   if (matchPlanningUiOnlyIntent(t, mk)) {
     const planUi = tryDeterministicPlanningUiReply(mk);
     if (planUi?.trim()) return planUi.trim();
+  }
+
+  try {
+    const planUmbral = await tryDeterministicPlannedHoursThresholdReply(t, toolCtx, recent);
+    if (planUmbral?.trim()) return planUmbral.trim();
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicPlannedHoursThresholdReply', e);
   }
 
   if (!shouldSkipDeterministicRouter(raw, recent)) {

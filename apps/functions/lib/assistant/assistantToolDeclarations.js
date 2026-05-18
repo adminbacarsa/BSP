@@ -205,7 +205,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'resumen_horas_sla_varios_objetivos',
-        description: 'Cuando el usuario pide SLA/horas de **varios** contratos a la vez (ej. tras listar «CASISA - Obrador», «Lotería - …» y pregunta «qué SLA tiene cada uno», «horas de cada servicio»): devuelve por cada objetivo horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Pasá textos_objetivo con el nombre del **objetivo** de cada línea (o cliente+objetivo). Si no tenés la lista, usá todos_servicios_activos_mes=true para todos los SLA activos del mes. fecha_referencia = día del mes a analizar.',
+        description: 'Cuando el usuario pide SLA/horas de **varios** contratos a la vez (ej. tras listar «CASISA - Obrador», «Lotería - …» y pregunta «qué SLA tiene cada uno», «horas de cada servicio»): devuelve por cada objetivo horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Pasá textos_objetivo con el nombre del **objetivo** de cada línea (o cliente+objetivo). Si piden **solo [cliente]** (ej. solo CASISA), usá texto_cliente y no todos_servicios_activos_mes. Si no tenés lista ni cliente, todos_servicios_activos_mes=true. fecha_referencia = día del mes a analizar.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -220,12 +220,37 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
                 },
                 todos_servicios_activos_mes: {
                     type: generative_ai_1.SchemaType.BOOLEAN,
-                    description: 'Si true, consulta todos los contratos SLA del mes (hasta limite).',
+                    description: 'Si true, consulta todos los contratos SLA del mes (hasta limite). No combinar con texto_cliente.',
+                },
+                texto_cliente: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Filtrar SLA del mes a un cliente comercial (ej. CASISA). Usar con «solo CASISA» o «servicios activos de X».',
                 },
                 limite: {
                     type: generative_ai_1.SchemaType.NUMBER,
                     description: 'Máximo de objetivos a consultar (default 12, máx 20).',
                 },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'listado_empleados_horas_planificadas_umbral',
+        description: 'Para «vigiladores/empleados con más de 200 h planificadas en mayo», «quién supera X horas planificadas por empleado»: lista legajos cuya suma horas_planificadas_cobertura en el mes/rango supera umbral_horas (default 200). No usar para SLA de un objetivo ni bolsa 200 de liquidación/fichadas. fecha_referencia = día del mes; o fecha_desde/fecha_hasta.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                umbral_horas: {
+                    type: generative_ai_1.SchemaType.NUMBER,
+                    description: 'Mínimo a superar (default 200). Ej. 200 para «más de 200 hs planificadas».',
+                },
+                fecha_referencia: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'YYYY-MM-DD dentro del mes (ej. mayo 2026 → 2026-05-15).',
+                },
+                fecha_desde: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD inicio inclusive.' },
+                fecha_hasta: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD fin inclusive.' },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas en la muestra (default 40, máx 80).' },
             },
             required: [],
         },

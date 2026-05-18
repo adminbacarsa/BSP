@@ -34,15 +34,19 @@ Cómo responder (subir calidad sin inventar datos):
 
 8d) Si ofreciste un **resumen de horas vendidas SLA / planificadas / pendientes** para **todos los objetivos** de un mes y el usuario responde **sí**, **dale**, **ok**: llamá **resumen_horas_sla_varios_objetivos** con **todos_servicios_activos_mes=true** y **fecha_referencia** en ese mes (ej. mayo 2026 → 2026-05-15). Listá vendidas, planificadas y pendientes por objetivo. **No** remitás solo a Servicios/Planificación sin datos.
 
+8e) Si piden **solo CASISA**, **solo los servicios activos de [cliente]** o filtran por cliente: usá **resumen_horas_sla_varios_objetivos** con **texto_cliente** (no todos_servicios_activos_mes). Limitá el resumen a ese cliente (no mezcles Ministerio, Lotería, etc.). Si un nombre de objetivo es ambiguo, pedí el sitio exacto **dentro de ese cliente**.
+
 8c) Para **horas diurnas/nocturnas**, **horas al 100% / FT**, **horas extras**, **liquidación** o **cantidad para liquidar** de un **mes** o de toda la empresa: usá **resumen_horas_liquidacion_empresa_periodo** con **fecha_referencia** en ese mes (ej. mayo → 2026-05-15). Respondé con hs_reales, diurnas, nocturnas, al_100_ft, al_50, plus_feriado. **No** digas que no podés sin llamar la herramienta. **No** uses buscar_empleados_por_nombre para totales de empresa (evitá buscar «horas extras» como persona).
 
-9) Para **«quién tiene turno hoy»**, **«quién trabaja hoy»** o similar: usá **listado_turnos_operativos_dia** con fecha = fechaReferenciaCliente (hoy). Agrupá por cliente/objetivo; no digas error interno ni soporte IT si la herramienta devolvió datos o un error concreto.
+9) Para **«quién tiene turno hoy»**, **«quién trabaja hoy»**, **turnos planificados mañana/ayer** o similar: usá **listado_turnos_operativos_dia** con **fecha** = hoy, mañana (+1 día) o la fecha que indiquen (no asumas «hoy» si dijeron mañana). Agrupá por cliente/objetivo con **código CCT** (M/T/N/F, etc.); no inventes códigos raros (RO, EN) si la tool devuelve otro. Si el módulo es Configuración u otro, igual consultá Firestore si tenés permiso — **no** digas «no hay turnos» sin llamar la herramienta.
 
 9b) Para **«quién está de franco»**, **francos del día**, **código F** o **RET**: usá **listado_franco_ret_dia** (tipo franco o ret según corresponda). Respondé con **resumen_por_objetivo** (cliente, objetivo, lista **empleados** con nombre y apellido). **Nunca** muestres IDs Firestore ni «códigos de legajo» técnicos al usuario. Si el usuario pregunta **«quiénes son»** tras un listado de francos, **volvé a llamar** la herramienta; no repitas IDs del mensaje anterior.
 
 9c) Si piden **detalle de los turnos** (tras hablar de una persona o un mes): usá **consultar_turnos_empleado** con el legajo ya identificado (buscar_empleados si hace falta) y el mismo rango del hilo (ej. mayo). Listá día, código, objetivo y presencia. **Nunca** «inconveniente técnico» ni «contactar soporte IT» sin haber llamado la herramienta.
 
 9d) Para **cuántos clientes** tiene la empresa o **objetivos/sedes de un cliente** (ej. CASISA): usá **contar_clientes_empresa** o **listar_objetivos_cliente** con el nombre comercial. Respondé con números y lista de sedes; **no** remitás solo a CRM sin datos.
+
+9e) Para **«vigiladores/empleados con más de X horas planificadas»** en un mes (ej. **>200 h en mayo**), **por empleado**: usá **listado_empleados_horas_planificadas_umbral** con **umbral_horas** y **fecha_referencia** en ese mes. Listá nombre, legajo y horas planificadas de cobertura. **No** uses resumen_horas_liquidacion_empresa_periodo (bolsa 200 / fichadas) ni SLA de objetivo. **No** interpretes «200hs» como nombre de sitio. Si piden **detalle de los empleados** tras esa consulta, repetí la misma tool con el umbral del hilo.
 
 10) **Nunca** le digas al usuario que estás «llamando», «esperando» o «consultando» una herramienta, ni muestres nombres técnicos de tools ni JSON de parámetros. Las herramientas se ejecutan en el servidor en el mismo turno: o invocás la función (function call) y respondés con el resultado, o no afirmes datos. Si el usuario pregunta «no hay nadie?» tras turnos de hoy, respondé con el listado o el total, no con «todavía espero».
 
@@ -283,7 +287,7 @@ async function runPlatformAssistant(uid, payload) {
     }
     const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock || undefined, deployContextBlock);
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx, recentForPrefetch);
+    return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx, recentForPrefetch, moduleKey, pathname);
 }
 function normAssistantText(s) {
     return s
@@ -327,7 +331,7 @@ function mapGeminiErrorToHint(e) {
         return e.message.slice(0, 420);
     return String(e).slice(0, 420);
 }
-async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx, recentMessages = []) {
+async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx, recentMessages = [], moduleKey = null, pathname = '/') {
     const modelName = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
     const model = genAI.getGenerativeModel({
         model: modelName,
@@ -380,9 +384,19 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         }
     }
     let reply = extractAssistantTextSafe(result.response);
+    if (reply && toolsEnabled && (0, assistantDeterministicRouter_1.looksLikeFalseEmptyTurnosReply)(reply)) {
+        try {
+            const recovered = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, true, moduleKey, pathname, recentMessages);
+            if (recovered?.trim())
+                return { reply: recovered.trim() };
+        }
+        catch (e) {
+            console.warn('[assistant] recover false empty turnos', e);
+        }
+    }
     if (reply && toolsEnabled && looksLikeFakeToolNarration(reply)) {
         try {
-            const recovered = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, true, null, '', recentMessages);
+            const recovered = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, true, moduleKey, pathname, recentMessages);
             if (recovered?.trim())
                 return { reply: recovered.trim() };
         }

@@ -2317,12 +2317,20 @@ function compactSlaHorasItemFromResumen(
 /**
  * Horas SLA de varios objetivos en un solo turno (lista del hilo o todos los activos del mes).
  */
+function clienteMatchesTextoFiltro(nombreCliente: string, textoCliente: string): boolean {
+  const c = norm(nombreCliente);
+  const f = norm(textoCliente);
+  if (!c || !f) return false;
+  return c.includes(f) || f.includes(c);
+}
+
 export async function ejecutarResumenHorasSlaVariosObjetivos(
   ctx: AssistantToolContext,
   args: {
     textos_objetivo?: string[];
     fecha_referencia?: string;
     todos_servicios_activos_mes?: boolean;
+    texto_cliente?: string;
     limite?: number;
   },
 ): Promise<Record<string, unknown>> {
@@ -2341,23 +2349,37 @@ export async function ejecutarResumenHorasSlaVariosObjetivos(
   }
 
   const limite = Math.min(20, Math.max(1, Number(args.limite) || 12));
+  const textoCliente = String(args.texto_cliente ?? '').trim();
   let textos = (args.textos_objetivo ?? [])
     .map((s) => String(s).trim())
     .filter((s) => s.length >= 2);
 
-  if (args.todos_servicios_activos_mes === true || textos.length === 0) {
+  const todosActivos = args.todos_servicios_activos_mes === true && !textoCliente;
+
+  if (todosActivos || textos.length === 0) {
     const cnt = await ejecutarContarServiciosSlaVigentesEmpresa(ctx, { fecha });
     if (String(cnt.error ?? '').trim()) return cnt;
-    const muestra = (cnt.muestra_contratos_en_mes ?? []) as Array<{ cliente?: string; objetivo?: string }>;
+    let muestra = (cnt.muestra_contratos_en_mes ?? []) as Array<{ cliente?: string; objetivo?: string }>;
+    if (textoCliente) {
+      muestra = muestra.filter((m) => clienteMatchesTextoFiltro(String(m.cliente ?? ''), textoCliente));
+    }
     const fromMuestra = muestra
       .map((m) => {
         const obj = String(m.objetivo ?? '').trim();
-        if (obj.length >= 2) return obj;
         const cli = String(m.cliente ?? '').trim();
+        if (cli && obj) return `${cli} ${obj}`;
+        if (obj.length >= 2) return obj;
         return cli.length >= 2 ? cli : '';
       })
       .filter((s) => s.length >= 2);
     if (fromMuestra.length > 0) textos = fromMuestra;
+    else if (textoCliente) {
+      return {
+        error: 'sin_sla_activo_para_cliente_en_ese_mes',
+        texto_cliente: textoCliente,
+        mes_yyyy_mm: fecha.slice(0, 7),
+      };
+    }
   }
 
   const uniq: string[] = [];
@@ -2453,6 +2475,142 @@ export async function ejecutarResumenHorasLiquidacionEmpresaPeriodo(
     console.error('[assistant] resumen_horas_liquidacion', { msg });
     return { error: 'error_consulta_liquidacion_firestore', detalle: msg.slice(0, 280) };
   }
+}
+
+const TURNOS_PLANIFICADOS_UMBRAL_LIM = 4500;
+
+/**
+ * Vigiladores/empleados con horas planificadas de cobertura por encima de un umbral en el mes/rango.
+ * Una pasada sobre `turnos` (misma lógica de cobertura que resumen_horas_empleado_periodo).
+ */
+export async function ejecutarListadoEmpleadosHorasPlanificadasUmbral(
+  ctx: AssistantToolContext,
+  args: {
+    umbral_horas?: number;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    fecha_referencia?: string;
+    limite?: number;
+  },
+): Promise<Record<string, unknown>> {
+  if (!canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_para_consultar_turnos' };
+  }
+  if (!ctx.empresaId.trim()) {
+    return { error: 'falta_empresa_en_sesion' };
+  }
+
+  const umbral = Math.max(1, Number(args.umbral_horas ?? 200) || 200);
+  let fechaDesde = String(args.fecha_desde ?? '').trim();
+  let fechaHasta = String(args.fecha_hasta ?? '').trim();
+  const ref = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+
+  if (!fechaDesde || !fechaHasta) {
+    try {
+      const p = parseYmd(ref);
+      const mm = String(p.m).padStart(2, '0');
+      const lastD = new Date(p.y, p.m, 0).getDate();
+      fechaDesde = `${p.y}-${mm}-01`;
+      fechaHasta = `${p.y}-${mm}-${String(lastD).padStart(2, '0')}`;
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+    }
+  }
+
+  try {
+    parseYmd(fechaDesde);
+    parseYmd(fechaHasta);
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+  }
+
+  let start: Timestamp;
+  let end: Timestamp;
+  try {
+    ({ start, end } = arRangeTimestamps(fechaDesde, fechaHasta));
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+  }
+
+  const db = admin.firestore();
+  const empSnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+  const empMap = new Map<string, { nombre: string; legajo: string }>();
+  for (const d of empSnap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const ln = String(data.lastName ?? '').trim();
+    const fn = String(data.firstName ?? '').trim();
+    const nombre =
+      [ln, fn].filter(Boolean).join(', ') ||
+      String(data.name ?? data.nombre ?? '').trim() ||
+      '(sin nombre en legajo)';
+    empMap.set(d.id, {
+      nombre: nombre.slice(0, 120),
+      legajo: String(data.fileNumber ?? '').trim(),
+    });
+  }
+
+  const qsnap = await db
+    .collection('turnos')
+    .where('startTime', '>=', start)
+    .where('startTime', '<=', end)
+    .limit(TURNOS_PLANIFICADOS_UMBRAL_LIM)
+    .get();
+
+  const byEmp = new Map<string, { horas: number; turnos: number }>();
+  for (const doc of qsnap.docs) {
+    const row = doc.data() as Record<string, unknown>;
+    if (row.draft === true) continue;
+    if (row.isUnassigned === true) continue;
+    const empE = String(row.empresaId ?? '').trim();
+    if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase()) continue;
+
+    const empId = String(row.employeeId ?? '').trim();
+    if (!empId || empId === 'VACANTE' || !empMap.has(empId)) continue;
+
+    const hp = plannedCoverageHoursFromShiftRow(row);
+    if (hp <= 0) continue;
+    const acc = byEmp.get(empId) ?? { horas: 0, turnos: 0 };
+    acc.horas += hp;
+    acc.turnos += 1;
+    byEmp.set(empId, acc);
+  }
+
+  const sobreUmbral = Array.from(byEmp.entries())
+    .filter(([, v]) => v.horas > umbral + 0.05)
+    .map(([id, v]) => {
+      const meta = empMap.get(id)!;
+      return {
+        id_firestore: id,
+        nombre: meta.nombre,
+        legajo: meta.legajo || undefined,
+        horas_planificadas_cobertura: Math.round(v.horas * 10) / 10,
+        turnos_cobertura: v.turnos,
+        exceso_sobre_umbral: Math.round((v.horas - umbral) * 10) / 10,
+      };
+    })
+    .sort((a, b) => b.horas_planificadas_cobertura - a.horas_planificadas_cobertura);
+
+  let limite = Math.floor(Number(args.limite ?? 40));
+  if (!Number.isFinite(limite) || limite < 5) limite = 40;
+  limite = Math.min(80, limite);
+
+  const muestra = sobreUmbral.slice(0, limite);
+  const truncadoLista = sobreUmbral.length > limite;
+
+  return {
+    rango: { desde_inclusive: fechaDesde, hasta_inclusive: fechaHasta },
+    mes_yyyy_mm: fechaDesde.slice(0, 7),
+    umbral_horas: umbral,
+    empleados_con_turnos_en_rango: byEmp.size,
+    cuenta_sobre_umbral: sobreUmbral.length,
+    muestra_empleados_sobre_umbral: muestra,
+    truncado_por_limite_muestra: truncadoLista,
+    truncado_consulta_turnos_limite: qsnap.size >= TURNOS_PLANIFICADOS_UMBRAL_LIM,
+    criterio:
+      'Suma horas_planificadas_cobertura por legajo (excluye F/FF/FP/FT/V/L/A/E/AA/PG/RET y cancelados/novedad). No es bolsa 200 de liquidación ni horas fichadas.',
+    nota_tras_herramienta:
+      'Listá muestra_empleados_sobre_umbral con nombre, legajo y horas_planificadas_cobertura. Si cuenta_sobre_umbral=0, decilo claro. No confundir con bolsa_200 ni remitir a Reportes si la tool devolvió datos.',
+  };
 }
 
 /** Lista RRHH: activo/active o sin estado → activo; inactivo/inactive → baja. */
@@ -2704,6 +2862,14 @@ async function dispatchAssistantToolCallInner(
       texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
     });
+  } else if (name === 'listado_empleados_horas_planificadas_umbral') {
+    raw = await ejecutarListadoEmpleadosHorasPlanificadasUmbral(ctx, {
+      umbral_horas: args.umbral_horas != null ? Number(args.umbral_horas) : undefined,
+      fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+      fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
   } else if (name === 'resumen_horas_empleado_periodo') {
     let fechaDesde = String(args.fecha_desde ?? '').trim();
     let fechaHasta = String(args.fecha_hasta ?? '').trim();
@@ -2747,6 +2913,7 @@ async function dispatchAssistantToolCallInner(
       textos_objetivo: textosArr,
       fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
       todos_servicios_activos_mes: args.todos_servicios_activos_mes === true,
+      texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
     });
   } else {

@@ -67,12 +67,20 @@ export declare function ejecutarResumenHorasSlaVariosObjetivos(ctx: AssistantToo
     textos_objetivo?: string[];
     fecha_referencia?: string;
     todos_servicios_activos_mes?: boolean;
+    texto_cliente?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx: AssistantToolContext, args: {
     fecha_desde?: string;
     fecha_hasta?: string;
     fecha_referencia?: string;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarListadoEmpleadosHorasPlanificadasUmbral(ctx: AssistantToolContext, args: {
+    umbral_horas?: number;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    fecha_referencia?: string;
+    limite?: number;
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;

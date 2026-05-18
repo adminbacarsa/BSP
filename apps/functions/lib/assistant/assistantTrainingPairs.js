@@ -234,6 +234,41 @@ exports.ASSISTANT_TRAINING_PAIRS = [
         herramienta_sugerida: 'resumen_horas_sla_varios_objetivos',
         respuesta_ideal_bullet: 'Una sola tool con textos_objetivo de cada línea del listado; responder vendidas/planificadas/pendiente por sitio; nunca error técnico genérico.',
     },
+    {
+        id: 157,
+        categoria: 'reportes_horas',
+        pregunta_usuario: 'vigiladores con mas de 200hs planificadas en mayo',
+        herramienta_sugerida: 'listado_empleados_horas_planificadas_umbral',
+        respuesta_ideal_bullet: 'umbral_horas=200, fecha_referencia 2026-05-15; listar nombre/legajo/horas planificadas cobertura; no bolsa_200 ni SLA objetivo; no remitir solo a Reportes.',
+    },
+    {
+        id: 158,
+        categoria: 'reportes_horas',
+        pregunta_usuario: 'detalle de los empleados (tras consulta >200h planificadas)',
+        herramienta_sugerida: 'listado_empleados_horas_planificadas_umbral',
+        respuesta_ideal_bullet: 'Seguimiento del hilo: misma tool y mes; no listado_empleados_empresa genérico de nómina.',
+    },
+    {
+        id: 159,
+        categoria: 'servicios_sla',
+        pregunta_usuario: 'solo los servicios activos de casisa',
+        herramienta_sugerida: 'resumen_horas_sla_varios_objetivos',
+        respuesta_ideal_bullet: 'texto_cliente=CASISA; solo contratos de ese cliente; encabezado «solo CASISA»; no Ministerio ni Lotería.',
+    },
+    {
+        id: 160,
+        categoria: 'listado_turnos',
+        pregunta_usuario: 'turnos planificados para mañana (módulo Configuración)',
+        herramienta_sugerida: 'listado_turnos_operativos_dia',
+        respuesta_ideal_bullet: 'fecha=mañana; mismo dato que Planificación/Operaciones; nunca «no hay turnos» sin Firestore.',
+    },
+    {
+        id: 161,
+        categoria: 'listado_turnos',
+        pregunta_usuario: 'quienes son los 18 (tras resumen ausentes hoy)',
+        herramienta_sugerida: 'listado_turnos_operativos_dia',
+        respuesta_ideal_bullet: 'Aclarar: son N turnos visibles; ausentes vs sin marcación; listar nombres agrupados por sitio/hora.',
+    },
 ];
 exports.ASSISTANT_TRAINING_PAIR_COUNT = exports.ASSISTANT_TRAINING_PAIRS.length;
 //# sourceMappingURL=assistantTrainingPairs.js.map

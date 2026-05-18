@@ -28,6 +28,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: string[];
     };
@@ -63,6 +64,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -89,6 +91,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -121,6 +124,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: string[];
     };
@@ -150,6 +154,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -185,6 +190,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: string[];
     };
@@ -217,6 +223,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -252,6 +259,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -290,6 +298,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -319,6 +328,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -357,6 +367,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo_cercania?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -392,6 +403,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
         };
         required: any[];
     };
@@ -416,6 +428,10 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
                 type: SchemaType;
                 description: string;
             };
+            texto_cliente: {
+                type: SchemaType;
+                description: string;
+            };
             limite: {
                 type: SchemaType;
                 description: string;
@@ -423,7 +439,6 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
-            texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
@@ -433,6 +448,49 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
             id_servicio_sla?: undefined;
+            umbral_horas?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            umbral_horas: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_referencia: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_desde: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_hasta: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
         };
         required: any[];
     };
