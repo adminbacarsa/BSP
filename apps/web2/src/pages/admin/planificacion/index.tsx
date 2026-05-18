@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -140,7 +140,7 @@ function isOperationalOriginShift(data: any): boolean {
  * Horas CCT / pie de grilla: solo turnos del objetivo en pantalla y NO operativos.
  * Importante: los borradores (draft:true) sí cuentan — son el crono planificado todavía
  * no publicado, hay que verlos en la grilla y sumarlos.
- * Evita “200h en abril” por turnos de OTRO objetivo o cobertura de ops mezclados en
+ * Evita "200h en abril" por turnos de OTRO objetivo o cobertura de ops mezclados en
  * `turnos` con la misma fecha+empleado.
  */
 function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefined | null): boolean {
@@ -2207,7 +2207,7 @@ export default function PlanificacionPage() {
         const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
 
         // Caso especial pedido: Franco ↔ Franco (intercambio de días de franco dentro del mes)
-        // Para que tenga efecto real, necesitamos los “turnos laborables” cruzados:
+        // Para que tenga efecto real, necesitamos los "turnos laborables" cruzados:
         // - emp2 en date1 (para que emp1 pueda trabajar ese día)
         // - emp1 en date2 (para que emp2 pueda trabajar ese día)
         if (isFrancoLike(shift1) && isFrancoLike(shift2)) {
@@ -5428,67 +5428,67 @@ export default function PlanificacionPage() {
 
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
-                    <div className=”fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm” onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
-                        <div className=”bg-white rounded-2xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden” onClick={e => e.stopPropagation()}>
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
                             {/* Header */}
-                            <div className=”flex items-center justify-between px-5 pt-5 pb-3 shrink-0”>
-                                <div className=”flex items-center gap-2”>
-                                    <Wand2 size={18} className=”text-amber-600 shrink-0”/>
-                                    <h3 className=”font-black text-base text-slate-800”>Automatizar cronograma</h3>
-                                    <span className=”text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700”>COSP</span>
+                            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+                                <div className="flex items-center gap-2">
+                                    <Wand2 size={18} className="text-amber-600 shrink-0"/>
+                                    <h3 className="font-black text-base text-slate-800">Automatizar cronograma</h3>
+                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">COSP</span>
                                 </div>
-                                <button type=”button” onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }} disabled={autoV2Loading || autoV2Generating} className=”text-slate-400 hover:text-slate-700 disabled:opacity-30 transition-colors”>
+                                <button type="button" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }} disabled={autoV2Loading || autoV2Generating} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 transition-colors">
                                     <X size={18}/>
                                 </button>
                             </div>
 
                             {/* Content */}
-                            <div className=”flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3”>
+                            <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3">
 
                                 {/* Progreso — detectando o generando */}
                                 {(autoWizardStep === 'detecting' || autoV2Loading || autoV2Generating) && (
-                                    <div className=”rounded-xl bg-slate-900 px-4 py-4 text-white shadow-inner ring-1 ring-slate-700/80”>
-                                        <div className=”flex justify-between items-center mb-2”>
-                                            <span className=”text-[11px] font-black uppercase tracking-wide text-amber-300”>
+                                    <div className="rounded-xl bg-slate-900 px-4 py-4 text-white shadow-inner ring-1 ring-slate-700/80">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-[11px] font-black uppercase tracking-wide text-amber-300">
                                                 {autoV2Generating ? 'Generando cronograma…' : 'Analizando configuración…'}
                                             </span>
-                                            <span className=”text-[11px] font-mono font-bold text-slate-300”>{Math.round(autoV2Progress?.pct ?? 0)}%</span>
+                                            <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
                                         </div>
-                                        <div className=”h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2”>
+                                        <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden mb-2">
                                             <div className={`h-full rounded-full bg-gradient-to-r transition-[width] duration-300 ease-out ${autoV2Generating ? 'from-emerald-500 to-emerald-300' : 'from-amber-500 to-amber-300'}`}
                                                 style={{ width: `${Math.min(100, Math.max(0, autoV2Progress?.pct ?? 3))}%` }}/>
                                         </div>
-                                        <p className=”text-[11px] font-medium text-slate-300 leading-snug”>{autoV2Progress?.label ?? 'Procesando…'}</p>
+                                        <p className="text-[11px] font-medium text-slate-300 leading-snug">{autoV2Progress?.label ?? 'Procesando…'}</p>
                                     </div>
                                 )}
 
                                 {/* No viable */}
                                 {autoWizardStep === 'verified' && autoV2Report && !autoV2Report.ok && (
-                                    <div className=”rounded-xl border-2 border-rose-300 bg-rose-50 p-3”>
-                                        <p className=”text-sm font-black text-rose-800 mb-3”>✗ Dotación insuficiente para cubrir el SLA</p>
-                                        <div className=”grid grid-cols-2 gap-2 mb-3”>
-                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
-                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Demanda SLA</div>
-                                                <div className=”text-lg font-black text-rose-700”>{Math.round(autoV2Report.metrics.contractedHours)}<span className=”text-xs”>h</span></div>
+                                    <div className="rounded-xl border-2 border-rose-300 bg-rose-50 p-3">
+                                        <p className="text-sm font-black text-rose-800 mb-3">✗ Dotación insuficiente para cubrir el SLA</p>
+                                        <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Demanda SLA</div>
+                                                <div className="text-lg font-black text-rose-700">{Math.round(autoV2Report.metrics.contractedHours)}<span className="text-xs">h</span></div>
                                             </div>
-                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
-                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Oferta disponible</div>
-                                                <div className=”text-lg font-black text-rose-700”>{Math.round(autoV2Report.metrics.offerHours)}<span className=”text-xs”>h</span></div>
-                                                <div className=”text-[9px] font-black text-rose-600 mt-0.5”>{Math.round(autoV2Report.metrics.offerHours - autoV2Report.metrics.effectiveTargetHours)}h faltantes</div>
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Oferta disponible</div>
+                                                <div className="text-lg font-black text-rose-700">{Math.round(autoV2Report.metrics.offerHours)}<span className="text-xs">h</span></div>
+                                                <div className="text-[9px] font-black text-rose-600 mt-0.5">{Math.round(autoV2Report.metrics.offerHours - autoV2Report.metrics.effectiveTargetHours)}h faltantes</div>
                                             </div>
-                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
-                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Personas necesarias</div>
-                                                <div className=”text-lg font-black text-rose-700”>{autoV2Report.metrics.peopleNeededForTarget}</div>
-                                                <div className=”text-[9px] text-slate-400 font-bold mt-0.5”>ciclo {autoV2Report.metrics.cycleUsed}: ~{autoV2Report.metrics.peopleSuggestedWithCycle}</div>
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Personas necesarias</div>
+                                                <div className="text-lg font-black text-rose-700">{autoV2Report.metrics.peopleNeededForTarget}</div>
+                                                <div className="text-[9px] text-slate-400 font-bold mt-0.5">ciclo {autoV2Report.metrics.cycleUsed}: ~{autoV2Report.metrics.peopleSuggestedWithCycle}</div>
                                             </div>
-                                            <div className=”bg-white rounded-lg p-2 border border-slate-200”>
-                                                <div className=”text-[9px] font-black uppercase tracking-wider text-slate-500”>Personas disponibles</div>
-                                                <div className=”text-lg font-black text-slate-800”>{autoV2Report.metrics.peopleAvailable}</div>
+                                            <div className="bg-white rounded-lg p-2 border border-slate-200">
+                                                <div className="text-[9px] font-black uppercase tracking-wider text-slate-500">Personas disponibles</div>
+                                                <div className="text-lg font-black text-slate-800">{autoV2Report.metrics.peopleAvailable}</div>
                                             </div>
                                         </div>
                                         {autoV2Report.reasons.length > 0 && (
-                                            <ul className=”list-disc list-inside space-y-0.5 text-[11px] font-bold text-rose-800”>
+                                            <ul className="list-disc list-inside space-y-0.5 text-[11px] font-bold text-rose-800">
                                                 {autoV2Report.reasons.map((r, i) => <li key={i}>{r}</li>)}
                                             </ul>
                                         )}
@@ -5497,19 +5497,19 @@ export default function PlanificacionPage() {
 
                                 {/* Resultado: 3 tarjetas */}
                                 {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && (
-                                    <div className=”grid grid-cols-3 gap-2”>
-                                        <div className=”bg-white rounded-xl p-3 border-2 border-slate-200 text-center”>
-                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Hs facturables</div>
-                                            <div className=”text-2xl font-black text-indigo-700”>{Math.round(autoV2GenStats.totalBillableHours)}<span className=”text-sm”>h</span></div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="bg-white rounded-xl p-3 border-2 border-slate-200 text-center">
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Hs facturables</div>
+                                            <div className="text-2xl font-black text-indigo-700">{Math.round(autoV2GenStats.totalBillableHours)}<span className="text-sm">h</span></div>
                                         </div>
-                                        <div className=”bg-white rounded-xl p-3 border-2 border-slate-200 text-center”>
-                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Cubiertos</div>
+                                        <div className="bg-white rounded-xl p-3 border-2 border-slate-200 text-center">
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Cubiertos</div>
                                             <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
                                                 {autoV2Coverage ? `${autoV2Coverage.coverage.coveredSlots}/${autoV2Coverage.coverage.totalSlots}` : '—'}
                                             </div>
                                         </div>
                                         <div className={`bg-white rounded-xl p-3 border-2 text-center ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'border-emerald-300' : 'border-rose-300'}`}>
-                                            <div className=”text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1”>Sin cubrir</div>
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Sin cubrir</div>
                                             <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                                                 {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
                                             </div>
@@ -5521,20 +5521,20 @@ export default function PlanificacionPage() {
                                     <>
                                         {/* Conflictos / descansos */}
                                         {autoV2Coverage && (autoV2Coverage.licenseConflicts.length > 0 || autoV2Coverage.restViolations.length > 0) && (
-                                            <div className=”flex flex-wrap gap-2”>
+                                            <div className="flex flex-wrap gap-2">
                                                 {autoV2Coverage.licenseConflicts.length > 0 && (
-                                                    <span className=”text-[11px] font-black text-rose-700 bg-rose-100 px-2 py-1 rounded-lg”>
+                                                    <span className="text-[11px] font-black text-rose-700 bg-rose-100 px-2 py-1 rounded-lg">
                                                         ⛔ {autoV2Coverage.licenseConflicts.length} conflicto{autoV2Coverage.licenseConflicts.length > 1 ? 's' : ''} de licencia
                                                     </span>
                                                 )}
                                                 {autoV2Coverage.restViolations.length > 0 && (
-                                                    <span className=”text-[11px] font-black text-amber-700 bg-amber-100 px-2 py-1 rounded-lg”>
+                                                    <span className="text-[11px] font-black text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">
                                                         ⚠ {autoV2Coverage.restViolations.length} descanso{autoV2Coverage.restViolations.length > 1 ? 's' : ''} roto{autoV2Coverage.restViolations.length > 1 ? 's' : ''}
                                                     </span>
                                                 )}
                                             </div>
                                         )}
-                                        <p className=”text-[11px] text-slate-500 font-bold”>
+                                        <p className="text-[11px] text-slate-500 font-bold">
                                             {autoV2Coverage?.ok !== false
                                                 ? 'Cronograma listo. Revisá la grilla y guardá cuando estés listo.'
                                                 : 'Cronograma con avisos. Revisá la grilla antes de guardar.'}
@@ -5542,35 +5542,35 @@ export default function PlanificacionPage() {
 
                                         {/* Autorización 200h */}
                                         {capOverflowEmps.length > 0 && (
-                                            <div className=”rounded-xl border-2 border-orange-300 bg-orange-50 p-3”>
-                                                <p className=”text-[11px] font-black text-orange-800 mb-1”>
+                                            <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3">
+                                                <p className="text-[11px] font-black text-orange-800 mb-1">
                                                     ⚠ {capOverflowEmps.length} empleado{capOverflowEmps.length > 1 ? 's' : ''} alcanzaron el tope de 200h
                                                 </p>
-                                                <p className=”text-[10px] text-orange-700 font-bold mb-2”>
+                                                <p className="text-[10px] text-orange-700 font-bold mb-2">
                                                     Autorizá quiénes pueden superarlo con PIN de supervisor. El motor re-generará.
                                                 </p>
-                                                <div className=”space-y-1 mb-3”>
+                                                <div className="space-y-1 mb-3">
                                                     {capOverflowEmps.map(e => (
-                                                        <label key={e.empId} className=”flex items-center gap-2 cursor-pointer”>
-                                                            <input type=”checkbox”
+                                                        <label key={e.empId} className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="checkbox"
                                                                 checked={over200AuthChecked[e.empId] ?? false}
                                                                 onChange={ev => setOver200AuthChecked(prev => ({ ...prev, [e.empId]: ev.target.checked }))}
-                                                                className=”w-3.5 h-3.5 accent-orange-600”/>
-                                                            <span className=”text-[11px] font-bold text-slate-800”>{e.nombre}</span>
+                                                                className="w-3.5 h-3.5 accent-orange-600"/>
+                                                            <span className="text-[11px] font-bold text-slate-800">{e.nombre}</span>
                                                             {authorizedOver200Ids.has(e.empId) && (
-                                                                <span className=”text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full”>ya autorizado</span>
+                                                                <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">ya autorizado</span>
                                                             )}
                                                         </label>
                                                     ))}
                                                 </div>
-                                                <div className=”flex items-center gap-2”>
-                                                    <input type=”password”
+                                                <div className="flex items-center gap-2">
+                                                    <input type="password"
                                                         value={over200AuthPin}
                                                         onChange={e => { setOver200AuthPin(e.target.value); setOver200AuthError(''); }}
-                                                        placeholder=”PIN supervisor (mín. 4 dígitos)”
+                                                        placeholder="PIN supervisor (mín. 4 dígitos)"
                                                         maxLength={20}
-                                                        className=”flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400”/>
-                                                    <button type=”button”
+                                                        className="flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400"/>
+                                                    <button type="button"
                                                         disabled={autoV2Generating || !over200AuthPin}
                                                         onClick={() => {
                                                             if (over200AuthPin.length < 4) { setOver200AuthError('PIN mínimo 4 caracteres'); return; }
@@ -5584,11 +5584,11 @@ export default function PlanificacionPage() {
                                                             setOver200AuthPin(''); setOver200AuthError('');
                                                             applyAutoScheduleV2();
                                                         }}
-                                                        className=”shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-orange-600 hover:bg-orange-700 transition-colors disabled:opacity-50”>
+                                                        className="shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-orange-600 hover:bg-orange-700 transition-colors disabled:opacity-50">
                                                         Autorizar y re-generar
                                                     </button>
                                                 </div>
-                                                {over200AuthError && <p className=”text-[10px] font-bold text-rose-700 mt-1”>{over200AuthError}</p>}
+                                                {over200AuthError && <p className="text-[10px] font-bold text-rose-700 mt-1">{over200AuthError}</p>}
                                             </div>
                                         )}
                                     </>
@@ -5596,22 +5596,22 @@ export default function PlanificacionPage() {
 
                                 {/* Ajustar configuración — colapsible, visible en verified (no viable) y done */}
                                 {(autoWizardStep === 'verified' || autoWizardStep === 'done') && !autoV2Generating && (
-                                    <div className=”border border-slate-200 rounded-xl overflow-hidden”>
-                                        <button type=”button”
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <button type="button"
                                             onClick={() => setAutoWizardPersonalize(p => !p)}
-                                            className=”w-full flex items-center justify-between px-3 py-2 text-[11px] font-black text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors”>
+                                            className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-black text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">
                                             <span>Ajustar configuración</span>
                                             {autoWizardPersonalize ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
                                         </button>
                                         {autoWizardPersonalize && (
-                                            <div className=”px-3 pb-3 pt-2 bg-white space-y-3”>
+                                            <div className="px-3 pb-3 pt-2 bg-white space-y-3">
                                                 <div>
-                                                    <label className=”text-[10px] font-black text-slate-600 uppercase tracking-wide block mb-1.5”>Esquema de ciclo</label>
-                                                    <div className=”grid grid-cols-4 gap-1.5”>
+                                                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-wide block mb-1.5">Esquema de ciclo</label>
+                                                    <div className="grid grid-cols-4 gap-1.5">
                                                         {['4+2','5+1','6+1','6+2'].map(key => {
                                                             const checked = autoCycles.includes(key);
                                                             return (
-                                                                <button key={key} type=”button”
+                                                                <button key={key} type="button"
                                                                     onClick={() => setAutoCycles(prev => checked ? prev.filter(c => c!==key) : [...prev, key])}
                                                                     className={`py-1.5 rounded-lg text-xs font-black border-2 transition-colors ${checked ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-amber-300'}`}>
                                                                     {key}
@@ -5619,29 +5619,29 @@ export default function PlanificacionPage() {
                                                             );
                                                         })}
                                                     </div>
-                                                    {autoCycles.length === 0 && <p className=”text-[10px] text-rose-500 font-bold mt-1”>Seleccioná al menos un esquema.</p>}
+                                                    {autoCycles.length === 0 && <p className="text-[10px] text-rose-500 font-bold mt-1">Seleccioná al menos un esquema.</p>}
                                                 </div>
-                                                <div className=”grid grid-cols-2 gap-1.5”>
-                                                    <button type=”button” onClick={() => setAutoV2BudgetMode('cct')}
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
                                                         className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
                                                         CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>cola + nuevo desde día {autoV2Report?.metrics.cctCutoffDay ?? 25}</div>
                                                     </button>
-                                                    <button type=”button” onClick={() => setAutoV2BudgetMode('calendar')}
+                                                    <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
                                                         className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
                                                         Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas sin cola</div>
                                                     </button>
                                                 </div>
-                                                <div className=”flex items-center gap-2”>
-                                                    <span className=”text-[10px] font-black text-slate-700 flex-1”>Sobreescribir celdas ya asignadas</span>
-                                                    <button type=”button” onClick={() => setAutoOverwrite(p => !p)}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Sobreescribir celdas ya asignadas</span>
+                                                    <button type="button" onClick={() => setAutoOverwrite(p => !p)}
                                                         className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
                                                         <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
                                                     </button>
                                                 </div>
-                                                <button type=”button”
+                                                <button type="button"
                                                     onClick={() => { setAutoWizardPersonalize(false); runFullGeneration(autoCycles.length > 0 ? autoCycles : undefined); }}
                                                     disabled={autoV2Loading || autoV2Generating || autoCycles.length === 0}
-                                                    className=”w-full py-2 rounded-lg text-[11px] font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5”>
+                                                    className="w-full py-2 rounded-lg text-[11px] font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
                                                     <RefreshCw size={11}/> Re-generar
                                                 </button>
                                             </div>
@@ -5652,26 +5652,26 @@ export default function PlanificacionPage() {
                             </div>
 
                             {/* Footer */}
-                            <div className=”shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3 flex flex-col gap-2 rounded-b-2xl”>
+                            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3 flex flex-col gap-2 rounded-b-2xl">
                                 {slaDebug && (
-                                    <div className=”bg-slate-900 text-slate-100 text-[10px] rounded-lg p-2 max-h-60 overflow-y-auto”>
-                                        <div className=”flex items-center justify-between mb-1.5”>
-                                            <span className=”font-black text-emerald-300”>doc id: {slaDebug.id}</span>
-                                            <div className=”flex gap-2”>
-                                                <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(slaDebug, null, 2)); toast.success('JSON copiado'); }} className=”text-[10px] font-bold text-slate-300 hover:text-white”>copiar</button>
-                                                <button onClick={() => setSlaDebug(null)} className=”text-[10px] font-bold text-slate-300 hover:text-white”>cerrar</button>
+                                    <div className="bg-slate-900 text-slate-100 text-[10px] rounded-lg p-2 max-h-60 overflow-y-auto">
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="font-black text-emerald-300">doc id: {slaDebug.id}</span>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(slaDebug, null, 2)); toast.success('JSON copiado'); }} className="text-[10px] font-bold text-slate-300 hover:text-white">copiar</button>
+                                                <button onClick={() => setSlaDebug(null)} className="text-[10px] font-bold text-slate-300 hover:text-white">cerrar</button>
                                             </div>
                                         </div>
-                                        <pre className=”whitespace-pre-wrap break-all leading-tight”>{JSON.stringify(slaDebug.data, null, 2)}</pre>
+                                        <pre className="whitespace-pre-wrap break-all leading-tight">{JSON.stringify(slaDebug.data, null, 2)}</pre>
                                     </div>
                                 )}
-                                <div className=”flex items-center justify-between gap-3”>
-                                    <button type=”button” onClick={fetchSlaDebug} disabled={slaDebugLoading || !selectedObjective}
-                                        className=”text-[11px] font-black text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors”>
+                                <div className="flex items-center justify-between gap-3">
+                                    <button type="button" onClick={fetchSlaDebug} disabled={slaDebugLoading || !selectedObjective}
+                                        className="text-[11px] font-black text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors">
                                         {slaDebugLoading ? 'Cargando…' : '🔧 SLA JSON'}
                                     </button>
-                                    <button type=”button” onClick={() => setShowAutoV2Modal(false)} disabled={autoV2Loading || autoV2Generating}
-                                        className=”px-5 py-2 rounded-xl text-sm font-black text-slate-600 bg-slate-200 hover:bg-slate-300 transition-colors disabled:opacity-50”>
+                                    <button type="button" onClick={() => setShowAutoV2Modal(false)} disabled={autoV2Loading || autoV2Generating}
+                                        className="px-5 py-2 rounded-xl text-sm font-black text-slate-600 bg-slate-200 hover:bg-slate-300 transition-colors disabled:opacity-50">
                                         Cerrar
                                     </button>
                                 </div>
