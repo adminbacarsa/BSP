@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
-import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { Timestamp, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import { aggregateLiquidacionEmpresaPeriodo } from './assistantLiquidacionAggregate';
 import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
 import type { AssistantPersona } from './resolveAssistantUser';
 
@@ -23,6 +24,46 @@ function norm(s: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+/** Tokens útiles para matchear «hospital misericordia», «H. MISERICORDIA», «hosp misericordia». */
+function objectiveSearchTokens(textoRaw: string): string[] {
+  const t = norm(textoRaw.replace(/\./g, ' ').replace(/,/g, ' '));
+  const words = t.split(/\s+/).filter((w) => w.length >= 2);
+  const out = new Set(words);
+  if (words.some((w) => w === 'hosp' || w === 'hospital' || w === 'h')) {
+    out.add('misericordia');
+    out.add('san');
+    out.add('roque');
+  }
+  if (t.includes('misericordia')) out.add('misericordia');
+  if (t.includes('malagueno') || t.includes('malagueño')) out.add('malagueno');
+  if (t.includes('cruz') && t.includes('eje')) {
+    out.add('cruz');
+    out.add('eje');
+  }
+  return [...out].filter((w) => w.length >= 3);
+}
+
+function objectiveHaystackMatchesNeedle(needleRaw: string, oname: string, clientName: string): boolean {
+  const hay = norm(`${oname} ${clientName}`);
+  const needle = norm(needleRaw.replace(/\./g, ' '));
+  if (!needle || needle.length < 2) return false;
+  if (hay.includes(needle)) return true;
+  const compactNeedle = needle.replace(/\s+/g, '');
+  const compactHay = hay.replace(/\s+/g, '');
+  if (compactHay.includes(compactNeedle)) return true;
+
+  const tokens = objectiveSearchTokens(needleRaw);
+  if (tokens.length === 0) return hay.includes(needle);
+  let hits = 0;
+  for (const tok of tokens) {
+    if (hay.includes(tok)) hits += 1;
+  }
+  if (hits >= Math.max(1, tokens.length - 1)) return true;
+  if (tokens.includes('misericordia') && hay.includes('misericordia')) return true;
+  if (tokens.includes('roque') && hay.includes('roque') && hay.includes('san')) return true;
+  return false;
 }
 
 /** Texto normalizado para buscar persona: apellido, nombre, campo name (suele ser "APELLIDO, NOMBRE"), legajo. */
@@ -88,6 +129,25 @@ function canSearchObjectivesCrm(ctx: AssistantToolContext): boolean {
   );
 }
 
+/** Clientes y objetivos embebidos en `clients` — conteos y listados CRM. */
+export function canQueryClientsCrm(ctx: AssistantToolContext): boolean {
+  if (ctx.persona !== 'SYSTEM') return false;
+  if (!ctx.empresaId.trim()) return false;
+  return ctx.readableModuleKeys.some((k) =>
+    ['CLIENTS', 'DASHBOARD', 'CONFIG', 'PLANNING', 'SERVICES', 'OPERATIONS'].includes(k),
+  );
+}
+
+function clientHaystackMatchesNeedle(needleRaw: string, clientName: string): boolean {
+  const needle = norm(needleRaw);
+  const hay = norm(clientName);
+  if (!needle || needle.length < 2 || !hay) return false;
+  if (hay.includes(needle) || needle.includes(hay)) return true;
+  const nTok = needle.split(/\s+/).filter((t) => t.length >= 2);
+  if (nTok.length === 0) return hay.includes(needle);
+  return nTok.every((t) => hay.includes(t));
+}
+
 /** Legajos `empleados` de la empresa — conteos «cuántos en plantilla». */
 function canQueryEmpleadosPlantillaResumen(ctx: AssistantToolContext): boolean {
   if (ctx.persona !== 'SYSTEM') return false;
@@ -126,8 +186,8 @@ function monitorWideWindow(referenceYsMmDd: string): { start: FirebaseFirestore.
   const startMs = dNoonMs - 86400000;
   const endMs = dEndMs + 86400000;
   return {
-    start: admin.firestore.Timestamp.fromMillis(startMs),
-    end: admin.firestore.Timestamp.fromMillis(endMs),
+    start: Timestamp.fromMillis(startMs),
+    end: Timestamp.fromMillis(endMs),
   };
 }
 
@@ -138,6 +198,7 @@ type OperacionesDiaRowPublico = {
   codigo: string;
   puesto: string;
   empleado_etiqueta: string;
+  employee_firestore_id: string;
   cliente: string;
   objetivo_nombre: string;
   h_inicio_cordoba: string;
@@ -154,9 +215,28 @@ function horaHmCordoba(dt: Date): string {
   }).format(dt);
 }
 
+function enrichOperacionesDiaRowsWithNombres(
+  rows: OperacionesDiaRowPublico[],
+  nombres: Map<string, string>,
+): OperacionesDiaRowPublico[] {
+  return rows.map((r) => {
+    if (!r.employee_firestore_id) return r;
+    const resolved = nombres.get(r.employee_firestore_id);
+    let etiqueta = r.empleado_etiqueta;
+    if (resolved) etiqueta = resolved;
+    else if (empleadoEtiquetaPareceIdFirestore(etiqueta, r.employee_firestore_id)) {
+      etiqueta = '(sin nombre en legajo RRHH)';
+    } else {
+      etiqueta = etiquetaEmpleadoParaUsuario(etiqueta, r.employee_firestore_id);
+    }
+    return { ...r, empleado_etiqueta: etiqueta };
+  });
+}
+
 /** Turnos visibles en fecha (día Cordoba), mismas reglas que el monitor de Operaciones. */
 async function queryTurnosVisiblesOperacionesEmpresaDia(
   db: FirebaseFirestore.Firestore,
+  empresaId: string,
   objectiveMap: Map<string, { name: string; clientId: string; clientName: string }>,
   fecha: string,
 ): Promise<{ rows: OperacionesDiaRowPublico[]; truncadoConsultaTurnos: boolean }> {
@@ -185,6 +265,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
     codigo: string;
     puesto: string;
     empleado_etiqueta: string;
+    employee_firestore_id: string;
     cliente: string;
     objetivo_nombre: string;
     h_inicio_cordoba: string;
@@ -236,7 +317,11 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
     const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
     const meta = objectiveMap.get(oid);
     const nombreEmp = String(shift.employeeName ?? '').trim();
-    const empleado_etiqueta = isValidEmployee ? nombreEmp || empId.slice(0, 12) || '(legajo)' : 'VACANTE / sin asignar';
+    const etiquetaTurno =
+      isValidEmployee && nombreEmp && !empleadoEtiquetaPareceIdFirestore(nombreEmp, empId) ? nombreEmp : '';
+    const empleado_etiqueta = isValidEmployee
+      ? etiquetaTurno || empId.slice(0, 12) || '(legajo)'
+      : 'VACANTE / sin asignar';
 
     pre.push({
       oid,
@@ -247,6 +332,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
       codigo: String(shift.code ?? shift.type ?? '').trim() || '—',
       puesto: rawPos,
       empleado_etiqueta,
+      employee_firestore_id: isValidEmployee ? empId : '',
       cliente: (meta?.clientName ?? String(shift.clientName ?? '').trim()) || '—',
       objetivo_nombre: (meta?.name ?? String(shift.objectiveName ?? '').trim()) || oid,
       h_inicio_cordoba: horaHmCordoba(shiftDateObj),
@@ -273,6 +359,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
       codigo: c.codigo,
       puesto: c.puesto,
       empleado_etiqueta: c.empleado_etiqueta,
+      employee_firestore_id: c.employee_firestore_id,
       cliente: c.cliente,
       objetivo_nombre: c.objetivo_nombre,
       h_inicio_cordoba: c.h_inicio_cordoba,
@@ -286,7 +373,12 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
     return a.shiftTsMs - b.shiftTsMs;
   });
 
-  const outMapped: OperacionesDiaRowPublico[] = rows.map(({ shiftTsMs, ...rest }) => rest);
+  let outMapped: OperacionesDiaRowPublico[] = rows.map(({ shiftTsMs, ...rest }) => rest);
+  const empIds = [...new Set(outMapped.map((r) => r.employee_firestore_id).filter(Boolean))];
+  if (empIds.length > 0 && empresaId) {
+    const nombresMap = await empleadosNombresBatch(db, empresaId, empIds);
+    outMapped = enrichOperacionesDiaRowsWithNombres(outMapped, nombresMap);
+  }
 
   return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
 }
@@ -414,8 +506,8 @@ async function collectFrancoRetTurnosDia(
   for (const docSnap of qsnap.docs) {
     const shift = docSnap.data() as Record<string, unknown>;
     if (shift.status === 'Canceled') continue;
-    const st = shift.startTime;
-    if (!(st instanceof admin.firestore.Timestamp)) continue;
+    const st = readFirestoreTs(shift, 'startTime');
+    if (!st) continue;
     const shiftDateObj = st.toDate();
     if (!isSameCordobaCalendarDay(shiftDateObj, fecha)) continue;
 
@@ -436,9 +528,11 @@ async function collectFrancoRetTurnosDia(
 
     const meta = objectiveMap.get(oid)!;
     const nombreEmp = String(shift.employeeName ?? '').trim();
+    const etiquetaTurno =
+      nombreEmp && !empleadoEtiquetaPareceIdFirestore(nombreEmp, empId) ? nombreEmp : '';
     rows.push({
       employee_firestore_id: empId,
-      empleado_etiqueta: nombreEmp || empId.slice(0, 12),
+      empleado_etiqueta: etiquetaTurno || empId,
       codigo: codeRaw || codeU,
       cliente: meta.clientName,
       objetivo: meta.name,
@@ -454,6 +548,167 @@ async function collectFrancoRetTurnosDia(
   });
 
   return { rows, truncado: qsnap.size >= ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
+}
+
+function nombreLegibleFromEmpleadoRow(row: Record<string, unknown>): string {
+  const ln = String(row.lastName ?? '').trim();
+  const fn = String(row.firstName ?? '').trim();
+  const fromFields = [ln, fn].filter(Boolean).join(', ');
+  if (fromFields) return fromFields;
+  const nameRaw = String(row.name ?? row.nombre ?? '').trim();
+  if (nameRaw) return nameRaw;
+  return [fn, ln].filter(Boolean).join(' ');
+}
+
+function empleadoEtiquetaPareceIdFirestore(etiqueta: string, empId: string): boolean {
+  const e = etiqueta.trim();
+  if (!e) return true;
+  if (e === empId || e === empId.slice(0, 12)) return true;
+  return e.length >= 10 && !/\s/.test(e) && /^[a-zA-Z0-9_-]+$/.test(e);
+}
+
+/** Mapa id → nombre (misma lógica que Operaciones: apellido + nombre desde RRHH). */
+async function empleadosNombreMapEmpresa(
+  db: FirebaseFirestore.Firestore,
+  empresaId: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!empresaId) return out;
+  const snap = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
+  for (const d of snap.docs) {
+    const row = d.data() as Record<string, unknown>;
+    const ln = String(row.lastName ?? '').trim();
+    const fn = String(row.firstName ?? '').trim();
+    const nombre =
+      (ln && fn ? `${ln} ${fn}` : '') ||
+      nombreLegibleFromEmpleadoRow(row);
+    if (nombre) out.set(d.id, nombre);
+  }
+  return out;
+}
+
+async function empleadosNombresBatch(
+  db: FirebaseFirestore.Firestore,
+  empresaId: string,
+  empIds: string[],
+): Promise<Map<string, string>> {
+  const out = await empleadosNombreMapEmpresa(db, empresaId);
+  const uniq = [...new Set(empIds)].filter(Boolean);
+  const missing = uniq.filter((id) => {
+    const n = out.get(id);
+    return !n || empleadoEtiquetaPareceIdFirestore(n, id);
+  });
+  if (missing.length === 0) return out;
+
+  const refs = missing.map((id) => db.collection('empleados').doc(id));
+  const snaps = await firestoreGetAllRefs(db, refs);
+  for (let j = 0; j < snaps.length; j++) {
+    const s = snaps[j];
+    if (!s.exists) continue;
+    const row = s.data() as Record<string, unknown>;
+    const empE = String(row.empresaId ?? '').trim();
+    if (empE && empresaId && empE.toLowerCase() !== empresaId.toLowerCase()) continue;
+    const nombre = nombreLegibleFromEmpleadoRow(row);
+    if (nombre) out.set(s.id, nombre);
+  }
+  return out;
+}
+
+function enrichFrancoRetRowsWithNombres(
+  rows: FrancoRetRowInternal[],
+  nombres: Map<string, string>,
+): FrancoRetRowInternal[] {
+  return rows.map((r) => {
+    const resolved = nombres.get(r.employee_firestore_id);
+    if (resolved) return { ...r, empleado_etiqueta: resolved };
+    if (empleadoEtiquetaPareceIdFirestore(r.empleado_etiqueta, r.employee_firestore_id)) {
+      return { ...r, empleado_etiqueta: '(sin nombre en legajo RRHH)' };
+    }
+    return r;
+  });
+}
+
+function etiquetaEmpleadoParaUsuario(etiqueta: string, empId = ''): string {
+  if (empleadoEtiquetaPareceIdFirestore(etiqueta, empId || etiqueta)) {
+    return '(sin nombre en legajo RRHH)';
+  }
+  return etiqueta;
+}
+
+/** Texto listo para chat: solo nombres legibles, nunca IDs Firestore. */
+export function formatListadoFrancoRetParaChat(data: Record<string, unknown>): string {
+  const resumen = (data.resumen_por_objetivo ?? []) as Array<{
+    cliente: string;
+    objetivo: string;
+    cantidad: number;
+    empleados: string[];
+  }>;
+  const fecha = String(data.fecha_referencia ?? '').trim();
+  const tipo = String(data.tipo_filtro ?? 'franco');
+  const cuenta = Number(data.cuenta_filas ?? 0);
+  const trunc = data.truncado_consulta_turnos === true;
+
+  let fechaLabel = fecha;
+  try {
+    const p = parseYmd(fecha);
+    fechaLabel = new Intl.DateTimeFormat('es-AR', {
+      timeZone: 'America/Argentina/Cordoba',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(`${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}T12:00:00.000-03:00`));
+  } catch {
+    /* keep iso */
+  }
+
+  const tipoLabel =
+    tipo === 'ret' ? 'en **RET**' : tipo === 'ambos' ? 'en **franco** o **RET**' : 'de **franco**';
+
+  if (resumen.length === 0) {
+    return `No hay colaboradores ${tipoLabel} registrados en turnos para el **${fechaLabel}**.`;
+  }
+
+  let body = `Colaboradores ${tipoLabel} el **${fechaLabel}**`;
+  if (cuenta > 0) body += ` (**${cuenta}** turno(s) en total)`;
+  body += ':\n\n';
+
+  for (const g of resumen) {
+    body += `**${g.cliente}** — **${g.objetivo}** (${g.cantidad}):\n`;
+    for (const emp of g.empleados) {
+      body += `- **${etiquetaEmpleadoParaUsuario(emp)}**\n`;
+    }
+    body += '\n';
+  }
+
+  if (trunc) {
+    body += '*Nota:* la consulta alcanzó el límite de turnos del día; puede haber más registros en **Planificación**.\n';
+  }
+  return body.trim();
+}
+
+function buildFrancoRetResumenPorObjetivo(rows: FrancoRetRowInternal[]): Array<{
+  cliente: string;
+  objetivo: string;
+  cantidad: number;
+  empleados: string[];
+}> {
+  const map = new Map<string, { cliente: string; objetivo: string; empleados: string[] }>();
+  for (const r of rows) {
+    let g = map.get(r.objetivo_id);
+    if (!g) {
+      g = { cliente: r.cliente, objetivo: r.objetivo, empleados: [] };
+      map.set(r.objetivo_id, g);
+    }
+    if (!g.empleados.includes(r.empleado_etiqueta)) g.empleados.push(r.empleado_etiqueta);
+  }
+  return Array.from(map.values())
+    .map((g) => ({
+      cliente: g.cliente,
+      objetivo: g.objetivo,
+      cantidad: g.empleados.length,
+      empleados: g.empleados.sort((a, b) => a.localeCompare(b, 'es')),
+    }))
+    .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'));
 }
 
 async function empleadosCoordsBatch(
@@ -514,7 +769,11 @@ export async function ejecutarListadoFrancoRetDia(
     return { fecha_referencia: fecha, nota: 'sin_objetivos_para_esta_empresa', cuenta: 0, filas: [] };
   }
 
-  const { rows: raw, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
+  const { rows: rawCollected, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
+  const empIdsAll = [...new Set(rawCollected.map((r) => r.employee_firestore_id))];
+  const nombresMap = await empleadosNombresBatch(db, ctx.empresaId, empIdsAll);
+  const raw = enrichFrancoRetRowsWithNombres(rawCollected, nombresMap);
+  const resumen_por_objetivo = buildFrancoRetResumenPorObjetivo(raw);
 
   const idCerc = String(args.id_objetivo_cercania ?? '').trim();
   if (idCerc) {
@@ -566,25 +825,27 @@ export async function ejecutarListadoFrancoRetDia(
       distancia_km_al_objetivo_pedido: r.distancia_km != null ? Math.round(r.distancia_km * 100) / 100 : null,
     }));
 
+    const resumenFiltrado = buildFrancoRetResumenPorObjetivo(raw.filter((r) => r.objetivo_id === idCerc));
+
     return {
       fecha_referencia: fecha,
       tipo_filtro: tipo,
       objetivo_referencia_distancia: { id: idCerc, nombre: target.name, cliente: target.clientName },
       criterios:
         'Turnos del día (zona AR) con código F/FF/FP/FT (franco) o RET, objetivos de la empresa; incluye borradores/planificación. Distancia = Haversine entre lat/lng del legajo (RRHH) y el objetivo pedido.',
-      cuenta_filas: raw.length,
+      cuenta_filas: raw.filter((r) => r.objetivo_id === idCerc).length,
       truncado_consulta_turnos: truncado,
       muestra_cap: lim,
       filas,
       empleados_sin_coordenadas_en_legajo_muestra: sinCoord.slice(0, 24),
+      resumen_por_objetivo: resumenFiltrado,
       nota_tras_herramienta:
-        'Ordená por distancia_km_al_objetivo_pedido ascendente; los null no tienen geolocalización en el legajo. No inventes nombres: usá solo campos de filas.',
+        'Ordená por distancia_km_al_objetivo_pedido ascendente; los null no tienen geolocalización en el legajo. Mostrá **empleado** (nombre y apellido); **nunca** IDs Firestore al usuario.',
     };
   }
 
   const filas = raw.slice(0, lim).map((r) => ({
     empleado: r.empleado_etiqueta,
-    id_legajo: r.employee_firestore_id,
     codigo: r.codigo,
     cliente: r.cliente,
     objetivo: r.objetivo,
@@ -599,9 +860,10 @@ export async function ejecutarListadoFrancoRetDia(
     cuenta_filas: raw.length,
     truncado_consulta_turnos: truncado,
     muestra_cap: lim,
+    resumen_por_objetivo,
     filas,
     nota_tras_herramienta:
-      'Para «quién está de franco» o «quién en RET» listá filas. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania. No inventes nombres.',
+      'Para «quién está de franco» o «quién en RET» usá **resumen_por_objetivo** (cliente, objetivo, lista **empleados** con nombres) o filas[].empleado. **Nunca** muestres IDs técnicos de Firestore al usuario. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania.',
   };
 }
 
@@ -630,7 +892,7 @@ function parseYmd(s: string): { y: number; m: number; d: number } {
 function slaCampoFechaYmD(raw: unknown): string {
   if (raw == null) return '';
   if (typeof raw === 'string') return raw.trim().slice(0, 10);
-  if (raw instanceof admin.firestore.Timestamp) {
+  if (raw instanceof Timestamp) {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Argentina/Cordoba',
       year: 'numeric',
@@ -641,7 +903,7 @@ function slaCampoFechaYmD(raw: unknown): string {
   if (typeof raw === 'object' && raw !== null && 'seconds' in raw) {
     const o = raw as { seconds: number; nanoseconds?: number };
     try {
-      const ts = new admin.firestore.Timestamp(o.seconds, o.nanoseconds ?? 0);
+      const ts = new Timestamp(o.seconds, o.nanoseconds ?? 0);
       return new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/Argentina/Cordoba',
         year: 'numeric',
@@ -700,8 +962,8 @@ function arRangeTimestamps(desdeYsMmDd: string, hastaYsMmDd: string): { start: F
   if (Number.isNaN(t0) || Number.isNaN(t1) || t1 < t0) throw new Error('rango de fechas inválido');
   if ((t1 - t0) / 86400000 > 98) throw new Error('el rango no puede superar ~98 días');
   return {
-    start: admin.firestore.Timestamp.fromMillis(t0),
-    end: admin.firestore.Timestamp.fromMillis(t1),
+    start: Timestamp.fromMillis(t0),
+    end: Timestamp.fromMillis(t1),
   };
 }
 
@@ -883,8 +1145,6 @@ export async function ejecutarBuscarObjetivosPorNombre(
 
   const db = admin.firestore();
   const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
-  const needle = norm(textoRaw);
-
   type ObjRow = {
     id_objetivo: string;
     nombre_objetivo: string;
@@ -917,17 +1177,14 @@ export async function ejecutarBuscarObjetivosPorNombre(
         const oid = String(o?.id ?? '').trim();
         if (!oid) continue;
         const oname = String(o?.name ?? '').trim() || oid;
-        const nameNorm = norm(oname);
-        const idNorm = norm(oid);
-        if (!nameNorm.includes(needle) && !idNorm.includes(needle) && nameNorm !== needle) continue;
+        if (!objectiveHaystackMatchesNeedle(textoRaw, oname, clientName)) continue;
         pushObj(d.id, clientName, oid, oname, o);
         if (out.length >= limite * 5) break;
       }
     } else if (!objetivos) {
       const oid = d.id;
       const oname = clientName;
-      const hay = norm(`${oname} ${oid}`);
-      if (!hay.includes(needle)) continue;
+      if (!objectiveHaystackMatchesNeedle(textoRaw, oname, clientName)) continue;
       pushObj(d.id, clientName, oid, oname, data as Record<string, unknown>);
     }
     if (out.length >= limite * 5) break;
@@ -953,6 +1210,128 @@ export async function ejecutarBuscarObjetivosPorNombre(
         ? 'Varias sedes: pedí aclaración (cliente o parte del nombre) o que el usuario elija id_objetivo antes de listado_franco_ret_dia con id_objetivo_cercania.'
         : 'Si el usuario sólo dijo el nombre del sitio, usá id_objetivo de la coincidencia en listado_franco_ret_dia(id_objetivo_cercania=…).') +
       ' No inventes ids.',
+  };
+}
+
+export async function ejecutarContarClientesEmpresa(
+  ctx: AssistantToolContext,
+  _args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!canQueryClientsCrm(ctx)) {
+    return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+  }
+
+  const db = admin.firestore();
+  const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+
+  let activos = 0;
+  let inactivos = 0;
+  let objetivosTotal = 0;
+  const muestraActivos: string[] = [];
+
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
+    const inactivo = st === 'INACTIVO';
+    if (inactivo) inactivos += 1;
+    else activos += 1;
+
+    const objsRaw = data.objetivos ?? data.objectives;
+    if (Array.isArray(objsRaw)) objetivosTotal += objsRaw.length;
+
+    const cname = String(data.name ?? '').trim() || d.id;
+    if (!inactivo && muestraActivos.length < 10) muestraActivos.push(cname.slice(0, 100));
+  }
+
+  return {
+    cuenta_clientes_activos: activos,
+    cuenta_clientes_inactivos: inactivos,
+    cuenta_total_clientes: activos + inactivos,
+    cuenta_objetivos_embebidos_en_clientes: objetivosTotal,
+    truncado_loteFirestore_480: snap.size >= 480,
+    muestra_primeros_clientes_activos: muestraActivos,
+    nota_tras_herramienta:
+      'Respondé cuenta_clientes_activos (o total si preguntan todos) en la primera oración. Objetivos embebidos = sedes en CRM, no contratos SLA.',
+  };
+}
+
+export async function ejecutarListarObjetivosCliente(
+  ctx: AssistantToolContext,
+  args: { texto_cliente?: string; limite?: number },
+): Promise<Record<string, unknown>> {
+  if (!canQueryClientsCrm(ctx)) {
+    return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+  }
+
+  const textoRaw = String(args.texto_cliente ?? '').trim();
+  if (textoRaw.length < 2) return { error: 'pedir_nombre_cliente_mas_largo' };
+
+  let limite = Math.floor(Number(args.limite ?? 40));
+  if (!Number.isFinite(limite) || limite < 1) limite = 40;
+  limite = Math.min(60, limite);
+
+  const db = admin.firestore();
+  const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+
+  type Match = {
+    id_cliente: string;
+    nombre_cliente: string;
+    objetivos: Array<{ id_objetivo: string; nombre_objetivo: string }>;
+  };
+  const matches: Match[] = [];
+
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const clientName = String(data.name ?? '').trim() || d.id;
+    if (!clientHaystackMatchesNeedle(textoRaw, clientName)) continue;
+
+    const objsRaw = data.objetivos ?? data.objectives;
+    const objetivos: Array<{ id_objetivo: string; nombre_objetivo: string }> = [];
+    if (Array.isArray(objsRaw)) {
+      for (const o of objsRaw as Array<Record<string, unknown>>) {
+        const oid = String(o?.id ?? '').trim();
+        if (!oid) continue;
+        objetivos.push({
+          id_objetivo: oid,
+          nombre_objetivo: String(o?.name ?? '').trim() || oid,
+        });
+      }
+    }
+    objetivos.sort((a, b) => a.nombre_objetivo.localeCompare(b.nombre_objetivo, 'es'));
+    matches.push({ id_cliente: d.id, nombre_cliente: clientName, objetivos });
+  }
+
+  if (matches.length === 0) {
+    return {
+      error: 'cliente_no_encontrado',
+      texto_buscado: textoRaw,
+      nota: 'probá otro fragmento del nombre comercial (ej. CASISA, Lotería)',
+    };
+  }
+
+  if (matches.length > 1) {
+    return {
+      ambigua: true,
+      texto_buscado: textoRaw,
+      clientes_coincidentes: matches.map((m) => ({
+        id_cliente: m.id_cliente,
+        nombre_cliente: m.nombre_cliente,
+        cuenta_objetivos: m.objetivos.length,
+      })),
+      nota_tras_herramienta: 'Pedí al usuario que elija el cliente exacto antes de listar sedes.',
+    };
+  }
+
+  const m = matches[0]!;
+  const sliced = m.objetivos.slice(0, limite);
+  return {
+    id_cliente: m.id_cliente,
+    nombre_cliente: m.nombre_cliente,
+    cuenta_objetivos: m.objetivos.length,
+    objetivos: sliced,
+    truncado_por_limite: m.objetivos.length > sliced.length,
+    nota_tras_herramienta:
+      'Listá los nombres de objetivos tal cual en objetivos[].nombre_objetivo; no inventes sedes. Para SLA/horas usá resumen_horas_objetivo_sla_periodo.',
   };
 }
 
@@ -999,17 +1378,27 @@ export async function ejecutarConsultarTurnosEmpleado(
     return { error: e?.message ?? 'fecha_invalida' };
   }
 
-  const qsnap = await db
-    .collection('turnos')
-    .where('employeeId', '==', empId)
-    .where('startTime', '>=', start)
-    .where('startTime', '<=', end)
-    .limit(32)
-    .get();
+  let qsnap: FirebaseFirestore.QuerySnapshot;
+  try {
+    qsnap = await db
+      .collection('turnos')
+      .where('employeeId', '==', empId)
+      .where('startTime', '>=', start)
+      .where('startTime', '<=', end)
+      .limit(32)
+      .get();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] consultar_turnos_empleado', { empId, desde, hasta, msg });
+    return { error: 'error_consulta_turnos_firestore', detalle: msg.slice(0, 280) };
+  }
 
   const turnos = qsnap.docs.map((docSnap) => {
     const t = docSnap.data() as Record<string, unknown>;
-    const ts = (x: unknown) => (x instanceof admin.firestore.Timestamp ? x.toDate().toISOString() : null);
+    const tsField = (key: string) => {
+      const parsed = readFirestoreTs(t, key);
+      return parsed ? parsed.toDate().toISOString() : null;
+    };
     const code = String(t.code ?? t.type ?? '').trim();
     const present = !!(t.isPresent === true || t.checkInTime);
     const absent = !!(t.isAbsent === true);
@@ -1027,8 +1416,8 @@ export async function ejecutarConsultarTurnosEmpleado(
 
     return {
       idTurno: docSnap.id,
-      inicioUtc: ts(t.startTime),
-      finUtc: ts(t.endTime),
+      inicioUtc: tsField('startTime'),
+      finUtc: tsField('endTime'),
       codigo: code || undefined,
       objetivo: String(t.objectiveName ?? t.objectiveId ?? '') || undefined,
       puesto: String(t.positionName ?? '') || undefined,
@@ -1109,19 +1498,23 @@ async function firestoreGetAllRefs(
   return out;
 }
 
-function readFirestoreTs(row: Record<string, unknown>, key: string): admin.firestore.Timestamp | null {
+function readFirestoreTs(row: Record<string, unknown>, key: string): Timestamp | null {
   const v = row[key];
-  if (v instanceof admin.firestore.Timestamp) return v;
+  if (v instanceof Timestamp) return v;
+  if (v && typeof v === 'object' && typeof (v as { toMillis?: unknown }).toMillis === 'function') {
+    const ms = (v as { toMillis: () => number }).toMillis();
+    if (Number.isFinite(ms)) return Timestamp.fromMillis(ms);
+  }
   if (v && typeof v === 'object' && v !== null && 'seconds' in v) {
     const o = v as { seconds?: unknown; nanoseconds?: unknown };
     const s = Number(o.seconds);
     const n = Number(o.nanoseconds ?? 0);
-    if (Number.isFinite(s)) return new admin.firestore.Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
+    if (Number.isFinite(s)) return new Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
   }
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim())) {
     const core = v.trim().slice(0, 10);
     const t0 = Date.parse(`${core}T12:00:00.000${AR_DAY_OFFSET}`);
-    if (Number.isFinite(t0)) return admin.firestore.Timestamp.fromMillis(t0);
+    if (Number.isFinite(t0)) return Timestamp.fromMillis(t0);
   }
   return null;
 }
@@ -1130,8 +1523,8 @@ function readFirestoreTs(row: Record<string, unknown>, key: string): admin.fires
 async function queryTurnosEmpleadoEnRango(
   db: FirebaseFirestore.Firestore,
   empId: string,
-  start: admin.firestore.Timestamp,
-  end: admin.firestore.Timestamp,
+  start: Timestamp,
+  end: Timestamp,
   lim: number,
 ): Promise<{ docs: FirebaseFirestore.QueryDocumentSnapshot[]; uso_fallback: boolean }> {
   try {
@@ -1226,8 +1619,8 @@ export async function ejecutarResumenHorasEmpleadoPeriodo(
 
   const desde = String(args.fecha_desde ?? '').trim();
   const hasta = String(args.fecha_hasta ?? '').trim();
-  let start: admin.firestore.Timestamp;
-  let end: admin.firestore.Timestamp;
+  let start: Timestamp;
+  let end: Timestamp;
   try {
     ({ start, end } = arRangeTimestamps(desde, hasta));
   } catch (e: any) {
@@ -1337,7 +1730,7 @@ export async function ejecutarResumenHorasEmpleadoPeriodo(
   };
 }
 
-function formatYmdCordobaFromTs(ts: admin.firestore.Timestamp): string {
+function formatYmdCordobaFromTs(ts: Timestamp): string {
   try {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Argentina/Cordoba',
@@ -1386,6 +1779,7 @@ export async function ejecutarResumenPresenciasObjetivosDia(
   try {
     ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(
       db,
+      ctx.empresaId,
       objectiveMap,
       fecha,
     ));
@@ -1508,6 +1902,7 @@ export async function ejecutarListadoTurnosOperativosDia(
   try {
     ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(
       db,
+      ctx.empresaId,
       objectiveMap,
       fecha,
     ));
@@ -2004,6 +2399,62 @@ export async function ejecutarResumenHorasSlaVariosObjetivos(
   };
 }
 
+/**
+ * Totales de liquidación operativa del período (misma lógica que Reportes / modal detalle de horas).
+ */
+export async function ejecutarResumenHorasLiquidacionEmpresaPeriodo(
+  ctx: AssistantToolContext,
+  args: { fecha_desde?: string; fecha_hasta?: string; fecha_referencia?: string },
+): Promise<Record<string, unknown>> {
+  if (!canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_consultar_turnos_requiere_reportes_planificacion_operaciones' };
+  }
+
+  let fechaDesde = String(args.fecha_desde ?? '').trim();
+  let fechaHasta = String(args.fecha_hasta ?? '').trim();
+  const ref = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+
+  if (!fechaDesde || !fechaHasta) {
+    try {
+      const p = parseYmd(ref);
+      const mm = String(p.m).padStart(2, '0');
+      const lastD = new Date(p.y, p.m, 0).getDate();
+      fechaDesde = `${p.y}-${mm}-01`;
+      fechaHasta = `${p.y}-${mm}-${String(lastD).padStart(2, '0')}`;
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+    }
+  }
+
+  try {
+    parseYmd(fechaDesde);
+    parseYmd(fechaHasta);
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+  }
+
+  try {
+    const agg = await aggregateLiquidacionEmpresaPeriodo(
+      admin.firestore(),
+      ctx.empresaId,
+      fechaDesde,
+      fechaHasta,
+    );
+    return {
+      ...agg,
+      mes_yyyy_mm: fechaDesde.slice(0, 7),
+      criterio:
+        'Hs reales = fichadas (realStartTime/checkOut). Diurnas/nocturnas sobre reales (21:00–06:00). Al 100% = FT/franco trabajado. Al 50% = bolsa (reales − FT) por encima de 200 h. No reemplaza export legal de Reportes.',
+      nota_tras_herramienta:
+        'Respondé con hs_reales, diurnas, nocturnas, al_100_ft, al_50, plus_feriado, bolsa_200 y hs_simples. Para un legajo puntual usá resumen_horas_empleado_periodo.',
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[assistant] resumen_horas_liquidacion', { msg });
+    return { error: 'error_consulta_liquidacion_firestore', detalle: msg.slice(0, 280) };
+  }
+}
+
 /** Lista RRHH: activo/active o sin estado → activo; inactivo/inactive → baja. */
 function esLegajoActivoComoPantallaRRHH(statusRaw: unknown): boolean {
   const s = String(statusRaw ?? '').trim().toLowerCase();
@@ -2087,7 +2538,7 @@ export async function ejecutarContarEmpleadosPlantillaEmpresa(
     },
     muestra_primeros_legajos: muestra,
     nota_tras_herramienta:
-      'Herramienta retirada del asistente: orientá al usuario a la tarjeta Empleados en nómina del Panel principal o RRHH y legajos; no devuelvas cifras desde el chat.',
+      'Respondé cuenta_para_tarjeta_panel_empleados_nomina en la primera oración si preguntan nómina del panel; cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado si piden «activos» en sentido RRHH. Si truncado_loteFirestore_900=true, aclaralo.',
   };
 }
 
@@ -2152,7 +2603,7 @@ export async function buildEmpresaMetricsSnapshotForPrompt(
   return [
     '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para SLA u operaciones del día cuando coincidan; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
     ...flat,
-    'Para «cuántos empleados en nómina/plantilla», no des un número desde el chat: indicá la tarjeta **Empleados en nómina** del **Panel principal** o **RRHH y legajos**.',
+    'Para «cuántos empleados en nómina/plantilla», usá **contar_empleados_plantilla_empresa** (cuenta_para_tarjeta_panel_empleados_nomina). Para clientes/objetivos CRM: **contar_clientes_empresa** y **listar_objetivos_cliente**.',
   ].join('\n');
 }
 
@@ -2243,11 +2694,16 @@ async function dispatchAssistantToolCallInner(
       fecha: args.fecha != null ? String(args.fecha) : undefined,
     });
   } else if (name === 'contar_empleados_plantilla_empresa') {
-    raw = {
-      no_disponible_en_asistente: true,
-      orientacion:
-        'El total de empleados en nómina no se consulta desde el chat. Indicá al usuario la tarjeta Empleados en nómina del Panel principal o el módulo RRHH y legajos.',
-    };
+    raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+    });
+  } else if (name === 'contar_clientes_empresa') {
+    raw = await ejecutarContarClientesEmpresa(ctx, args);
+  } else if (name === 'listar_objetivos_cliente') {
+    raw = await ejecutarListarObjetivosCliente(ctx, {
+      texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
   } else if (name === 'resumen_horas_empleado_periodo') {
     let fechaDesde = String(args.fecha_desde ?? '').trim();
     let fechaHasta = String(args.fecha_hasta ?? '').trim();
@@ -2273,6 +2729,12 @@ async function dispatchAssistantToolCallInner(
       texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
       fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
       id_servicio_sla: args.id_servicio_sla != null ? String(args.id_servicio_sla) : undefined,
+    });
+  } else if (name === 'resumen_horas_liquidacion_empresa_periodo') {
+    raw = await ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx, {
+      fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+      fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
     });
   } else if (name === 'resumen_horas_sla_varios_objetivos') {
     const rawTextos = args.textos_objetivo;

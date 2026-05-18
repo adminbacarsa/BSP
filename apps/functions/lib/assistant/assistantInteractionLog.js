@@ -1,9 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.replyShowsFirestoreEmployeeIds = replyShowsFirestoreEmployeeIds;
 exports.classifyAssistantOutcome = classifyAssistantOutcome;
 exports.writeAssistantInteractionLog = writeAssistantInteractionLog;
 exports.extractLastUserQuestion = extractLastUserQuestion;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const COLLECTION = 'assistant_interaction_logs';
 const UNSATISFIED_REPLY_PATTERNS = [
     /\binconveniente\s+t[eé]cnico\b/i,
@@ -19,8 +21,35 @@ const UNSATISFIED_REPLY_PATTERNS = [
     /\bno\s+pude\s+completar\b/i,
     /\bno\s+pude\s+listar\b/i,
     /\bno\s+pude\s+consultar\b/i,
+    /\bno\s+puedo\s+darte\b/i,
+    /\bsuger(i|í)\s+consultar\s+el\s+m[oó]dulo\b/i,
+    /\brevis[aá]\s+el\s+m[oó]dulo\s+de\s+\*\*reportes\*\*/i,
+    /\bcontact(ar|e)\s+.{0,24}(soporte|it)\b/i,
+    /\b(soporte|equipo)\s+de\s+it\b/i,
+    /\bintent[aá]\s+nuevamente\s+m[aá]s\s+tarde\b/i,
+    /\bnecesito consultar la informaci[oó]n\b/i,
+    /\bse encuentra disponible en el m[oó]dulo\b/i,
+    /\best[aá] disponible en el m[oó]dulo de\b/i,
+    /\b(pod[eé]s|puede)\s+(ver|consultar|revisar)\s+.{0,40}m[oó]dulo\b/i,
+    /\b(dirigite|dir[ií]gete|acced[eé])\s+.{0,32}m[oó]dulo\b/i,
+    /\bno\s+(encontr[eé]|localic[eé]|identifiqu[eé])\b/i,
+    /\bsin\s+coincidencias\b/i,
+    /\bno\s+hay\s+datos\b/i,
+    /\bno\s+disponemos\b/i,
     /^⚠️/,
 ];
+const ID_BLOCKLIST = /^(firestore|ministerio|casisa|loteria|lotería|configuracion|planificacion|operaciones|colaboradores)$/i;
+function replyShowsFirestoreEmployeeIds(reply) {
+    if (!/\b(franco|ret|empleado|guardia|legajo|turno|colaborador)\b/i.test(reply))
+        return false;
+    const ids = reply.match(/\b[a-zA-Z][a-zA-Z0-9]{9,21}\b/g) ?? [];
+    const suspicious = ids.filter((id) => !ID_BLOCKLIST.test(id) && !/MISERICORDIA/i.test(id));
+    if (suspicious.length >= 2)
+        return true;
+    if (suspicious.length >= 1 && /\b(franco|ret)\b/i.test(reply))
+        return true;
+    return false;
+}
 function classifyAssistantOutcome(reply, hadError) {
     if (hadError)
         return 'error';
@@ -31,6 +60,8 @@ function classifyAssistantOutcome(reply, hadError) {
         if (re.test(r))
             return 'unsatisfied';
     }
+    if (replyShowsFirestoreEmployeeIds(r))
+        return 'unsatisfied';
     if (r.length < 28 && /\bno\s+(puedo|podemos|hay)\b/i.test(r))
         return 'unsatisfied';
     return 'answered';
@@ -58,7 +89,7 @@ async function writeAssistantInteractionLog(input) {
             errorCode: input.errorCode ? clip(input.errorCode, 64) : null,
             errorMessage: input.errorMessage ? clip(input.errorMessage, 480) : null,
             durationMs: typeof input.durationMs === 'number' ? Math.round(input.durationMs) : null,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
     }
     catch (e) {

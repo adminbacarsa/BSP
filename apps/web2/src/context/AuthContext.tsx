@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, User, setPersistence, browserLocalPersistence, signOut } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
+
+const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 import { doc, getDoc } from 'firebase/firestore';
 import { useRouter } from 'next/router';
 
@@ -49,6 +51,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
+    if (USE_EMULATOR) ensureFirebaseEmulatorsConnected();
     setPersistence(auth, browserLocalPersistence).catch(e => console.error("Error persistencia:", e));
 
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -78,16 +81,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               setRolePermissions({});
             }
           } else {
-            // Fallback: usar custom claims del token cuando system_users no existe
-            // (común en emulador después de reimport de backup)
             const token = await u.getIdTokenResult(true);
             const claimRole = (token.claims.role as string) || null;
             setUserRole(claimRole);
             setAssignedClientId(null);
+            const claimUp = (claimRole || '').toUpperCase();
+            if (claimUp === 'SUPERADMIN' || claimUp === 'SUPER_ADMIN') {
+              setEmpresaId('bacarsa');
+            }
             if (claimRole) {
               const roleSnap = await getDoc(doc(db, 'roles', roleDocId(claimRole)));
               if (roleSnap.exists()) {
                 setRolePermissions((roleSnap.data().permissions || {}) as Record<string, string[]>);
+              } else if (claimUp === 'SUPERADMIN' || claimUp === 'SUPER_ADMIN') {
+                const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+                const perms: Record<string, string[]> = {};
+                modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
+                setRolePermissions(perms);
               } else {
                 setRolePermissions({});
               }
@@ -98,6 +108,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } catch (e) {
           console.error("Error cargando system_users:", e);
           setRolePermissions({});
+          try {
+            const token = await u.getIdTokenResult(true);
+            const claimRole = (token.claims.role as string) || null;
+            if (claimRole) setUserRole(claimRole);
+            const claimUp = (claimRole || '').toUpperCase();
+            if (claimUp === 'SUPERADMIN' || claimUp === 'SUPER_ADMIN') {
+              const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+              const perms: Record<string, string[]> = {};
+              modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
+              setRolePermissions(perms);
+              setEmpresaId('bacarsa');
+            }
+          } catch {
+            /* ignore */
+          }
         }
       } else {
         setUserRole(null);

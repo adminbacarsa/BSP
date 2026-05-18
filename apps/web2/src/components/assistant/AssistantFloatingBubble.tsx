@@ -9,6 +9,11 @@ import { functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { inferModuleKeyFromPath, moduleTitleEs } from '@/lib/assistant/inferModuleKeyFromPath';
+import {
+  clientDeployForAssistant,
+  getClientDeployContext,
+  type ClientDeployContext,
+} from '@/lib/appBuildInfo';
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
@@ -168,6 +173,8 @@ function hideGloboRoute(pathname: string): boolean {
   return false;
 }
 
+const deployCtx: ClientDeployContext = getClientDeployContext();
+
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -238,6 +245,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         moduleKey,
         empresaId: empresaCtxId || '',
         clientToday: clientLocalTodayYsMmDd(),
+        clientDeploy: clientDeployForAssistant(deployCtx),
       });
       const data = res.data as { reply?: string };
       const reply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
@@ -373,6 +381,22 @@ export function AssistantFloatingBubble(): React.ReactNode {
                 </p>
                 <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400" title={fullPath}>
                   {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
+                </p>
+                <p
+                  className="truncate text-[9px] font-bold text-slate-500 dark:text-slate-500"
+                  title={deployCtx.versionLabel}
+                >
+                  <span
+                    className={
+                      deployCtx.environment === 'emulator'
+                        ? 'text-amber-700 dark:text-amber-400'
+                        : 'text-emerald-700 dark:text-emerald-400'
+                    }
+                  >
+                    {deployCtx.environment === 'emulator' ? 'Lab' : 'Prod'}
+                  </span>
+                  {' · '}
+                  {deployCtx.buildHash}
                 </p>
               </div>
             </div>

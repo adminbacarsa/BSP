@@ -78,28 +78,227 @@ function extractMonthRangeFromHoursQuery(t, refYmd) {
     return null;
 }
 const RE_HORA = '\\bhoras?\\b';
+function looksLikeEmployeeNameFragment(frag) {
+    const n = normText(frag);
+    if (n.length < 3)
+        return false;
+    if (/^(horas?\s+)?(extras?|diurnas?|nocturnas?|reales?|teoricas?|liquidaci[oó]n|al\s*100|feriados?|bolsa|ft)\b/.test(n))
+        return false;
+    if (/\b(extras?|diurnas?|nocturnas?|liquidaci[oó]n)\b/.test(n) && n.split(/\s+/).length <= 3)
+        return false;
+    return true;
+}
 function extractEmployeeNameFromHoursQuery(raw) {
     const t = normText(raw);
     const monthNames = Object.keys(SPANISH_MONTHS).join('|');
     const periodTail = `(?:en|durante|para|del)\\s+(?:el\\s+)?(?:mes\\s+de\\s+)?(?:${monthNames}|este mes|mes actual|mes pasado|20\\d{2})`;
     let m = t.match(new RegExp(`${RE_HORA}.{0,24}\\b(?:de|del)\\s+(.+?)\\s+${periodTail}`));
-    if (m?.[1] && m[1].trim().length >= 3)
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
         return m[1].trim();
     m = t.match(new RegExp(`\\b(?:cuantas|cuántas)\\s+horas?\\b.{0,32}\\b(?:de|del)\\s+(.+?)\\s+${periodTail}`));
-    if (m?.[1] && m[1].trim().length >= 3)
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
         return m[1].trim();
     m = t.match(new RegExp(`${RE_HORA}.{0,16}\\b(?:trabaj|planific|fichad)\\w*\\s+(?:de\\s+)?(.+?)\\s+${periodTail}`));
-    if (m?.[1] && m[1].trim().length >= 3)
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
         return m[1].trim();
     m = t.match(/\b(?:de|del)\s+([a-záéíóúñ][a-záéíóúñ\s]{2,40}?)\s+en\s+(?:el\s+)?(?:mes\s+de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/);
-    if (m?.[1] && m[1].trim().length >= 3)
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
         return m[1].trim();
     m = t.match(new RegExp(`${RE_HORA}\\s+(?:de|del)\\s+([a-záéíóúñ][a-záéíóúñ\\s]{2,48})\\s+en\\s+(?:${monthNames})\\b`));
-    if (m?.[1] && m[1].trim().length >= 3)
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
+        return m[1].trim();
+    m = t.match(new RegExp(`\\b(?:cuantas?|cuántas?)\\s+horas?\\s+trabaj\\w*\\s+([a-záéíóúñ][a-záéíóúñ\\s]{2,48}?)\\s+en\\s+(?:el\\s+)?(?:mes\\s+de\\s+)?(?:${monthNames})\\b`));
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
         return m[1].trim();
     return null;
 }
+function extractEmployeeNameFromTurnosDetailQuery(raw) {
+    const t = normText(raw);
+    let m = t.match(/\b(?:detalle|listado|mostrar|mostrame|mostrá|ver|pasame|pasa)\b.{0,40}\b(?:de\s+)?(?:los\s+|las\s+)?turnos?\s+(?:de|del)\s+(.+)$/);
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
+        return m[1].trim();
+    m = t.match(/\bturnos?\s+(?:de|del)\s+([a-záéíóúñ][a-záéíóúñ\s,]{2,48})$/);
+    if (m?.[1] && looksLikeEmployeeNameFragment(m[1]))
+        return m[1].trim();
+    return null;
+}
+function extractEmployeeNameFromRecentMessages(recent) {
+    for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+        const c = recent[i].content || '';
+        const encontre = c.match(/Encontr[eé]\s+a\s+\*\*([^*]+)\*\*/i);
+        if (encontre?.[1] && looksLikeEmployeeNameFragment(encontre[1]))
+            return encontre[1].trim();
+        const boldMatches = c.match(/\*\*([^*]{3,64})\*\*/g);
+        if (boldMatches) {
+            for (const b of boldMatches) {
+                const name = b.replace(/\*\*/g, '').trim();
+                if (!looksLikeEmployeeNameFragment(name))
+                    continue;
+                if (/^(reportes|planificaci[oó]n|operaciones|firestore|servicios|rrhh|dashboard)$/i.test(name))
+                    continue;
+                if (name.split(/[\s,]+/).filter(Boolean).length >= 2 || /,/.test(name))
+                    return name;
+            }
+        }
+        if (recent[i].role === 'user') {
+            const frag = extractEmployeeNameFromHoursQuery(c) ||
+                extractEmployeeNameFromTurnosDetailQuery(c);
+            if (frag)
+                return frag;
+        }
+    }
+    return null;
+}
+function matchEmployeeTurnosDetailIntent(t, recent) {
+    if (!/\b(turnos?)\b/.test(t))
+        return false;
+    const wantsDetail = /\b(detalle|listado|mostrar|mostrame|mostrá|ver|pasame|pasa|desglos|itemizado)\b/.test(t) ||
+        /^(detalle|los turnos|el detalle)\b/.test(t.trim());
+    if (!wantsDetail)
+        return false;
+    if (/\b(sla|servicio|contrato|liquidaci[oó]n)\b/.test(t) && !/\b(empleado|guardia|legajo|colaborador)\b/.test(t)) {
+        return false;
+    }
+    if (extractEmployeeNameFromHoursQuery(t) || extractEmployeeNameFromTurnosDetailQuery(t))
+        return true;
+    return !!extractEmployeeNameFromRecentMessages(recent);
+}
+function formatCordobaDayFromIso(iso) {
+    if (!iso)
+        return '—';
+    try {
+        return new Intl.DateTimeFormat('es-AR', {
+            timeZone: 'America/Argentina/Cordoba',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+        }).format(new Date(iso));
+    }
+    catch {
+        return String(iso).slice(0, 10);
+    }
+}
+function formatTurnosDetailReply(nombre, rangeLabel, data) {
+    const turnos = (data.turnos ?? []);
+    const emp = data.empleado;
+    const nom = String(emp?.nombreLegible ?? nombre).trim() || nombre;
+    if (turnos.length === 0) {
+        return `Según **Firestore**, **${nom}** no tiene turnos registrados en **${rangeLabel}** (rango consultado en colección **turnos**).`;
+    }
+    let body = `Detalle de turnos de **${nom}** en **${rangeLabel}** (${turnos.length} registro(s)):\n\n`;
+    for (const row of turnos.slice(0, 22)) {
+        const dia = formatCordobaDayFromIso(String(row.inicioUtc ?? ''));
+        const cod = String(row.codigo ?? '—');
+        const obj = String(row.objetivo ?? '—');
+        const puesto = String(row.puesto ?? '').trim();
+        const pres = String(row.resumen_presencia_para_usuario ?? '').replace(/_/g, ' ');
+        body += `- **${dia}** · código **${cod}**`;
+        if (puesto && puesto !== 'Sin Puesto')
+            body += ` · puesto ${puesto}`;
+        body += ` · ${obj}`;
+        if (pres)
+            body += ` · ${pres}`;
+        if (row.borrador === true)
+            body += ' · *borrador*';
+        body += '\n';
+    }
+    if (turnos.length > 22) {
+        body += `\n*… y ${turnos.length - 22} turno(s) más en el período (consulta limitada a 32 por respuesta rápida).*\n`;
+    }
+    const acl = String(data.aclaracion ?? '').trim();
+    if (acl)
+        body += `\n*Nota:* ${acl.replace(/_/g, ' ')}.\n`;
+    return body.trim();
+}
+function matchLiquidacionEmpresaIntent(t) {
+    if (matchLiquidacionEmpresaIntentExcludeEmployee(t))
+        return false;
+    if (/\b(diurna|nocturna|liquidaci|liquidar|extras?|al\s*100|100\s*%|ft\s+trabaj|franco\s+trabaj|bolsa|al\s*50|feriado)\b/.test(t)) {
+        return true;
+    }
+    if (/\bhoras?\b/.test(t) && /\b(total|cantidad|cuantas|cuántas|empresa|plantilla|nomina|nómina)\b/.test(t)) {
+        return true;
+    }
+    if (/\b(cantidad|total)\b/.test(t) && /\b(liquidar|liquidaci)\b/.test(t))
+        return true;
+    return false;
+}
+function matchLiquidacionEmpresaIntentExcludeEmployee(t) {
+    if (!/\bhoras?\b/.test(t))
+        return false;
+    const nameFrag = extractEmployeeNameFromHoursQuery(t);
+    if (nameFrag &&
+        nameFrag.length >= 3 &&
+        looksLikeEmployeeNameFragment(nameFrag) &&
+        !/\b(empresa|plantilla|total|todos)\b/.test(nameFrag)) {
+        return true;
+    }
+    return false;
+}
+function formatLiquidacionEmpresaReply(agg, rangeLabel) {
+    const trunc = agg.truncado_consulta_turnos === true;
+    let body = `Según **Firestore** (turnos fichados, misma lógica que **Reportes y liquidación**) para **${rangeLabel}**:\n\n`;
+    body += `- **Horas reales fichadas:** **${agg.hs_reales}** h (${agg.turnos_con_fichada} turnos con fichada, ${agg.empleados_con_fichada} legajos)\n`;
+    body += `- **Horas teóricas planificadas:** **${agg.hs_teoricas}** h\n`;
+    body += `- **Diurnas (sobre reales, 21:00–06:00 nocturnas):** **${agg.diurnas}** h\n`;
+    body += `- **Nocturnas:** **${agg.nocturnas}** h\n`;
+    body += `- **Al 100% (franco trabajado / FT):** **${agg.al_100_ft}** h (${agg.turnos_ft} turno(s) FT)\n`;
+    body += `- **Plus feriado (reales en día feriado):** **${agg.plus_feriado}** h\n`;
+    body += `- **Bolsa 200 h (reales − FT):** **${agg.bolsa_200}** h → **Hs simples:** **${agg.hs_simples}** h, **Al 50%:** **${agg.al_50}** h\n`;
+    body += `- **Extras (reales − teóricas por legajo, suma):** **${agg.horas_extras_reales_menos_teoricas}** h\n`;
+    const muestra = (agg.muestra_empleados ?? []);
+    if (muestra.length > 0) {
+        body += `\n**Mayores hs reales (muestra):**\n`;
+        for (const e of muestra.slice(0, 6)) {
+            body += `- **${e.nombre}**: ${e.hs_reales} h reales (${e.diurnas} diurnas, ${e.nocturnas} nocturnas`;
+            if (Number(e.al_100_ft) > 0)
+                body += `, ${e.al_100_ft} h al 100%`;
+            body += ')\n';
+        }
+    }
+    if (trunc) {
+        body += `\n*Nota:* la consulta alcanzó el límite de turnos; los totales pueden estar incompletos. Revisá el detalle en **Reportes y liquidación**.\n`;
+    }
+    else if (Number(agg.advertencias_sin_fichada) > 0) {
+        body += `\n*Aviso:* ${agg.advertencias_sin_fichada} turno(s) operativos sin fichada no suman a horas reales.\n`;
+    }
+    return body.trim();
+}
+async function tryDeterministicLiquidacionEmpresaReply(t, toolCtx, recent = []) {
+    if (!matchLiquidacionEmpresaIntent(t))
+        return null;
+    let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
+    if (!range) {
+        range = extractMonthRangeFromHoursQuery(recent
+            .slice(-6)
+            .map((m) => m.content)
+            .join(' '), toolCtx.referenceDateYsMmDd);
+    }
+    if (!range) {
+        try {
+            const ref = parseRefYmd(extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd));
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+        catch {
+            return null;
+        }
+    }
+    const resumen = await (0, assistantDataTools_1.ejecutarResumenHorasLiquidacionEmpresaPeriodo)(toolCtx, {
+        fecha_desde: range.desde,
+        fecha_hasta: range.hasta,
+    });
+    const err = String(resumen.error ?? '').trim();
+    if (err) {
+        if (err === 'sin_permiso_consultar_turnos_requiere_reportes_planificacion_operaciones') {
+            return 'Tu perfil no tiene permiso para consultar turnos. Necesitás lectura en **Reportes**, **Planificación** u **Operaciones**.';
+        }
+        return `No pude calcular los totales de liquidación (${err}). Revisá **Reportes y liquidación**.`;
+    }
+    return formatLiquidacionEmpresaReply(resumen, range.label).slice(0, 7500);
+}
 function matchEmployeeHoursPeriodIntent(t) {
+    if (matchLiquidacionEmpresaIntent(t))
+        return false;
     if (!new RegExp(RE_HORA).test(t))
         return false;
     if (/\b(empresa|plantilla completa|todos los empleados|total de la empresa)\b/.test(t) && !/\bde\s+\w/.test(t)) {
@@ -131,15 +330,93 @@ function formatDeterministicHoursReply(nombre, rangeLabel, resumen) {
     if (trunc) {
         body += `\n*Nota:* la consulta alcanzó el límite de turnos; el total puede estar incompleto.\n`;
     }
-    body += `\nPara nocturnas, feriados y liquidación oficial usá el módulo **Reportes y liquidación**.`;
     return body;
 }
-async function tryDeterministicEmployeeHoursReply(raw, t, toolCtx) {
+async function tryDeterministicEmployeeTurnosDetailReply(raw, t, toolCtx, recent) {
+    if (!matchEmployeeTurnosDetailIntent(t, recent))
+        return null;
+    const nameFragment = extractEmployeeNameFromHoursQuery(raw) ||
+        extractEmployeeNameFromTurnosDetailQuery(raw) ||
+        extractEmployeeNameFromRecentMessages(recent);
+    if (!nameFragment) {
+        return 'Para el detalle de turnos necesito el **apellido y nombre** del colaborador (o repetí la consulta en el mismo mensaje, ej. «detalle de turnos de Romina Romero en mayo»).';
+    }
+    let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
+    if (!range) {
+        range = extractMonthRangeFromHoursQuery(recent
+            .slice(-6)
+            .map((m) => m.content)
+            .join(' '), toolCtx.referenceDateYsMmDd);
+    }
+    if (!range) {
+        try {
+            const ref = parseRefYmd(extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd));
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+        catch {
+            const ref = parseRefYmd(toolCtx.referenceDateYsMmDd);
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+    }
+    const search = await (0, assistantDataTools_1.ejecutarBuscarEmpleadosPorNombre)(toolCtx, { texto: nameFragment, limite: 6 });
+    const searchErr = String(search.error ?? '').trim();
+    if (searchErr) {
+        if (searchErr === 'sin_permiso_para_buscar_personal') {
+            return 'Tu perfil no tiene permiso para buscar legajos. Pedí acceso de lectura a **RRHH** o **Planificación**.';
+        }
+        return null;
+    }
+    const coincidencias = (search.coincidencias ?? []);
+    if (coincidencias.length === 0) {
+        return `No encontré legajos que coincidan con «${nameFragment}». Probá apellido y nombre o número de legajo.`;
+    }
+    if (search.ambigua === true && coincidencias.length >= 2) {
+        const lista = coincidencias
+            .slice(0, 6)
+            .map((c) => `**${c.nombreLegible ?? c.idFirestore}**`)
+            .join(', ');
+        return `Hay varias personas similares a «${nameFragment}»: ${lista}. Decime cuál para listar sus turnos.`;
+    }
+    const emp = coincidencias[0];
+    const empId = String(emp.idFirestore ?? '').trim();
+    if (!empId)
+        return null;
+    const detalle = await (0, assistantDataTools_1.ejecutarConsultarTurnosEmpleado)(toolCtx, {
+        id_firestore_empleado: empId,
+        fecha_desde: range.desde,
+        fecha_hasta: range.hasta,
+    });
+    const err = String(detalle.error ?? '').trim();
+    if (err) {
+        if (err === 'sin_permiso_para_consultar_turnos') {
+            return `Encontré a **${emp.nombreLegible ?? nameFragment}**, pero tu perfil no tiene permiso para consultar turnos. Necesitás lectura en **Planificación**, **Operaciones** o **Reportes**.`;
+        }
+        return `Encontré a **${emp.nombreLegible ?? nameFragment}** pero no pude listar los turnos (${err}). Probá de nuevo en unos segundos.`;
+    }
+    const nombre = String(emp.nombreLegible ?? nameFragment);
+    return formatTurnosDetailReply(nombre, range.label, detalle).slice(0, 7500);
+}
+async function tryDeterministicEmployeeHoursReply(raw, t, toolCtx, recent = []) {
     if (!matchEmployeeHoursPeriodIntent(t))
         return null;
-    const nameFragment = extractEmployeeNameFromHoursQuery(raw);
-    const range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
-    if (!nameFragment || !range)
+    const nameFragment = extractEmployeeNameFromHoursQuery(raw) || extractEmployeeNameFromRecentMessages(recent);
+    let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
+    if (!range) {
+        range = extractMonthRangeFromHoursQuery(recent
+            .slice(-6)
+            .map((m) => m.content)
+            .join(' '), toolCtx.referenceDateYsMmDd);
+    }
+    if (!range) {
+        try {
+            const ref = parseRefYmd(extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd));
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+        catch {
+            return null;
+        }
+    }
+    if (!nameFragment)
         return null;
     const search = await (0, assistantDataTools_1.ejecutarBuscarEmpleadosPorNombre)(toolCtx, { texto: nameFragment, limite: 6 });
     const searchErr = String(search.error ?? '').trim();
@@ -227,9 +504,120 @@ function extractFechaFromRecentTurnosThread(recent, fallback) {
     }
     return fallback;
 }
+function recentFrancoRetThread(recent) {
+    for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+        const c = normText(recent[i].content || '');
+        if (/\b(franco|ret\b|reten)\b/.test(c))
+            return true;
+        if (/\b(codigos? de legajo|empleados con franco|en ret)\b/.test(c))
+            return true;
+        if (/\bresumen_por_objetivo\b/.test(recent[i].content || ''))
+            return true;
+    }
+    return false;
+}
+function matchFrancoRetFollowUpIntent(t, recent) {
+    const trimmed = t.trim();
+    if (/^(cuantos|cuántas?)\s+son\.?$/i.test(trimmed) && recentFrancoRetThread(recent))
+        return true;
+    if (/^(quienes|quiénes|quien|quién)\s*(son|es|estan|están)?\.?$/i.test(trimmed)) {
+        return recentFrancoRetThread(recent);
+    }
+    if (/\b(quienes|quiénes)\s+(son|estan|están|es)\b/.test(t) && recentFrancoRetThread(recent))
+        return true;
+    if (/\b(nombres|nombralos|nombrarlos|decime los nombres)\b/.test(t) && recentFrancoRetThread(recent))
+        return true;
+    return false;
+}
+function matchFrancoRetDiaIntent(t, recent) {
+    if (matchFrancoRetFollowUpIntent(t, recent))
+        return true;
+    if (!/\b(franco|ret\b|reten)\b/.test(t))
+        return false;
+    if (/\b(quien|quién|quienes|quiénes|cuantos|cuántos|lista|hay|cuenta)\b/.test(t))
+        return true;
+    if (/\b(codigo|cod)\s*f\b/.test(t))
+        return true;
+    return false;
+}
+function extractFrancoRetTipoFromQuery(t, recent) {
+    const blob = [t, ...recent.slice(-4).map((m) => m.content)].join(' ');
+    const n = normText(blob);
+    const hasFranco = /\bfranco\b/.test(n) || /\bcodigo\s*f\b/.test(n);
+    const hasRet = /\bret\b|\breten\b/.test(n);
+    if (hasRet && !hasFranco)
+        return 'ret';
+    if (hasFranco && !hasRet)
+        return 'franco';
+    return 'ambos';
+}
+function extractObjectiveSiteFromQuery(t) {
+    let m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?(?:hospital|h\.?)\s*([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
+    if (m?.[1]?.trim())
+        return m[1].trim();
+    m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?([a-záéíóúñ0-9.\s]{3,55}?)(?:\s+hoy|\s*\?|$)/i);
+    if (m?.[1]?.trim()) {
+        const frag = m[1].trim();
+        if (!/\b(franco|ret|turno|tarde|mañana|noche|personas?|cuantos|cuántos)\b/i.test(frag))
+            return frag;
+    }
+    m = t.match(/\b(?:hospital|h\.?)\s*([a-záéíóúñ\s]{3,40})/i);
+    if (m?.[1]?.trim())
+        return m[1].trim();
+    return null;
+}
+async function tryDeterministicFrancoRetDiaReply(t, toolCtx, recent) {
+    if (!matchFrancoRetDiaIntent(t, recent))
+        return null;
+    const fecha = extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
+    const tipo = extractFrancoRetTipoFromQuery(t, recent);
+    const siteHint = extractObjectiveSiteFromQuery(t) ||
+        extractObjectiveHintFromRecentMessages(recent) ||
+        extractObjectiveSiteFromQuery(recent.map((m) => m.content).join(' '));
+    let listadoArgs = {
+        fecha,
+        tipo,
+        limite: 120,
+    };
+    if (siteHint && siteHint.length >= 3) {
+        const found = await (0, assistantDataTools_1.ejecutarBuscarObjetivosPorNombre)(toolCtx, { texto: siteHint, limite: 6 });
+        const coincidencias = (found.coincidencias ?? []);
+        if (coincidencias.length === 1 && coincidencias[0].id_objetivo) {
+            listadoArgs = { ...listadoArgs, id_objetivo_cercania: coincidencias[0].id_objetivo };
+        }
+        else if (coincidencias.length === 0) {
+            return `No encontré el objetivo «${siteHint}» en **Clientes y Objetivos**. Probá «H. Misericordia», «Misericordia» o el nombre del cliente.`;
+        }
+        else if (coincidencias.length > 1) {
+            const lista = coincidencias
+                .slice(0, 5)
+                .map((c) => `**${c.nombre_objetivo}**`)
+                .join(', ');
+            return `Hay varias sedes parecidas a «${siteHint}»: ${lista}. Decime cuál.`;
+        }
+    }
+    const data = await (0, assistantDataTools_1.ejecutarListadoFrancoRetDia)(toolCtx, listadoArgs);
+    const err = String(data.error ?? '').trim();
+    if (err) {
+        if (err === 'sin_permiso_requiere_modulo_operaciones_planificacion_o_similar') {
+            return 'Tu perfil no tiene permiso para listar francos/RET. Necesitás lectura en **Operaciones** o **Planificación**.';
+        }
+        return `No pude listar francos/RET (${err}).`;
+    }
+    return (0, assistantDataTools_1.formatListadoFrancoRetParaChat)(data).slice(0, 7500);
+}
+function matchTurnosObjetivoHoyIntent(t) {
+    if (!/\b(hoy|el dia|el día)\b/.test(t))
+        return false;
+    if (!/\b(turno|tarde|mañana|noche|personas?|alguien|viene|vienen)\b/.test(t))
+        return false;
+    return /\b(en|del|de)\s+(?:el\s+)?(?:h\.?|hospital|[a-záéíóúñ])/i.test(t);
+}
 function matchWhoOnShiftTodayIntent(t) {
     if (/\b(franco|ret\b|reten|cercan)\b/.test(t))
         return false;
+    if (matchTurnosObjetivoHoyIntent(t))
+        return true;
     if (!/\b(quien|quién|quienes|quiénes)\b/.test(t) && !/\bturno\s+hoy\b/.test(t)) {
         if (!/\b(hoy|el dia|el día)\b/.test(t) || !/\b(turno|trabaja|guardia|personal)\b/.test(t))
             return false;
@@ -239,9 +627,13 @@ function matchWhoOnShiftTodayIntent(t) {
     }
     return /\bturno\s+hoy\b/.test(t) || (/\b(hoy)\b/.test(t) && /\b(tiene|tienen|esta|están|hay)\b/.test(t));
 }
-function shouldSkipDeterministicRouter(raw) {
+function shouldSkipDeterministicRouter(raw, recent = []) {
     const t = normText(raw);
     if (matchWhoOnShiftTodayIntent(t))
+        return false;
+    if (matchFrancoRetDiaIntent(t, recent))
+        return false;
+    if (matchAffirmativeShortIntent(t) && recentOffersSlaAllObjectivesBatch(recent))
         return false;
     if (raw.length > 240)
         return true;
@@ -259,7 +651,10 @@ function employeeCountLooksGlobalOnly(t) {
     }
     return true;
 }
-function matchEmployeeCountIntent(t, moduleKey, pathname) {
+function matchEmployeeCountIntent(t, moduleKey, pathname, recent = []) {
+    if (recentFrancoRetThread(recent) && /^(cuantos|cuántas?|quienes|quiénes)\s+son\.?$/i.test(t.trim())) {
+        return false;
+    }
     if (!employeeCountLooksGlobalOnly(t))
         return false;
     const rrhhCtx = moduleKey === 'RRHH' || moduleKey === 'DASHBOARD' || /rrhh/i.test(pathname);
@@ -277,6 +672,38 @@ function matchEmployeeCountIntent(t, moduleKey, pathname) {
     }
     if (/\b(empleados|vigiladores|legajos)\s+en\s+(nómina|nomina|plantilla)\b/.test(t) &&
         /\b(cuántos|cuantos|cuántas|cuantas|cuanto|cuánto|numero|número|total)\b/.test(t)) {
+        return true;
+    }
+    return false;
+}
+function matchClientCountIntent(t) {
+    if (!/\b(cuántos|cuantos|cuántas|cuantas|numero|número|total)\b/.test(t))
+        return false;
+    return /\b(clientes?)\b/.test(t);
+}
+function extractClientNameFromQuery(t) {
+    const m1 = t.match(/\bobjetivos?\s+(?:de|del)\s+(?:cliente\s+)?(.+?)(?:\?|$)/i);
+    if (m1?.[1])
+        return m1[1].trim();
+    const m2 = t.match(/\b(?:cliente\s+)?([a-záéíóúñ0-9][a-záéíóúñ0-9\s.-]{2,48})\s+tiene\b/i);
+    if (m2?.[1] && !/\b(cuántos|cuantos|objetivos?|sedes?)\b/i.test(m2[1]))
+        return m2[1].trim();
+    const m3 = t.match(/\b(?:sedes?|objetivos?)\s+(?:de|del)\s+(.+?)(?:\?|$)/i);
+    if (m3?.[1])
+        return m3[1].trim();
+    const known = t.match(/\b(casisa|loteria|lotería|ministerio|bacarsa|ypf|shell)\b/i);
+    if (known?.[1])
+        return known[1].trim();
+    return null;
+}
+function matchClientObjectivesIntent(t) {
+    if (/\bobjetivos?\b/.test(t) && /\b(cliente|empresa)\b/.test(t))
+        return true;
+    if (/\bobjetivos?\b/.test(t) && extractClientNameFromQuery(t))
+        return true;
+    if (/\b(sedes?|ubicaciones?)\b/.test(t) && extractClientNameFromQuery(t))
+        return true;
+    if (/\b(cuántos|cuantos|cuántas|cuantas)\b/.test(t) && /\bobjetivos?\b/.test(t) && extractClientNameFromQuery(t)) {
         return true;
     }
     return false;
@@ -363,12 +790,40 @@ function matchMultiSlaFromListIntent(t, recent) {
         return true;
     return false;
 }
-function matchSlaAllActiveServicesIntent(t) {
-    return (/\b(todos los servicios|todos los contratos|cada servicio activo|servicios activos del mes)\b/.test(t) &&
-        /\b(sla|horas?|planif|vendid)\b/.test(t));
+function matchAffirmativeShortIntent(t) {
+    return /^(si|sí|ok|dale|bueno|perfecto|por favor|porfa|de acuerdo|esta bien|está bien|mostrame|mostrá|mostrar|si por favor)\.?$/i.test(t.trim());
+}
+function recentOffersSlaAllObjectivesBatch(recent) {
+    for (let i = recent.length - 1; i >= 0 && i >= recent.length - 8; i--) {
+        if (recent[i].role !== 'assistant')
+            continue;
+        const n = normText(recent[i].content || '');
+        if (!/\b(sla|servicios activos)\b/.test(n))
+            continue;
+        if (/\b(horas vendidas|ya planificadas|pendientes a planificar|planificadas en turnos)\b/.test(n) &&
+            /\b(todos los objetivos|todos los servicios|servicios activos)\b/.test(n)) {
+            return true;
+        }
+        if (/\b(te gustaria|te gustaría|quieres|queres|puedo mostrarte|resumen)\b/.test(n) &&
+            /\b(vendidas|planificad|pendiente)\b/.test(n) &&
+            /\b(sla|objetivos|servicios activos)\b/.test(n)) {
+            return true;
+        }
+    }
+    return false;
+}
+function matchSlaAllActiveServicesIntent(t, recent = []) {
+    const blob = normText([t, ...recent.slice(-5).map((m) => m.content)].join(' '));
+    if (/\b(todos los servicios|todos los contratos|todos los objetivos|cada servicio activo|servicios activos)\b/.test(blob) &&
+        /\b(sla|horas?|planif|vendid|pendiente)\b/.test(blob)) {
+        return true;
+    }
+    if (matchAffirmativeShortIntent(t) && recentOffersSlaAllObjectivesBatch(recent))
+        return true;
+    return false;
 }
 function matchSlaContractHoursIntent(t, recent) {
-    if (matchMultiSlaFromListIntent(t, recent) || matchSlaAllActiveServicesIntent(t))
+    if (matchMultiSlaFromListIntent(t, recent) || matchSlaAllActiveServicesIntent(t, recent))
         return false;
     if (/\b(que|qué)\s+sla\b/.test(t) && recentMentionsSlaOrContrato(recent))
         return true;
@@ -539,13 +994,81 @@ function formatDeterministicTurnosHoyReply(fecha, r) {
     }
     return body.trim();
 }
+async function tryDeterministicCrmReply(t, toolCtx) {
+    if (!(0, assistantDataTools_1.canQueryClientsCrm)(toolCtx))
+        return null;
+    if (matchClientCountIntent(t)) {
+        const r = await (0, assistantDataTools_1.ejecutarContarClientesEmpresa)(toolCtx, {});
+        const err = String(r.error ?? '').trim();
+        if (err) {
+            if (err === 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar') {
+                return 'Tu perfil no tiene permiso para consultar **Clientes y Objetivos**. Necesitás lectura en ese módulo.';
+            }
+            return null;
+        }
+        const activos = Number(r.cuenta_clientes_activos ?? 0);
+        const inactivos = Number(r.cuenta_clientes_inactivos ?? 0);
+        const objs = Number(r.cuenta_objetivos_embebidos_en_clientes ?? 0);
+        let body = `Según **Firestore** (CRM, clientes de la empresa), hay **${activos}** cliente(s) **activo(s)**`;
+        if (inactivos > 0)
+            body += ` y **${inactivos}** inactivo(s)`;
+        body += ` (**${activos + inactivos}** en total). Objetivos/sedes cargados en CRM: **${objs}**.`;
+        if (r.truncado_loteFirestore_480 === true) {
+            body += '\n\n*Nota:* el conteo puede estar acotado por límite de consulta; para el detalle completo abrí **Clientes y Objetivos**.';
+        }
+        return body;
+    }
+    if (matchClientObjectivesIntent(t)) {
+        const hint = extractClientNameFromQuery(t);
+        if (!hint || hint.length < 2)
+            return null;
+        const r = await (0, assistantDataTools_1.ejecutarListarObjetivosCliente)(toolCtx, { texto_cliente: hint, limite: 48 });
+        const err = String(r.error ?? '').trim();
+        if (err === 'cliente_no_encontrado') {
+            return `No encontré el cliente «${hint}» en **Firestore** (CRM). Probá el nombre comercial exacto como en **Clientes y Objetivos**.`;
+        }
+        if (err)
+            return null;
+        if (r.ambigua === true) {
+            const lista = (r.clientes_coincidentes ?? [])
+                .map((c) => `**${c.nombre_cliente ?? '?'}**`)
+                .join(', ');
+            return `Hay varios clientes similares a «${hint}»: ${lista}. Decime cuál querés consultar.`;
+        }
+        const nombre = String(r.nombre_cliente ?? hint);
+        const cuenta = Number(r.cuenta_objetivos ?? 0);
+        const objs = (r.objetivos ?? []);
+        if (cuenta === 0) {
+            return `El cliente **${nombre}** no tiene objetivos/sedes cargados en CRM.`;
+        }
+        let body = `El cliente **${nombre}** tiene **${cuenta}** objetivo(s)/sede(s) en CRM:\n\n`;
+        for (const o of objs.slice(0, 24)) {
+            body += `- **${String(o.nombre_objetivo ?? '—')}**\n`;
+        }
+        if (cuenta > objs.length)
+            body += `\n*… y ${cuenta - objs.length} más (abrí CRM para la lista completa).*\n`;
+        if (r.truncado_por_limite === true)
+            body += '\n*Lista acotada en el chat.*\n';
+        return body.trim();
+    }
+    return null;
+}
 async function tryDeterministicTurnosHoyReply(t, toolCtx, recent) {
-    if (!matchTurnosHoyFollowUpIntent(t, recent))
+    if (!matchTurnosHoyFollowUpIntent(t, recent) && !matchTurnosObjetivoHoyIntent(t))
         return null;
     const fecha = extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
+    const siteHint = extractObjectiveSiteFromQuery(t) || extractObjectiveHintFromRecentMessages(recent);
+    let idObj;
+    if (siteHint && siteHint.length >= 3) {
+        const found = await (0, assistantDataTools_1.ejecutarBuscarObjetivosPorNombre)(toolCtx, { texto: siteHint, limite: 4 });
+        const coincidencias = (found.coincidencias ?? []);
+        if (coincidencias.length === 1)
+            idObj = coincidencias[0].id_objetivo;
+    }
     const r = await (0, assistantDataTools_1.ejecutarListadoTurnosOperativosDia)(toolCtx, {
         fecha,
         limite: 96,
+        id_objetivo: idObj,
     });
     const err = String(r.error ?? '').trim();
     if (err) {
@@ -606,7 +1129,7 @@ function shouldPrefetchOperationsMetricsInSnapshot(lastUser) {
 }
 async function tryDeterministicMultiSlaHoursReply(t, toolCtx, recent) {
     const pairs = extractClienteObjetivoPairsFromRecent(recent);
-    const allActive = matchSlaAllActiveServicesIntent(t);
+    const allActive = matchSlaAllActiveServicesIntent(t, recent);
     if (!matchMultiSlaFromListIntent(t, recent) && !allActive)
         return null;
     if (!allActive && pairs.length < 2)
@@ -676,11 +1199,19 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     if (!toolsEnabled || toolCtx.persona !== 'SYSTEM' || !toolCtx.empresaId.trim())
         return null;
     const raw = lastUser.trim();
-    if (!raw || shouldSkipDeterministicRouter(raw))
+    const recent = recentMessages.slice(-8);
+    if (!raw || shouldSkipDeterministicRouter(raw, recent))
         return null;
     const t = normText(raw);
     const mk = typeof moduleKey === 'string' && moduleKey.trim() ? moduleKey.trim() : null;
-    const recent = recentMessages.slice(-8);
+    try {
+        const francoRet = await tryDeterministicFrancoRetDiaReply(t, toolCtx, recent);
+        if (francoRet?.trim())
+            return francoRet.trim();
+    }
+    catch (e) {
+        console.warn('[assistant] tryDeterministicFrancoRetDiaReply', e);
+    }
     try {
         const turnosHoy = await tryDeterministicTurnosHoyReply(t, toolCtx, recent);
         if (turnosHoy?.trim())
@@ -689,12 +1220,28 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     catch (e) {
         console.warn('[assistant] tryDeterministicTurnosHoyReply', e);
     }
+    try {
+        const crm = await tryDeterministicCrmReply(t, toolCtx);
+        if (crm?.trim())
+            return crm.trim();
+    }
+    catch (e) {
+        console.warn('[assistant] tryDeterministicCrmReply', e);
+    }
     if (matchPlanningUiOnlyIntent(t, mk)) {
         const planUi = tryDeterministicPlanningUiReply(mk);
         if (planUi?.trim())
             return planUi.trim();
     }
-    if (!shouldSkipDeterministicRouter(raw)) {
+    if (!shouldSkipDeterministicRouter(raw, recent)) {
+        try {
+            const liqEmp = await tryDeterministicLiquidacionEmpresaReply(t, toolCtx, recent);
+            if (liqEmp?.trim())
+                return liqEmp.trim();
+        }
+        catch (e) {
+            console.warn('[assistant] tryDeterministicLiquidacionEmpresaReply', e);
+        }
         try {
             const multiSla = await tryDeterministicMultiSlaHoursReply(t, toolCtx, recent);
             if (multiSla?.trim())
@@ -712,7 +1259,15 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
             console.warn('[assistant] tryDeterministicSlaHoursToPlanReply', e);
         }
         try {
-            const hoursReply = await tryDeterministicEmployeeHoursReply(raw, t, toolCtx);
+            const turnosDet = await tryDeterministicEmployeeTurnosDetailReply(raw, t, toolCtx, recent);
+            if (turnosDet?.trim())
+                return turnosDet.trim();
+        }
+        catch (e) {
+            console.warn('[assistant] tryDeterministicEmployeeTurnosDetailReply', e);
+        }
+        try {
+            const hoursReply = await tryDeterministicEmployeeHoursReply(raw, t, toolCtx, recent);
             if (hoursReply?.trim())
                 return hoursReply.trim();
         }
@@ -720,14 +1275,32 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
             console.warn('[assistant] tryDeterministicEmployeeHoursReply', e);
         }
     }
-    const wantEmp = matchEmployeeCountIntent(t, mk, pathname);
+    const wantEmp = matchEmployeeCountIntent(t, mk, pathname, recent);
     const wantSla = matchSlaCountIntent(t);
     const wantOps = matchOpsDayAggregateIntent(t);
-    if (!wantEmp && !wantSla && !wantOps)
+    const wantClients = matchClientCountIntent(t);
+    const wantClientObjs = matchClientObjectivesIntent(t);
+    if (!wantEmp && !wantSla && !wantOps && !wantClients && !wantClientObjs)
         return null;
     const blocks = [];
+    if (wantClients || wantClientObjs) {
+        const crm = await tryDeterministicCrmReply(t, toolCtx);
+        if (crm?.trim())
+            blocks.push(crm.trim());
+    }
     if (wantEmp) {
-        blocks.push('El total de **empleados en nómina** (legajos activos en plantilla) está en la tarjeta **Empleados en nómina** del **Panel principal** — es la misma cifra que ves en el dashboard, sin necesidad de consultarla acá.\n\nPara buscar una persona, ver legajos o gestionar altas y bajas, usá **RRHH y legajos**.');
+        const r = await (0, assistantDataTools_1.ejecutarContarEmpleadosPlantillaEmpresa)(toolCtx, {});
+        if (String(r.error ?? '').trim()) {
+            blocks.push('No pude contar la nómina desde Firestore (revisá permiso en **RRHH**). La cifra oficial está en la tarjeta **Empleados en nómina** del **Panel principal**.');
+        }
+        else {
+            const n = Number(r.cuenta_para_tarjeta_panel_empleados_nomina ?? 0);
+            const amplio = Number(r.cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado ?? 0);
+            blocks.push(`Según **Firestore** (legajos de la empresa), hay **${n}** empleado(s) en nómina con status activo (misma regla que la tarjeta **Empleados en nómina** del panel). Criterio amplio RRHH (incluye sin estado explícito): **${amplio}**.`);
+            if (r.truncado_loteFirestore_900 === true) {
+                blocks.push('*Nota:* el conteo puede estar incompleto por límite de consulta; verificá en **RRHH y legajos**.');
+            }
+        }
     }
     if (wantSla) {
         const r = await (0, assistantDataTools_1.ejecutarContarServiciosSlaVigentesEmpresa)(toolCtx, {});

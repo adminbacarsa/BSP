@@ -37,7 +37,8 @@ async function run() {
     displayName: 'Juan Pérez',
   });
   const uid = u.uid;
-  console.log(`✓ Auth: creado uid=${uid}`);
+  await auth.setCustomUserClaims(uid, { role: 'employee', type: 'employee' });
+  console.log(`✓ Auth: creado uid=${uid} con claims employee`);
 
   // Documento en 'empleados'
   const empData = {

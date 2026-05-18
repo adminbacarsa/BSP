@@ -35,6 +35,34 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'contar_clientes_empresa',
+        description: 'Cuenta clientes de la empresa en CRM (colección clients): activos, inactivos y total de objetivos/sedes embebidos. Usar para «cuántos clientes tenemos», «clientes activos».',
+        parameters: { type: generative_ai_1.SchemaType.OBJECT, properties: {}, required: [] },
+    },
+    {
+        name: 'listar_objetivos_cliente',
+        description: 'Lista objetivos/sedes embebidos de un cliente por nombre comercial (ej. CASISA, Lotería). Usar para «objetivos de CASISA», «cuántas sedes tiene el cliente X».',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                texto_cliente: { type: generative_ai_1.SchemaType.STRING, description: 'Fragmento del nombre del cliente en CRM.' },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de objetivos a listar (default 40, máx 60).' },
+            },
+            required: ['texto_cliente'],
+        },
+    },
+    {
+        name: 'contar_empleados_plantilla_empresa',
+        description: 'Cuenta legajos de la empresa: cuenta_para_tarjeta_panel_empleados_nomina (misma regla que tarjeta EMPLEADOS EN NÓMINA del panel) y criterio amplio RRHH. Usar para «cuántos empleados en nómina/plantilla».',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha_referencia: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD opcional para rotular el mes.' },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'buscar_objetivos_por_nombre',
         description: 'Resuelve nombre de sede/objetivo (o fragmento) a id_objetivo Firestore dentro de los clientes de la empresa (CRM). Usalo antes de listado_franco_ret_dia con id_objetivo_cercania cuando el usuario no pasó el id. Devuelve nombre_cliente y tiene_coordenadas. Si ambigua, pedí aclaración.',
         parameters: {
@@ -48,7 +76,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'consultar_turnos_empleado',
-        description: 'Lista turnos reales desde Firestore de un legajo por idFirestore (colección empleados) en un rango de fechas inclusivo zona AR. Usá esto para saber si estaba planificado, borrador u operativo, y señales de presencia cuando existan.',
+        description: 'Lista turnos reales desde Firestore de un legajo por idFirestore en un rango de fechas (zona AR). Usá para «detalle de los turnos», «mostrame los turnos de X en mayo», seguimiento tras resumen_horas_empleado_periodo. Si el hilo ya nombró a la persona (ej. Romina Romero), buscar_empleados primero si no tenés id. Devuelve día, código, objetivo, borrador y presencia.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -101,7 +129,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'listado_franco_ret_dia',
-        description: 'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador; no es el mismo filtro que cobertura operativa). Con id_objetivo_cercania + coordenadas en CRM y legajos, ordena candidatos por distancia Haversine km al objetivo (útil para «el más cercano en franco/RET a tal sitio»).',
+        description: 'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador). Devuelve resumen_por_objetivo con nombres de legajos (desde RRHH) y filas[].empleado. Con id_objetivo_cercania ordena por distancia Haversine km al objetivo.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -154,6 +182,22 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
                 id_servicio_sla: {
                     type: generative_ai_1.SchemaType.STRING,
                     description: 'Opcional. Id o prefijo del doc servicios_sla si hay varios contratos para el mismo objetivo.',
+                },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'resumen_horas_liquidacion_empresa_periodo',
+        description: 'Totales de liquidación operativa de la empresa en un mes o rango (misma lógica que Reportes): hs_reales fichadas, diurnas, nocturnas, al_100_ft (FT), al_50 (bolsa >200h), plus_feriado, bolsa_200, hs_simples. Usar para «horas extras en mayo», «horas al 100%», «diurnas y nocturnas», «cantidad para liquidar», «FT trabajados». fecha_referencia = cualquier día del mes; o fecha_desde/fecha_hasta.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha_desde: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD inicio inclusive.' },
+                fecha_hasta: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD fin inclusive.' },
+                fecha_referencia: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Si solo dan mes (ej. mayo 2026), pasá 2026-05-15.',
                 },
             },
             required: [],

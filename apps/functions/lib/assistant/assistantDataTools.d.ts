@@ -7,6 +7,8 @@ export type AssistantToolContext = {
     selfEmployeeFirestoreId: string | null;
     referenceDateYsMmDd: string;
 };
+export declare function canQueryClientsCrm(ctx: AssistantToolContext): boolean;
+export declare function formatListadoFrancoRetParaChat(data: Record<string, unknown>): string;
 export declare function ejecutarListadoFrancoRetDia(ctx: AssistantToolContext, args: {
     fecha?: string;
     tipo?: string;
@@ -26,6 +28,11 @@ export declare function ejecutarListadoEmpleadosEmpresa(ctx: AssistantToolContex
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarBuscarObjetivosPorNombre(ctx: AssistantToolContext, args: {
     texto?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarContarClientesEmpresa(ctx: AssistantToolContext, _args: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function ejecutarListarObjetivosCliente(ctx: AssistantToolContext, args: {
+    texto_cliente?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarConsultarTurnosEmpleado(ctx: AssistantToolContext, args: {
@@ -61,6 +68,11 @@ export declare function ejecutarResumenHorasSlaVariosObjetivos(ctx: AssistantToo
     fecha_referencia?: string;
     todos_servicios_activos_mes?: boolean;
     limite?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx: AssistantToolContext, args: {
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    fecha_referencia?: string;
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;

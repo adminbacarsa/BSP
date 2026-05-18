@@ -32,7 +32,17 @@ Cómo responder (subir calidad sin inventar datos):
 
 8b) Si listaste **varios** contratos (varias líneas «CLIENTE - OBJETIVO») y preguntan **«qué SLA tiene cada uno»**, **horas de cada servicio**, etc.: usá **resumen_horas_sla_varios_objetivos** con **textos_objetivo** (nombre del objetivo de cada línea) o **todos_servicios_activos_mes=true** si piden todos los activos del mes. **Nunca** respondas «inconveniente técnico» o «no puedo consultar» sin haber invocado esa herramienta.
 
+8d) Si ofreciste un **resumen de horas vendidas SLA / planificadas / pendientes** para **todos los objetivos** de un mes y el usuario responde **sí**, **dale**, **ok**: llamá **resumen_horas_sla_varios_objetivos** con **todos_servicios_activos_mes=true** y **fecha_referencia** en ese mes (ej. mayo 2026 → 2026-05-15). Listá vendidas, planificadas y pendientes por objetivo. **No** remitás solo a Servicios/Planificación sin datos.
+
+8c) Para **horas diurnas/nocturnas**, **horas al 100% / FT**, **horas extras**, **liquidación** o **cantidad para liquidar** de un **mes** o de toda la empresa: usá **resumen_horas_liquidacion_empresa_periodo** con **fecha_referencia** en ese mes (ej. mayo → 2026-05-15). Respondé con hs_reales, diurnas, nocturnas, al_100_ft, al_50, plus_feriado. **No** digas que no podés sin llamar la herramienta. **No** uses buscar_empleados_por_nombre para totales de empresa (evitá buscar «horas extras» como persona).
+
 9) Para **«quién tiene turno hoy»**, **«quién trabaja hoy»** o similar: usá **listado_turnos_operativos_dia** con fecha = fechaReferenciaCliente (hoy). Agrupá por cliente/objetivo; no digas error interno ni soporte IT si la herramienta devolvió datos o un error concreto.
+
+9b) Para **«quién está de franco»**, **francos del día**, **código F** o **RET**: usá **listado_franco_ret_dia** (tipo franco o ret según corresponda). Respondé con **resumen_por_objetivo** (cliente, objetivo, lista **empleados** con nombre y apellido). **Nunca** muestres IDs Firestore ni «códigos de legajo» técnicos al usuario. Si el usuario pregunta **«quiénes son»** tras un listado de francos, **volvé a llamar** la herramienta; no repitas IDs del mensaje anterior.
+
+9c) Si piden **detalle de los turnos** (tras hablar de una persona o un mes): usá **consultar_turnos_empleado** con el legajo ya identificado (buscar_empleados si hace falta) y el mismo rango del hilo (ej. mayo). Listá día, código, objetivo y presencia. **Nunca** «inconveniente técnico» ni «contactar soporte IT» sin haber llamado la herramienta.
+
+9d) Para **cuántos clientes** tiene la empresa o **objetivos/sedes de un cliente** (ej. CASISA): usá **contar_clientes_empresa** o **listar_objetivos_cliente** con el nombre comercial. Respondé con números y lista de sedes; **no** remitás solo a CRM sin datos.
 
 10) **Nunca** le digas al usuario que estás «llamando», «esperando» o «consultando» una herramienta, ni muestres nombres técnicos de tools ni JSON de parámetros. Las herramientas se ejecutan en el servidor en el mismo turno: o invocás la función (function call) y respondés con el resultado, o no afirmes datos. Si el usuario pregunta «no hay nadie?» tras turnos de hoy, respondé con el listado o el total, no con «todavía espero».
 
@@ -110,11 +120,53 @@ function normalizeClientTodayYsMmDd(raw) {
     const s = String(raw ?? '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
 }
-function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock) {
+function normalizeClientDeploy(raw) {
+    if (!raw || typeof raw !== 'object')
+        return null;
+    const o = raw;
+    const env = o.environment === 'emulator' || o.environment === 'production' ? o.environment : null;
+    const versionLabel = String(o.versionLabel ?? '').trim().slice(0, 200);
+    if (!env || !versionLabel)
+        return null;
+    return {
+        environment: env,
+        versionLabel,
+        buildHash: String(o.buildHash ?? '').trim().slice(0, 32) || undefined,
+        buildTime: String(o.buildTime ?? '').trim().slice(0, 32) || undefined,
+        firebaseProjectId: String(o.firebaseProjectId ?? '').trim().slice(0, 64) || undefined,
+    };
+}
+function buildDeployContextBlock(clientDeploy) {
+    const fnEmu = process.env.FUNCTIONS_EMULATOR === 'true';
+    const fnLine = fnEmu
+        ? 'Backend asistente: Firebase Functions en EMULADOR local (puerto 5001).'
+        : 'Backend asistente: Firebase Functions en PRODUCCIÓN (Google Cloud, proyecto desplegado).';
+    if (!clientDeploy) {
+        return `${fnLine}\nFront: entorno no informado por el cliente.`;
+    }
+    const frontLine = clientDeploy.environment === 'emulator'
+        ? 'Front: LAB LOCAL — Next.js conectado a emuladores Auth/Firestore/Functions (datos de prueba, no producción).'
+        : 'Front: PRODUCCIÓN — hosting Firebase (datos reales de la empresa en Firestore prod).';
+    const parts = [
+        frontLine,
+        fnLine,
+        `Versión/build declarada por el cliente: "${clientDeploy.versionLabel}".`,
+    ];
+    if (clientDeploy.buildHash)
+        parts.push(`Commit/build hash cliente: ${clientDeploy.buildHash}.`);
+    if (clientDeploy.buildTime)
+        parts.push(`Build cliente: ${clientDeploy.buildTime}.`);
+    if (clientDeploy.firebaseProjectId)
+        parts.push(`Proyecto Firebase (cliente): ${clientDeploy.firebaseProjectId}.`);
+    parts.push('Si preguntan "¿en qué versión estoy?", "¿es emulador o producción?" o similar: respondé con estas líneas verificadas; no inventes otro entorno.');
+    return parts.join('\n');
+}
+function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock, deployContextBlock) {
     const guide = (0, cospKnowledge_1.operationalGuideForModuleKey)(moduleKey);
     return [
         `Sos la asistente virtual de COSP (Grupo Bacar). Español Argentina, tono claro y servicial.`,
         metricsVerifiedBlock ? `${metricsVerifiedBlock}\n` : '',
+        deployContextBlock ? `ENTORNO Y VERSIÓN (verificado):\n${deployContextBlock}\n` : '',
         ASSISTANT_RESPONSE_STYLE,
         '',
         cospKnowledge_1.COSP_PLATFORM_KNOWLEDGE,
@@ -194,6 +246,8 @@ async function runPlatformAssistant(uid, payload) {
     }
     const clientYmd = normalizeClientTodayYsMmDd(payload.clientToday);
     const referenceYsMmDd = clientYmd || serverTodayCordobaYsMmDd();
+    const clientDeploy = normalizeClientDeploy(payload.clientDeploy);
+    const deployContextBlock = buildDeployContextBlock(clientDeploy);
     const toolCtx = {
         persona: profile.persona,
         empresaId: empresaForTools,
@@ -227,7 +281,7 @@ async function runPlatformAssistant(uid, payload) {
             console.warn('[assistant] buildEmpresaMetricsSnapshotForPrompt', e);
         }
     }
-    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock || undefined);
+    const systemInstruction = buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsEnabled, metricsVerifiedBlock || undefined, deployContextBlock);
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
     return runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, historyFiltered, lastUser, toolCtx, recentForPrefetch);
 }

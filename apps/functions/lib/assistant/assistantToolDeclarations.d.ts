@@ -15,6 +15,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             };
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
@@ -23,7 +25,6 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -49,6 +50,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
                 description: string;
             };
             texto?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
@@ -57,7 +60,93 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            texto?: undefined;
+            limite?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
             fecha_referencia?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            texto_cliente: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            fecha_referencia?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+        };
+        required: string[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            fecha_referencia: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            limite?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -86,12 +175,13 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -116,13 +206,14 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -150,13 +241,14 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -188,12 +280,13 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             id_objetivo?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -214,6 +307,8 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
@@ -221,7 +316,6 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
-            fecha_referencia?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
@@ -254,12 +348,48 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             fecha?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            fecha_desde: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_hasta: {
+                type: SchemaType;
+                description: string;
+            };
+            fecha_referencia: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            limite?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
             todos_servicios_activos_mes?: undefined;
         };
@@ -293,6 +423,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;

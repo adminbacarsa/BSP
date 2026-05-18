@@ -1,0 +1,31 @@
+export type LiquidacionEmpresaAggregate = {
+    fecha_desde: string;
+    fecha_hasta: string;
+    empleados_con_fichada: number;
+    empleados_con_turnos: number;
+    turnos_considerados: number;
+    turnos_con_fichada: number;
+    turnos_ft: number;
+    hs_teoricas: number;
+    hs_reales: number;
+    diurnas: number;
+    nocturnas: number;
+    al_50: number;
+    al_100_ft: number;
+    plus_feriado: number;
+    bolsa_200: number;
+    hs_simples: number;
+    horas_extras_reales_menos_teoricas: number;
+    truncado_consulta_turnos: boolean;
+    advertencias_sin_fichada: number;
+    muestra_empleados: Array<{
+        id: string;
+        nombre: string;
+        hs_reales: number;
+        diurnas: number;
+        nocturnas: number;
+        al_50: number;
+        al_100_ft: number;
+    }>;
+};
+export declare function aggregateLiquidacionEmpresaPeriodo(db: FirebaseFirestore.Firestore, empresaId: string, fechaDesde: string, fechaHasta: string): Promise<LiquidacionEmpresaAggregate>;

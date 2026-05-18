@@ -1,12 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = void 0;
+exports.canQueryClientsCrm = canQueryClientsCrm;
+exports.formatListadoFrancoRetParaChat = formatListadoFrancoRetParaChat;
 exports.ejecutarListadoFrancoRetDia = ejecutarListadoFrancoRetDia;
 exports.assistantToolsEnabledForContext = assistantToolsEnabledForContext;
 exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
 exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
 exports.ejecutarListadoEmpleadosEmpresa = ejecutarListadoEmpleadosEmpresa;
 exports.ejecutarBuscarObjetivosPorNombre = ejecutarBuscarObjetivosPorNombre;
+exports.ejecutarContarClientesEmpresa = ejecutarContarClientesEmpresa;
+exports.ejecutarListarObjetivosCliente = ejecutarListarObjetivosCliente;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenHorasEmpleadoPeriodo = ejecutarResumenHorasEmpleadoPeriodo;
 exports.ejecutarResumenPresenciasObjetivosDia = ejecutarResumenPresenciasObjetivosDia;
@@ -14,10 +18,13 @@ exports.ejecutarListadoTurnosOperativosDia = ejecutarListadoTurnosOperativosDia;
 exports.ejecutarContarServiciosSlaVigentesEmpresa = ejecutarContarServiciosSlaVigentesEmpresa;
 exports.ejecutarResumenHorasObjetivoSlaPeriodo = ejecutarResumenHorasObjetivoSlaPeriodo;
 exports.ejecutarResumenHorasSlaVariosObjetivos = ejecutarResumenHorasSlaVariosObjetivos;
+exports.ejecutarResumenHorasLiquidacionEmpresaPeriodo = ejecutarResumenHorasLiquidacionEmpresaPeriodo;
 exports.ejecutarContarEmpleadosPlantillaEmpresa = ejecutarContarEmpleadosPlantillaEmpresa;
 exports.buildEmpresaMetricsSnapshotForPrompt = buildEmpresaMetricsSnapshotForPrompt;
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
+const assistantLiquidacionAggregate_1 = require("./assistantLiquidacionAggregate");
 const assistantSlaHours_1 = require("./assistantSlaHours");
 const AR_DAY_OFFSET = '-03:00';
 exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
@@ -27,6 +34,52 @@ function norm(s) {
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .trim();
+}
+function objectiveSearchTokens(textoRaw) {
+    const t = norm(textoRaw.replace(/\./g, ' ').replace(/,/g, ' '));
+    const words = t.split(/\s+/).filter((w) => w.length >= 2);
+    const out = new Set(words);
+    if (words.some((w) => w === 'hosp' || w === 'hospital' || w === 'h')) {
+        out.add('misericordia');
+        out.add('san');
+        out.add('roque');
+    }
+    if (t.includes('misericordia'))
+        out.add('misericordia');
+    if (t.includes('malagueno') || t.includes('malagueño'))
+        out.add('malagueno');
+    if (t.includes('cruz') && t.includes('eje')) {
+        out.add('cruz');
+        out.add('eje');
+    }
+    return [...out].filter((w) => w.length >= 3);
+}
+function objectiveHaystackMatchesNeedle(needleRaw, oname, clientName) {
+    const hay = norm(`${oname} ${clientName}`);
+    const needle = norm(needleRaw.replace(/\./g, ' '));
+    if (!needle || needle.length < 2)
+        return false;
+    if (hay.includes(needle))
+        return true;
+    const compactNeedle = needle.replace(/\s+/g, '');
+    const compactHay = hay.replace(/\s+/g, '');
+    if (compactHay.includes(compactNeedle))
+        return true;
+    const tokens = objectiveSearchTokens(needleRaw);
+    if (tokens.length === 0)
+        return hay.includes(needle);
+    let hits = 0;
+    for (const tok of tokens) {
+        if (hay.includes(tok))
+            hits += 1;
+    }
+    if (hits >= Math.max(1, tokens.length - 1))
+        return true;
+    if (tokens.includes('misericordia') && hay.includes('misericordia'))
+        return true;
+    if (tokens.includes('roque') && hay.includes('roque') && hay.includes('san'))
+        return true;
+    return false;
 }
 function buildEmpleadoSearchHaystack(data) {
     const ln = String(data.lastName ?? '').trim();
@@ -81,6 +134,25 @@ function canSearchObjectivesCrm(ctx) {
         return false;
     return ctx.readableModuleKeys.some((k) => ['CLIENTS', 'PLANNING', 'OPERATIONS', 'SERVICES', 'ANALYSIS', 'DASHBOARD', 'REPORTS', 'CONFIG'].includes(k));
 }
+function canQueryClientsCrm(ctx) {
+    if (ctx.persona !== 'SYSTEM')
+        return false;
+    if (!ctx.empresaId.trim())
+        return false;
+    return ctx.readableModuleKeys.some((k) => ['CLIENTS', 'DASHBOARD', 'CONFIG', 'PLANNING', 'SERVICES', 'OPERATIONS'].includes(k));
+}
+function clientHaystackMatchesNeedle(needleRaw, clientName) {
+    const needle = norm(needleRaw);
+    const hay = norm(clientName);
+    if (!needle || needle.length < 2 || !hay)
+        return false;
+    if (hay.includes(needle) || needle.includes(hay))
+        return true;
+    const nTok = needle.split(/\s+/).filter((t) => t.length >= 2);
+    if (nTok.length === 0)
+        return hay.includes(needle);
+    return nTok.every((t) => hay.includes(t));
+}
 function canQueryEmpleadosPlantillaResumen(ctx) {
     if (ctx.persona !== 'SYSTEM')
         return false;
@@ -114,8 +186,8 @@ function monitorWideWindow(referenceYsMmDd) {
     const startMs = dNoonMs - 86400000;
     const endMs = dEndMs + 86400000;
     return {
-        start: admin.firestore.Timestamp.fromMillis(startMs),
-        end: admin.firestore.Timestamp.fromMillis(endMs),
+        start: firestore_1.Timestamp.fromMillis(startMs),
+        end: firestore_1.Timestamp.fromMillis(endMs),
     };
 }
 function horaHmCordoba(dt) {
@@ -126,7 +198,24 @@ function horaHmCordoba(dt) {
         hour12: false,
     }).format(dt);
 }
-async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha) {
+function enrichOperacionesDiaRowsWithNombres(rows, nombres) {
+    return rows.map((r) => {
+        if (!r.employee_firestore_id)
+            return r;
+        const resolved = nombres.get(r.employee_firestore_id);
+        let etiqueta = r.empleado_etiqueta;
+        if (resolved)
+            etiqueta = resolved;
+        else if (empleadoEtiquetaPareceIdFirestore(etiqueta, r.employee_firestore_id)) {
+            etiqueta = '(sin nombre en legajo RRHH)';
+        }
+        else {
+            etiqueta = etiquetaEmpleadoParaUsuario(etiqueta, r.employee_firestore_id);
+        }
+        return { ...r, empleado_etiqueta: etiqueta };
+    });
+}
+async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objectiveMap, fecha) {
     const objectiveIds = new Set(objectiveMap.keys());
     const { start, end } = monitorWideWindow(fecha);
     let qsnap;
@@ -187,7 +276,10 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
         const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
         const meta = objectiveMap.get(oid);
         const nombreEmp = String(shift.employeeName ?? '').trim();
-        const empleado_etiqueta = isValidEmployee ? nombreEmp || empId.slice(0, 12) || '(legajo)' : 'VACANTE / sin asignar';
+        const etiquetaTurno = isValidEmployee && nombreEmp && !empleadoEtiquetaPareceIdFirestore(nombreEmp, empId) ? nombreEmp : '';
+        const empleado_etiqueta = isValidEmployee
+            ? etiquetaTurno || empId.slice(0, 12) || '(legajo)'
+            : 'VACANTE / sin asignar';
         pre.push({
             oid,
             needsPubCheck,
@@ -197,6 +289,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
             codigo: String(shift.code ?? shift.type ?? '').trim() || '—',
             puesto: rawPos,
             empleado_etiqueta,
+            employee_firestore_id: isValidEmployee ? empId : '',
             cliente: (meta?.clientName ?? String(shift.clientName ?? '').trim()) || '—',
             objetivo_nombre: (meta?.name ?? String(shift.objectiveName ?? '').trim()) || oid,
             h_inicio_cordoba: horaHmCordoba(shiftDateObj),
@@ -222,6 +315,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
             codigo: c.codigo,
             puesto: c.puesto,
             empleado_etiqueta: c.empleado_etiqueta,
+            employee_firestore_id: c.employee_firestore_id,
             cliente: c.cliente,
             objetivo_nombre: c.objetivo_nombre,
             h_inicio_cordoba: c.h_inicio_cordoba,
@@ -234,7 +328,12 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha)
             return c0;
         return a.shiftTsMs - b.shiftTsMs;
     });
-    const outMapped = rows.map(({ shiftTsMs, ...rest }) => rest);
+    let outMapped = rows.map(({ shiftTsMs, ...rest }) => rest);
+    const empIds = [...new Set(outMapped.map((r) => r.employee_firestore_id).filter(Boolean))];
+    if (empIds.length > 0 && empresaId) {
+        const nombresMap = await empleadosNombresBatch(db, empresaId, empIds);
+        outMapped = enrichOperacionesDiaRowsWithNombres(outMapped, nombresMap);
+    }
     return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
 }
 async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
@@ -336,8 +435,8 @@ async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
         const shift = docSnap.data();
         if (shift.status === 'Canceled')
             continue;
-        const st = shift.startTime;
-        if (!(st instanceof admin.firestore.Timestamp))
+        const st = readFirestoreTs(shift, 'startTime');
+        if (!st)
             continue;
         const shiftDateObj = st.toDate();
         if (!isSameCordobaCalendarDay(shiftDateObj, fecha))
@@ -358,9 +457,10 @@ async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
             continue;
         const meta = objectiveMap.get(oid);
         const nombreEmp = String(shift.employeeName ?? '').trim();
+        const etiquetaTurno = nombreEmp && !empleadoEtiquetaPareceIdFirestore(nombreEmp, empId) ? nombreEmp : '';
         rows.push({
             employee_firestore_id: empId,
-            empleado_etiqueta: nombreEmp || empId.slice(0, 12),
+            empleado_etiqueta: etiquetaTurno || empId,
             codigo: codeRaw || codeU,
             cliente: meta.clientName,
             objetivo: meta.name,
@@ -375,6 +475,141 @@ async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
         return a.empleado_etiqueta.localeCompare(b.empleado_etiqueta, 'es');
     });
     return { rows, truncado: qsnap.size >= exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
+}
+function nombreLegibleFromEmpleadoRow(row) {
+    const ln = String(row.lastName ?? '').trim();
+    const fn = String(row.firstName ?? '').trim();
+    const fromFields = [ln, fn].filter(Boolean).join(', ');
+    if (fromFields)
+        return fromFields;
+    const nameRaw = String(row.name ?? row.nombre ?? '').trim();
+    if (nameRaw)
+        return nameRaw;
+    return [fn, ln].filter(Boolean).join(' ');
+}
+function empleadoEtiquetaPareceIdFirestore(etiqueta, empId) {
+    const e = etiqueta.trim();
+    if (!e)
+        return true;
+    if (e === empId || e === empId.slice(0, 12))
+        return true;
+    return e.length >= 10 && !/\s/.test(e) && /^[a-zA-Z0-9_-]+$/.test(e);
+}
+async function empleadosNombreMapEmpresa(db, empresaId) {
+    const out = new Map();
+    if (!empresaId)
+        return out;
+    const snap = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
+    for (const d of snap.docs) {
+        const row = d.data();
+        const ln = String(row.lastName ?? '').trim();
+        const fn = String(row.firstName ?? '').trim();
+        const nombre = (ln && fn ? `${ln} ${fn}` : '') ||
+            nombreLegibleFromEmpleadoRow(row);
+        if (nombre)
+            out.set(d.id, nombre);
+    }
+    return out;
+}
+async function empleadosNombresBatch(db, empresaId, empIds) {
+    const out = await empleadosNombreMapEmpresa(db, empresaId);
+    const uniq = [...new Set(empIds)].filter(Boolean);
+    const missing = uniq.filter((id) => {
+        const n = out.get(id);
+        return !n || empleadoEtiquetaPareceIdFirestore(n, id);
+    });
+    if (missing.length === 0)
+        return out;
+    const refs = missing.map((id) => db.collection('empleados').doc(id));
+    const snaps = await firestoreGetAllRefs(db, refs);
+    for (let j = 0; j < snaps.length; j++) {
+        const s = snaps[j];
+        if (!s.exists)
+            continue;
+        const row = s.data();
+        const empE = String(row.empresaId ?? '').trim();
+        if (empE && empresaId && empE.toLowerCase() !== empresaId.toLowerCase())
+            continue;
+        const nombre = nombreLegibleFromEmpleadoRow(row);
+        if (nombre)
+            out.set(s.id, nombre);
+    }
+    return out;
+}
+function enrichFrancoRetRowsWithNombres(rows, nombres) {
+    return rows.map((r) => {
+        const resolved = nombres.get(r.employee_firestore_id);
+        if (resolved)
+            return { ...r, empleado_etiqueta: resolved };
+        if (empleadoEtiquetaPareceIdFirestore(r.empleado_etiqueta, r.employee_firestore_id)) {
+            return { ...r, empleado_etiqueta: '(sin nombre en legajo RRHH)' };
+        }
+        return r;
+    });
+}
+function etiquetaEmpleadoParaUsuario(etiqueta, empId = '') {
+    if (empleadoEtiquetaPareceIdFirestore(etiqueta, empId || etiqueta)) {
+        return '(sin nombre en legajo RRHH)';
+    }
+    return etiqueta;
+}
+function formatListadoFrancoRetParaChat(data) {
+    const resumen = (data.resumen_por_objetivo ?? []);
+    const fecha = String(data.fecha_referencia ?? '').trim();
+    const tipo = String(data.tipo_filtro ?? 'franco');
+    const cuenta = Number(data.cuenta_filas ?? 0);
+    const trunc = data.truncado_consulta_turnos === true;
+    let fechaLabel = fecha;
+    try {
+        const p = parseYmd(fecha);
+        fechaLabel = new Intl.DateTimeFormat('es-AR', {
+            timeZone: 'America/Argentina/Cordoba',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        }).format(new Date(`${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}T12:00:00.000-03:00`));
+    }
+    catch {
+    }
+    const tipoLabel = tipo === 'ret' ? 'en **RET**' : tipo === 'ambos' ? 'en **franco** o **RET**' : 'de **franco**';
+    if (resumen.length === 0) {
+        return `No hay colaboradores ${tipoLabel} registrados en turnos para el **${fechaLabel}**.`;
+    }
+    let body = `Colaboradores ${tipoLabel} el **${fechaLabel}**`;
+    if (cuenta > 0)
+        body += ` (**${cuenta}** turno(s) en total)`;
+    body += ':\n\n';
+    for (const g of resumen) {
+        body += `**${g.cliente}** — **${g.objetivo}** (${g.cantidad}):\n`;
+        for (const emp of g.empleados) {
+            body += `- **${etiquetaEmpleadoParaUsuario(emp)}**\n`;
+        }
+        body += '\n';
+    }
+    if (trunc) {
+        body += '*Nota:* la consulta alcanzó el límite de turnos del día; puede haber más registros en **Planificación**.\n';
+    }
+    return body.trim();
+}
+function buildFrancoRetResumenPorObjetivo(rows) {
+    const map = new Map();
+    for (const r of rows) {
+        let g = map.get(r.objetivo_id);
+        if (!g) {
+            g = { cliente: r.cliente, objetivo: r.objetivo, empleados: [] };
+            map.set(r.objetivo_id, g);
+        }
+        if (!g.empleados.includes(r.empleado_etiqueta))
+            g.empleados.push(r.empleado_etiqueta);
+    }
+    return Array.from(map.values())
+        .map((g) => ({
+        cliente: g.cliente,
+        objetivo: g.objetivo,
+        cantidad: g.empleados.length,
+        empleados: g.empleados.sort((a, b) => a.localeCompare(b, 'es')),
+    }))
+        .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'));
 }
 async function empleadosCoordsBatch(db, empresaId, empIds) {
     const out = new Map();
@@ -419,7 +654,11 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
     if (objectiveMap.size === 0) {
         return { fecha_referencia: fecha, nota: 'sin_objetivos_para_esta_empresa', cuenta: 0, filas: [] };
     }
-    const { rows: raw, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
+    const { rows: rawCollected, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
+    const empIdsAll = [...new Set(rawCollected.map((r) => r.employee_firestore_id))];
+    const nombresMap = await empleadosNombresBatch(db, ctx.empresaId, empIdsAll);
+    const raw = enrichFrancoRetRowsWithNombres(rawCollected, nombresMap);
+    const resumen_por_objetivo = buildFrancoRetResumenPorObjetivo(raw);
     const idCerc = String(args.id_objetivo_cercania ?? '').trim();
     if (idCerc) {
         const withCoords = await objectivesMapWithCoordsForEmpresa(db, ctx.empresaId, undefined);
@@ -468,22 +707,23 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
             hora_inicio_cor: r.hora_inicio_cor,
             distancia_km_al_objetivo_pedido: r.distancia_km != null ? Math.round(r.distancia_km * 100) / 100 : null,
         }));
+        const resumenFiltrado = buildFrancoRetResumenPorObjetivo(raw.filter((r) => r.objetivo_id === idCerc));
         return {
             fecha_referencia: fecha,
             tipo_filtro: tipo,
             objetivo_referencia_distancia: { id: idCerc, nombre: target.name, cliente: target.clientName },
             criterios: 'Turnos del día (zona AR) con código F/FF/FP/FT (franco) o RET, objetivos de la empresa; incluye borradores/planificación. Distancia = Haversine entre lat/lng del legajo (RRHH) y el objetivo pedido.',
-            cuenta_filas: raw.length,
+            cuenta_filas: raw.filter((r) => r.objetivo_id === idCerc).length,
             truncado_consulta_turnos: truncado,
             muestra_cap: lim,
             filas,
             empleados_sin_coordenadas_en_legajo_muestra: sinCoord.slice(0, 24),
-            nota_tras_herramienta: 'Ordená por distancia_km_al_objetivo_pedido ascendente; los null no tienen geolocalización en el legajo. No inventes nombres: usá solo campos de filas.',
+            resumen_por_objetivo: resumenFiltrado,
+            nota_tras_herramienta: 'Ordená por distancia_km_al_objetivo_pedido ascendente; los null no tienen geolocalización en el legajo. Mostrá **empleado** (nombre y apellido); **nunca** IDs Firestore al usuario.',
         };
     }
     const filas = raw.slice(0, lim).map((r) => ({
         empleado: r.empleado_etiqueta,
-        id_legajo: r.employee_firestore_id,
         codigo: r.codigo,
         cliente: r.cliente,
         objetivo: r.objetivo,
@@ -496,8 +736,9 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
         cuenta_filas: raw.length,
         truncado_consulta_turnos: truncado,
         muestra_cap: lim,
+        resumen_por_objetivo,
         filas,
-        nota_tras_herramienta: 'Para «quién está de franco» o «quién en RET» listá filas. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania. No inventes nombres.',
+        nota_tras_herramienta: 'Para «quién está de franco» o «quién en RET» usá **resumen_por_objetivo** (cliente, objetivo, lista **empleados** con nombres) o filas[].empleado. **Nunca** muestres IDs técnicos de Firestore al usuario. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania.',
     };
 }
 function assistantToolsEnabledForContext(ctx) {
@@ -527,7 +768,7 @@ function slaCampoFechaYmD(raw) {
         return '';
     if (typeof raw === 'string')
         return raw.trim().slice(0, 10);
-    if (raw instanceof admin.firestore.Timestamp) {
+    if (raw instanceof firestore_1.Timestamp) {
         return new Intl.DateTimeFormat('en-CA', {
             timeZone: 'America/Argentina/Cordoba',
             year: 'numeric',
@@ -538,7 +779,7 @@ function slaCampoFechaYmD(raw) {
     if (typeof raw === 'object' && raw !== null && 'seconds' in raw) {
         const o = raw;
         try {
-            const ts = new admin.firestore.Timestamp(o.seconds, o.nanoseconds ?? 0);
+            const ts = new firestore_1.Timestamp(o.seconds, o.nanoseconds ?? 0);
             return new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'America/Argentina/Cordoba',
                 year: 'numeric',
@@ -597,8 +838,8 @@ function arRangeTimestamps(desdeYsMmDd, hastaYsMmDd) {
     if ((t1 - t0) / 86400000 > 98)
         throw new Error('el rango no puede superar ~98 días');
     return {
-        start: admin.firestore.Timestamp.fromMillis(t0),
-        end: admin.firestore.Timestamp.fromMillis(t1),
+        start: firestore_1.Timestamp.fromMillis(t0),
+        end: firestore_1.Timestamp.fromMillis(t1),
     };
 }
 async function assertEmployeeInEmpresa(db, employeeDocId, empresaId) {
@@ -744,7 +985,6 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
     limite = Math.min(20, limite);
     const db = admin.firestore();
     const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
-    const needle = norm(textoRaw);
     const out = [];
     const pushObj = (clientDocId, clientName, oid, oname, o) => {
         const lat = o?.lat != null ? Number(o.lat) : NaN;
@@ -769,9 +1009,7 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
                 if (!oid)
                     continue;
                 const oname = String(o?.name ?? '').trim() || oid;
-                const nameNorm = norm(oname);
-                const idNorm = norm(oid);
-                if (!nameNorm.includes(needle) && !idNorm.includes(needle) && nameNorm !== needle)
+                if (!objectiveHaystackMatchesNeedle(textoRaw, oname, clientName))
                     continue;
                 pushObj(d.id, clientName, oid, oname, o);
                 if (out.length >= limite * 5)
@@ -781,8 +1019,7 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
         else if (!objetivos) {
             const oid = d.id;
             const oname = clientName;
-            const hay = norm(`${oname} ${oid}`);
-            if (!hay.includes(needle))
+            if (!objectiveHaystackMatchesNeedle(textoRaw, oname, clientName))
                 continue;
             pushObj(d.id, clientName, oid, oname, data);
         }
@@ -807,6 +1044,106 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
             ? 'Varias sedes: pedí aclaración (cliente o parte del nombre) o que el usuario elija id_objetivo antes de listado_franco_ret_dia con id_objetivo_cercania.'
             : 'Si el usuario sólo dijo el nombre del sitio, usá id_objetivo de la coincidencia en listado_franco_ret_dia(id_objetivo_cercania=…).') +
             ' No inventes ids.',
+    };
+}
+async function ejecutarContarClientesEmpresa(ctx, _args) {
+    if (!canQueryClientsCrm(ctx)) {
+        return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+    }
+    const db = admin.firestore();
+    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    let activos = 0;
+    let inactivos = 0;
+    let objetivosTotal = 0;
+    const muestraActivos = [];
+    for (const d of snap.docs) {
+        const data = d.data();
+        const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
+        const inactivo = st === 'INACTIVO';
+        if (inactivo)
+            inactivos += 1;
+        else
+            activos += 1;
+        const objsRaw = data.objetivos ?? data.objectives;
+        if (Array.isArray(objsRaw))
+            objetivosTotal += objsRaw.length;
+        const cname = String(data.name ?? '').trim() || d.id;
+        if (!inactivo && muestraActivos.length < 10)
+            muestraActivos.push(cname.slice(0, 100));
+    }
+    return {
+        cuenta_clientes_activos: activos,
+        cuenta_clientes_inactivos: inactivos,
+        cuenta_total_clientes: activos + inactivos,
+        cuenta_objetivos_embebidos_en_clientes: objetivosTotal,
+        truncado_loteFirestore_480: snap.size >= 480,
+        muestra_primeros_clientes_activos: muestraActivos,
+        nota_tras_herramienta: 'Respondé cuenta_clientes_activos (o total si preguntan todos) en la primera oración. Objetivos embebidos = sedes en CRM, no contratos SLA.',
+    };
+}
+async function ejecutarListarObjetivosCliente(ctx, args) {
+    if (!canQueryClientsCrm(ctx)) {
+        return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+    }
+    const textoRaw = String(args.texto_cliente ?? '').trim();
+    if (textoRaw.length < 2)
+        return { error: 'pedir_nombre_cliente_mas_largo' };
+    let limite = Math.floor(Number(args.limite ?? 40));
+    if (!Number.isFinite(limite) || limite < 1)
+        limite = 40;
+    limite = Math.min(60, limite);
+    const db = admin.firestore();
+    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const matches = [];
+    for (const d of snap.docs) {
+        const data = d.data();
+        const clientName = String(data.name ?? '').trim() || d.id;
+        if (!clientHaystackMatchesNeedle(textoRaw, clientName))
+            continue;
+        const objsRaw = data.objetivos ?? data.objectives;
+        const objetivos = [];
+        if (Array.isArray(objsRaw)) {
+            for (const o of objsRaw) {
+                const oid = String(o?.id ?? '').trim();
+                if (!oid)
+                    continue;
+                objetivos.push({
+                    id_objetivo: oid,
+                    nombre_objetivo: String(o?.name ?? '').trim() || oid,
+                });
+            }
+        }
+        objetivos.sort((a, b) => a.nombre_objetivo.localeCompare(b.nombre_objetivo, 'es'));
+        matches.push({ id_cliente: d.id, nombre_cliente: clientName, objetivos });
+    }
+    if (matches.length === 0) {
+        return {
+            error: 'cliente_no_encontrado',
+            texto_buscado: textoRaw,
+            nota: 'probá otro fragmento del nombre comercial (ej. CASISA, Lotería)',
+        };
+    }
+    if (matches.length > 1) {
+        return {
+            ambigua: true,
+            texto_buscado: textoRaw,
+            clientes_coincidentes: matches.map((m) => ({
+                id_cliente: m.id_cliente,
+                nombre_cliente: m.nombre_cliente,
+                cuenta_objetivos: m.objetivos.length,
+            })),
+            nota_tras_herramienta: 'Pedí al usuario que elija el cliente exacto antes de listar sedes.',
+        };
+    }
+    const m = matches[0];
+    const sliced = m.objetivos.slice(0, limite);
+    return {
+        id_cliente: m.id_cliente,
+        nombre_cliente: m.nombre_cliente,
+        cuenta_objetivos: m.objetivos.length,
+        objetivos: sliced,
+        truncado_por_limite: m.objetivos.length > sliced.length,
+        nota_tras_herramienta: 'Listá los nombres de objetivos tal cual en objetivos[].nombre_objetivo; no inventes sedes. Para SLA/horas usá resumen_horas_objetivo_sla_periodo.',
     };
 }
 async function ejecutarConsultarTurnosEmpleado(ctx, args) {
@@ -843,16 +1180,27 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
     catch (e) {
         return { error: e?.message ?? 'fecha_invalida' };
     }
-    const qsnap = await db
-        .collection('turnos')
-        .where('employeeId', '==', empId)
-        .where('startTime', '>=', start)
-        .where('startTime', '<=', end)
-        .limit(32)
-        .get();
+    let qsnap;
+    try {
+        qsnap = await db
+            .collection('turnos')
+            .where('employeeId', '==', empId)
+            .where('startTime', '>=', start)
+            .where('startTime', '<=', end)
+            .limit(32)
+            .get();
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('[assistant] consultar_turnos_empleado', { empId, desde, hasta, msg });
+        return { error: 'error_consulta_turnos_firestore', detalle: msg.slice(0, 280) };
+    }
     const turnos = qsnap.docs.map((docSnap) => {
         const t = docSnap.data();
-        const ts = (x) => (x instanceof admin.firestore.Timestamp ? x.toDate().toISOString() : null);
+        const tsField = (key) => {
+            const parsed = readFirestoreTs(t, key);
+            return parsed ? parsed.toDate().toISOString() : null;
+        };
         const code = String(t.code ?? t.type ?? '').trim();
         const present = !!(t.isPresent === true || t.checkInTime);
         const absent = !!(t.isAbsent === true);
@@ -867,8 +1215,8 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
             presenciaHumana = 'marcado_conflictivo_revisar_módulo_operaciones';
         return {
             idTurno: docSnap.id,
-            inicioUtc: ts(t.startTime),
-            finUtc: ts(t.endTime),
+            inicioUtc: tsField('startTime'),
+            finUtc: tsField('endTime'),
             codigo: code || undefined,
             objetivo: String(t.objectiveName ?? t.objectiveId ?? '') || undefined,
             puesto: String(t.positionName ?? '') || undefined,
@@ -941,20 +1289,25 @@ async function firestoreGetAllRefs(db, refs) {
 }
 function readFirestoreTs(row, key) {
     const v = row[key];
-    if (v instanceof admin.firestore.Timestamp)
+    if (v instanceof firestore_1.Timestamp)
         return v;
+    if (v && typeof v === 'object' && typeof v.toMillis === 'function') {
+        const ms = v.toMillis();
+        if (Number.isFinite(ms))
+            return firestore_1.Timestamp.fromMillis(ms);
+    }
     if (v && typeof v === 'object' && v !== null && 'seconds' in v) {
         const o = v;
         const s = Number(o.seconds);
         const n = Number(o.nanoseconds ?? 0);
         if (Number.isFinite(s))
-            return new admin.firestore.Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
+            return new firestore_1.Timestamp(Math.floor(s), Number.isFinite(n) ? Math.floor(n) : 0);
     }
     if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim())) {
         const core = v.trim().slice(0, 10);
         const t0 = Date.parse(`${core}T12:00:00.000${AR_DAY_OFFSET}`);
         if (Number.isFinite(t0))
-            return admin.firestore.Timestamp.fromMillis(t0);
+            return firestore_1.Timestamp.fromMillis(t0);
     }
     return null;
 }
@@ -1182,7 +1535,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
     let visibleRows;
     let truncadoConsultaTurnos;
     try {
-        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha));
+        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha));
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1281,7 +1634,7 @@ async function ejecutarListadoTurnosOperativosDia(ctx, args) {
     let visibleRows;
     let truncadoConsultaTurnos;
     try {
-        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, objectiveMap, fecha));
+        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha));
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1715,6 +2068,47 @@ async function ejecutarResumenHorasSlaVariosObjetivos(ctx, args) {
         nota_tras_herramienta: 'Listá cada objetivo con horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Si con_error>0, indicá el error por ítem sin decir «error técnico» genérico.',
     };
 }
+async function ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx, args) {
+    if (!canQueryShifts(ctx)) {
+        return { error: 'sin_permiso_consultar_turnos_requiere_reportes_planificacion_operaciones' };
+    }
+    let fechaDesde = String(args.fecha_desde ?? '').trim();
+    let fechaHasta = String(args.fecha_hasta ?? '').trim();
+    const ref = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+    if (!fechaDesde || !fechaHasta) {
+        try {
+            const p = parseYmd(ref);
+            const mm = String(p.m).padStart(2, '0');
+            const lastD = new Date(p.y, p.m, 0).getDate();
+            fechaDesde = `${p.y}-${mm}-01`;
+            fechaHasta = `${p.y}-${mm}-${String(lastD).padStart(2, '0')}`;
+        }
+        catch (e) {
+            return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+        }
+    }
+    try {
+        parseYmd(fechaDesde);
+        parseYmd(fechaHasta);
+    }
+    catch (e) {
+        return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+    }
+    try {
+        const agg = await (0, assistantLiquidacionAggregate_1.aggregateLiquidacionEmpresaPeriodo)(admin.firestore(), ctx.empresaId, fechaDesde, fechaHasta);
+        return {
+            ...agg,
+            mes_yyyy_mm: fechaDesde.slice(0, 7),
+            criterio: 'Hs reales = fichadas (realStartTime/checkOut). Diurnas/nocturnas sobre reales (21:00–06:00). Al 100% = FT/franco trabajado. Al 50% = bolsa (reales − FT) por encima de 200 h. No reemplaza export legal de Reportes.',
+            nota_tras_herramienta: 'Respondé con hs_reales, diurnas, nocturnas, al_100_ft, al_50, plus_feriado, bolsa_200 y hs_simples. Para un legajo puntual usá resumen_horas_empleado_periodo.',
+        };
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('[assistant] resumen_horas_liquidacion', { msg });
+        return { error: 'error_consulta_liquidacion_firestore', detalle: msg.slice(0, 280) };
+    }
+}
 function esLegajoActivoComoPantallaRRHH(statusRaw) {
     const s = String(statusRaw ?? '').trim().toLowerCase();
     if (!s)
@@ -1784,7 +2178,7 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
             rrhh_lista: 'cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado = activo/active o vacío u otros no marcados inactivo (lista RRHH).',
         },
         muestra_primeros_legajos: muestra,
-        nota_tras_herramienta: 'Herramienta retirada del asistente: orientá al usuario a la tarjeta Empleados en nómina del Panel principal o RRHH y legajos; no devuelvas cifras desde el chat.',
+        nota_tras_herramienta: 'Respondé cuenta_para_tarjeta_panel_empleados_nomina en la primera oración si preguntan nómina del panel; cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado si piden «activos» en sentido RRHH. Si truncado_loteFirestore_900=true, aclaralo.',
     };
 }
 async function buildEmpresaMetricsSnapshotForPrompt(ctx, options = {}) {
@@ -1833,7 +2227,7 @@ async function buildEmpresaMetricsSnapshotForPrompt(ctx, options = {}) {
     return [
         '══ MÉTRICAS YA CALCULADAS EN ESTE TURNO (priorizá estas cifras para SLA u operaciones del día cuando coincidan; no inventes otras). Para otra fecha o desglose, usá herramientas. ══',
         ...flat,
-        'Para «cuántos empleados en nómina/plantilla», no des un número desde el chat: indicá la tarjeta **Empleados en nómina** del **Panel principal** o **RRHH y legajos**.',
+        'Para «cuántos empleados en nómina/plantilla», usá **contar_empleados_plantilla_empresa** (cuenta_para_tarjeta_panel_empleados_nomina). Para clientes/objetivos CRM: **contar_clientes_empresa** y **listar_objetivos_cliente**.',
     ].join('\n');
 }
 function sanitizeGeminiStruct(value, depth = 0) {
@@ -1925,10 +2319,18 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
         });
     }
     else if (name === 'contar_empleados_plantilla_empresa') {
-        raw = {
-            no_disponible_en_asistente: true,
-            orientacion: 'El total de empleados en nómina no se consulta desde el chat. Indicá al usuario la tarjeta Empleados en nómina del Panel principal o el módulo RRHH y legajos.',
-        };
+        raw = await ejecutarContarEmpleadosPlantillaEmpresa(ctx, {
+            fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+        });
+    }
+    else if (name === 'contar_clientes_empresa') {
+        raw = await ejecutarContarClientesEmpresa(ctx, args);
+    }
+    else if (name === 'listar_objetivos_cliente') {
+        raw = await ejecutarListarObjetivosCliente(ctx, {
+            texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
     }
     else if (name === 'resumen_horas_empleado_periodo') {
         let fechaDesde = String(args.fecha_desde ?? '').trim();
@@ -1956,6 +2358,13 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
             texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
             fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
             id_servicio_sla: args.id_servicio_sla != null ? String(args.id_servicio_sla) : undefined,
+        });
+    }
+    else if (name === 'resumen_horas_liquidacion_empresa_periodo') {
+        raw = await ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx, {
+            fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+            fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+            fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
         });
     }
     else if (name === 'resumen_horas_sla_varios_objetivos') {

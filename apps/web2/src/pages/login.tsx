@@ -2,8 +2,17 @@
 import { useState } from 'react';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
 import { ShieldCheck, Lock, Mail, Loader2, AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { auth, db, ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
+
+const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
+
+const ADMIN_ROLES = ['admin', 'superadmin', 'manager', 'scheduler', 'supervisor', 'operator', 'hrmanager'];
+const EMPLOYEE_ROLES = ['employee', 'empleado'];
+
+function normalizeRoleKey(role: string): string {
+  return role.toLowerCase().replace(/_/g, '').trim();
+}
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('');
@@ -26,44 +35,75 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
+      if (USE_EMULATOR) ensureFirebaseEmulatorsConnected();
+
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       const uid = cred.user.uid;
 
-      const token = await cred.user.getIdTokenResult();
-      const claimRole = (token.claims.role as string || '').toLowerCase();
-      const claimType = (token.claims.type as string || '').toLowerCase();
-      const ADMIN_ROLES    = ['admin', 'superadmin', 'manager', 'scheduler', 'supervisor', 'operator', 'hr_manager'];
-      const EMPLOYEE_ROLES = ['employee', 'empleado'];
+      const token = await cred.user.getIdTokenResult(true);
+      const claimRole = normalizeRoleKey(String(token.claims.role ?? ''));
+      const claimType = normalizeRoleKey(String(token.claims.type ?? ''));
 
-      if (ADMIN_ROLES.includes(claimRole.replace('_', ''))) { window.location.href = '/admin/dashboard'; return; }
-      if (EMPLOYEE_ROLES.includes(claimRole) || EMPLOYEE_ROLES.includes(claimType)) { window.location.href = '/empleado/dashboard'; return; }
+      if (ADMIN_ROLES.includes(claimRole)) {
+        window.location.href = '/admin/dashboard';
+        return;
+      }
+      if (EMPLOYEE_ROLES.includes(claimRole) || EMPLOYEE_ROLES.includes(claimType)) {
+        window.location.href = '/empleado/dashboard';
+        return;
+      }
 
       let isAdmin = false;
       try {
         const sysSnap = await getDoc(doc(db, 'system_users', uid));
         if (sysSnap.exists()) {
-          const sysRole = (sysSnap.data().role || '').toLowerCase();
-          if (!EMPLOYEE_ROLES.includes(sysRole)) isAdmin = true;
+          const sysRole = normalizeRoleKey(String(sysSnap.data().role ?? ''));
+          if (ADMIN_ROLES.includes(sysRole) || !EMPLOYEE_ROLES.includes(sysRole)) isAdmin = true;
         }
-      } catch (_) {}
+      } catch (fireErr) {
+        console.warn('[login] system_users', fireErr);
+        if (claimRole === 'superadmin') isAdmin = true;
+      }
 
-      if (isAdmin) { window.location.href = '/admin/dashboard'; return; }
+      if (isAdmin) {
+        window.location.href = '/admin/dashboard';
+        return;
+      }
 
       try {
-        const byEmail = await getDocs(query(collection(db, 'empleados'), where('email', '==', (cred.user.email || '').trim())));
-        if (!byEmail.empty) { window.location.href = '/empleado/dashboard'; return; }
-      } catch (_) {}
+        const byEmail = await getDocs(
+          query(collection(db, 'empleados'), where('email', '==', (cred.user.email || '').trim())),
+        );
+        if (!byEmail.empty) {
+          window.location.href = '/empleado/dashboard';
+          return;
+        }
+      } catch (fireErr) {
+        console.warn('[login] empleados', fireErr);
+      }
 
-      window.location.href = '/empleado/dashboard';
-
-    } catch (err: any) {
       setLoading(false);
-      if (['auth/invalid-credential','auth/user-not-found','auth/wrong-password'].includes(err.code)) {
-        setError('Correo o contraseña incorrectos.');
-      } else if (err.code === 'auth/too-many-requests') {
+      setError(
+        USE_EMULATOR
+          ? 'Usuario creado en Auth pero sin perfil en el emulador. Ejecutá npm run seed y volvé a entrar.'
+          : 'Tu cuenta no tiene perfil asignado. Contactá al administrador.',
+      );
+    } catch (err: unknown) {
+      setLoading(false);
+      const code = (err as { code?: string })?.code ?? '';
+      const msg = err instanceof Error ? err.message : String(err);
+      if (['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password', 'auth/invalid-email'].includes(code)) {
+        setError(
+          USE_EMULATOR
+            ? 'Correo o contraseña incorrectos en el emulador. Probá admin@bacarsa.com.ar / admin1234 (npm run seed).'
+            : 'Correo o contraseña incorrectos.',
+        );
+      } else if (code === 'auth/too-many-requests') {
         setError('Muchos intentos fallidos. Esperá unos minutos.');
+      } else if (USE_EMULATOR && /fetch|network|Failed to fetch/i.test(msg)) {
+        setError('No se conecta al emulador Auth (puerto 9099). Ejecutá npm run emulators en la raíz del repo.');
       } else {
-        setError('Error de conexión. Intentá nuevamente.');
+        setError(USE_EMULATOR ? `Error de login (lab): ${code || msg}` : 'Error de conexión. Intentá nuevamente.');
       }
     }
   };
@@ -88,7 +128,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {USE_EMULATOR && (
+        <div className="w-full bg-amber-400 text-amber-950 text-center text-xs font-bold py-2 px-3">
+          Modo emulador — admin@bacarsa.com.ar / admin1234 · guardia@bacarsa.com.ar / guardia1234
+        </div>
+      )}
+      <div className="flex flex-1 w-full min-h-0">
 
       {/* ── PANEL IZQUIERDO (branding) ──────────────────────────────── */}
       <div className="hidden lg:flex w-[45%] bg-indigo-600 flex-col justify-between p-12 relative overflow-hidden">
@@ -285,6 +331,7 @@ export default function LoginPage() {
           )}
 
         </div>
+      </div>
       </div>
     </div>
   );

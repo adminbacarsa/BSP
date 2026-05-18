@@ -16,11 +16,13 @@ const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 function getEmulatorHost(): string {
   const explicit = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST?.trim();
   if (explicit) return explicit;
+  // El suite Firebase corre en esta PC; aunque abras :3000 por IP LAN, los emuladores están en loopback.
+  if (USE_EMULATOR) return '127.0.0.1';
   if (typeof window !== 'undefined') {
     const h = window.location.hostname;
     if (h && h !== 'localhost' && h !== '127.0.0.1') return h;
   }
-  return 'localhost';
+  return '127.0.0.1';
 }
 
 const firebaseConfig = {
@@ -36,38 +38,57 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 const auth = getAuth(app);
-
-// Persistencia offline: cachea datos en IndexedDB y sincroniza al volver la conexión
-// initializeFirestore solo puede llamarse una vez; getFirestore devuelve la instancia existente
-let db;
-try {
-  db = typeof window !== 'undefined'
-    ? initializeFirestore(app, {
-        // forceOwnership: true garantiza que esta ventana siempre sea la propietaria del caché
-        // (apropiado para PWA que corre como ventana única)
-        localCache: persistentLocalCache({
-          tabManager: persistentSingleTabManager({ forceOwnership: true })
-        })
-      })
-    : getFirestore(app);
-} catch {
-  // Ya inicializado (hot reload en dev)
-  db = getFirestore(app);
-}
-
 const functions = getFunctions(app, 'us-central1');
 const storage = getStorage(app);
 
-// Conectar emuladores en modo local
-if (USE_EMULATOR && typeof window !== 'undefined') {
-  try {
-    const host = getEmulatorHost();
-    connectFirestoreEmulator(db, host, 8080);
+function isAuthOnEmulator(): boolean {
+  return Boolean((auth as unknown as { _emulatorConfig?: { host?: string } })._emulatorConfig?.host);
+}
+
+/** Conecta Auth/Firestore/Functions al lab local (idempotente). Llamar antes del primer signIn. */
+export function ensureFirebaseEmulatorsConnected(): void {
+  if (typeof window === 'undefined' || !USE_EMULATOR) return;
+  const host = getEmulatorHost();
+  if (!isAuthOnEmulator()) {
     connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  }
+  try {
+    connectFirestoreEmulator(db, host, 8080);
+  } catch {
+    /* ya conectado */
+  }
+  try {
     connectFunctionsEmulator(functions, host, 5001);
-    console.info(`[Firebase] Modo emulador activo → ${host} (auth 9099, firestore 8080, functions 5001) 🧪`);
-  } catch (_) {
-    // ya conectado (hot reload)
+  } catch {
+    /* ya conectado */
+  }
+}
+
+// En emulador: sin IndexedDB (evita mezclar prod + localhost). En prod: persistencia offline.
+let db;
+if (typeof window === 'undefined') {
+  db = getFirestore(app);
+} else if (USE_EMULATOR) {
+  try {
+    db = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch {
+    db = getFirestore(app);
+  }
+  ensureFirebaseEmulatorsConnected();
+  console.info(
+    `[Firebase] Modo emulador activo → ${getEmulatorHost()} (auth 9099, firestore 8080, functions 5001) 🧪`,
+  );
+} else {
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager({ forceOwnership: true }),
+      }),
+    });
+  } catch {
+    db = getFirestore(app);
   }
 }
 

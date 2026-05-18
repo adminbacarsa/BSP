@@ -74,9 +74,23 @@ function outcomeBadge(outcome: LogOutcome) {
   );
 }
 
+const CSV_SEP = ';';
+
 function csvEscape(s: string): string {
-  const t = String(s ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ');
+  const t = String(s ?? '')
+    .replace(/"/g, '""')
+    .replace(/\r?\n/g, ' ')
+    .replace(/;/g, ',');
   return `"${t}"`;
+}
+
+function fmtDateCsv(d: Date | null): string {
+  if (!d) return '';
+  try {
+    return d.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }).replace(/;/g, ',');
+  } catch {
+    return '';
+  }
 }
 
 function downloadCsv(rows: AssistantLogRow[], empresaId: string) {
@@ -93,10 +107,10 @@ function downloadCsv(rows: AssistantLogRow[], empresaId: string) {
     'duracion_ms',
   ];
   const lines = [
-    header.join(','),
+    header.join(CSV_SEP),
     ...rows.map((r) =>
       [
-        fmtDate(r.createdAt),
+        fmtDateCsv(r.createdAt),
         r.outcome,
         r.userEmail || r.uid,
         r.moduleKey || '',
@@ -106,7 +120,7 @@ function downloadCsv(rows: AssistantLogRow[], empresaId: string) {
         r.errorCode || '',
         csvEscape(r.errorMessage || ''),
         r.durationMs != null ? String(r.durationMs) : '',
-      ].join(','),
+      ].join(CSV_SEP),
     ),
   ];
   const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });

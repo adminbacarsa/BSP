@@ -12,6 +12,7 @@ export type AssistantInteractionLogInput = {
     errorMessage?: string | null;
     durationMs?: number;
 };
+export declare function replyShowsFirestoreEmployeeIds(reply: string): boolean;
 export declare function classifyAssistantOutcome(reply: string | null | undefined, hadError: boolean): AssistantLogOutcome;
 export declare function writeAssistantInteractionLog(input: AssistantInteractionLogInput): Promise<void>;
 export declare function extractLastUserQuestion(messages: Array<{

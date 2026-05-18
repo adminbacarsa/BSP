@@ -9,6 +9,13 @@ try {
 
 const buildTime = new Date().toISOString().slice(0, 16).replace('T', ' ');
 
+let appVersion = '0.0.0';
+try {
+  appVersion = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'),
+  ).version;
+} catch (_) {}
+
 // ── Fuente única de verdad para el nombre de la app ──────────────────────────
 const APP_NAME    = 'COSP V 1.0';
 const APP_SUBTITLE = 'Seguridad Privada · Grupo Bacar';
@@ -47,6 +54,7 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_HASH: gitHash,
     NEXT_PUBLIC_BUILD_TIME: buildTime,
+    NEXT_PUBLIC_APP_VERSION: appVersion,
     NEXT_PUBLIC_APP_NAME: APP_NAME,
     NEXT_PUBLIC_APP_SUBTITLE: APP_SUBTITLE,
   },
