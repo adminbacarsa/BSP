@@ -1205,6 +1205,48 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         assignOffsets(empIds12h, 4, 2); // 4+2 siempre
     });
 
+    // ── GLOBAL STAGGER: evitar francos simultáneos entre puestos ─────────────
+    // Cada positionGroups.forEach corre assignOffsets de forma independiente:
+    // el 2º empleado de posición-A y el 2º de posición-B obtienen ambos offset=2
+    // → descansan los mismos días → la banda T (o M, N…) queda sin cobertura.
+    // Redistribuimos los offsets de empleados sin ancla histórica para que la
+    // misma banda esté cubierta cada día del mes desde distintos puestos.
+    {
+        const _gGroups = new Map<string, string[]>(); // key = `${shift}|${cycleLen}`
+        ctx.employees.forEach(emp => {
+            const sc = (empPrimaryShift[emp.id] || '').toUpperCase();
+            if (!sc) return;
+            const ecl = empCycleLen[emp.id] ?? cycleLen;
+            const k = `${sc}|${ecl}`;
+            if (!_gGroups.has(k)) _gGroups.set(k, []);
+            _gGroups.get(k)!.push(emp.id);
+        });
+        _gGroups.forEach(ids => {
+            if (ids.length <= 1) return;
+            const ecl = empCycleLen[ids[0]] ?? cycleLen;
+            const total = ids.length;
+            // Empleados con trailing real: offset fijado por continuidad cross-mes → no mover.
+            const anchored = new Set(ids.filter(id => {
+                const tw = ctx.prevMonthTrailingWorkDays?.[id];
+                const tr = ctx.prevMonthTrailingRestDays?.[id];
+                return ((tw as number) > 0) || ((tr as number) > 0);
+            }));
+            const free = ids.filter(id => !anchored.has(id));
+            if (free.length === 0) return;
+            const usedSlots = new Set<number>(
+                ids.filter(id => anchored.has(id)).map(id => empGroupIdx[id] ?? 0)
+            );
+            free.sort((a, b) => (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0));
+            free.forEach((empId, i) => {
+                let off = Math.floor(i * ecl / Math.max(1, total));
+                let tries = 0;
+                while (usedSlots.has(off) && tries < ecl) { off = (off + 1) % ecl; tries++; }
+                usedSlots.add(off);
+                empGroupIdx[empId] = off;
+            });
+        });
+    }
+
     // ── PASO 3: Días "de trabajo" del ciclo por empleado ────────────────
     //  - Asignado a puesto que NO opera todos los días de la semana (ej. EN L-V, RON L-V):
     //    días de trabajo = días en que el puesto opera. S/D que el puesto no opera → F automático.
@@ -1350,6 +1392,30 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         stats.employeeCycleHours.next[e.id] = 0;
     });
 
+    // Asignaciones sintéticas del mes anterior: permiten que passesAgreementRest
+    // vea la racha real que viene del mes previo y evite violaciones cross-mes.
+    // No se incluyen en el array assignments devuelto al caller.
+    const syntheticPrevAssignments: V2Assignment[] = [];
+    if (ctx.daysInMonth.length > 0) {
+        const _fmd = ctx.daysInMonth[0];
+        ctx.employees.forEach(emp => {
+            const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
+            if (!tw || tw <= 0) return;
+            const eCLsyn = empCL_map[emp.id] ?? cL;
+            const scSyn = (empPrimaryShift[emp.id] || 'M').toUpperCase();
+            const hSyn = SHIFT_HRS_DEFAULT[scSyn] ?? 8;
+            const stSyn = DEFAULT_SHIFT_TIMES[scSyn] || '07:00';
+            for (let i = 1; i <= Math.min(tw, eCLsyn); i++) {
+                const pd = new Date(_fmd.getFullYear(), _fmd.getMonth(), _fmd.getDate() - i);
+                syntheticPrevAssignments.push({
+                    empId: emp.id, dateStr: ctx.getDateKey(pd),
+                    positionName: '', code: scSyn, name: scSyn,
+                    hours: hSyn, startTime: stSyn,
+                });
+            }
+        });
+    }
+
     // Helpers
     void stats.targetHours; // referencia para stats, no se usa como cap en la generación
 
@@ -1372,7 +1438,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (eid === empId && ds === dateStr) {
                 return { code: codeUp, startTime: startResolved, hours: hrs };
             }
-            const a = assignments.find((x) => x.empId === eid && x.dateStr === ds);
+            const a = assignments.find((x) => x.empId === eid && x.dateStr === ds)
+                ?? syntheticPrevAssignments.find((x) => x.empId === eid && x.dateStr === ds);
             if (!a) return null;
             const c = String(a.code || '').toUpperCase();
             // RET y francos no son turnos trabajados: deben reportar 0 horas
