@@ -178,7 +178,8 @@ const deployCtx: ClientDeployContext = getClientDeployContext();
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { empresaId: empresaCtxId } = useEmpresa();
+  const { empresaId: empresaCtxId, empresa } = useEmpresa();
+  const brandColor = empresa?.primaryColor || '#6366f1';
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -322,7 +323,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
       <button
         type="button"
         style={{ bottom: fabBottomCss, right: fabRightCss, touchAction: 'none' }}
-        className="fixed z-[9999] flex h-16 w-16 shrink-0 cursor-grab items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-700 text-white shadow-[0_12px_44px_-10px_rgba(79,70,229,0.9),0_4px_18px_rgba(0,0,0,0.22)] ring-[3px] ring-white/50 active:cursor-grabbing active:scale-[0.98] focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 dark:ring-slate-900/60"
+        className="fixed z-[9999] flex h-16 w-16 shrink-0 cursor-grab items-center justify-center rounded-full text-white ring-[3px] ring-white/50 active:cursor-grabbing active:scale-[0.98] focus:outline-none dark:ring-slate-900/60"
+        style={{
+          background: `linear-gradient(135deg, ${brandColor}cc, ${brandColor})`,
+          boxShadow: `0 12px 44px -10px ${brandColor}cc, 0 4px 18px rgba(0,0,0,0.22)`,
+        }}
         aria-expanded={open}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente COSP'}
         title="Tocá para abrir/cerrar. Mantené y arrastrá para mover."
@@ -372,11 +377,14 @@ export function AssistantFloatingBubble(): React.ReactNode {
           }}
           className="fixed z-[9999] flex flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_28px_60px_-14px_rgba(0,0,0,0.38)] backdrop-blur-md dark:border-slate-600/80 dark:bg-slate-900/95"
         >
-          <div className="flex items-center justify-between gap-2 border-b border-indigo-100/80 bg-gradient-to-r from-indigo-50 to-violet-50 px-3 py-2 dark:border-slate-800 dark:from-indigo-950/50 dark:to-violet-950/30">
+          <div
+            className="flex items-center justify-between gap-2 border-b px-3 py-2 dark:border-slate-800"
+            style={{ background: `linear-gradient(90deg, ${brandColor}18, ${brandColor}08)`, borderColor: `${brandColor}30` }}
+          >
             <div className="flex min-w-0 items-center gap-2.5">
-              <CospShieldIcon size={36} className="text-indigo-600 dark:text-indigo-300" />
+              <CospShieldIcon size={36} className="" style={{ color: brandColor } as React.CSSProperties} />
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide text-indigo-900 dark:text-indigo-100">
+                <p className="text-[11px] font-black uppercase tracking-wide dark:text-indigo-100" style={{ color: brandColor }}>
                   Asistente COSP
                 </p>
                 <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400" title={fullPath}>
@@ -415,7 +423,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
             className="max-h-[min(58vh,360px)] space-y-2.5 overflow-y-auto px-3 py-3 text-[13px] leading-relaxed"
           >
             {msgs.length === 0 && (
-              <div className="rounded-xl border border-indigo-100/90 bg-indigo-50/50 px-3 py-2.5 dark:border-indigo-900/40 dark:bg-indigo-950/25">
+              <div className="rounded-xl border px-3 py-2.5 dark:bg-indigo-950/25"
+                style={{ borderColor: `${brandColor}30`, backgroundColor: `${brandColor}0d` }}>
                 <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-400">
                   Datos de la empresa o ayuda con este módulo. Por ejemplo:{' '}
                   <span className="text-slate-700 dark:text-slate-300">
@@ -432,16 +441,18 @@ export function AssistantFloatingBubble(): React.ReactNode {
                 <div
                   className={`min-w-0 max-w-[92%] rounded-2xl font-medium ${
                     m.role === 'user'
-                      ? 'bg-indigo-600 px-3 py-2 text-[13px] text-white shadow-sm'
+                      ? 'px-3 py-2 text-[13px] text-white shadow-sm'
                       : 'border border-slate-100 bg-slate-50 px-3 py-2.5 text-slate-800 leading-relaxed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                   }`}
+                  style={m.role === 'user' ? { backgroundColor: brandColor } : undefined}
                 >
                   {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
                 </div>
               </div>
             ))}
             {busy && (
-              <p className="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[12px] font-medium text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-200">
+              <p className="rounded-xl border border-dashed px-3 py-2 text-[12px] font-medium dark:bg-indigo-950/30 dark:text-indigo-200"
+                style={{ borderColor: `${brandColor}50`, backgroundColor: `${brandColor}12`, color: brandColor }}>
                 Consultando datos…
               </p>
             )}
@@ -461,7 +472,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
               type="button"
               onClick={() => void send()}
               disabled={busy || !input.trim()}
-              className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2.5 text-white shadow-sm disabled:opacity-40"
+              className="shrink-0 rounded-xl px-3 py-2.5 text-white shadow-sm disabled:opacity-40"
+              style={{ backgroundColor: brandColor }}
               aria-label="Enviar"
             >
               <SendHorizontal size={20} />
