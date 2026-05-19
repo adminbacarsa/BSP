@@ -1,3 +1,7 @@
+export interface BackupOptions {
+    empresaId?: string;
+    scopeEmpresa?: boolean;
+}
 export interface BackupResult {
     id: string;
     driveFileId: string;
@@ -9,5 +13,6 @@ export interface BackupResult {
     createdAt: string;
     status: 'ok' | 'error';
     error?: string;
+    empresaId?: string;
 }
-export declare function runBackup(folderId: string): Promise<BackupResult>;
+export declare function runBackup(folderId: string, opts?: BackupOptions): Promise<BackupResult>;

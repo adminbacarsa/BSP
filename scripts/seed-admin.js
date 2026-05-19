@@ -43,7 +43,7 @@ async function run() {
   console.log(`✓ system_users/${uid} → SUPERADMIN`);
 
   // roles/SUPERADMIN
-  const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+  const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
   const perms = {};
   modules.forEach(m => perms[m] = ['read','create','update','delete']);
   await db.collection('roles').doc('SUPERADMIN').set({ name: 'Superadmin', permissions: perms }, { merge: true });

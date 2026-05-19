@@ -214,6 +214,9 @@ async function runPlatformAssistant(uid, payload) {
     if (!profile) {
         throw new functions.https.HttpsError('permission-denied', 'Tu cuenta no está asociada a usuarios COSP conocidos para el asistente.');
     }
+    if (!profile.canUseAssistant) {
+        throw new functions.https.HttpsError('permission-denied', 'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.');
+    }
     const claimedEmpresa = typeof payload.empresaId === 'string' ? payload.empresaId : '';
     if (!(0, resolveAssistantUser_1.empresaAllowed)(claimedEmpresa && claimedEmpresa.length > 0 ? claimedEmpresa : undefined, profile)) {
         throw new functions.https.HttpsError('permission-denied', 'Sesión empresa no coincide con el perfil de usuario.');

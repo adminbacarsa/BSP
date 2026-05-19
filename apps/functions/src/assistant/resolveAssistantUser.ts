@@ -8,11 +8,18 @@ export interface ResolvedAssistantUser {
   roleName?: string | null;
   empresaId: string;
   readableModuleKeys: string[];
+  /** Acceso al asistente (globo / callable). Backoffice: permiso ASSISTANT read; portal empleado/cliente: true. */
+  canUseAssistant: boolean;
   summaryLabel: string;
 }
 
 function normalizeRoleId(role: string): string {
   return role.trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+function roleHasAssistantRead(perms: Record<string, unknown>): boolean {
+  const a = perms.ASSISTANT;
+  return Array.isArray(a) && a.includes('read');
 }
 
 export async function resolveAssistantUser(uid: string): Promise<ResolvedAssistantUser | null> {
@@ -24,11 +31,13 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
       normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
     let empresaId = String(sys.data()?.empresaId ?? '').trim() || (!isSuper ? 'bacarsa' : '');
     let readableModuleKeys: string[];
+    let canUseAssistant = isSuper;
     if (isSuper || !role) {
       readableModuleKeys = [...KNOWN_ADMIN_MODULE_KEYS];
     } else {
       const roleSnap = await db.collection('roles').doc(normalizeRoleId(role)).get();
       const perms = (roleSnap.data()?.permissions ?? {}) as Record<string, unknown>;
+      canUseAssistant = roleHasAssistantRead(perms);
       readableModuleKeys = KNOWN_ADMIN_MODULE_KEYS.filter((k) => {
         const a = perms[k];
         return Array.isArray(a) && a.includes('read');
@@ -43,6 +52,7 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
       roleName: role || null,
       empresaId,
       readableModuleKeys,
+      canUseAssistant,
       summaryLabel: role ? `Usuario sistema (${role})` : 'Usuario sistema',
     };
   }
@@ -55,6 +65,7 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
       roleName: 'client_portal',
       empresaId: String(d.clientId ?? d.clienteId ?? d.empresaId ?? ''),
       readableModuleKeys: ['CLIENT_PORTAL'],
+      canUseAssistant: true,
       summaryLabel: 'Portal cliente',
     };
   }
@@ -67,6 +78,7 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
       roleName: 'empleado_portal',
       empresaId: String(d.empresaId ?? ''),
       readableModuleKeys: ['EMPLOYEE_PORTAL'],
+      canUseAssistant: true,
       summaryLabel: 'Colaborador (portal empleado)',
     };
   }
@@ -97,6 +109,7 @@ async function tryResolveAssistantFromEmulatorAuth(uid: string): Promise<Resolve
         roleName: role || 'SUPERADMIN',
         empresaId,
         readableModuleKeys: [...KNOWN_ADMIN_MODULE_KEYS],
+        canUseAssistant: true,
         summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
       };
     }

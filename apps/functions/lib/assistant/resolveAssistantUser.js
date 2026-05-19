@@ -7,6 +7,10 @@ const cospKnowledge_1 = require("./cospKnowledge");
 function normalizeRoleId(role) {
     return role.trim().toUpperCase().replace(/\s+/g, '_');
 }
+function roleHasAssistantRead(perms) {
+    const a = perms.ASSISTANT;
+    return Array.isArray(a) && a.includes('read');
+}
 async function resolveAssistantUser(uid) {
     const db = admin.firestore();
     const sys = await db.collection('system_users').doc(uid).get();
@@ -15,12 +19,14 @@ async function resolveAssistantUser(uid) {
         const isSuper = normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
         let empresaId = String(sys.data()?.empresaId ?? '').trim() || (!isSuper ? 'bacarsa' : '');
         let readableModuleKeys;
+        let canUseAssistant = isSuper;
         if (isSuper || !role) {
             readableModuleKeys = [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS];
         }
         else {
             const roleSnap = await db.collection('roles').doc(normalizeRoleId(role)).get();
             const perms = (roleSnap.data()?.permissions ?? {});
+            canUseAssistant = roleHasAssistantRead(perms);
             readableModuleKeys = cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.filter((k) => {
                 const a = perms[k];
                 return Array.isArray(a) && a.includes('read');
@@ -35,6 +41,7 @@ async function resolveAssistantUser(uid) {
             roleName: role || null,
             empresaId,
             readableModuleKeys,
+            canUseAssistant,
             summaryLabel: role ? `Usuario sistema (${role})` : 'Usuario sistema',
         };
     }
@@ -46,6 +53,7 @@ async function resolveAssistantUser(uid) {
             roleName: 'client_portal',
             empresaId: String(d.clientId ?? d.clienteId ?? d.empresaId ?? ''),
             readableModuleKeys: ['CLIENT_PORTAL'],
+            canUseAssistant: true,
             summaryLabel: 'Portal cliente',
         };
     }
@@ -57,6 +65,7 @@ async function resolveAssistantUser(uid) {
             roleName: 'empleado_portal',
             empresaId: String(d.empresaId ?? ''),
             readableModuleKeys: ['EMPLOYEE_PORTAL'],
+            canUseAssistant: true,
             summaryLabel: 'Colaborador (portal empleado)',
         };
     }
@@ -80,6 +89,7 @@ async function tryResolveAssistantFromEmulatorAuth(uid) {
                 roleName: role || 'SUPERADMIN',
                 empresaId,
                 readableModuleKeys: [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS],
+                canUseAssistant: true,
                 summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
             };
         }

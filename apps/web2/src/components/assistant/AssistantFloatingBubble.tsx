@@ -180,7 +180,7 @@ const deployCtx: ClientDeployContext = getClientDeployContext();
 
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, loading, canReadModule } = useAuth();
   const { empresaId: empresaCtxId, empresa } = useEmpresa();
   const brandColor = empresa?.primaryColor || '#6366f1';
   const [open, setOpen] = useState(false);
@@ -271,6 +271,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
       ) {
         human =
           'La respuesta tardó demasiado (tiempo máximo superado). Volvé a intentar con una pregunta más corta o esperá unos segundos; si sigue igual, revisá que la función chatPlatformAssistant esté desplegada con suficiente timeout.';
+      } else if (code === 'permission-denied') {
+        human =
+          rawMsg.includes('asistente virtual')
+            ? rawMsg
+            : 'No tenés permiso para usar el asistente. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.';
       } else if (code === 'internal' || /^internal\b/i.test(rawMsg)) {
         human = 'Fallo interno en el servidor. Probá de nuevo en un momento; si se repite, avisá a soporte técnico.';
       } else if (code === 'unavailable') {
@@ -314,6 +319,9 @@ export function AssistantFloatingBubble(): React.ReactNode {
     }, []);
 
   if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) return null;
+  const pathBase = (pathname || '').split('?')[0];
+  const isEmployeePortal = pathBase.startsWith('/empleado');
+  if (!isEmployeePortal && !canReadModule('ASSISTANT')) return null;
   if (empresa !== null && empresa.assistantEnabled === false) {
     return null;
   }

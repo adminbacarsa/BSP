@@ -16,7 +16,7 @@ import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSche
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { filterRowsByEmpresa, belongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { filterSlaRowsByEmpresa, belongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 function toYyyyMmDd(value: unknown): string {
   if (value == null) return '';
@@ -154,18 +154,28 @@ export default function ServiciosSLAPage() {
     setIsEditing(false);
   }, [empresaId]);
 
-  // ✅ CORRECCIÓN ARQUITECTÓNICA: Colección 'servicios_sla'
+  // ✅ Colección servicios_sla — sin orderBy(clientName): excluye docs legacy sin ese campo
   useEffect(() => {
       if (!empresaId) return;
-      loadClients();
-      
-      try {
+
+      let unsub: (() => void) | undefined;
+      let cancelled = false;
+
+      (async () => {
         setLoading(true);
-        const q = scopeEmpresa
-          ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-          : query(collection(db, 'servicios_sla'), orderBy('clientName'));
-        
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        let clientRows: any[] = [];
+        try {
+          clientRows = await slaService.getClients({ empresaId, scopeEmpresa });
+          if (!cancelled) setClients(clientRows);
+        } catch (e) {
+          console.error('Error cargando clientes:', e);
+        }
+
+        const clientIds = new Set(clientRows.map((c) => c.id));
+
+        const q = query(collection(db, 'servicios_sla'));
+
+        unsub = onSnapshot(q, (snapshot) => {
             let adaptedData = snapshot.docs.map(doc => {
                 const data = doc.data();
                 return { 
@@ -177,9 +187,11 @@ export default function ServiciosSLAPage() {
                 } as ServiceSLA;
               });
             if (scopeEmpresa) {
-              adaptedData = filterRowsByEmpresa(adaptedData, empresaId, true);
-              adaptedData.sort((a, b) => (a.clientName || '').localeCompare(b.clientName || '', 'es'));
+              adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, true, clientIds);
             }
+            adaptedData.sort((a, b) =>
+              (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
+            );
             setServices(adaptedData);
             setDbStatus('online');
             setLoading(false);
@@ -187,18 +199,19 @@ export default function ServiciosSLAPage() {
             console.error("Error RealTime:", error);
             setDbStatus('offline');
             setLoading(false);
-            loadDataFallback();
+            loadDataFallback(clientIds);
         });
+      })();
 
-        return () => unsubscribe();
-      } catch (e) {
-          console.error("Error socket:", e);
-          loadDataFallback();
-      }
+      return () => {
+        cancelled = true;
+        unsub?.();
+      };
   }, [empresaId, scopeEmpresa]);
 
-  const loadDataFallback = async () => {
-    const data = await slaService.getAll({ empresaId, scopeEmpresa });
+  const loadDataFallback = async (clientIds?: Set<string>) => {
+    const ids = clientIds ?? new Set(clients.map((c) => c.id));
+    const data = await slaService.getAll({ empresaId, scopeEmpresa, clientIds: ids });
     const adaptedData = data.map((d: any) => ({
       ...d,
       startDate: toYyyyMmDd(d.startDate),
@@ -209,15 +222,7 @@ export default function ServiciosSLAPage() {
     setLoading(false);
   };
 
-  const loadClients = async () => {
-    try {
-      const data = await slaService.getClients({ empresaId, scopeEmpresa });
-      setClients(data);
-    } catch (e) {
-      console.error("Error cargando clientes:", e);
-      addToast('Error al cargar clientes', 'error');
-    }
-  };
+  const clientNameById = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
 
 
   // Auditoría en 'audit_logs'
@@ -868,11 +873,11 @@ export default function ServiciosSLAPage() {
     });
     return Array.from(map.entries()).map(([key, items]) => ({
       key,
-      clientName: items[0].clientName || 'Sin cliente',
+      clientName: items[0].clientName || clientNameById.get(items[0].clientId) || 'Sin cliente',
       objectiveName: items[0].objectiveName || 'General',
       services: items.sort((a, b) => (b.startDate||'').localeCompare(a.startDate||'')),
     }));
-  }, [services, srvSearch]);
+  }, [services, srvSearch, clientNameById]);
 
   const kpiHistory = useMemo(() => {
     const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];

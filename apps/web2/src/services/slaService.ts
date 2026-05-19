@@ -1,7 +1,7 @@
 
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
-import { empresaScopedQuery, filterRowsByEmpresa } from '@/lib/multiempresa';
+import { empresaScopedQuery, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 
 // Definición de Turno (variante)
 export interface ShiftVariant {
@@ -40,31 +40,20 @@ export interface ServiceSLA {
 }
 
 export const slaService = {
-  getAll: async (opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {
+  getAll: async (opts?: { empresaId?: string; scopeEmpresa?: boolean; clientIds?: Set<string> }) => {
     try {
       const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
+      const clientIds = opts?.clientIds ?? new Set<string>();
       const q = scope
-        ? query(empresaScopedQuery('servicios_sla', opts!.empresaId!, true) as ReturnType<typeof query>, orderBy('clientName'))
-        : query(collection(db, 'servicios_sla'), orderBy('clientName'));
+        ? query(collection(db, 'servicios_sla'))
+        : query(collection(db, 'servicios_sla'));
       const s = await getDocs(q);
-      return filterRowsByEmpresa(
-        s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
-        opts?.empresaId || '',
-        scope,
+      const rows = s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA));
+      const filtered = filterSlaRowsByEmpresa(rows, opts?.empresaId || '', scope, clientIds);
+      return filtered.sort((a, b) =>
+        (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
       );
     } catch (e) {
-      if (opts?.scopeEmpresa) {
-        try {
-          const s = await getDocs(empresaScopedQuery('servicios_sla', opts!.empresaId!, true) as ReturnType<typeof query>);
-          return filterRowsByEmpresa(
-            s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
-            opts!.empresaId!,
-            true,
-          ).sort((a, b) => (a.clientName || '').localeCompare(b.clientName || ''));
-        } catch {
-          /* fall through */
-        }
-      }
       console.error("Error getting services:", e);
       return [];
     }
@@ -75,11 +64,10 @@ export const slaService = {
       const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
       const q = query(collection(db, 'servicios_sla'), where('clientId', '==', clientId));
       const s = await getDocs(q);
-      return filterRowsByEmpresa(
-        s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
-        opts?.empresaId || '',
-        scope,
-      );
+      const rows = s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA));
+      if (!scope) return rows;
+      const clientIds = new Set([clientId]);
+      return filterSlaRowsByEmpresa(rows, opts!.empresaId!, true, clientIds);
     } catch (e) {
       console.error("Error filter services:", e);
       return [];

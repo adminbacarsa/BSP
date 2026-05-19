@@ -4,6 +4,7 @@ export interface ResolvedAssistantUser {
     roleName?: string | null;
     empresaId: string;
     readableModuleKeys: string[];
+    canUseAssistant: boolean;
     summaryLabel: string;
 }
 export declare function resolveAssistantUser(uid: string): Promise<ResolvedAssistantUser | null>;

@@ -76,6 +76,7 @@ export default function BackupTab() {
     storagePath?: string;
     fileName: string;
     mode: 'merge' | 'full';
+    platformImport?: boolean;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -132,13 +133,12 @@ export default function BackupTab() {
   const validateBackupJsonForEmpresa = (backup: Record<string, unknown>) => {
     const meta = (backup._meta ?? {}) as Record<string, unknown>;
     const backupEmpresa = String(meta.empresaId ?? '').trim();
-    if (!scopeEmpresa || !empresaId) return;
+    if (!scopeEmpresa || !empresaId) return { platformImport: false };
     if (meta.scopeEmpresa === true && backupEmpresa && backupEmpresa !== empresaId) {
       throw new Error('El archivo pertenece a otra empresa.');
     }
-    if (!backupEmpresa && meta.scopeEmpresa !== true) {
-      throw new Error('Este backup es de plataforma completa y no puede importarse en esta empresa.');
-    }
+    const platformImport = !backupEmpresa && meta.scopeEmpresa !== true;
+    return { platformImport };
   };
 
   const handleSelectUploadFile = async (file: File) => {
@@ -148,7 +148,7 @@ export default function BackupTab() {
     try {
       const text = await file.text();
       const backup = JSON.parse(text) as Record<string, unknown>;
-      validateBackupJsonForEmpresa(backup);
+      const { platformImport } = validateBackupJsonForEmpresa(backup);
 
       setProgress({ done: 0, total: 100, phase: 'Subiendo archivo…' });
       const jobStamp = Date.now();
@@ -161,6 +161,7 @@ export default function BackupTab() {
         storagePath: path,
         fileName: file.name,
         mode: 'merge',
+        platformImport,
       });
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al subir el backup' });
@@ -469,11 +470,17 @@ export default function BackupTab() {
                 )}
                 {b.status === 'ok' && !IS_EMULATOR && (
                   <>
-                    <button onClick={() => setRestoreModal({ backup: b, fileName: b.fileName, mode: 'merge' })}
+                    <button onClick={() => setRestoreModal({
+                      backup: b, fileName: b.fileName, mode: 'merge',
+                      platformImport: scopeEmpresa && !b.scopeEmpresa && !b.empresaId,
+                    })}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-emerald-600 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors">
                       <RotateCcw size={12} /> Merge
                     </button>
-                    <button onClick={() => setRestoreModal({ backup: b, fileName: b.fileName, mode: 'full' })}
+                    <button onClick={() => setRestoreModal({
+                      backup: b, fileName: b.fileName, mode: 'full',
+                      platformImport: scopeEmpresa && !b.scopeEmpresa && !b.empresaId,
+                    })}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors">
                       <ShieldAlert size={12} /> Full
                     </button>
@@ -502,9 +509,16 @@ export default function BackupTab() {
               <button onClick={() => setRestoreModal(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X size={20}/></button>
             </div>
             <div className={`p-4 rounded-xl mb-4 text-sm font-bold ${restoreModal.mode === 'full' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
-              {restoreModal.mode === 'full'
-                ? <><ShieldAlert size={14} className="inline mr-1.5"/>{restoreModal.storagePath ? 'ATENCIÓN: reemplazará los datos de esta empresa en las colecciones del backup.' : 'ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.'}</>
-                : <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>}
+              {restoreModal.platformImport && scopeEmpresa ? (
+                <>
+                  <ShieldAlert size={14} className="inline mr-1.5" />
+                  Backup de plataforma (Bacarsa): se copiarán empleados, clientes, turnos y demás datos al tenant <b>{empresa?.name || empresaId}</b>, etiquetándolos con su <code>empresaId</code>. No se modifican los datos legacy de Bacarsa.
+                </>
+              ) : restoreModal.mode === 'full' ? (
+                <><ShieldAlert size={14} className="inline mr-1.5"/>{restoreModal.storagePath ? 'ATENCIÓN: reemplazará los datos de esta empresa en las colecciones del backup.' : 'ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.'}</>
+              ) : (
+                <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>
+              )}
             </div>
             <div className="flex gap-2 mb-6">
               <button

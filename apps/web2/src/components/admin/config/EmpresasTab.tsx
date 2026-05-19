@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, TriangleAlert } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { migrarEmpresa, guardarEmpresa, type ProgresoMigracion } from '@/lib/multiempresa';
+import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 
 export default function EmpresasTab() {
@@ -81,6 +81,49 @@ export default function EmpresasTab() {
       toast.error('Error al guardar');
     } finally {
       setGuardandoAsistente(false);
+    }
+  };
+
+  // Mostrar inactivas
+  const [mostrarInactivas, setMostrarInactivas] = useState(false);
+
+  // Toggle activo/inactivo por empresa
+  const [toggling, setToggling] = useState<string | null>(null);
+  const handleToggleActivo = async (e: typeof empresas[0]) => {
+    setToggling(e.id);
+    try {
+      if (e.active === false) { await activarEmpresa(e.id); toast.success(`"${e.name}" reactivada`); }
+      else { await desactivarEmpresa(e.id); toast.success(`"${e.name}" desactivada`); }
+    } catch { toast.error('Error al cambiar estado'); }
+    finally { setToggling(null); }
+  };
+
+  // Modal eliminación
+  type DeleteStep = 'idle' | 'confirm1' | 'confirm2' | 'deleting';
+  const [deleteTarget, setDeleteTarget] = useState<typeof empresas[0] | null>(null);
+  const [deleteStep, setDeleteStep] = useState<DeleteStep>('idle');
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleteProgreso, setDeleteProgreso] = useState<ProgresoEliminacion | null>(null);
+
+  const abrirEliminar = (e: typeof empresas[0]) => {
+    setDeleteTarget(e);
+    setDeleteConfirmInput('');
+    setDeleteProgreso(null);
+    setDeleteStep('confirm1');
+  };
+  const cerrarEliminar = () => { setDeleteStep('idle'); setDeleteTarget(null); setDeleteConfirmInput(''); setDeleteProgreso(null); };
+
+  const handleEliminar = async () => {
+    if (!deleteTarget) return;
+    setDeleteStep('deleting');
+    try {
+      await eliminarEmpresaYDatos(deleteTarget.id, p => setDeleteProgreso(p));
+      toast.success(`Empresa "${deleteTarget.name}" y todos sus datos eliminados`);
+      if (empresaId === deleteTarget.id) switchEmpresa('bacarsa');
+      cerrarEliminar();
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al eliminar');
+      cerrarEliminar();
     }
   };
 

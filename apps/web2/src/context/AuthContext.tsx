@@ -94,7 +94,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               if (roleSnap.exists()) {
                 setRolePermissions((roleSnap.data().permissions || {}) as Record<string, string[]>);
               } else if (claimUp === 'SUPERADMIN' || claimUp === 'SUPER_ADMIN') {
-                const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+                const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
                 const perms: Record<string, string[]> = {};
                 modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
                 setRolePermissions(perms);
@@ -114,7 +114,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             if (claimRole) setUserRole(claimRole);
             const claimUp = (claimRole || '').toUpperCase();
             if (claimUp === 'SUPERADMIN' || claimUp === 'SUPER_ADMIN') {
-              const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+              const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
               const perms: Record<string, string[]> = {};
               modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
               setRolePermissions(perms);

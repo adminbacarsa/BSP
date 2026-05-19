@@ -41,6 +41,12 @@ function deserializeFields(obj: any): any {
   return result;
 }
 
+function isPlatformBackup(payload: Record<string, unknown>): boolean {
+  const meta = (payload._meta ?? {}) as Record<string, unknown>;
+  const backupEmpresa = String(meta.empresaId ?? '').trim();
+  return !backupEmpresa && meta.scopeEmpresa !== true;
+}
+
 function assertBackupAllowedForRestore(
   payload: Record<string, unknown>,
   opts: RestoreOptions,
@@ -55,21 +61,23 @@ function assertBackupAllowedForRestore(
   if (backupScoped && backupEmpresa && backupEmpresa.toLowerCase() !== sessionEmpresa.toLowerCase()) {
     throw new Error('El backup pertenece a otra empresa.');
   }
-  if (!backupEmpresa && !backupScoped) {
-    throw new Error('Este backup es de plataforma completa y no puede restaurarse en esta empresa.');
-  }
 }
 
 function docIncludedInScopedRestore(
   colName: string,
   doc: Record<string, unknown>,
   opts: RestoreOptions,
+  platformImport: boolean,
 ): boolean {
   if (!opts.scopeEmpresa || !opts.empresaId) return true;
   if (colName === 'empresas') {
     return String(doc._id ?? '') === opts.empresaId;
   }
   if (EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
+    if (platformImport) {
+      const docEmpresa = String(doc.empresaId ?? '').trim();
+      return !docEmpresa || docEmpresa === opts.empresaId;
+    }
     return belongsToEmpresa(doc, opts.empresaId, true);
   }
   return false;
@@ -135,6 +143,7 @@ export async function runRestoreFromPayload(
   const db = admin.firestore();
 
   assertBackupAllowedForRestore(payload, opts);
+  const platformImport = isPlatformBackup(payload) && opts.scopeEmpresa === true && !!opts.empresaId;
 
   const setJob = (data: object) => {
     if (!jobId) return Promise.resolve();
@@ -150,7 +159,7 @@ export async function runRestoreFromPayload(
 
   const filteredEntries = colEntries
     .map(([colName, docs]) => {
-      const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc as Record<string, unknown>, opts));
+      const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc as Record<string, unknown>, opts, platformImport));
       return [colName, filtered] as [string, any[]];
     })
     .filter(([, docs]) => docs.length > 0);
@@ -176,6 +185,9 @@ export async function runRestoreFromPayload(
         const { _id, ...fields } = doc;
         if (!_id) return;
         const clean = deserializeFields(fields);
+        if (platformImport && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
+          clean.empresaId = opts.empresaId;
+        }
         const ref = db.collection(colName).doc(_id);
         if (mode === 'full') {
           batch.set(ref, clean);

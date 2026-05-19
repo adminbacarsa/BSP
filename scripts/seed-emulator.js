@@ -121,7 +121,7 @@ async function seedAdminUser() {
   await auth.setCustomUserClaims(uid, { role: 'SUPERADMIN' });
   console.log(`  Auth: creado uid=${uid} + customClaims { role: SUPERADMIN }`);
 
-  const modules = ['DASHBOARD','OPERATIONS','PLANNING','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','CONFIG'];
+  const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
   const perms = {};
   modules.forEach(m => perms[m] = ['read','create','update','delete']);
 

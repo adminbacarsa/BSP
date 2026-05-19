@@ -115,13 +115,72 @@ async function marcarMigracionCompleta(empresaId: string) {
  */
 export async function guardarEmpresa(
   empresaId: string,
-  datos: { name: string; cuit?: string; direccion?: string; plan?: string }
+  datos: Record<string, unknown>
 ): Promise<void> {
   await setDoc(
     doc(db, 'empresas', empresaId),
-    { ...datos, active: true, updatedAt: new Date().toISOString() },
+    { ...datos, updatedAt: new Date().toISOString() },
     { merge: true }
   );
+}
+
+export async function desactivarEmpresa(empresaId: string): Promise<void> {
+  await setDoc(doc(db, 'empresas', empresaId), { active: false, updatedAt: new Date().toISOString() }, { merge: true });
+}
+
+export async function activarEmpresa(empresaId: string): Promise<void> {
+  await setDoc(doc(db, 'empresas', empresaId), { active: true, updatedAt: new Date().toISOString() }, { merge: true });
+}
+
+export interface ProgresoEliminacion {
+  coleccion: string;
+  eliminados: number;
+  total: number;
+  completa: boolean;
+  error?: string;
+}
+
+/** Colecciones a purgar al eliminar una empresa (todas tienen campo empresaId). */
+const COLECCIONES_A_ELIMINAR = [
+  'turnos', 'empleados', 'clients', 'clientes', 'ausencias', 'novedades',
+  'servicios_sla', 'planificacion_estados', 'swap_requests', 'contratos_servicio',
+  'tipos_turno', 'objetivos', 'audit_logs', 'user_notifications',
+];
+
+/**
+ * Elimina todos los documentos de una empresa en todas las colecciones y luego el doc de la empresa.
+ * No puede ejecutarse sobre 'bacarsa' ni sobre la empresa activa del usuario.
+ */
+export async function eliminarEmpresaYDatos(
+  empresaId: string,
+  onProgreso: (p: ProgresoEliminacion) => void
+): Promise<void> {
+  if (!empresaId || empresaId === 'bacarsa') throw new Error('No se puede eliminar esta empresa');
+
+  let totalEliminados = 0;
+
+  for (const col of COLECCIONES_A_ELIMINAR) {
+    onProgreso({ coleccion: col, eliminados: totalEliminados, total: -1, completa: false });
+    try {
+      const snap = await getDocs(query(collection(db, col), where('empresaId', '==', empresaId)));
+      const docs = snap.docs;
+      for (let i = 0; i < docs.length; i += 490) {
+        const batch = writeBatch(db);
+        docs.slice(i, i + 490).forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        totalEliminados += Math.min(490, docs.length - i);
+        onProgreso({ coleccion: col, eliminados: totalEliminados, total: -1, completa: false });
+      }
+    } catch {
+      // colección vacía o sin permiso — continuar
+    }
+  }
+
+  // Finalmente eliminar el doc de la empresa
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'empresas', empresaId));
+  await batch.commit();
+  onProgreso({ coleccion: 'empresas', eliminados: totalEliminados + 1, total: totalEliminados + 1, completa: true });
 }
 
 /** Legacy bacarsa sin migrar sigue viendo todo; empresas nuevas o migradas se filtran por empresaId. */
@@ -149,6 +208,31 @@ export function filterRowsByEmpresa<T extends { empresaId?: unknown }>(
   if (!scopeEmpresa) return rows;
   const id = String(empresaId ?? '').trim();
   return rows.filter(r => String(r.empresaId ?? '').trim() === id);
+}
+
+/** SLA legacy sin empresaId: incluir si clientId pertenece a un cliente de la empresa (planificación). */
+export function slaBelongsToEmpresa(
+  row: { empresaId?: unknown; clientId?: unknown },
+  empresaId: string,
+  scopeEmpresa: boolean,
+  clientIds: Set<string>,
+): boolean {
+  if (!scopeEmpresa) return true;
+  const id = String(empresaId ?? '').trim();
+  const emp = String(row.empresaId ?? '').trim();
+  if (emp) return emp === id;
+  const cid = String(row.clientId ?? '').trim();
+  return !!cid && clientIds.has(cid);
+}
+
+export function filterSlaRowsByEmpresa<T extends { empresaId?: unknown; clientId?: unknown }>(
+  rows: T[],
+  empresaId: string,
+  scopeEmpresa: boolean,
+  clientIds: Set<string>,
+): T[] {
+  if (!scopeEmpresa) return rows;
+  return rows.filter(r => slaBelongsToEmpresa(r, empresaId, true, clientIds));
 }
 
 /** Query Firestore acotada por empresaId cuando corresponde. */

@@ -279,6 +279,13 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
     );
   }
 
+  if (!profile.canUseAssistant) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.',
+    );
+  }
+
   const claimedEmpresa = typeof payload.empresaId === 'string' ? payload.empresaId : '';
   if (!empresaAllowed(claimedEmpresa && claimedEmpresa.length > 0 ? claimedEmpresa : undefined, profile)) {
     throw new functions.https.HttpsError('permission-denied', 'Sesión empresa no coincide con el perfil de usuario.');
