@@ -4,10 +4,12 @@ export const LAST_COMPANY_COLOR_KEY = 'cosp_last_primary_color';
 export const COMPANY_THEME_VARS = [
   '--sb-bg','--sb-border','--sb-text','--sb-muted','--sb-section',
   '--sb-active-bg','--sb-active-text','--sb-hover-bg','--sb-hover-text',
-  '--sb-logo','--sb-logo-sub','--app-bg','--topbar-bg','--topbar-border',
+  '--sb-logo','--sb-logo-sub','--topbar-bg','--topbar-border',
   '--topbar-text','--company-primary','--company-primary-dark',
   '--company-primary-darker','--company-primary-light',
   '--company-primary-lighter','--company-primary-lightest','--company-primary-ring',
+  '--company-primary-on-dark','--company-primary-dark-card',
+  '--company-primary-dark-card2','--company-primary-dark-border',
 ];
 
 function hexToHsl(hex: string): [number, number, number] {
@@ -57,7 +59,6 @@ export function buildCompanyTheme(hex: string): Record<string, string> {
     '--sb-special-bg':            'rgba(239,68,68,0.12)',
     '--sb-special-text':          '#fca5a5',
     '--sb-special-border':        'rgba(239,68,68,0.3)',
-    '--app-bg':                   '#f8fafc',
     '--topbar-bg':                hslToHex(h, sat - 5, 11),
     '--topbar-border':            hslToHex(h, sat - 10, 18),
     '--topbar-text':              hslToHex(h, 20, 86),
@@ -68,18 +69,23 @@ export function buildCompanyTheme(hex: string): Record<string, string> {
     '--company-primary-lighter':  hslToHex(h, Math.min(sat, 55), 92),
     '--company-primary-lightest': hslToHex(h, Math.min(sat, 45), 96),
     '--company-primary-ring':     hex + '80',
+    '--company-primary-on-dark':  hslToHex(h, Math.min(sat, 72), 68),
+    '--company-primary-dark-card':  hslToHex(h, Math.min(sat, 38), 9),
+    '--company-primary-dark-card2': hslToHex(h, Math.min(sat, 32), 14),
+    '--company-primary-dark-border':hslToHex(h, sat - 15, 32),
   };
 }
 
 function buildBrandCSS(): string {
   return `
+    /* ── LIGHT MODE (default) ── */
     html[data-brand] .bg-indigo-600,
     html[data-brand] .bg-indigo-500 { background-color: var(--company-primary) !important; }
     html[data-brand] .bg-indigo-700 { background-color: var(--company-primary-dark) !important; }
     html[data-brand] .bg-indigo-800 { background-color: var(--company-primary-darker) !important; }
     html[data-brand] .hover\\:bg-indigo-700:hover { background-color: var(--company-primary-dark) !important; }
     html[data-brand] .hover\\:bg-indigo-600:hover { background-color: var(--company-primary) !important; }
-    html[data-brand] .bg-indigo-50 { background-color: var(--company-primary-lightest) !important; }
+    html[data-brand] .bg-indigo-50  { background-color: var(--company-primary-lightest) !important; }
     html[data-brand] .bg-indigo-100 { background-color: var(--company-primary-lighter) !important; }
     html[data-brand] .text-indigo-600,
     html[data-brand] .text-indigo-500 { color: var(--company-primary) !important; }
@@ -102,6 +108,38 @@ function buildBrandCSS(): string {
     html[data-brand] .to-indigo-600,
     html[data-brand] .to-indigo-700 { --tw-gradient-to: var(--company-primary-dark) !important; }
     html[data-brand] .divide-indigo-200 > * + * { border-color: var(--company-primary-lighter) !important; }
+
+    /* ── DARK / AZUL-PRO — usa variantes oscuras del color empresa ── */
+    html.dark[data-brand] .bg-indigo-50  { background-color: var(--company-primary-dark-card)  !important; }
+    html.dark[data-brand] .bg-indigo-100 { background-color: var(--company-primary-dark-card2) !important; }
+    html.dark[data-brand] .border-indigo-200,
+    html.dark[data-brand] .border-indigo-300,
+    html.dark[data-brand] .border-indigo-400,
+    html.dark[data-brand] .border-indigo-500 { border-color: var(--company-primary-dark-border) !important; }
+    html.dark[data-brand] .divide-indigo-200 > * + * { border-color: var(--company-primary-dark-border) !important; }
+    html.dark[data-brand] .text-indigo-600,
+    html.dark[data-brand] .text-indigo-500 { color: var(--company-primary-on-dark) !important; }
+    html.dark[data-brand] .text-indigo-700 { color: var(--company-primary-light) !important; }
+    html.dark[data-brand] .text-indigo-800 { color: var(--company-primary) !important; }
+    html.dark[data-brand] .text-indigo-400 { color: var(--company-primary-light) !important; }
+    html.dark[data-brand] .focus\\:border-indigo-500:focus,
+    html.dark[data-brand] .focus\\:border-indigo-400:focus { border-color: var(--company-primary-dark-border) !important; }
+
+    /* ── CONTRASTE — respeta accesibilidad, solo mantiene botones en color empresa ── */
+    html.theme-contrast[data-brand] .bg-indigo-50,
+    html.theme-contrast[data-brand] .bg-indigo-100 { background-color: #000000 !important; border-color: #FFD700 !important; }
+    html.theme-contrast[data-brand] .border-indigo-200,
+    html.theme-contrast[data-brand] .border-indigo-300,
+    html.theme-contrast[data-brand] .border-indigo-400,
+    html.theme-contrast[data-brand] .border-indigo-500 { border-color: #FFD700 !important; }
+    html.theme-contrast[data-brand] .divide-indigo-200 > * + * { border-color: #FFD700 !important; }
+    html.theme-contrast[data-brand] .text-indigo-600,
+    html.theme-contrast[data-brand] .text-indigo-500,
+    html.theme-contrast[data-brand] .text-indigo-700,
+    html.theme-contrast[data-brand] .text-indigo-800 { color: #ffffff !important; }
+    html.theme-contrast[data-brand] .text-indigo-400 { color: #FFD700 !important; }
+    html.theme-contrast[data-brand] .focus\\:border-indigo-500:focus,
+    html.theme-contrast[data-brand] .focus\\:border-indigo-400:focus { border-color: #FFD700 !important; }
   `;
 }
 
