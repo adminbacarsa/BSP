@@ -19,6 +19,7 @@ import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
@@ -219,6 +220,7 @@ export default function PlanificacionPage() {
     const { empresaId, empresa } = useEmpresa();
     const { isSuperAdmin } = useAuth();
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+    const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
     // ============================================================================
     // 1. ESTADOS (NIVEL 0)
@@ -1375,36 +1377,29 @@ export default function PlanificacionPage() {
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
-        // Mapa: servicios_sla doc ID → objectiveId (para cruzar preferredObjectiveId cargado desde RRHH)
         getDocs(collection(db, 'servicios_sla')).then(snap => {
             const m: Record<string, string> = {};
-            snap.docs.forEach(d => { if (d.data().objectiveId) m[d.id] = d.data().objectiveId; });
+            snap.docs.forEach(d => {
+                if (scopeEmpresa && String(d.data().empresaId || '') !== empresaId) return;
+                if (d.data().objectiveId) m[d.id] = d.data().objectiveId;
+            });
             setSlaIdToObjId(m);
         }).catch(() => {});
 
-        // Queries filtradas por empresa si la migración está completa
-        const clientsQ = migracionCompleta
+        const clientsQ = scopeEmpresa
             ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
             : collection(db, 'clients');
-        const empleadosQ = migracionCompleta
+        const empleadosQ = scopeEmpresa
             ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
             : collection(db, 'empleados');
 
         const unsubC = onSnapshot(clientsQ, snap => {
-            if (snap.empty && migracionCompleta) {
-                getDocs(collection(db, 'clients')).then(fb => { if (!fb.empty) setClients(fb.docs.map(d => ({id: d.id, ...d.data()}))); }).catch(() => {});
-            } else {
-                setClients(snap.docs.map(d => ({id: d.id, ...d.data()})));
-            }
+            setClients(snap.docs.map(d => ({id: d.id, ...d.data()})));
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
         const unsubE = onSnapshot(empleadosQ, snap => {
             const map = (s: typeof snap) => s.docs.map(d => { const data = d.data(); return { id: d.id, name: data.name || data.firstName + ' ' + data.lastName, preferredObjectiveId: data.preferredObjectiveId, laborAgreement: data.laborAgreement, status: data.status || 'activo', lat: data.lat ?? data.latitude ?? null, lng: data.lng ?? data.longitude ?? null, address: data.address || '', restriccionesObjetivo: data.restriccionesObjetivo || [], restriccionesCliente: data.restriccionesCliente || [], conflictosEmpleados: data.conflictosEmpleados || [] }; });
-            if (snap.empty && migracionCompleta) {
-                getDocs(collection(db, 'empleados')).then(fb => { if (!fb.empty) setEmployees(map(fb)); }).catch(() => {});
-            } else {
-                setEmployees(map(snap));
-            }
+            setEmployees(map(snap));
         }, (e) => console.error('[plan] empleados error:', e));
 
         const unsubS = onSnapshot(collection(db, 'turnos'), snap => {
@@ -1546,7 +1541,7 @@ export default function PlanificacionPage() {
         
         return () => { unsubC(); unsubE(); unsubS(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [empresaId, migracionCompleta]);
+    }, [empresaId, migracionCompleta, scopeEmpresa]);
 
     // Cargar estado de publicación cuando cambia objetivo o mes
     useEffect(() => {

@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 // --- CONSTANTES Y HELPERS ---
 // Non-work codes: días libres / licencias. Cualquier otro código se considera operativo.
@@ -139,6 +141,12 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 };
 
 export const useReportes = (forcedClientId?: string | null) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+    const scopeEmpresa = useMemo(
+        () => shouldScopeQueriesToEmpresa(empresaId, migracionCompleta),
+        [empresaId, migracionCompleta],
+    );
     const [loading, setLoading] = useState(false);
 
     // Inicializamos fechas locales
@@ -157,11 +165,12 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [holidaysData, setHolidaysData] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
+        if (!empresaId) return;
         const loadCatalogs = async () => {
             try {
                 const [s, c, h] = await Promise.all([ 
-                    getDocs(collection(db, 'empleados')), 
-                    getDocs(collection(db, 'clients')),
+                    getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+                    getDocs(empresaScopedQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>),
                     getDocs(collection(db, 'feriados'))
                 ]);
                 
@@ -194,7 +203,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             } catch (e) { console.error("Error cargando catálogos:", e); }
         };
         loadCatalogs();
-    }, []);
+    }, [empresaId, scopeEmpresa]);
 
     const generateReports = async () => {
         if (!dateRange.start || !dateRange.end) return toast.error("Seleccione un rango de fechas");
@@ -214,10 +223,11 @@ export const useReportes = (forcedClientId?: string | null) => {
             }
 
             // Cargar contratos de servicio para cruzar Hs. Vendidas por objetivo
-            const slaSnap = await getDocs(collection(db, 'servicios_sla'));
+            const slaSnap = await getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>);
             const slaMap: Record<string, number> = {};
             slaSnap.docs.forEach(d => {
                 const sla = d.data();
+                if (scopeEmpresa && !belongsToEmpresa(sla, empresaId, true)) return;
                 if (!sla.objectiveId || !sla.startDate || !sla.endDate) return;
                 const slaStart = new Date(`${sla.startDate}T00:00:00`);
                 const slaEnd   = new Date(`${sla.endDate}T23:59:59`);
@@ -241,6 +251,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 .map(doc => ({ id: doc.id, ...doc.data() }))
                 .filter((d: any) => {
                     if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
+                    if (scopeEmpresa && d.empresaId && d.empresaId !== empresaId) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
                     return true;
                 });
@@ -363,7 +374,11 @@ export const useReportes = (forcedClientId?: string | null) => {
             );
             
             const snap = await getDocs(q);
-            const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const logs = filterRowsByEmpresa(
+                snap.docs.map(d => ({ id: d.id, ...d.data() })),
+                empresaId,
+                scopeEmpresa,
+            );
             
             setAuditLogs(logs.sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds));
             

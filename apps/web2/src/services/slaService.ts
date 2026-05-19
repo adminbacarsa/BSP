@@ -1,6 +1,7 @@
 
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { empresaScopedQuery, filterRowsByEmpresa } from '@/lib/multiempresa';
 
 // Definición de Turno (variante)
 export interface ShiftVariant {
@@ -39,45 +40,93 @@ export interface ServiceSLA {
 }
 
 export const slaService = {
-  // 1. Obtener todos los servicios (para la lista general)
-  getAll: async () => {
+  getAll: async (opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {
     try {
-      const q = query(collection(db, 'servicios_sla'), orderBy('clientName'));
+      const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
+      const q = scope
+        ? query(empresaScopedQuery('servicios_sla', opts!.empresaId!, true) as ReturnType<typeof query>, orderBy('clientName'))
+        : query(collection(db, 'servicios_sla'), orderBy('clientName'));
       const s = await getDocs(q);
-      return s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA));
+      return filterRowsByEmpresa(
+        s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
+        opts?.empresaId || '',
+        scope,
+      );
     } catch (e) {
+      if (opts?.scopeEmpresa) {
+        try {
+          const s = await getDocs(empresaScopedQuery('servicios_sla', opts!.empresaId!, true) as ReturnType<typeof query>);
+          return filterRowsByEmpresa(
+            s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
+            opts!.empresaId!,
+            true,
+          ).sort((a, b) => (a.clientName || '').localeCompare(b.clientName || ''));
+        } catch {
+          /* fall through */
+        }
+      }
       console.error("Error getting services:", e);
       return [];
     }
   },
 
-  // 2. Obtener servicios de un cliente específico (para la pestaña del CRM)
-  getByClientId: async (clientId: string) => {
+  getByClientId: async (clientId: string, opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {
     try {
+      const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
       const q = query(collection(db, 'servicios_sla'), where('clientId', '==', clientId));
       const s = await getDocs(q);
-      return s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA));
+      return filterRowsByEmpresa(
+        s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA)),
+        opts?.empresaId || '',
+        scope,
+      );
     } catch (e) {
       console.error("Error filter services:", e);
       return [];
     }
   },
 
-  // 3. Obtener Clientes y sus Objetivos (CORREGIDO ESPAÑOL/INGLÉS)
-  getClients: async () => {
+  getClients: async (opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {
     try {
-      const q = query(collection(db, 'clients'), orderBy('name'));
+      const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
+      const q = scope
+        ? query(empresaScopedQuery('clients', opts!.empresaId!, true) as ReturnType<typeof query>, orderBy('name'))
+        : query(collection(db, 'clients'), orderBy('name'));
       const s = await getDocs(q);
-      return s.docs.map(d => {
+      return filterRowsByEmpresa(
+        s.docs.map(d => {
         const data = d.data();
         return { 
           id: d.id, 
           name: data.name || data.fantasyName || 'Sin Nombre',
-          // AQUÍ ESTÁ LA MAGIA: Leemos 'objetivos' (tu DB actual) O 'objectives' (backup)
-          objectives: data.objetivos || data.objectives || [] 
+          objectives: data.objetivos || data.objectives || [],
+          empresaId: data.empresaId,
         };
-      });
+      }),
+        opts?.empresaId || '',
+        scope,
+      );
     } catch (e) {
+      if (opts?.scopeEmpresa && opts.empresaId) {
+        try {
+          const s = await getDocs(empresaScopedQuery('clients', opts.empresaId, true) as ReturnType<typeof query>);
+          return filterRowsByEmpresa(
+            s.docs.map(d => {
+              const data = d.data();
+              return {
+                id: d.id,
+                name: data.name || data.fantasyName || 'Sin Nombre',
+                objectives: data.objetivos || data.objectives || [],
+                empresaId: data.empresaId,
+              };
+            }),
+            opts.empresaId,
+            true,
+          ).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        } catch {
+          /* fall through */
+        }
+      }
       console.error("Error loading clients for dropdown:", e);
       return [];
     }

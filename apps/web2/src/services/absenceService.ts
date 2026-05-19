@@ -1,6 +1,7 @@
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { empresaScopedQuery } from '@/lib/multiempresa';
 
 export interface Absence {
   id?: string;
@@ -28,10 +29,14 @@ const toDateStr = (val: any): string => {
 };
 
 export const absenceService = {
-  getAll: async () => {
-    const q = query(collection(db, 'ausencias'), orderBy('startDate', 'desc'));
-    const s = await getDocs(q);
-    return s.docs.map(d => {
+  getAll: async (opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {
+    const scope = opts?.scopeEmpresa === true && !!opts?.empresaId?.trim();
+    const s = await getDocs(
+      scope
+        ? (empresaScopedQuery('ausencias', opts!.empresaId!, true) as ReturnType<typeof query>)
+        : query(collection(db, 'ausencias'), orderBy('startDate', 'desc')),
+    );
+    const rows = s.docs.map(d => {
         const data = d.data();
         return {
             id: d.id,
@@ -45,6 +50,7 @@ export const absenceService = {
             comments: data.comments || ''
         } as Absence;
     });
+    return scope ? rows.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')) : rows;
   },
 
   add: async (data: Absence) => addDoc(collection(db, 'ausencias'), {

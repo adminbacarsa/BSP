@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
@@ -419,6 +420,7 @@ export default function AnalisisPage() {
   useAuth();
   const { empresaId, empresa, loadingEmpresa } = useEmpresa();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const now = new Date();
   const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
@@ -528,23 +530,22 @@ export default function AnalisisPage() {
   const hsRealesGuardia = Math.round(capHsPerGuardPeriod * (1 - ausentismoTotal / 100));
 
   useEffect(() => {
-    if (loadingEmpresa) return;
+    if (loadingEmpresa || !empresaId) return;
     (async () => {
       try {
-        const empQ = migracionCompleta && empresaId
-          ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
-          : collection(db, 'empleados');
         const [sSnap, eSnap] = await Promise.all([
-          getDocs(collection(db, 'servicios_sla')),
-          getDocs(empQ),
+          getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+          getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
         ]);
-        setServices(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setEmployees(eSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-          .filter((e: any) => !['inactive','baja','inactivo'].includes((e.status||'').toLowerCase())));
+        setServices(filterRowsByEmpresa(sSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa));
+        setEmployees(
+          filterRowsByEmpresa(eSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa)
+            .filter((e: any) => !['inactive','baja','inactivo'].includes((e.status||'').toLowerCase())),
+        );
       } catch(e) { console.error(e); }
       finally { setLoadInit(false); }
     })();
-  }, [loadingEmpresa, empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadingEmpresa, empresaId, migracionCompleta, scopeEmpresa]);
 
   useEffect(() => {
     if (loadingEmpresa) return;
@@ -572,11 +573,9 @@ export default function AnalisisPage() {
         console.error(e);
       }
       try {
-        const clientsQ =
-          migracionCompleta && empresaId
-            ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
-            : collection(db, 'clients');
-        const clientsSnap = await getDocs(clientsQ);
+        const clientsSnap = await getDocs(
+          empresaScopedQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+        );
         clientsSnap.forEach((cd) => {
           const cdata = cd.data();
           const clientName = String(cdata.name || cdata.nombre || cdata.razonSocial || '');
@@ -595,7 +594,9 @@ export default function AnalisisPage() {
       }
       setObjectivesGeoById(map);
     })();
-  }, [loadingEmpresa, migracionCompleta, empresaId]);
+  }, [loadingEmpresa, migracionCompleta, empresaId, scopeEmpresa]);
+
+  const empIdsScope = useMemo(() => new Set(employees.map((e: any) => e.id)), [employees]);
 
   useEffect(() => {
     (async () => {
@@ -612,22 +613,30 @@ export default function AnalisisPage() {
             where('startTime', '>=', tsStart),
             where('startTime', '<=', tsEnd)
           )),
-          getDocs(query(
-            collection(db, 'ausencias'),
-            where('startDate', '<=', tsEnd)
-          )),
+          getDocs(
+            scopeEmpresa
+              ? (empresaScopedQuery('ausencias', empresaId, true) as ReturnType<typeof query>)
+              : collection(db, 'ausencias'),
+          ),
         ]);
         setTurnos(turnosSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-          .filter((t: any) => t.type !== 'NOVEDAD' && t.startTime && t.endTime));
+          .filter((t: any) => {
+            if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
+            if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return false;
+            if (scopeEmpresa && t.employeeId && !empIdsScope.has(t.employeeId)) return false;
+            return true;
+          }));
         setAusencias(ausSnap.docs.map(d => ({ id: d.id, ...d.data() }))
           .filter((a: any) => {
+            if (scopeEmpresa && a.empresaId && a.empresaId !== empresaId) return false;
+            if (scopeEmpresa && a.employeeId && !empIdsScope.has(a.employeeId)) return false;
             const ed = a.endDate?.seconds ? new Date(a.endDate.seconds*1000) : new Date(a.endDate);
             return ed >= start;
           }));
       } catch(e) { console.error(e); }
       finally { setLoadTurnos(false); setLoadAus(false); }
     })();
-  }, [periodKey]);
+  }, [periodKey, scopeEmpresa, empresaId, empIdsScope]);
 
   // ── Analítica: cargar turnos bajo demanda con filtros de fecha ────────────────
   const loadAnalytics = async (dateFromOverride?: string, dateToOverride?: string) => {
@@ -643,7 +652,12 @@ export default function AnalisisPage() {
         where('startTime', '<=', Timestamp.fromDate(end))
       ));
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter((t: any) => t.type !== 'NOVEDAD' && t.startTime && t.endTime);
+        .filter((t: any) => {
+          if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
+          if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return false;
+          if (scopeEmpresa && t.employeeId && !empIdsScope.has(t.employeeId)) return false;
+          return true;
+        });
       setAnalRawTurnos(docs);
       setAnalLoaded(true);
     } catch(e) { console.error(e); }

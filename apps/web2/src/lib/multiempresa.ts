@@ -5,6 +5,7 @@
  */
 import {
   collection, getDocs, writeBatch, doc, setDoc,
+  query, where, Query, CollectionReference,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -122,3 +123,43 @@ export async function guardarEmpresa(
     { merge: true }
   );
 }
+
+/** Legacy bacarsa sin migrar sigue viendo todo; empresas nuevas o migradas se filtran por empresaId. */
+export function shouldScopeQueriesToEmpresa(empresaId: string, migracionCompleta: boolean): boolean {
+  const id = String(empresaId ?? '').trim();
+  if (!id) return false;
+  if (migracionCompleta) return true;
+  return id.toLowerCase() !== 'bacarsa';
+}
+
+export function belongsToEmpresa(
+  data: { empresaId?: unknown },
+  empresaId: string,
+  scopeEmpresa: boolean,
+): boolean {
+  if (!scopeEmpresa) return true;
+  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+}
+
+export function filterRowsByEmpresa<T extends { empresaId?: unknown }>(
+  rows: T[],
+  empresaId: string,
+  scopeEmpresa: boolean,
+): T[] {
+  if (!scopeEmpresa) return rows;
+  const id = String(empresaId ?? '').trim();
+  return rows.filter(r => String(r.empresaId ?? '').trim() === id);
+}
+
+/** Query Firestore acotada por empresaId cuando corresponde. */
+export function empresaScopedQuery(
+  colName: string,
+  empresaId: string,
+  scopeEmpresa: boolean,
+): Query | CollectionReference {
+  const col = collection(db, colName);
+  if (!scopeEmpresa || !String(empresaId ?? '').trim()) return col;
+  return query(col, where('empresaId', '==', String(empresaId).trim()));
+}
+
+export const SUPERADMIN_EMPRESA_STORAGE_KEY = 'cosp_superadmin_empresa_id';

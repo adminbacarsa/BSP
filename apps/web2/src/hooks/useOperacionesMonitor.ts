@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const getSafeDate = (val: any) => { if (!val) return null; try { if (val.toDate) return val.toDate(); if (val.seconds) return new Date(val.seconds * 1000); return new Date(val); } catch (e) { return null; } };
 const isSameDay = (d1: Date, d2: Date) => d1 && d2 && d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
@@ -76,6 +77,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
     useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
@@ -86,22 +88,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const unsubs: Function[] = [];
 
         const mapEmps = (docs: any[]) => docs.map(d => ({ id: d.id, fullName: `${d.data().lastName} ${d.data().firstName}`, ...d.data() }));
-        const empQ = empresaId && migracionCompleta ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId)) : collection(db, 'empleados');
+        const empQ = scopeEmpresa ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId)) : collection(db, 'empleados');
         unsubs.push(onSnapshot(empQ, snap => {
-            if (snap.empty && migracionCompleta && empresaId) {
-                getDocs(collection(db, 'empleados')).then(fb => { if (!fb.empty) setEmployees(mapEmps(fb.docs)); }).catch(() => {});
-            } else { setEmployees(mapEmps(snap.docs)); }
+            setEmployees(mapEmps(snap.docs));
         }));
 
         const buildObjectives = (docs: any[]) => { const objs: any[] = []; docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); return objs; };
-        const clientsQ = empresaId && migracionCompleta ? query(collection(db, 'clients'), where('empresaId', '==', empresaId)) : collection(db, 'clients');
+        const clientsQ = scopeEmpresa ? query(collection(db, 'clients'), where('empresaId', '==', empresaId)) : collection(db, 'clients');
         unsubs.push(onSnapshot(clientsQ, snap => {
-            if (snap.empty && migracionCompleta && empresaId) {
-                getDocs(collection(db, 'clients')).then(fb => { if (!fb.empty) setObjectives(buildObjectives(fb.docs)); }).catch(() => {});
-            } else { setObjectives(buildObjectives(snap.docs)); }
+            setObjectives(buildObjectives(snap.docs));
         }));
 
-        unsubs.push(onSnapshot(query(collection(db, 'servicios_sla'), where('status', '==', 'active')), snap => setServicesSLA(snap.docs.map(d => ({ id: d.id, ...d.data() })))));
+        const svcQ = query(collection(db, 'servicios_sla'), where('status', '==', 'active'));
+        unsubs.push(onSnapshot(svcQ, snap => {
+            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setServicesSLA(scopeEmpresa ? rows.filter(r => String((r as any).empresaId || '') === empresaId) : rows);
+        }));
         const today = new Date();
         const yearMonth = `${today.getFullYear()}_${today.getMonth() + 1}`;
         unsubs.push(onSnapshot(collection(db, 'planificacion_estados'), snap => {
@@ -112,7 +114,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
         unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => { setRecentLogs(snap.docs.map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details }))); }));
         return () => { unsubs.forEach(u => u()); };
-    }, [empresaId, migracionCompleta]);
+    }, [empresaId, migracionCompleta, scopeEmpresa]);
 
     useEffect(() => {
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs

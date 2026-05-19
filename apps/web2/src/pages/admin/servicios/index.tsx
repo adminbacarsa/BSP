@@ -15,6 +15,8 @@ import {
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { filterRowsByEmpresa, belongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 function toYyyyMmDd(value: unknown): string {
   if (value == null) return '';
@@ -78,6 +80,9 @@ const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
+  const { empresaId, empresa } = useEmpresa();
+  const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   
   // ESTADOS
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
@@ -140,16 +145,28 @@ export default function ServiciosSLAPage() {
     if (serverPositionsJson !== formPositionsJson) setExternalChange(true);
   }, [services]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Al cambiar de empresa: limpiar listado y volver a la grilla
+  useEffect(() => {
+    setServices([]);
+    setClients([]);
+    setAvailableObjectives([]);
+    setView('list');
+    setIsEditing(false);
+  }, [empresaId]);
+
   // ✅ CORRECCIÓN ARQUITECTÓNICA: Colección 'servicios_sla'
   useEffect(() => {
+      if (!empresaId) return;
       loadClients();
       
       try {
         setLoading(true);
-        const q = query(collection(db, 'servicios_sla'), orderBy('clientName'));
+        const q = scopeEmpresa
+          ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+          : query(collection(db, 'servicios_sla'), orderBy('clientName'));
         
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const adaptedData = snapshot.docs.map(doc => {
+            let adaptedData = snapshot.docs.map(doc => {
                 const data = doc.data();
                 return { 
                     id: doc.id, 
@@ -158,7 +175,11 @@ export default function ServiciosSLAPage() {
                     endDate: toYyyyMmDd(data.endDate),
                     positions: data.positions || [] 
                 } as ServiceSLA;
-            });
+              });
+            if (scopeEmpresa) {
+              adaptedData = filterRowsByEmpresa(adaptedData, empresaId, true);
+              adaptedData.sort((a, b) => (a.clientName || '').localeCompare(b.clientName || '', 'es'));
+            }
             setServices(adaptedData);
             setDbStatus('online');
             setLoading(false);
@@ -174,10 +195,10 @@ export default function ServiciosSLAPage() {
           console.error("Error socket:", e);
           loadDataFallback();
       }
-  }, []);
+  }, [empresaId, scopeEmpresa]);
 
   const loadDataFallback = async () => {
-    const data = await slaService.getAll();
+    const data = await slaService.getAll({ empresaId, scopeEmpresa });
     const adaptedData = data.map((d: any) => ({
       ...d,
       startDate: toYyyyMmDd(d.startDate),
@@ -190,7 +211,7 @@ export default function ServiciosSLAPage() {
 
   const loadClients = async () => {
     try {
-      const data = await slaService.getClients();
+      const data = await slaService.getClients({ empresaId, scopeEmpresa });
       setClients(data);
     } catch (e) {
       console.error("Error cargando clientes:", e);
@@ -214,6 +235,7 @@ export default function ServiciosSLAPage() {
               action: accion,
               module: 'SERVICIOS_SLA',
               details: detalle,
+              ...(scopeEmpresa && empresaId ? { empresaId } : {}),
               metadata: { platform: 'web_admin_crono' }
           });
       } catch (error: any) {
@@ -588,6 +610,9 @@ export default function ServiciosSLAPage() {
     });
     if (hasOverlap) return addToast('Ya existe un SLA con fechas superpuestas para ese objetivo', 'error');
 
+    const turnosBelong = (data: Record<string, unknown>) =>
+      !scopeEmpresa || belongsToEmpresa(data, empresaId, true);
+
     // ── Cleanup al cambiar fechas ────────────────────────────────────────────
     // Si la fecha de inicio se adelantó o la de fin se retrasó, eliminar todos los
     // turnos, ausencias y novedades del objetivo fuera del nuevo rango.
@@ -605,7 +630,7 @@ export default function ServiciosSLAPage() {
             where('objectiveId', '==', form.objectiveId),
             where('startTime', '<', Timestamp.fromDate(startDate))
           ));
-          snap.docs.forEach(d => turnosToDelete.push(d.id));
+          snap.docs.forEach(d => { if (turnosBelong(d.data())) turnosToDelete.push(d.id); });
         }
 
         if (oldEnd && endDate < oldEnd) {
@@ -615,7 +640,7 @@ export default function ServiciosSLAPage() {
             where('objectiveId', '==', form.objectiveId),
             where('startTime', '>', Timestamp.fromDate(newEndOfDay))
           ));
-          snap.docs.forEach(d => turnosToDelete.push(d.id));
+          snap.docs.forEach(d => { if (turnosBelong(d.data())) turnosToDelete.push(d.id); });
         }
 
         if (turnosToDelete.length > 0) {
@@ -654,6 +679,7 @@ export default function ServiciosSLAPage() {
 
     // JSON round-trip elimina campos undefined que Firestore no acepta
     const dataToSave = JSON.parse(JSON.stringify({ ...form, totalMonthlyHours: totalContractHours })) as any;
+    if (scopeEmpresa && empresaId) dataToSave.empresaId = empresaId;
 
     try {
       if (isEditing && form.id) {
@@ -713,7 +739,9 @@ export default function ServiciosSLAPage() {
       where('startTime', '>=', rangeStart),
       where('startTime', '<=', rangeEnd)
     ));
-    const shiftIds = turnosSnap.docs.map(d => d.id);
+    const shiftIds = turnosSnap.docs
+      .filter(d => !scopeEmpresa || belongsToEmpresa(d.data(), empresaId, true))
+      .map(d => d.id);
 
     // Buscar ausencias y novedades vinculadas (chunks de 30)
     const ausIds: string[] = [];

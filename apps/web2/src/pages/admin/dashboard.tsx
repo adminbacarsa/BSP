@@ -10,6 +10,7 @@ import {
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { auth, db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import {
@@ -82,15 +83,19 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 interface LicenciaRow { empName: string; reason: string; from: string; to: string; }
 
 // ─── COMPONENT ───────────────────────────────────────────────────────────────
-const CACHE_KEY = 'dashboard_cache_v2';
+const CACHE_KEY_PREFIX = 'dashboard_cache_v3';
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-function saveCache(data: Record<string, any>) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch {}
+function cacheKeyForEmpresa(empresaId: string) {
+  return `${CACHE_KEY_PREFIX}_${empresaId || 'legacy'}`;
 }
-function loadCache(): Record<string, any> | null {
+
+function saveCache(empresaId: string, data: Record<string, any>) {
+  try { localStorage.setItem(cacheKeyForEmpresa(empresaId), JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+function loadCache(empresaId: string): Record<string, any> | null {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(cacheKeyForEmpresa(empresaId));
     if (!raw) return null;
     const { ts, data } = JSON.parse(raw);
     return Date.now() - ts < CACHE_TTL ? data : null;
@@ -150,8 +155,8 @@ function AdminDashboard() {
 
   // Carga caché al montar y arranca fetch; re-corre cuando cambia empresaId
   useEffect(() => {
-    if (loadingEmpresa) return; // esperar que EmpresaContext termine de cargar
-    const cached = loadCache();
+    if (loadingEmpresa || !empresaId) return;
+    const cached = loadCache(empresaId);
     if (cached) {
       applyState(cached);
       setFromCache(true);
@@ -159,22 +164,24 @@ function AdminDashboard() {
       setIsRefreshing(true);
       fetchAll(true);
     } else {
+      setFromCache(false);
       fetchAll(false);
     }
-  }, [loadingEmpresa, empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadingEmpresa, empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh manual o por refreshKey
   useEffect(() => {
-    if (refreshKey === 0) return;
+    if (refreshKey === 0 || !empresaId) return;
     setIsRefreshing(true);
     fetchAll(true);
-  }, [refreshKey]);
+  }, [refreshKey, empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh cada 5 minutos en segundo plano
   useEffect(() => {
+    if (!empresaId) return;
     const t = setInterval(() => { setIsRefreshing(true); fetchAll(true); }, CACHE_TTL);
     return () => clearInterval(t);
-  }, []);
+  }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const applyState = (d: Record<string, any>) => {
     setClientsCount(d.clientsCount ?? 0);
@@ -246,23 +253,34 @@ function AdminDashboard() {
 
   // ── FETCH PRINCIPAL (queries en paralelo) ────────────────────────────────
   const fetchAll = async (background = false) => {
+    if (!empresaId) return;
     if (!background) setLoading(true);
     try {
+      const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const todayStart = new Date(today); todayStart.setHours(0,0,0,0);
       const todayEnd   = new Date(today); todayEnd.setHours(23,59,59,999);
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
       const monthEnd   = new Date(today.getFullYear(), today.getMonth()+1, 0, 23, 59, 59);
 
-      const empQ = migracionCompleta && empresaId
+      const clientsQ = scopeEmpresa
+        ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
+        : collection(db, 'clients');
+      const svcQ = scopeEmpresa
+        ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+        : collection(db, 'servicios_sla');
+      const empQ = scopeEmpresa
         ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
         : collection(db, 'empleados');
+      const ausQ = scopeEmpresa
+        ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId))
+        : collection(db, 'ausencias');
 
       // Todas las queries en paralelo
       const [clientsSnap, svcSnap, empSnap, ausSnap, turnosSnap, monthTurnosSnap] = await Promise.all([
-        getDocs(collection(db, 'clients')),
-        getDocs(collection(db, 'servicios_sla')),
+        getDocs(clientsQ),
+        getDocs(svcQ),
         getDocs(empQ),
-        getDocs(collection(db, 'ausencias')),
+        getDocs(ausQ),
         getDocs(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(todayStart)), where('startTime', '<=', Timestamp.fromDate(todayEnd)))),
         getDocs(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(monthStart)), where('startTime', '<=', Timestamp.fromDate(monthEnd)))),
       ]);
@@ -329,6 +347,7 @@ function AdminDashboard() {
       let presentesHoy = new Set<string>(), enServicioActivo = new Set<string>();
       turnosSnap.forEach(doc => {
         const s = doc.data();
+        if (scopeEmpresa && s.empresaId && s.empresaId !== empresaId) return;
         if (s.status === 'Canceled') return;
         if (s.employeeId && s.employeeId !== 'VACANTE' && !empMap[s.employeeId]) return;
         totalTurnos++;
@@ -351,6 +370,7 @@ function AdminDashboard() {
       const empHrsMap: Record<string,number> = {};
       monthTurnosSnap.forEach(doc => {
         const s = doc.data();
+        if (scopeEmpresa && s.empresaId && s.empresaId !== empresaId) return;
         if (s.status === 'Canceled') return;
         if (!s.employeeId || s.employeeId === 'VACANTE' || !empMap[s.employeeId]) return;
         const code = (s.code || s.type || '').toString().toUpperCase();
@@ -386,7 +406,7 @@ function AdminDashboard() {
       };
 
       applyState(newState);
-      saveCache(newState);
+      saveCache(empresaId, newState);
       setFromCache(false);
     } catch (err) {
       console.error('Dashboard fetchAll error:', err);

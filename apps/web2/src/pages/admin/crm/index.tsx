@@ -24,6 +24,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa } from '@/lib/multiempresa';
 import {
   AlertCircle,
   BarChart3,
@@ -177,6 +178,7 @@ export default function CRMPage() {
   const router = useRouter();
   const { empresaId, empresa } = useEmpresa();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [activeTab, setActiveTab] = useState('INFO');
@@ -368,16 +370,10 @@ export default function CRMPage() {
   const fetchClients = async () => {
     setLoadingClients(true);
     try {
-      let snap;
-      if (migracionCompleta) {
-        snap = await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')));
-        // Si el filtro devuelve vacío la migración puede estar incompleta — fallback sin filtro
-        if (snap.empty) {
-          snap = await getDocs(query(collection(db, 'clients'), orderBy('name')));
-        }
-      } else {
-        snap = await getDocs(query(collection(db, 'clients'), orderBy('name')));
-      }
+      const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+      const snap = scopeEmpresa
+        ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')))
+        : await getDocs(query(collection(db, 'clients'), orderBy('name')));
       const data = snap.docs.map((x) => ({ id: x.id, ...x.data() }));
       setClients(data);
     } catch (e) {
@@ -396,7 +392,13 @@ export default function CRMPage() {
         getDocs(query(collection(db, 'contracts'), where('clientId', '==', id))),
         getDocs(query(collection(db, 'quotes'), where('clientId', '==', id))),
       ]);
-      setClientServices(srv.docs.map((x) => ({ id: x.id, ...x.data() })));
+      setClientServices(
+        filterRowsByEmpresa(
+          srv.docs.map((x) => ({ id: x.id, ...x.data() })),
+          empresaId,
+          scopeEmpresa,
+        ),
+      );
       setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
       setClientQuotes(quo.docs.map((x) => ({ id: x.id, ...x.data() })));
     } catch (e) {
@@ -422,17 +424,19 @@ export default function CRMPage() {
   const calculateDashboardMetrics = async () => {
     setCalculatingMetrics(true);
     try {
+      const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const [{ start, end }, sSla, sTurnos, sContracts, sEmployees] = await Promise.all([
         Promise.resolve(getRangeDates()),
-        getDocs(collection(db, 'servicios_sla')),
+        getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
         getDocs(collection(db, 'turnos')),
         getDocs(collection(db, 'contracts')),
-        getDocs(collection(db, 'empleados')),
+        getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
 
       const validEmp: Record<string, boolean> = {};
       sEmployees.forEach((d) => {
         const e = d.data() as any;
+        if (scopeEmpresa && String(e.empresaId || '') !== empresaId) return;
         const fileNumber = String(e.fileNumber || '').trim();
         const dni = String(e.dni || '').trim();
         const cuil = String(e.cuil || '').trim();
@@ -473,6 +477,7 @@ export default function CRMPage() {
 
       sTurnos.forEach((d) => {
         const t = d.data() as any;
+        if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return;
         if (!t.clientId || !t.startTime || !t.endTime || typeof t.startTime.toDate !== 'function') return;
         if (!validEmp[t.employeeId]) return;
         if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;
@@ -549,7 +554,7 @@ export default function CRMPage() {
     setSavingNewClient(true);
     try {
       const payload: any = { ...newClientForm, status: 'ACTIVO', createdAt: serverTimestamp() };
-      if (migracionCompleta && empresaId) payload.empresaId = empresaId;
+      if (shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) && empresaId) payload.empresaId = empresaId;
       await addDoc(collection(db, 'clients'), payload);
       toast.success(`"${newClientForm.name}" creado`);
       setNewClientOpen(false);
@@ -649,6 +654,7 @@ export default function CRMPage() {
         positions: serviceVersionForm.draftPositions,
         startDate: serviceVersionForm.startDate,
         endDate: serviceVersionForm.endDate,
+        ...(scopeEmpresa && empresaId ? { empresaId } : {}),
         createdAt: serverTimestamp(),
       });
       setServiceVersionForm(EMPTY_SVC_FORM);
@@ -788,7 +794,11 @@ export default function CRMPage() {
       const found = snap.docs.find(d => d.data().objectiveId);
       if (!found) {
         // Fallback: buscar por nombre en empleados
-        const empSnap = await getDocs(collection(db, 'empleados'));
+        const empSnap = await getDocs(
+          scopeEmpresa
+            ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+            : collection(db, 'empleados'),
+        );
         // No podemos cruzar directamente, pedir al usuario
         toast.error('No se encontraron turnos para recuperar el ID. Revisar en Firebase Console.');
         return;

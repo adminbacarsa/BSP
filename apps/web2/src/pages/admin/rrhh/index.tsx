@@ -12,6 +12,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, onSnapshot, limit } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { useToast } from '@/context/ToastContext';
 import {
     Users, Search, Plus, Edit2, Trash2,
@@ -203,6 +204,7 @@ const NOVEDAD_TYPES = ['Vacaciones', 'Enfermedad', 'ART', 'Injustificada', 'Lice
 export default function EmployeesPage() {
   const { empresaId, empresa, empresas } = useEmpresa();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const { addToast } = useToast();
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -359,14 +361,11 @@ export default function EmployeesPage() {
   // --- CARGA DE DATOS RAW (SIN FILTROS DE SERVICIO) ---
   const loadData = async () => {
       try {
-          let snapshot;
-          if (migracionCompleta) {
-              snapshot = await getDocs(query(collection(db, 'empleados'), where('empresaId', '==', empresaId)));
-              // Fallback si la migración está marcada pero no hay docs con empresaId
-              if (snapshot.empty) snapshot = await getDocs(collection(db, 'empleados'));
-          } else {
-              snapshot = await getDocs(collection(db, 'empleados'));
-          }
+          const snapshot = await getDocs(
+            scopeEmpresa
+              ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+              : collection(db, 'empleados'),
+          );
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setEmployees(data.sort((a: any, b: any) => (a.lastName || '').localeCompare(b.lastName || '')));
       } catch (e) {
@@ -374,10 +373,29 @@ export default function EmployeesPage() {
       }
   };
 
-  const loadAbsences = async () => { const data = await absenceService.getAll(); setAbsences(data); };
+  const loadAbsences = async () => {
+    const data = await absenceService.getAll({ empresaId, scopeEmpresa });
+    setAbsences(data);
+  };
   const loadHolidays = async () => { const data = await holidayService.getAll(); setHolidays(data); };
   const loadAgreements = async () => { const data = await agreementService.getAll(); setAgreements(data.map(a => ({...a, categories: Array.isArray(a.categories) ? a.categories : [], paysDoubleOnFranco: !!a.paysDoubleOnFranco} as ExtendedAgreement))); };
-  const loadClientsAndObjectives = async () => { try { const cSnap = await getDocs(collection(db, 'clients')); setClients(cSnap.docs.map(d => ({ id: d.id, ...d.data() }))); const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active'))); setAllObjectives(sSnap.docs.map(d => ({ id: d.data().objectiveId || d.id, docId: d.id, name: d.data().objectiveName || d.data().name, clientId: d.data().clientId }))); } catch (e) {} };
+  const loadClientsAndObjectives = async () => {
+    try {
+      const cSnap = await getDocs(
+        scopeEmpresa
+          ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
+          : collection(db, 'clients'),
+      );
+      setClients(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active')));
+      const slaRows = filterRowsByEmpresa(
+        sSnap.docs.map(d => ({ id: d.data().objectiveId || d.id, docId: d.id, name: d.data().objectiveName || d.data().name, clientId: d.data().clientId, empresaId: d.data().empresaId })),
+        empresaId,
+        scopeEmpresa,
+      );
+      setAllObjectives(slaRows);
+    } catch (e) {}
+  };
 
   // --- PORTAL DE EMPLEADOS ---
   const sendPortalInvites = async (empIds: string[]) => {
