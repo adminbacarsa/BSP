@@ -4,6 +4,7 @@ import * as admin from 'firebase-admin';
 import { runBackup } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
+import { assertRestoreRequestAllowed, executeRestoreJob, RestoreRequestPayload } from './backup/restore-job.runner';
 import { createNestApp } from './main';
 import { INestApplicationContext } from '@nestjs/common';
 
@@ -1792,111 +1793,73 @@ export const triggerBackup = functions
     }
   });
 
+/** Encola restauración (rápido). El trabajo pesado corre en processRestoreJob (hasta 1 h). */
 export const restoreBackup = functions
-  .runWith({ timeoutSeconds: 540, memory: '2GB' })
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 120, memory: '512MB' })
   .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
-    const {
-      driveFileId,
-      storagePath,
-      fileName: uploadedFileName,
-      mode,
-      jobId,
-      empresaId: claimedEmpresa,
-      tenantImport: requestedTenantImport,
-      sourceEmpresaId: claimedSourceEmpresa,
-    } = data as {
-      driveFileId?: string;
-      storagePath?: string;
-      fileName?: string;
-      mode: RestoreMode;
-      jobId?: string;
-      empresaId?: string;
-      tenantImport?: boolean;
-      sourceEmpresaId?: string;
-    };
-    if (!driveFileId && !storagePath) {
-      throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');
-    }
-    if (!['merge', 'full'].includes(mode)) throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
-
-    const db = admin.firestore();
-    let empresaId = String(claimedEmpresa ?? '').trim();
-    const tokenRole = normalizeBackupRole(context.auth!.token?.role);
-    let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
-    const sysUser = await db.collection('system_users').doc(context.auth!.uid).get();
-    if (sysUser.exists) {
-      const sysRole = normalizeBackupRole(sysUser.data()?.role);
-      isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
-      const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
-      if (!isSuper) empresaId = profileEmpresa || 'bacarsa';
-      else if (!empresaId) empresaId = profileEmpresa;
-    }
-
-    const tenantImport = requestedTenantImport === true;
-    if (tenantImport && !isSuper) {
-      throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede importar backups de otra empresa.');
-    }
-
-    let scopeEmpresa = false;
-    if (empresaId) {
-      const empSnap = await db.collection('empresas').doc(empresaId).get();
-      const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
-      scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-    }
-
-    const restoreOpts = {
-      empresaId,
-      scopeEmpresa,
-      ...(tenantImport
-        ? {
-            tenantImport: true,
-            sourceEmpresaId: String(claimedSourceEmpresa ?? '').trim(),
-          }
-        : {}),
-    };
-
-    if (driveFileId && !tenantImport) {
-      const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
-      if (!metaSnap.empty) {
-        const meta = metaSnap.docs[0].data();
-        const backupEmpresa = String(meta.empresaId ?? '').trim();
-        const backupScoped = meta.scopeEmpresa === true;
-        if (backupScoped && backupEmpresa && empresaId && backupEmpresa.toLowerCase() !== empresaId.toLowerCase()) {
-          throw new functions.https.HttpsError('permission-denied', 'El backup no pertenece a la empresa activa.');
-        }
-      }
-    }
-
-    if (storagePath) {
-      const safePath = String(storagePath).trim();
-      if (!safePath.startsWith('backup-restore/') || safePath.includes('..')) {
-        throw new functions.https.HttpsError('invalid-argument', 'storagePath inválido');
-      }
-    }
-
+    const payload = (data ?? {}) as RestoreRequestPayload;
     try {
-      if (storagePath) {
-        const name = String(uploadedFileName ?? storagePath.split('/').pop() ?? 'backup.json').trim();
-        return await runRestoreFromStorage(storagePath, name, mode, jobId, restoreOpts);
-      }
-      return await runRestore(driveFileId!, mode, jobId, restoreOpts);
-    } catch (e: any) {
-      const msg = e?.message || 'Error al restaurar';
-      if (jobId) {
-        await db.collection('restore_jobs').doc(jobId).set({
-          status: 'error',
-          phase: 'Error en restauración',
-          error: msg.slice(0, 500),
-        }, { merge: true }).catch(() => undefined);
-      }
-      if (/pertenece a otra empresa|plataforma completa/i.test(msg)) {
+      const { jobId, restoreOpts, fileName } = await assertRestoreRequestAllowed(
+        context.auth!.uid,
+        context.auth!.token?.role,
+        payload,
+      );
+      const db = admin.firestore();
+      const storagePath = String(payload.storagePath ?? '').trim();
+      const driveFileId = String(payload.driveFileId ?? '').trim();
+
+      await db.collection('restore_jobs').doc(jobId).set({
+        status: 'queued',
+        phase: 'En cola…',
+        mode: payload.mode,
+        fileName,
+        empresaId: restoreOpts.empresaId ?? '',
+        scopeEmpresa: restoreOpts.scopeEmpresa === true,
+        tenantImport: restoreOpts.tenantImport === true,
+        sourceEmpresaId: restoreOpts.sourceEmpresaId ?? '',
+        storagePath: storagePath || null,
+        driveFileId: driveFileId || null,
+        requestedBy: context.auth!.uid,
+        docsRestored: 0,
+        total: 0,
+        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return { jobId, queued: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Error al encolar restauración';
+      if (/pertenece a otra empresa|plataforma completa|Solo superadmin|panel de administración/i.test(msg)) {
         throw new functions.https.HttpsError('permission-denied', msg);
       }
-      if (/no such object|no está en Storage/i.test(msg)) {
-        throw new functions.https.HttpsError('failed-precondition', msg);
+      if (/storagePath inválido|merge o full|storagePath requerido|driveFileId/i.test(msg)) {
+        throw new functions.https.HttpsError('invalid-argument', msg);
       }
       throw new functions.https.HttpsError('internal', msg);
+    }
+  });
+
+/** Ejecuta restore_jobs en background (hasta 9 min por invocación). */
+export const processRestoreJob = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 540, memory: '4GB' })
+  .firestore.document('restore_jobs/{jobId}')
+  .onWrite(async (change) => {
+    const after = change.after;
+    if (!after.exists) return;
+    const status = String(after.data()?.status ?? '');
+    if (status !== 'queued') return;
+    const beforeStatus = change.before.exists
+      ? String(change.before.data()?.status ?? '')
+      : '';
+    if (beforeStatus === 'queued') return;
+
+    const jobId = after.id;
+    try {
+      await executeRestoreJob(jobId);
+    } catch (e) {
+      console.error('[processRestoreJob] failed', jobId, e);
     }
   });
 

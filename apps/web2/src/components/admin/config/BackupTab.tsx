@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions, storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -287,16 +287,6 @@ export default function BackupTab() {
     const jobRef = fsDoc(db, 'restore_jobs', jobId);
     let unsub: (() => void) | null = null;
     try {
-      await setDoc(jobRef, { status: 'pending', docsRestored: 0, total: 0, phase: 'Iniciando…' });
-      unsub = onSnapshot(jobRef, snap => {
-        const d = snap.data();
-        if (!d) return;
-        setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
-        if (d.status === 'error' && d.error) {
-          setLastResult({ ok: false, msg: String(d.error) });
-        }
-      });
-      const fn = httpsCallable(functions, 'restoreBackup', { timeout: 540000 });
       const payload: Record<string, unknown> = {
         mode: restoreModal.mode,
         jobId,
@@ -314,9 +304,26 @@ export default function BackupTab() {
       } else {
         throw new Error('Origen de restauración no definido');
       }
-      const res: any = await fn(payload);
-      const d = res.data;
-      setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored.toLocaleString()} docs en ${(d.durationMs/1000).toFixed(1)}s` });
+
+      const donePromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+        unsub = onSnapshot(jobRef, (snap) => {
+          const d = snap.data();
+          if (!d) return;
+          setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
+          if (d.status === 'done') resolve(d);
+          if (d.status === 'error') reject(new Error(String(d.error ?? 'Error al restaurar')));
+        });
+      });
+
+      const fn = httpsCallable(functions, 'restoreBackup', { timeout: 120000 });
+      await fn(payload);
+
+      const d = await donePromise;
+      const durationMs = Number(d.durationMs ?? 0);
+      setLastResult({
+        ok: true,
+        msg: `Restauración ${restoreModal.mode === 'full' ? 'completa' : 'merge'} exitosa — ${Number(d.docsRestored ?? 0).toLocaleString()} docs${durationMs ? ` en ${(durationMs / 1000).toFixed(1)}s` : ''}`,
+      });
       setRestoreModal(null);
     } catch (e: unknown) {
       setLastResult({ ok: false, msg: formatRestoreError(e) });
@@ -324,7 +331,6 @@ export default function BackupTab() {
       unsub?.();
       setRestoring(false);
       setProgress(null);
-      deleteDoc(jobRef).catch(() => {});
     }
   };
 

@@ -1,12 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
 const assistantEmpresaScope_1 = require("./assistant/assistantEmpresaScope");
-const restore_service_1 = require("./backup/restore.service");
+const restore_job_runner_1 = require("./backup/restore-job.runner");
 const main_1 = require("./main");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
@@ -1474,89 +1474,67 @@ exports.triggerBackup = functions
     }
 });
 exports.restoreBackup = functions
-    .runWith({ timeoutSeconds: 540, memory: '2GB' })
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
     .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
-    const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId, empresaId: claimedEmpresa, tenantImport: requestedTenantImport, sourceEmpresaId: claimedSourceEmpresa, } = data;
-    if (!driveFileId && !storagePath) {
-        throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');
-    }
-    if (!['merge', 'full'].includes(mode))
-        throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
-    const db = admin.firestore();
-    let empresaId = String(claimedEmpresa ?? '').trim();
-    const tokenRole = normalizeBackupRole(context.auth.token?.role);
-    let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
-    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
-    if (sysUser.exists) {
-        const sysRole = normalizeBackupRole(sysUser.data()?.role);
-        isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
-        const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
-        if (!isSuper)
-            empresaId = profileEmpresa || 'bacarsa';
-        else if (!empresaId)
-            empresaId = profileEmpresa;
-    }
-    const tenantImport = requestedTenantImport === true;
-    if (tenantImport && !isSuper) {
-        throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede importar backups de otra empresa.');
-    }
-    let scopeEmpresa = false;
-    if (empresaId) {
-        const empSnap = await db.collection('empresas').doc(empresaId).get();
-        const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
-        scopeEmpresa = (0, assistantEmpresaScope_1.shouldScopeQueriesToEmpresa)(empresaId, migracionCompleta);
-    }
-    const restoreOpts = {
-        empresaId,
-        scopeEmpresa,
-        ...(tenantImport
-            ? {
-                tenantImport: true,
-                sourceEmpresaId: String(claimedSourceEmpresa ?? '').trim(),
-            }
-            : {}),
-    };
-    if (driveFileId && !tenantImport) {
-        const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
-        if (!metaSnap.empty) {
-            const meta = metaSnap.docs[0].data();
-            const backupEmpresa = String(meta.empresaId ?? '').trim();
-            const backupScoped = meta.scopeEmpresa === true;
-            if (backupScoped && backupEmpresa && empresaId && backupEmpresa.toLowerCase() !== empresaId.toLowerCase()) {
-                throw new functions.https.HttpsError('permission-denied', 'El backup no pertenece a la empresa activa.');
-            }
-        }
-    }
-    if (storagePath) {
-        const safePath = String(storagePath).trim();
-        if (!safePath.startsWith('backup-restore/') || safePath.includes('..')) {
-            throw new functions.https.HttpsError('invalid-argument', 'storagePath inválido');
-        }
-    }
+    const payload = (data ?? {});
     try {
-        if (storagePath) {
-            const name = String(uploadedFileName ?? storagePath.split('/').pop() ?? 'backup.json').trim();
-            return await (0, restore_service_1.runRestoreFromStorage)(storagePath, name, mode, jobId, restoreOpts);
-        }
-        return await (0, restore_service_1.runRestore)(driveFileId, mode, jobId, restoreOpts);
+        const { jobId, restoreOpts, fileName } = await (0, restore_job_runner_1.assertRestoreRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
+        const db = admin.firestore();
+        const storagePath = String(payload.storagePath ?? '').trim();
+        const driveFileId = String(payload.driveFileId ?? '').trim();
+        await db.collection('restore_jobs').doc(jobId).set({
+            status: 'queued',
+            phase: 'En cola…',
+            mode: payload.mode,
+            fileName,
+            empresaId: restoreOpts.empresaId ?? '',
+            scopeEmpresa: restoreOpts.scopeEmpresa === true,
+            tenantImport: restoreOpts.tenantImport === true,
+            sourceEmpresaId: restoreOpts.sourceEmpresaId ?? '',
+            storagePath: storagePath || null,
+            driveFileId: driveFileId || null,
+            requestedBy: context.auth.uid,
+            docsRestored: 0,
+            total: 0,
+            queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        return { jobId, queued: true };
     }
     catch (e) {
-        const msg = e?.message || 'Error al restaurar';
-        if (jobId) {
-            await db.collection('restore_jobs').doc(jobId).set({
-                status: 'error',
-                phase: 'Error en restauración',
-                error: msg.slice(0, 500),
-            }, { merge: true }).catch(() => undefined);
-        }
-        if (/pertenece a otra empresa|plataforma completa/i.test(msg)) {
+        const msg = e instanceof Error ? e.message : 'Error al encolar restauración';
+        if (/pertenece a otra empresa|plataforma completa|Solo superadmin|panel de administración/i.test(msg)) {
             throw new functions.https.HttpsError('permission-denied', msg);
         }
-        if (/no such object|no está en Storage/i.test(msg)) {
-            throw new functions.https.HttpsError('failed-precondition', msg);
+        if (/storagePath inválido|merge o full|storagePath requerido|driveFileId/i.test(msg)) {
+            throw new functions.https.HttpsError('invalid-argument', msg);
         }
         throw new functions.https.HttpsError('internal', msg);
+    }
+});
+exports.processRestoreJob = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 540, memory: '4GB' })
+    .firestore.document('restore_jobs/{jobId}')
+    .onWrite(async (change) => {
+    const after = change.after;
+    if (!after.exists)
+        return;
+    const status = String(after.data()?.status ?? '');
+    if (status !== 'queued')
+        return;
+    const beforeStatus = change.before.exists
+        ? String(change.before.data()?.status ?? '')
+        : '';
+    if (beforeStatus === 'queued')
+        return;
+    const jobId = after.id;
+    try {
+        await (0, restore_job_runner_1.executeRestoreJob)(jobId);
+    }
+    catch (e) {
+        console.error('[processRestoreJob] failed', jobId, e);
     }
 });
 exports.onAusenciaCreatedFromPortal = functions
