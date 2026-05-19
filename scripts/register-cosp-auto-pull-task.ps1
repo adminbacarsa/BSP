@@ -24,7 +24,11 @@ $pwsh = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.ex
 $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
 $action = New-ScheduledTaskAction -Execute $pwsh -Argument $arg -WorkingDirectory $projectRoot
 
-$repeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration ([TimeSpan]::MaxValue)
+# Task Scheduler rechaza [TimeSpan]::MaxValue (P99999999DT...). ~10 años es suficiente.
+$repeatDuration = New-TimeSpan -Days (365 * 10)
+$repeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes 5) `
+  -RepetitionDuration $repeatDuration
 
 if ($AtStartupAsSystem) {
   $bootTrigger = New-ScheduledTaskTrigger -AtStartup
