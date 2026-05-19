@@ -1023,21 +1023,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── RET-DESIGNATE: UN SOLO empleado por puesto recibe RET ───────────────
+    // ── RET-DESIGNATE: UN SOLO empleado por puesto recibe RET, rotando mes a mes ──
     // RET = horas excedentes del servicio disponibles para reasignar a otro objetivo.
-    // Solo el empleado con menor prioridad (más lejano / mayor ausentismo) por puesto
-    // es el "retén designado": sus días de ciclo-trabajo sin slot activo → RET.
-    // Todos los demás empleados del grupo, en esa misma situación → F (franco normal).
-    // Si un empleado tiene defaultPos fijo explícito (owner del puesto), nunca es retén.
+    // Se ordena por priorityScore; el designado rota según (año*12+mes) % candidatos,
+    // así cada mes le toca a un empleado diferente del grupo.
+    // Owners fijos del puesto (userLockedPos) nunca son retén.
     const retDesignateSet = new Set<string>();
+    const _firstDay = ctx.daysInMonth[0];
+    const _retMonth = _firstDay ? (_firstDay.getFullYear() * 12 + _firstDay.getMonth()) : 0;
     Object.entries(positionGroups).forEach(([posName, group]) => {
         if (group.length === 0) return;
-        // Excluir owners fijos del puesto: ellos siempre trabajan, nunca son retén.
         const candidates = group.filter(id => userLockedPos[id] !== posName);
         if (candidates.length === 0) return;
-        // El de menor prioridad (último tras ordenar desc) es el retén designado.
         const sorted = [...candidates].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
-        retDesignateSet.add(sorted[0]);
+        retDesignateSet.add(sorted[_retMonth % sorted.length]);
     });
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
@@ -1076,9 +1075,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
     /**
      * Banda esperada para un empleado en un día dado.
-     * - rotateShifts=true (default): la banda rota cada bloque de ciclo (M→T→N→M…).
-     *   Dirección ascendente dentro del anillo: primer bloque=slot asignado, siguiente=+1, etc.
-     * - rotateShifts=false: banda FIJA todo el mes (M siempre M, N siempre N).
+     * - rotateShifts=true (default): rotación péndulo M→T→N→T→M→T→N…
+     *   Evita la transición N→M directa (sin descanso entre noche y mañana).
+     *   Para anillos ≥3: period=2*(len-1), idx=pos<len?pos:period-pos (ping-pong).
+     *   Para anillos de 1-2 elementos: circular normal.
+     * - rotateShifts=false: banda FIJA todo el mes.
      */
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
@@ -1086,14 +1087,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const slot = empRotationSlot[empId] ?? 0;
         if (ring.length === 1) return ring[0];
         if (ctx.rotateShifts !== false) {
-            // Rotación: avanza una posición en el anillo por cada bloque de ciclo completo.
             const di = dayIndexMap.get(dateStr) ?? 0;
             const eCycleLen = empCycleLen[empId] ?? cycleLen;
             const offset = empGroupIdx[empId] ?? 0;
             const blockNum = Math.floor((di + offset) / eCycleLen);
+            if (ring.length >= 3) {
+                // Péndulo: M→T→N→T→M→T→N… evita salto N→M sin franco de por medio.
+                const period = 2 * (ring.length - 1);
+                const pos = (slot + blockNum) % period;
+                const idx = pos < ring.length ? pos : period - pos;
+                return ring[idx];
+            }
             return ring[(slot + blockNum) % ring.length];
         }
-        // Banda fija (default): el empleado trabaja el mismo turno todo el mes.
+        // Banda fija: el empleado trabaja el mismo turno todo el mes.
         return ring[slot % ring.length];
     };
 
