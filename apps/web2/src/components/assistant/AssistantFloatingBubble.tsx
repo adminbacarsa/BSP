@@ -322,12 +322,14 @@ export function AssistantFloatingBubble(): React.ReactNode {
     <>
       <button
         type="button"
-        style={{ bottom: fabBottomCss, right: fabRightCss, touchAction: 'none' }}
-        className="fixed z-[9999] flex h-16 w-16 shrink-0 cursor-grab items-center justify-center rounded-full text-white ring-[3px] ring-white/50 active:cursor-grabbing active:scale-[0.98] focus:outline-none dark:ring-slate-900/60"
         style={{
+          bottom: fabBottomCss,
+          right: fabRightCss,
+          touchAction: 'none',
           background: `linear-gradient(135deg, ${brandColor}cc, ${brandColor})`,
           boxShadow: `0 12px 44px -10px ${brandColor}cc, 0 4px 18px rgba(0,0,0,0.22)`,
         }}
+        className="fixed z-[9999] flex h-16 w-16 shrink-0 cursor-grab items-center justify-center rounded-full text-white ring-[3px] ring-white/50 active:cursor-grabbing active:scale-[0.98] focus:outline-none dark:ring-slate-900/60"
         aria-expanded={open}
         aria-label={open ? 'Cerrar asistente' : 'Abrir asistente COSP'}
         title="Tocá para abrir/cerrar. Mantené y arrastrá para mover."
