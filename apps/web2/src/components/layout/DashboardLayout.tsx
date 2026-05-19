@@ -120,7 +120,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
               {empresas.length === 0 && (
                 <p className="px-4 py-3 text-xs text-slate-400">Sin empresas registradas</p>
               )}
-              {empresas.map(e => (
+              {empresas.filter(e => e.active !== false).map(e => (
                 <button
                   key={e.id}
                   onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}
