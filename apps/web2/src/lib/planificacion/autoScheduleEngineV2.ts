@@ -1023,19 +1023,21 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── RET-DESIGNATES (diagnóstico solamente) ──────────────────────────────
-    // Lista de empleados de menor prioridad por puesto, para informes futuros.
-    // NO altera el fallback: los días de ciclo-trabajo sin turno siempre → RET.
+    // ── RET-DESIGNATE: UN SOLO empleado por puesto recibe RET ───────────────
+    // RET = horas excedentes del servicio disponibles para reasignar a otro objetivo.
+    // Solo el empleado con menor prioridad (más lejano / mayor ausentismo) por puesto
+    // es el "retén designado": sus días de ciclo-trabajo sin slot activo → RET.
+    // Todos los demás empleados del grupo, en esa misma situación → F (franco normal).
+    // Si un empleado tiene defaultPos fijo explícito (owner del puesto), nunca es retén.
     const retDesignateSet = new Set<string>();
     Object.entries(positionGroups).forEach(([posName, group]) => {
         if (group.length === 0) return;
-        const sorted = [...group].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
-        const need = Math.max(1, positionNeed[posName] || 1);
-        const surplus = Math.max(0, group.length - need);
-        const designateCount = surplus > 1 ? 2 : 1;
-        for (let i = 0; i < Math.min(designateCount, sorted.length); i++) {
-            retDesignateSet.add(sorted[i]);
-        }
+        // Excluir owners fijos del puesto: ellos siempre trabajan, nunca son retén.
+        const candidates = group.filter(id => userLockedPos[id] !== posName);
+        if (candidates.length === 0) return;
+        // El de menor prioridad (último tras ordenar desc) es el retén designado.
+        const sorted = [...candidates].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+        retDesignateSet.add(sorted[0]);
     });
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
@@ -1074,16 +1076,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
     /**
      * Banda esperada para un empleado en un día dado.
-     * - rotateShifts=false (default): banda FIJA todo el mes (M siempre M, N siempre N).
-     * - rotateShifts=true: la banda rota cada bloque de ciclo (M→T→N→M…).
+     * - rotateShifts=true (default): la banda rota cada bloque de ciclo (M→T→N→M…).
      *   Dirección ascendente dentro del anillo: primer bloque=slot asignado, siguiente=+1, etc.
+     * - rotateShifts=false: banda FIJA todo el mes (M siempre M, N siempre N).
      */
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
         if (ring.length === 1) return ring[0];
-        if (ctx.rotateShifts === true) {
+        if (ctx.rotateShifts !== false) {
             // Rotación: avanza una posición en el anillo por cada bloque de ciclo completo.
             const di = dayIndexMap.get(dateStr) ?? 0;
             const eCycleLen = empCycleLen[empId] ?? cycleLen;
@@ -1647,11 +1649,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const lastCode = (st.lastShiftCode || '').toUpperCase();
             const isPostStreakShortCycle = cF === 1 && (lastCode === 'N' || lastCode === 'N12');
             // Día de ciclo-trabajo sin turno:
-            //   - post-noche en 6+1 → F (descanso CCT 35h no cubierto con 1 solo franco)
-            //   - cualquier otro → RET (stand-by; si llegan a 200h igual acumulan desde otros objetivos)
+            //   - post-noche en 6+1 → F (descanso CCT 35h)
+            //   - retén designado del puesto → RET (horas excedentes disponibles para otro servicio)
+            //   - resto → F
             // Día de ciclo-franco o empleado sin puesto → F siempre.
             const fallbackCode = isWorkDayInCycle
-                ? (isPostStreakShortCycle ? 'F' : 'RET')
+                ? (isPostStreakShortCycle ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F'))
                 : 'F';
             assignments.push({
                 empId: emp.id,
