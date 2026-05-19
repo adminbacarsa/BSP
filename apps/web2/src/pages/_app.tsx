@@ -8,6 +8,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { EmpresaProvider } from '@/context/EmpresaContext';
 import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
+import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 
 const AssistantFloatingBubble = dynamic(
   () => import('@/components/assistant/AssistantFloatingBubble').then((m) => m.AssistantFloatingBubble),
@@ -17,6 +18,7 @@ const AssistantFloatingBubble = dynamic(
 export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
     initTheme();
+    applyCompanyThemeFromStorage();
     // El SDK de Firestore puede lanzar "INTERNAL ASSERTION FAILED" de forma asíncrona
     // cuando el watch stream se reconecta. No afecta datos — solo previene que Next.js
     // muestre el overlay de error en desarrollo.
