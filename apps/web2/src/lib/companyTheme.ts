@@ -57,7 +57,7 @@ export function buildCompanyTheme(hex: string): Record<string, string> {
     '--sb-special-bg':            'rgba(239,68,68,0.12)',
     '--sb-special-text':          '#fca5a5',
     '--sb-special-border':        'rgba(239,68,68,0.3)',
-    '--app-bg':                   hslToHex(h, Math.min(sat, 25), 8),
+    '--app-bg':                   '#f8fafc',
     '--topbar-bg':                hslToHex(h, sat - 5, 11),
     '--topbar-border':            hslToHex(h, sat - 10, 18),
     '--topbar-text':              hslToHex(h, 20, 86),
