@@ -75,23 +75,31 @@ function allocateCloneDocId(db, colName, oldId, idMaps) {
 function mapForeignId(idMaps, col, value) {
     const v = String(value ?? '').trim();
     if (!v)
-        return value;
+        return undefined;
     const mapped = idMaps[col]?.get(v);
     return mapped ?? value;
+}
+function setMappedForeignField(target, key, idMaps, col, value) {
+    const mapped = mapForeignId(idMaps, col, value);
+    if (mapped === undefined)
+        delete target[key];
+    else
+        target[key] = mapped;
 }
 function remapCloneDocumentFields(colName, data, idMaps, db) {
     const clean = { ...data };
     if (colName === 'turnos') {
-        clean.employeeId = mapForeignId(idMaps, 'empleados', clean.employeeId);
-        clean.objectiveId = mapForeignId(idMaps, 'objetivos', clean.objectiveId);
+        setMappedForeignField(clean, 'employeeId', idMaps, 'empleados', clean.employeeId);
+        setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+        setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
     }
     if (colName === 'ausencias' || colName === 'novedades') {
-        clean.employeeId = mapForeignId(idMaps, 'empleados', clean.employeeId);
-        clean.shiftId = mapForeignId(idMaps, 'turnos', clean.shiftId);
+        setMappedForeignField(clean, 'employeeId', idMaps, 'empleados', clean.employeeId);
+        setMappedForeignField(clean, 'shiftId', idMaps, 'turnos', clean.shiftId);
     }
     if (colName === 'servicios_sla' || colName === 'contratos_servicio') {
-        clean.clientId = mapForeignId(idMaps, 'clients', clean.clientId);
-        clean.objectiveId = mapForeignId(idMaps, 'objetivos', clean.objectiveId);
+        setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
+        setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
     }
     if (colName === 'clients' && Array.isArray(clean.objetivos)) {
         clean.objetivos = clean.objetivos.map((row) => {
@@ -219,7 +227,7 @@ async function writeCollectionWithBulkWriter(db, colName, docs, mode, retagEmpre
         let clean = sanitizeForFirestore(deserializeFields(fields));
         if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
             clean.empresaId = opts.empresaId;
-            clean = remapCloneDocumentFields(colName, clean, idMaps, db);
+            clean = sanitizeForFirestore(remapCloneDocumentFields(colName, clean, idMaps, db));
         }
         const writeId = retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)
             ? allocateCloneDocId(db, colName, String(_id), idMaps)

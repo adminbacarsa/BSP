@@ -13,7 +13,7 @@ function roleDocId(role: string) {
 
 function isSuperAdminRoleId(role: unknown): boolean {
   const r = roleDocId(String(role ?? ''));
-  return r === 'SUPERADMIN' || r === 'SUPER_ADMIN';
+  return r === 'SUPERADMIN' || r === 'SUPER_ADMIN' || r === 'SP';
 }
 
 interface AuthContextType {

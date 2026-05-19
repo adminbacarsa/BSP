@@ -5,6 +5,12 @@ import { runBackup } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
 import { assertRestoreRequestAllowed, executeRestoreJob, RestoreRequestPayload } from './backup/restore-job.runner';
+import {
+  assertBackupCallableAllowed,
+  normalizeBackupRole,
+  resolveBackupCaller,
+  isSuperAdminBackupRole,
+} from './backup/backup-auth.util';
 import { createNestApp } from './main';
 import { INestApplicationContext } from '@nestjs/common';
 
@@ -34,6 +40,7 @@ import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/pla
 if (!admin.apps.length) {
   admin.initializeApp();
 }
+admin.firestore().settings({ ignoreUndefinedProperties: true });
 
 let nestApp: INestApplicationContext;
 
@@ -648,8 +655,7 @@ export const syncSystemUserClaims = functions.https.onCall(async (data, context)
     const callerRole = normalizeBackupRole(callerSnap.data()?.role);
     const tokenRole = normalizeBackupRole(context.auth.token?.role);
     const callerSuper =
-      callerRole === 'SUPERADMIN' || callerRole === 'SUPER_ADMIN' ||
-      tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
+      isSuperAdminBackupRole(callerRole) || isSuperAdminBackupRole(tokenRole);
     if (!callerSuper) {
       throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede sincronizar otros usuarios.');
     }
@@ -1729,23 +1735,6 @@ export const gestionarVacantes = functions
 // =========================================================
 // BACKUP — Firestore → Google Drive
 // =========================================================
-function normalizeBackupRole(role: unknown): string {
-  return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
-}
-
-async function assertBackupCallableAllowed(context: functions.https.CallableContext): Promise<void> {
-  if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-  }
-  const tokenRole = normalizeBackupRole(context.auth.token?.role);
-  if (tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN' || tokenRole === 'ADMIN') return;
-
-  const sysUser = await admin.firestore().collection('system_users').doc(context.auth.uid).get();
-  if (sysUser.exists) return;
-
-  throw new functions.https.HttpsError('permission-denied', 'Solo usuarios del panel de administración pueden usar backups.');
-}
-
 export const triggerBackup = functions
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
   .https.onCall(async (data, context) => {
@@ -1757,18 +1746,11 @@ export const triggerBackup = functions
     const db = admin.firestore();
     const claimedEmpresa = String((data as { empresaId?: string })?.empresaId ?? '').trim();
     let empresaId = claimedEmpresa;
-    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
-    if (sysUser.exists) {
-      const sysRole = String(sysUser.data()?.role ?? '');
-      const isSuper =
-        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
-        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
-      const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
-      if (!isSuper) {
-        empresaId = profileEmpresa || 'bacarsa';
-      } else if (!empresaId) {
-        empresaId = profileEmpresa;
-      }
+    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
+    if (!caller.isSuper) {
+      empresaId = caller.profileEmpresa || 'bacarsa';
+    } else if (!empresaId) {
+      empresaId = caller.profileEmpresa;
     }
 
     let scopeEmpresa = false;
@@ -1823,9 +1805,13 @@ export const restoreBackup = functions
         driveFileId: driveFileId || null,
         requestedBy: context.auth!.uid,
         docsRestored: 0,
+        docsDeleted: 0,
         total: 0,
+        resumeColIndex: 0,
+        idMaps: null,
+        error: null,
         queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      });
 
       return { jobId, queued: true };
     } catch (e: unknown) {

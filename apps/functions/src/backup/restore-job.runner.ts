@@ -1,6 +1,9 @@
 import * as admin from 'firebase-admin';
 import { shouldScopeQueriesToEmpresa } from '../assistant/assistantEmpresaScope';
 import {
+  resolveBackupCaller,
+} from './backup-auth.util';
+import {
   runRestore,
   runRestoreFromStorage,
   RestoreMode,
@@ -18,10 +21,6 @@ export interface RestoreRequestPayload {
   empresaId?: string;
   tenantImport?: boolean;
   sourceEmpresaId?: string;
-}
-
-function normalizeBackupRole(role: unknown): string {
-  return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
 }
 
 export async function assertRestoreRequestAllowed(
@@ -49,23 +48,22 @@ export async function assertRestoreRequestAllowed(
 
   const db = admin.firestore();
   let empresaId = String(claimedEmpresa ?? '').trim();
-  const tokenRole = normalizeBackupRole(tokenRoleRaw);
-  let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
-
-  const sysUser = await db.collection('system_users').doc(authUid).get();
-  if (!sysUser.exists) {
+  const caller = await resolveBackupCaller(authUid, tokenRoleRaw);
+  if (!caller.isPanelUser) {
     throw new Error('Solo usuarios del panel de administración pueden usar backups.');
   }
 
-  const sysRole = normalizeBackupRole(sysUser.data()?.role);
-  isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
-  const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
+  let isSuper = caller.isSuper;
+  const profileEmpresa = caller.profileEmpresa;
   if (!isSuper) empresaId = profileEmpresa || 'bacarsa';
   else if (!empresaId) empresaId = profileEmpresa;
 
   const tenantImport = requestedTenantImport === true;
   if (tenantImport && !isSuper) {
     throw new Error('Solo superadmin puede importar backups de otra empresa.');
+  }
+  if (tenantImport && mode === 'merge') {
+    throw new Error('Import cross-tenant: usá solo Full Restore. Merge duplica empleados, clientes y turnos.');
   }
 
   let scopeEmpresa = false;
@@ -139,6 +137,7 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
   if (!claimed) return;
 
   const mode = data.mode as RestoreMode;
+  const effectiveMode: RestoreMode = data.tenantImport === true ? 'full' : mode;
   const restoreOpts: RestoreOptions = {
     empresaId: String(data.empresaId ?? '').trim() || undefined,
     scopeEmpresa: data.scopeEmpresa === true,
@@ -163,8 +162,8 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
 
   try {
     const result = storagePath
-      ? await runRestoreFromStorage(storagePath, fileName, mode, jobId, restoreOpts, partial)
-      : await runRestore(driveFileId, mode, jobId, restoreOpts, partial);
+      ? await runRestoreFromStorage(storagePath, fileName, effectiveMode, jobId, restoreOpts, partial)
+      : await runRestore(driveFileId, effectiveMode, jobId, restoreOpts, partial);
 
     if (result.isComplete) {
       await jobRef.set({

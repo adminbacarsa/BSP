@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { db, functions, storage } from '@/lib/firebase';
+import { db, functions, storage, auth } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -20,6 +20,10 @@ interface LoadedVersion {
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 const PROJECT_ID  = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'comtroldata';
+
+async function refreshAuthTokenForBackup() {
+  await auth.currentUser?.getIdToken(true);
+}
 
 interface BackupRecord {
   id: string;
@@ -168,6 +172,7 @@ export default function BackupTab() {
   const handleRunBackup = async () => {
     setRunning(true); setLastResult(null);
     try {
+      await refreshAuthTokenForBackup();
       const fn = httpsCallable(functions, 'triggerBackup');
       const res: any = await fn({ empresaId: empresaId || '' });
       setLastResult({ ok: true, msg: `Backup creado: ${res.data.fileName} (${fmt(res.data.sizeBytes)}, ${res.data.totalDocs} docs)` });
@@ -209,7 +214,7 @@ export default function BackupTab() {
         backup: null,
         storagePath: path,
         fileName: file.name,
-        mode: 'merge',
+        mode: importKind.tenantImport ? 'full' : 'merge',
         ...importKind,
       });
     } catch (e: any) {
@@ -288,7 +293,7 @@ export default function BackupTab() {
     let unsub: (() => void) | null = null;
     try {
       const payload: Record<string, unknown> = {
-        mode: restoreModal.mode,
+        mode: restoreModal.tenantImport ? 'full' : restoreModal.mode,
         jobId,
         empresaId: empresaId || '',
         fileName: restoreModal.fileName,
@@ -316,6 +321,7 @@ export default function BackupTab() {
       });
 
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 120000 });
+      await refreshAuthTokenForBackup();
       await fn(payload);
 
       const d = await donePromise;
@@ -584,7 +590,7 @@ export default function BackupTab() {
               {restoreModal.tenantImport && scopeEmpresa ? (
                 <>
                   <ShieldAlert size={14} className="inline mr-1.5" />
-                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos al tenant destino con IDs nuevos. El origen no se modifica. No se importan usuarios del panel ni auditoría.
+                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos con IDs nuevos. Usá <b>solo Full</b> (Merge duplica datos). <b>No se importan usuarios del panel</b> (system_users): el SuperAdmin es global y accede a todas las empresas con el selector superior; creá usuarios admin para {empresa?.name || empresaId} manualmente si hace falta.
                 </>
               ) : restoreModal.platformImport && scopeEmpresa ? (
                 <>
@@ -600,9 +606,9 @@ export default function BackupTab() {
             <div className="flex gap-2 mb-6">
               <button
                 type="button"
-                disabled={restoring}
+                disabled={restoring || restoreModal.tenantImport}
                 onClick={() => setRestoreModal((m) => (m ? { ...m, mode: 'merge' } : m))}
-                className={`flex-1 py-2 rounded-lg text-xs font-black border transition-colors ${restoreModal.mode === 'merge' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                className={`flex-1 py-2 rounded-lg text-xs font-black border transition-colors ${restoreModal.mode === 'merge' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'} ${restoreModal.tenantImport ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 Merge
               </button>

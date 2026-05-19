@@ -7,6 +7,7 @@ const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
 const assistantEmpresaScope_1 = require("./assistant/assistantEmpresaScope");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
+const backup_auth_util_1 = require("./backup/backup-auth.util");
 const main_1 = require("./main");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
@@ -24,6 +25,7 @@ const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
+admin.firestore().settings({ ignoreUndefinedProperties: true });
 let nestApp;
 async function getService(service) {
     if (!nestApp) {
@@ -482,7 +484,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
     const { email, password, firstName, lastName, role, empresaId } = data;
-    const roleNorm = normalizeBackupRole(role);
+    const roleNorm = (0, backup_auth_util_1.normalizeBackupRole)(role);
     try {
         const userRecord = await admin.auth().createUser({
             email,
@@ -514,10 +516,9 @@ exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     const db = admin.firestore();
     if (targetUid !== context.auth.uid) {
         const callerSnap = await db.collection('system_users').doc(context.auth.uid).get();
-        const callerRole = normalizeBackupRole(callerSnap.data()?.role);
-        const tokenRole = normalizeBackupRole(context.auth.token?.role);
-        const callerSuper = callerRole === 'SUPERADMIN' || callerRole === 'SUPER_ADMIN' ||
-            tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
+        const callerRole = (0, backup_auth_util_1.normalizeBackupRole)(callerSnap.data()?.role);
+        const tokenRole = (0, backup_auth_util_1.normalizeBackupRole)(context.auth.token?.role);
+        const callerSuper = (0, backup_auth_util_1.isSuperAdminBackupRole)(callerRole) || (0, backup_auth_util_1.isSuperAdminBackupRole)(tokenRole);
         if (!callerSuper) {
             throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede sincronizar otros usuarios.');
         }
@@ -526,7 +527,7 @@ exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     if (!snap.exists) {
         throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
     }
-    const role = normalizeBackupRole(snap.data()?.role);
+    const role = (0, backup_auth_util_1.normalizeBackupRole)(snap.data()?.role);
     if (!role) {
         throw new functions.https.HttpsError('failed-precondition', 'El usuario no tiene rol asignado.');
     }
@@ -1414,43 +1415,22 @@ exports.gestionarVacantes = functions
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
     return null;
 });
-function normalizeBackupRole(role) {
-    return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
-}
-async function assertBackupCallableAllowed(context) {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-    }
-    const tokenRole = normalizeBackupRole(context.auth.token?.role);
-    if (tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN' || tokenRole === 'ADMIN')
-        return;
-    const sysUser = await admin.firestore().collection('system_users').doc(context.auth.uid).get();
-    if (sysUser.exists)
-        return;
-    throw new functions.https.HttpsError('permission-denied', 'Solo usuarios del panel de administración pueden usar backups.');
-}
 exports.triggerBackup = functions
     .runWith({ timeoutSeconds: 540, memory: '512MB' })
     .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
     const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
     if (!folderId)
         throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
     const db = admin.firestore();
     const claimedEmpresa = String(data?.empresaId ?? '').trim();
     let empresaId = claimedEmpresa;
-    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
-    if (sysUser.exists) {
-        const sysRole = String(sysUser.data()?.role ?? '');
-        const isSuper = sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
-            sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
-        const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
-        if (!isSuper) {
-            empresaId = profileEmpresa || 'bacarsa';
-        }
-        else if (!empresaId) {
-            empresaId = profileEmpresa;
-        }
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isSuper) {
+        empresaId = caller.profileEmpresa || 'bacarsa';
+    }
+    else if (!empresaId) {
+        empresaId = caller.profileEmpresa;
     }
     let scopeEmpresa = false;
     if (empresaId) {
@@ -1477,7 +1457,7 @@ exports.restoreBackup = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
     .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
     const payload = (data ?? {});
     try {
         const { jobId, restoreOpts, fileName } = await (0, restore_job_runner_1.assertRestoreRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
@@ -1497,9 +1477,13 @@ exports.restoreBackup = functions
             driveFileId: driveFileId || null,
             requestedBy: context.auth.uid,
             docsRestored: 0,
+            docsDeleted: 0,
             total: 0,
+            resumeColIndex: 0,
+            idMaps: null,
+            error: null,
             queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
+        });
         return { jobId, queued: true };
     }
     catch (e) {

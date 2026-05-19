@@ -15,6 +15,7 @@ export declare const checkSystemHealth: functions.HttpsFunction & functions.Runn
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
+export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
@@ -30,5 +31,6 @@ export declare const detectarAusencias: functions.CloudFunction<unknown>;
 export declare const gestionarVacantes: functions.CloudFunction<unknown>;
 export declare const triggerBackup: functions.HttpsFunction & functions.Runnable<any>;
 export declare const restoreBackup: functions.HttpsFunction & functions.Runnable<any>;
+export declare const processRestoreJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledBackup: functions.CloudFunction<unknown>;

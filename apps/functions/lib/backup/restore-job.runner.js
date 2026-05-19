@@ -4,10 +4,8 @@ exports.assertRestoreRequestAllowed = assertRestoreRequestAllowed;
 exports.executeRestoreJob = executeRestoreJob;
 const admin = require("firebase-admin");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
+const backup_auth_util_1 = require("./backup-auth.util");
 const restore_service_1 = require("./restore.service");
-function normalizeBackupRole(role) {
-    return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
-}
 async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId: requestedJobId, empresaId: claimedEmpresa, tenantImport: requestedTenantImport, sourceEmpresaId: claimedSourceEmpresa, } = payload;
     if (!driveFileId && !storagePath) {
@@ -18,15 +16,12 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     }
     const db = admin.firestore();
     let empresaId = String(claimedEmpresa ?? '').trim();
-    const tokenRole = normalizeBackupRole(tokenRoleRaw);
-    let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
-    const sysUser = await db.collection('system_users').doc(authUid).get();
-    if (!sysUser.exists) {
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(authUid, tokenRoleRaw);
+    if (!caller.isPanelUser) {
         throw new Error('Solo usuarios del panel de administración pueden usar backups.');
     }
-    const sysRole = normalizeBackupRole(sysUser.data()?.role);
-    isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
-    const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
+    let isSuper = caller.isSuper;
+    const profileEmpresa = caller.profileEmpresa;
     if (!isSuper)
         empresaId = profileEmpresa || 'bacarsa';
     else if (!empresaId)
@@ -34,6 +29,9 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     const tenantImport = requestedTenantImport === true;
     if (tenantImport && !isSuper) {
         throw new Error('Solo superadmin puede importar backups de otra empresa.');
+    }
+    if (tenantImport && mode === 'merge') {
+        throw new Error('Import cross-tenant: usá solo Full Restore. Merge duplica empleados, clientes y turnos.');
     }
     let scopeEmpresa = false;
     if (empresaId) {
@@ -98,6 +96,7 @@ async function executeRestoreJob(jobId) {
     if (!claimed)
         return;
     const mode = data.mode;
+    const effectiveMode = data.tenantImport === true ? 'full' : mode;
     const restoreOpts = {
         empresaId: String(data.empresaId ?? '').trim() || undefined,
         scopeEmpresa: data.scopeEmpresa === true,
@@ -121,8 +120,8 @@ async function executeRestoreJob(jobId) {
     };
     try {
         const result = storagePath
-            ? await (0, restore_service_1.runRestoreFromStorage)(storagePath, fileName, mode, jobId, restoreOpts, partial)
-            : await (0, restore_service_1.runRestore)(driveFileId, mode, jobId, restoreOpts, partial);
+            ? await (0, restore_service_1.runRestoreFromStorage)(storagePath, fileName, effectiveMode, jobId, restoreOpts, partial)
+            : await (0, restore_service_1.runRestore)(driveFileId, effectiveMode, jobId, restoreOpts, partial);
         if (result.isComplete) {
             await jobRef.set({
                 status: 'done',

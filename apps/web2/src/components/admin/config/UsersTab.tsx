@@ -40,7 +40,7 @@ export default function UsersTab() {
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
             // SuperAdmin ve todos; el resto ve los de su empresa + los superadmins (siempre visibles en todas)
-            const isSA = (u: any) => ['SUPERADMIN','SUPER_ADMIN'].includes((u.role || '').toUpperCase());
+            const isSA = (u: any) => ['SUPERADMIN','SUPER_ADMIN','SP'].includes((u.role || '').toUpperCase());
             const filtered = isSuperAdmin
                 ? allUsers
                 : allUsers.filter(u => isSA(u) || (u.empresaId || 'bacarsa') === myEmpresaId);
@@ -85,7 +85,7 @@ export default function UsersTab() {
         const promise = new Promise(async (resolve, reject) => {
             try {
                 // Superadmin no lleva empresa fija
-                const roleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN'].includes((formData.role || '').toUpperCase());
+                const roleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes((formData.role || '').toUpperCase());
                 const efectivaEmpresaId = roleIsSuperAdmin ? '' : (formData.empresaId || myEmpresaId);
 
                 if (editMode) {
@@ -148,7 +148,7 @@ export default function UsersTab() {
         empresas.find(e => e.id === id)?.name || id || '—';
 
     // El rol seleccionado en el form es superadmin → no lleva empresa
-    const formRoleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN'].includes((formData.role || '').toUpperCase());
+    const formRoleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes((formData.role || '').toUpperCase());
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -209,7 +209,7 @@ export default function UsersTab() {
                                     )}
                                 </td>
                                 <td className="p-5">
-                                    {['SUPERADMIN','SUPER_ADMIN'].includes((u.role||'').toUpperCase()) ? (
+                                    {['SUPERADMIN','SUPER_ADMIN','SP'].includes((u.role||'').toUpperCase()) ? (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold">
                                             <Shield size={12}/> Todas
                                         </span>
