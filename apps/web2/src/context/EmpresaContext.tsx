@@ -11,6 +11,7 @@ export interface Empresa {
   logo?: string;
   plan?: string;
   active?: boolean;
+  primaryColor?: string;
 }
 
 interface EmpresaContextType {

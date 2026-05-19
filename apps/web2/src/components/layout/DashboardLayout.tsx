@@ -13,6 +13,66 @@ import {
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 
+// ─── Company color theming ────────────────────────────────────────────────────
+function hexToHsl(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, Math.round(l * 100)];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  switch (max) {
+    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+    case g: h = ((b - r) / d + 2) / 6; break;
+    case b: h = ((r - g) / d + 4) / 6; break;
+  }
+  return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+}
+function hslToHex(h: number, s: number, l: number): string {
+  const sl = s / 100, ll = l / 100;
+  const a = sl * Math.min(ll, 1 - ll);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    return Math.round(255 * (ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1))).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+function buildCompanyTheme(hex: string): Record<string, string> {
+  const [h, s] = hexToHsl(hex);
+  const sat = Math.min(s, 88);
+  return {
+    '--sb-bg':              hslToHex(h, sat, 13),
+    '--sb-border':          hslToHex(h, sat - 10, 22),
+    '--sb-text':            hslToHex(h, 22, 83),
+    '--sb-muted':           hslToHex(h, 18, 52),
+    '--sb-section':         hslToHex(h, sat - 20, 40),
+    '--sb-active-bg':       hex,
+    '--sb-active-text':     '#ffffff',
+    '--sb-hover-bg':        hslToHex(h, sat - 10, 21),
+    '--sb-hover-text':      '#ffffff',
+    '--sb-logo':            hslToHex(h, Math.min(sat + 8, 100), 78),
+    '--sb-logo-sub':        hslToHex(h, 18, 55),
+    '--sb-logout':          '#f43f5e',
+    '--sb-special-bg':      'rgba(239,68,68,0.12)',
+    '--sb-special-text':    '#fca5a5',
+    '--sb-special-border':  'rgba(239,68,68,0.3)',
+    '--app-bg':             '#f8fafc',
+    '--topbar-bg':          '#ffffff',
+    '--topbar-border':      '#e2e8f0',
+    '--topbar-text':        '#0f172a',
+    '--company-primary':    hex,
+  };
+}
+const COMPANY_THEME_VARS = [
+  '--sb-bg','--sb-border','--sb-text','--sb-muted','--sb-section',
+  '--sb-active-bg','--sb-active-text','--sb-hover-bg','--sb-hover-text',
+  '--sb-logo','--sb-logo-sub','--app-bg','--topbar-bg','--topbar-border',
+  '--topbar-text','--company-primary',
+];
+
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/dashboard'))       return 'Dashboard';
@@ -101,10 +161,13 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
           <button
             onClick={() => isSuperAdmin && setShowEmpresaDrop(d => !d)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black border transition-colors ${
-              isSuperAdmin
-                ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 cursor-pointer'
-                : 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
+              isSuperAdmin ? 'cursor-pointer' : 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
             }`}
+            style={isSuperAdmin ? {
+              backgroundColor: 'var(--company-primary, #4f46e5)',
+              color: '#ffffff',
+              borderColor: 'var(--company-primary, #4338ca)',
+            } : undefined}
             title={isSuperAdmin ? 'Cambiar empresa' : empresa.name}
           >
             <Building2 size={12} />
@@ -173,6 +236,17 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     setIsPinned(false);
     setIsHovered(false);
   }, [router.pathname]);
+
+  // Inyecta/revierte variables CSS de color de empresa
+  useEffect(() => {
+    const root = document.documentElement;
+    if (empresa?.primaryColor) {
+      const theme = buildCompanyTheme(empresa.primaryColor);
+      Object.entries(theme).forEach(([k, v]) => root.style.setProperty(k, v));
+    } else {
+      COMPANY_THEME_VARS.forEach(k => root.style.removeProperty(k));
+    }
+  }, [empresa?.primaryColor]);
 
   const handleLogout = async () => {
     try { await signOut(auth); window.location.href = '/login'; } catch (e) { console.error(e); }

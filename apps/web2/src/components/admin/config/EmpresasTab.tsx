@@ -14,6 +14,30 @@ export default function EmpresasTab() {
   const [showNueva, setShowNueva] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
+  // Color de empresa
+  const DEFAULT_COLOR = '#6366f1';
+  const COLOR_PRESETS = ['#6366f1','#e53e3e','#0ea5e9','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b'];
+  const [colorForm, setColorForm] = useState(empresa?.primaryColor || DEFAULT_COLOR);
+  const [guardandoColor, setGuardandoColor] = useState(false);
+
+  // Sincronizar color cuando cambia la empresa activa
+  React.useEffect(() => {
+    setColorForm(empresa?.primaryColor || DEFAULT_COLOR);
+  }, [empresa?.id, empresa?.primaryColor]);
+
+  const handleGuardarColor = async () => {
+    if (!empresa) return;
+    setGuardandoColor(true);
+    try {
+      await guardarEmpresa(empresa.id, { primaryColor: colorForm } as any);
+      toast.success('Color actualizado');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoColor(false);
+    }
+  };
+
   // Migración
   const [progreso, setProgreso] = useState<ProgresoMigracion | null>(null);
   const [migrando, setMigrando] = useState(false);
@@ -109,7 +133,10 @@ export default function EmpresasTab() {
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm ${e.id === empresaId ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm text-white"
+                    style={{ backgroundColor: (e as any).primaryColor || (e.id === empresaId ? '#6366f1' : '#94a3b8') }}
+                  >
                     {(e.name || e.id || '?').charAt(0).toUpperCase()}
                   </div>
                   <div>
@@ -164,6 +191,67 @@ export default function EmpresasTab() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Color de empresa ── */}
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-4 h-4 rounded-full border border-slate-200 shrink-0" style={{ backgroundColor: colorForm }} />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Color de empresa</h3>
+          </div>
+          <p className="text-xs text-slate-500 font-medium mb-5">
+            El sidebar y los elementos de navegación adoptarán este color para la empresa activa.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 mb-5">
+            {/* Picker nativo */}
+            <input
+              type="color"
+              value={colorForm}
+              onChange={e => setColorForm(e.target.value)}
+              className="w-10 h-10 rounded-xl cursor-pointer border border-slate-200 p-0.5 shrink-0"
+              title="Elegir color personalizado"
+            />
+            {/* Presets */}
+            <div className="flex flex-wrap gap-2">
+              {COLOR_PRESETS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setColorForm(c)}
+                  className="w-8 h-8 rounded-lg transition-all border-2"
+                  style={{ backgroundColor: c, borderColor: colorForm === c ? '#0f172a' : 'transparent' }}
+                  title={c}
+                />
+              ))}
+            </div>
+            <button
+              onClick={handleGuardarColor}
+              disabled={guardandoColor}
+              className="ml-auto flex items-center gap-1.5 px-4 py-2 text-white rounded-xl text-xs font-black disabled:opacity-60 transition-colors"
+              style={{ backgroundColor: colorForm }}
+            >
+              {guardandoColor ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              Guardar
+            </button>
+          </div>
+
+          {/* Preview */}
+          <div className="flex items-center gap-3 p-3 rounded-xl border" style={{ backgroundColor: colorForm + '18', borderColor: colorForm + '40' }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-base shrink-0" style={{ backgroundColor: colorForm }}>
+              {(empresa.name || empresa.id || '?').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm font-black" style={{ color: colorForm }}>{empresa.name || empresa.id}</p>
+              <p className="text-[11px] text-slate-400">Sidebar y navegación en este color</p>
+            </div>
+            <div className="ml-auto flex gap-1">
+              <div className="w-3 h-6 rounded" style={{ backgroundColor: colorForm }} />
+              <div className="w-3 h-6 rounded opacity-60" style={{ backgroundColor: colorForm }} />
+              <div className="w-3 h-6 rounded opacity-30" style={{ backgroundColor: colorForm }} />
+            </div>
+          </div>
         </div>
       )}
 
