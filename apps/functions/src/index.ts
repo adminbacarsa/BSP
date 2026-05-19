@@ -1770,6 +1770,8 @@ export const restoreBackup = functions
       mode,
       jobId,
       empresaId: claimedEmpresa,
+      tenantImport: requestedTenantImport,
+      sourceEmpresaId: claimedSourceEmpresa,
     } = data as {
       driveFileId?: string;
       storagePath?: string;
@@ -1777,6 +1779,8 @@ export const restoreBackup = functions
       mode: RestoreMode;
       jobId?: string;
       empresaId?: string;
+      tenantImport?: boolean;
+      sourceEmpresaId?: string;
     };
     if (!driveFileId && !storagePath) {
       throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');
@@ -1785,15 +1789,20 @@ export const restoreBackup = functions
 
     const db = admin.firestore();
     let empresaId = String(claimedEmpresa ?? '').trim();
-    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
+    const tokenRole = normalizeBackupRole(context.auth!.token?.role);
+    let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
+    const sysUser = await db.collection('system_users').doc(context.auth!.uid).get();
     if (sysUser.exists) {
-      const sysRole = String(sysUser.data()?.role ?? '');
-      const isSuper =
-        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
-        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
+      const sysRole = normalizeBackupRole(sysUser.data()?.role);
+      isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
       const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
       if (!isSuper) empresaId = profileEmpresa || 'bacarsa';
       else if (!empresaId) empresaId = profileEmpresa;
+    }
+
+    const tenantImport = requestedTenantImport === true;
+    if (tenantImport && !isSuper) {
+      throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede importar backups de otra empresa.');
     }
 
     let scopeEmpresa = false;
@@ -1803,9 +1812,18 @@ export const restoreBackup = functions
       scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
     }
 
-    const restoreOpts = { empresaId, scopeEmpresa };
+    const restoreOpts = {
+      empresaId,
+      scopeEmpresa,
+      ...(tenantImport
+        ? {
+            tenantImport: true,
+            sourceEmpresaId: String(claimedSourceEmpresa ?? '').trim(),
+          }
+        : {}),
+    };
 
-    if (driveFileId) {
+    if (driveFileId && !tenantImport) {
       const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
       if (!metaSnap.empty) {
         const meta = metaSnap.docs[0].data();

@@ -1449,7 +1449,7 @@ exports.restoreBackup = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB' })
     .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
-    const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId, empresaId: claimedEmpresa, } = data;
+    const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId, empresaId: claimedEmpresa, tenantImport: requestedTenantImport, sourceEmpresaId: claimedSourceEmpresa, } = data;
     if (!driveFileId && !storagePath) {
         throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');
     }
@@ -1457,16 +1457,21 @@ exports.restoreBackup = functions
         throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
     const db = admin.firestore();
     let empresaId = String(claimedEmpresa ?? '').trim();
+    const tokenRole = normalizeBackupRole(context.auth.token?.role);
+    let isSuper = tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
     const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
     if (sysUser.exists) {
-        const sysRole = String(sysUser.data()?.role ?? '');
-        const isSuper = sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
-            sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
+        const sysRole = normalizeBackupRole(sysUser.data()?.role);
+        isSuper = isSuper || sysRole === 'SUPERADMIN' || sysRole === 'SUPER_ADMIN';
         const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
         if (!isSuper)
             empresaId = profileEmpresa || 'bacarsa';
         else if (!empresaId)
             empresaId = profileEmpresa;
+    }
+    const tenantImport = requestedTenantImport === true;
+    if (tenantImport && !isSuper) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede importar backups de otra empresa.');
     }
     let scopeEmpresa = false;
     if (empresaId) {
@@ -1474,8 +1479,17 @@ exports.restoreBackup = functions
         const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
         scopeEmpresa = (0, assistantEmpresaScope_1.shouldScopeQueriesToEmpresa)(empresaId, migracionCompleta);
     }
-    const restoreOpts = { empresaId, scopeEmpresa };
-    if (driveFileId) {
+    const restoreOpts = {
+        empresaId,
+        scopeEmpresa,
+        ...(tenantImport
+            ? {
+                tenantImport: true,
+                sourceEmpresaId: String(claimedSourceEmpresa ?? '').trim(),
+            }
+            : {}),
+    };
+    if (driveFileId && !tenantImport) {
         const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
         if (!metaSnap.empty) {
             const meta = metaSnap.docs[0].data();

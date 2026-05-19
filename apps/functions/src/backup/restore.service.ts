@@ -15,6 +15,9 @@ export interface RestoreResult {
 export interface RestoreOptions {
   empresaId?: string;
   scopeEmpresa?: boolean;
+  /** Copiar backup de otra empresa al tenant destino (superadmin). */
+  tenantImport?: boolean;
+  sourceEmpresaId?: string;
 }
 
 const SKIP_DELETE = new Set(['system_backups', 'audit_logs', 'restore_jobs']);
@@ -57,6 +60,7 @@ function assertBackupAllowedForRestore(
   const sessionEmpresa = String(opts.empresaId ?? '').trim();
 
   if (!opts.scopeEmpresa || !sessionEmpresa) return;
+  if (opts.tenantImport === true) return;
 
   if (backupScoped && backupEmpresa && backupEmpresa.toLowerCase() !== sessionEmpresa.toLowerCase()) {
     throw new Error('El backup pertenece a otra empresa.');
@@ -68,15 +72,23 @@ function docIncludedInScopedRestore(
   doc: Record<string, unknown>,
   opts: RestoreOptions,
   platformImport: boolean,
+  tenantImport: boolean,
+  sourceEmpresaId: string,
 ): boolean {
   if (!opts.scopeEmpresa || !opts.empresaId) return true;
   if (colName === 'empresas') {
+    if (tenantImport) return false;
     return String(doc._id ?? '') === opts.empresaId;
   }
   if (EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
     if (platformImport) {
       const docEmpresa = String(doc.empresaId ?? '').trim();
       return !docEmpresa || docEmpresa === opts.empresaId;
+    }
+    if (tenantImport) {
+      const docEmpresa = String(doc.empresaId ?? '').trim();
+      if (!docEmpresa) return true;
+      return docEmpresa.toLowerCase() === sourceEmpresaId.toLowerCase();
     }
     return belongsToEmpresa(doc, opts.empresaId, true);
   }
@@ -143,7 +155,17 @@ export async function runRestoreFromPayload(
   const db = admin.firestore();
 
   assertBackupAllowedForRestore(payload, opts);
+  const meta = (payload._meta ?? {}) as Record<string, unknown>;
+  const backupEmpresa = String(meta.empresaId ?? '').trim();
   const platformImport = isPlatformBackup(payload) && opts.scopeEmpresa === true && !!opts.empresaId;
+  const sourceEmpresaId = String(opts.sourceEmpresaId ?? backupEmpresa).trim();
+  const tenantImport =
+    opts.tenantImport === true &&
+    opts.scopeEmpresa === true &&
+    !!opts.empresaId &&
+    !!sourceEmpresaId &&
+    sourceEmpresaId.toLowerCase() !== opts.empresaId.toLowerCase();
+  const retagEmpresaId = platformImport || tenantImport;
 
   const setJob = (data: object) => {
     if (!jobId) return Promise.resolve();
@@ -159,7 +181,16 @@ export async function runRestoreFromPayload(
 
   const filteredEntries = colEntries
     .map(([colName, docs]) => {
-      const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc as Record<string, unknown>, opts, platformImport));
+      const filtered = docs.filter((doc) =>
+        docIncludedInScopedRestore(
+          colName,
+          doc as Record<string, unknown>,
+          opts,
+          platformImport,
+          tenantImport,
+          sourceEmpresaId,
+        ),
+      );
       return [colName, filtered] as [string, any[]];
     })
     .filter(([, docs]) => docs.length > 0);
@@ -185,7 +216,7 @@ export async function runRestoreFromPayload(
         const { _id, ...fields } = doc;
         if (!_id) return;
         const clean = deserializeFields(fields);
-        if (platformImport && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
+        if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
           clean.empresaId = opts.empresaId;
         }
         const ref = db.collection(colName).doc(_id);
@@ -207,7 +238,9 @@ export async function runRestoreFromPayload(
     action: 'RESTORE_BACKUP',
     module: 'SISTEMA',
     actorName: 'Admin',
-    details: `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
+    details: tenantImport
+      ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
+      : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
     ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
   });

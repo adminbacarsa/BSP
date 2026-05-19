@@ -10,6 +10,8 @@ export interface RestoreResult {
 export interface RestoreOptions {
     empresaId?: string;
     scopeEmpresa?: boolean;
+    tenantImport?: boolean;
+    sourceEmpresaId?: string;
 }
 export declare function runRestoreFromPayload(payload: Record<string, unknown>, fileName: string, mode: RestoreMode, jobId?: string, opts?: RestoreOptions): Promise<RestoreResult>;
 export declare function runRestore(driveFileId: string, mode: RestoreMode, jobId?: string, opts?: RestoreOptions): Promise<RestoreResult>;

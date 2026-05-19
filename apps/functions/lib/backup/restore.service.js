@@ -39,20 +39,30 @@ function assertBackupAllowedForRestore(payload, opts) {
     const sessionEmpresa = String(opts.empresaId ?? '').trim();
     if (!opts.scopeEmpresa || !sessionEmpresa)
         return;
+    if (opts.tenantImport === true)
+        return;
     if (backupScoped && backupEmpresa && backupEmpresa.toLowerCase() !== sessionEmpresa.toLowerCase()) {
         throw new Error('El backup pertenece a otra empresa.');
     }
 }
-function docIncludedInScopedRestore(colName, doc, opts, platformImport) {
+function docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantImport, sourceEmpresaId) {
     if (!opts.scopeEmpresa || !opts.empresaId)
         return true;
     if (colName === 'empresas') {
+        if (tenantImport)
+            return false;
         return String(doc._id ?? '') === opts.empresaId;
     }
     if (EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
         if (platformImport) {
             const docEmpresa = String(doc.empresaId ?? '').trim();
             return !docEmpresa || docEmpresa === opts.empresaId;
+        }
+        if (tenantImport) {
+            const docEmpresa = String(doc.empresaId ?? '').trim();
+            if (!docEmpresa)
+                return true;
+            return docEmpresa.toLowerCase() === sourceEmpresaId.toLowerCase();
         }
         return (0, assistantEmpresaScope_1.belongsToEmpresa)(doc, opts.empresaId, true);
     }
@@ -105,7 +115,16 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
     const t0 = Date.now();
     const db = admin.firestore();
     assertBackupAllowedForRestore(payload, opts);
+    const meta = (payload._meta ?? {});
+    const backupEmpresa = String(meta.empresaId ?? '').trim();
     const platformImport = isPlatformBackup(payload) && opts.scopeEmpresa === true && !!opts.empresaId;
+    const sourceEmpresaId = String(opts.sourceEmpresaId ?? backupEmpresa).trim();
+    const tenantImport = opts.tenantImport === true &&
+        opts.scopeEmpresa === true &&
+        !!opts.empresaId &&
+        !!sourceEmpresaId &&
+        sourceEmpresaId.toLowerCase() !== opts.empresaId.toLowerCase();
+    const retagEmpresaId = platformImport || tenantImport;
     const setJob = (data) => {
         if (!jobId)
             return Promise.resolve();
@@ -116,7 +135,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
     const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && docs.length > 0);
     const filteredEntries = colEntries
         .map(([colName, docs]) => {
-        const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc, opts, platformImport));
+        const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantImport, sourceEmpresaId));
         return [colName, filtered];
     })
         .filter(([, docs]) => docs.length > 0);
@@ -138,7 +157,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
                 if (!_id)
                     return;
                 const clean = deserializeFields(fields);
-                if (platformImport && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
+                if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
                     clean.empresaId = opts.empresaId;
                 }
                 const ref = db.collection(colName).doc(_id);
@@ -159,7 +178,9 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
         action: 'RESTORE_BACKUP',
         module: 'SISTEMA',
         actorName: 'Admin',
-        details: `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
+        details: tenantImport
+            ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
+            : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
     });

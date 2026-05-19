@@ -5,6 +5,7 @@ import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, d
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useAuth } from '@/context/AuthContext';
 import { shouldScopeQueriesToEmpresa, filterRowsByEmpresa } from '@/lib/multiempresa';
 
 const STORAGE_KEY = 'emulator_loaded_backup';
@@ -49,6 +50,36 @@ const fmtDate = (val: any) => {
   } catch { return '—'; }
 };
 
+function resolveBackupImportKind(
+  meta: Record<string, unknown>,
+  empresaId: string,
+  scopeEmpresa: boolean,
+) {
+  const backupEmpresa = String(meta.empresaId ?? '').trim();
+  if (!scopeEmpresa || !empresaId) {
+    return { platformImport: false, tenantImport: false, sourceEmpresaId: '' };
+  }
+  if (!backupEmpresa && meta.scopeEmpresa !== true) {
+    return { platformImport: true, tenantImport: false, sourceEmpresaId: '' };
+  }
+  if (backupEmpresa && backupEmpresa.toLowerCase() !== empresaId.toLowerCase()) {
+    return { platformImport: false, tenantImport: true, sourceEmpresaId: backupEmpresa };
+  }
+  return { platformImport: false, tenantImport: false, sourceEmpresaId: '' };
+}
+
+function resolveBackupRecordImportKind(
+  b: BackupRecord,
+  empresaId: string,
+  scopeEmpresa: boolean,
+) {
+  return resolveBackupImportKind(
+    { empresaId: b.empresaId, scopeEmpresa: b.scopeEmpresa },
+    empresaId,
+    scopeEmpresa,
+  );
+}
+
 // Deserializa { _seconds, _nanoseconds } → Firestore Timestamp recursivamente
 const deserialize = (obj: any): any => {
   if (obj === null || obj === undefined) return obj;
@@ -63,7 +94,8 @@ const deserialize = (obj: any): any => {
 };
 
 export default function BackupTab() {
-  const { empresaId, empresa } = useEmpresa();
+  const { isSuperAdmin } = useAuth();
+  const { empresaId, empresa, empresas } = useEmpresa();
   const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -77,6 +109,8 @@ export default function BackupTab() {
     fileName: string;
     mode: 'merge' | 'full';
     platformImport?: boolean;
+    tenantImport?: boolean;
+    sourceEmpresaId?: string;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -132,13 +166,11 @@ export default function BackupTab() {
 
   const validateBackupJsonForEmpresa = (backup: Record<string, unknown>) => {
     const meta = (backup._meta ?? {}) as Record<string, unknown>;
-    const backupEmpresa = String(meta.empresaId ?? '').trim();
-    if (!scopeEmpresa || !empresaId) return { platformImport: false };
-    if (meta.scopeEmpresa === true && backupEmpresa && backupEmpresa !== empresaId) {
-      throw new Error('El archivo pertenece a otra empresa.');
+    const importKind = resolveBackupImportKind(meta, empresaId, scopeEmpresa);
+    if (importKind.tenantImport && !isSuperAdmin) {
+      throw new Error(`El archivo pertenece a otra empresa (${importKind.sourceEmpresaId}). Solo superadmin puede importarlo a ${empresaId}.`);
     }
-    const platformImport = !backupEmpresa && meta.scopeEmpresa !== true;
-    return { platformImport };
+    return importKind;
   };
 
   const handleSelectUploadFile = async (file: File) => {
@@ -148,7 +180,7 @@ export default function BackupTab() {
     try {
       const text = await file.text();
       const backup = JSON.parse(text) as Record<string, unknown>;
-      const { platformImport } = validateBackupJsonForEmpresa(backup);
+      const importKind = validateBackupJsonForEmpresa(backup);
 
       setProgress({ done: 0, total: 100, phase: 'Subiendo archivo…' });
       const jobStamp = Date.now();
@@ -165,7 +197,7 @@ export default function BackupTab() {
         storagePath: path,
         fileName: file.name,
         mode: 'merge',
-        platformImport,
+        ...importKind,
       });
     } catch (e: any) {
       const code = String(e?.code ?? '');
@@ -255,6 +287,10 @@ export default function BackupTab() {
         empresaId: empresaId || '',
         fileName: restoreModal.fileName,
       };
+      if (restoreModal.tenantImport) {
+        payload.tenantImport = true;
+        payload.sourceEmpresaId = restoreModal.sourceEmpresaId || '';
+      }
       if (restoreModal.storagePath) {
         payload.storagePath = restoreModal.storagePath;
       } else if (restoreModal.backup?.driveFileId) {
@@ -317,7 +353,8 @@ export default function BackupTab() {
               <h3 className="font-black text-sm text-indigo-900 dark:text-indigo-100">Restaurar backup descargado</h3>
               <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-0.5 mb-4">
                 Si descargaste un <b>.json</b> desde Drive (u otro origen), subilo acá para restaurarlo en la empresa activa.
-                Después elegís <b>Merge</b> (seguro) o <b>Full</b> (reemplaza datos de la empresa).
+                Podés copiar datos de <b>otra empresa</b> (superadmin): se etiquetan con el tenant destino.
+                Después elegís <b>Merge</b> (seguro) o <b>Full</b> (reemplaza datos de la empresa destino).
               </p>
               {progress && uploading ? (
                 <div className="space-y-1.5">
@@ -477,24 +514,28 @@ export default function BackupTab() {
                     <ExternalLink size={12} /> Drive
                   </a>
                 )}
-                {b.status === 'ok' && !IS_EMULATOR && (
+                {b.status === 'ok' && !IS_EMULATOR && (() => {
+                  const importKind = resolveBackupRecordImportKind(b, empresaId, scopeEmpresa);
+                  if (importKind.tenantImport && !isSuperAdmin) return null;
+                  const openRestore = (mode: 'merge' | 'full') => setRestoreModal({
+                    backup: b,
+                    fileName: b.fileName,
+                    mode,
+                    ...importKind,
+                  });
+                  return (
                   <>
-                    <button onClick={() => setRestoreModal({
-                      backup: b, fileName: b.fileName, mode: 'merge',
-                      platformImport: scopeEmpresa && !b.scopeEmpresa && !b.empresaId,
-                    })}
+                    <button onClick={() => openRestore('merge')}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-emerald-600 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors">
                       <RotateCcw size={12} /> Merge
                     </button>
-                    <button onClick={() => setRestoreModal({
-                      backup: b, fileName: b.fileName, mode: 'full',
-                      platformImport: scopeEmpresa && !b.scopeEmpresa && !b.empresaId,
-                    })}
+                    <button onClick={() => openRestore('full')}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors">
                       <ShieldAlert size={12} /> Full
                     </button>
                   </>
-                )}
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -518,7 +559,12 @@ export default function BackupTab() {
               <button onClick={() => setRestoreModal(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X size={20}/></button>
             </div>
             <div className={`p-4 rounded-xl mb-4 text-sm font-bold ${restoreModal.mode === 'full' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
-              {restoreModal.platformImport && scopeEmpresa ? (
+              {restoreModal.tenantImport && scopeEmpresa ? (
+                <>
+                  <ShieldAlert size={14} className="inline mr-1.5" />
+                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos al tenant destino con su <code>empresaId</code>. El origen no se modifica.
+                </>
+              ) : restoreModal.platformImport && scopeEmpresa ? (
                 <>
                   <ShieldAlert size={14} className="inline mr-1.5" />
                   Backup de plataforma (Bacarsa): se copiarán empleados, clientes, turnos y demás datos al tenant <b>{empresa?.name || empresaId}</b>, etiquetándolos con su <code>empresaId</code>. No se modifican los datos legacy de Bacarsa.
