@@ -230,6 +230,8 @@ function looksLikeObjectiveHintFalsePositive(hint: string): boolean {
   const h = normText(hint);
   if (/^\d{2,4}\s*hs?$/.test(h)) return true;
   if (/\bpor\s+empleado\b/.test(h)) return true;
+  if (/\b(cuantas|cuántas|total|cantidad|numero|número)\s+horas?\b/.test(h)) return true;
+  if (/^(cuantas|cuántas|total|cantidad|de\s+cuantas|de\s+cuántas)\s+horas?$/i.test(h.trim())) return true;
   if (h.length < 4) return true;
   return false;
 }
@@ -454,9 +456,10 @@ function formatTurnosDetailReply(nombre: string, rangeLabel: string, data: Recor
   return body.trim();
 }
 
-function matchLiquidacionEmpresaIntent(t: string): boolean {
+function matchLiquidacionEmpresaIntent(t: string, recent: AssistantRecentMessage[] = []): boolean {
   if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   if (matchLiquidacionEmpresaIntentExcludeEmployee(t)) return false;
+  if (matchSlaHoursQueryIntent(t, recent)) return false;
   if (/\b(diurna|nocturna|liquidaci|liquidar|extras?|al\s*100|100\s*%|ft\s+trabaj|franco\s+trabaj|bolsa|al\s*50|feriado)\b/.test(t)) {
     return true;
   }
@@ -517,7 +520,7 @@ async function tryDeterministicLiquidacionEmpresaReply(
   toolCtx: AssistantToolContext,
   recent: AssistantRecentMessage[] = [],
 ): Promise<string | null> {
-  if (!matchLiquidacionEmpresaIntent(t)) return null;
+  if (!matchLiquidacionEmpresaIntent(t, recent)) return null;
 
   let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
   if (!range) {
@@ -554,8 +557,8 @@ async function tryDeterministicLiquidacionEmpresaReply(
   return formatLiquidacionEmpresaReply(resumen, range.label).slice(0, 7500);
 }
 
-function matchEmployeeHoursPeriodIntent(t: string): boolean {
-  if (matchLiquidacionEmpresaIntent(t)) return false;
+function matchEmployeeHoursPeriodIntent(t: string, recent: AssistantRecentMessage[] = []): boolean {
+  if (matchLiquidacionEmpresaIntent(t, recent)) return false;
   if (!new RegExp(RE_HORA).test(t)) return false;
   if (/\b(empresa|plantilla completa|todos los empleados|total de la empresa)\b/.test(t) && !/\bde\s+\w/.test(t)) {
     return false;
@@ -677,7 +680,7 @@ async function tryDeterministicEmployeeHoursReply(
   toolCtx: AssistantToolContext,
   recent: AssistantRecentMessage[] = [],
 ): Promise<string | null> {
-  if (!matchEmployeeHoursPeriodIntent(t)) return null;
+  if (!matchEmployeeHoursPeriodIntent(t, recent)) return null;
 
   const nameFragment =
     extractEmployeeNameFromHoursQuery(raw) || extractEmployeeNameFromRecentMessages(recent);
@@ -1162,11 +1165,31 @@ function matchHoursToPlanIntent(t: string): boolean {
   );
 }
 
+/** Horas del contrato SLA (vendidas/planificadas), no liquidación de nómina. */
+function matchSlaHoursQueryIntent(t: string, recent: AssistantRecentMessage[] = []): boolean {
+  if (matchHoursToPlanIntent(t)) return true;
+  if (/\bhoras?\s+(?:del|de)\s+(?:el\s+)?(?:servicio|contrato|sla)\b/.test(t)) return true;
+  if (/\btotal\s+de\s+horas?\b/.test(t) && /\b(servicio|contrato|sla)\b/.test(t)) return true;
+  if (/\b(servicio|contrato|sla)\b/.test(t) && /\bhoras?\b/.test(t) && !/\b(empleado|legajo|guardia|nomina|nómina|plantilla|fichad|liquidaci)\b/.test(t)) {
+    return true;
+  }
+  if (/\bel\s+servicio\s+sla\b/.test(t) && /\bhoras?\b/.test(t)) return true;
+  if (recentMentionsSlaOrContrato(recent)) {
+    if (/\b(de\s+)?(cuantas|cuántas|total|cantidad)\b/.test(t) && /\bhoras?\b/.test(t)) return true;
+    if (/^(?:y\s+)?(?:las?\s+)?horas?\s*\??\s*$/i.test(t.trim())) return true;
+  }
+  return false;
+}
+
 function recentMentionsSlaOrContrato(recent: AssistantRecentMessage[]): boolean {
   for (let i = recent.length - 1; i >= 0 && i >= recent.length - 8; i--) {
     const t = normText(recent[i].content || '');
     if (/\b(servicios?\s+activ|contrato\s+es|servicios_sla|objetivo\s+distinto\s+con\s+sla)\b/.test(t)) {
       return true;
+    }
+    if (/\b(hay\s+\d+\s+(servicio|sla|contrato)s?\s+activ|servicio\s+activo|sla\s+activo)\b/.test(t)) return true;
+    if (/\bobjetivo\s+[a-záéíóúñ0-9]/i.test(recent[i].content || '')) {
+      if (/\b(servicio|contrato|sla|ministro|misericordia)\b/.test(t)) return true;
     }
     if (/\ben\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/.test(t)) {
       if (/\b(servicio|contrato|sla|kpi)\b/.test(t)) return true;
@@ -1967,6 +1990,51 @@ export function shouldPrefetchOperationsMetricsInSnapshot(lastUser: string): boo
   return matchOpsDayAggregateIntent(normText(lastUser));
 }
 
+async function tryDeterministicSlaSoldHoursAggregateReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[],
+): Promise<string | null> {
+  if (!matchSlaHoursQueryIntent(t, recent)) return null;
+  if (matchMultiSlaFromListIntent(t, recent) || matchSlaAllActiveServicesIntent(t, recent)) return null;
+  if (matchEmployeePlannedHoursThresholdIntent(t)) return null;
+
+  const fechaRef = extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd);
+  let objHint = extractObjectiveHintFromRecentMessages(recent);
+  if (objHint && looksLikeObjectiveHintFalsePositive(objHint)) objHint = null;
+
+  if (objHint && objHint.length >= 3) {
+    const resumen = await ejecutarResumenHorasObjetivoSlaPeriodo(toolCtx, {
+      texto_objetivo: objHint,
+      fecha_referencia: fechaRef,
+    });
+    const err = String(resumen.error ?? '').trim();
+    if (!err) {
+      return formatDeterministicSlaHoursToPlanReply(resumen).slice(0, 7500);
+    }
+    if (err !== 'objetivo_ambiguo' && err !== 'objetivo_no_encontrado') {
+      const msg = formatSlaHoursToolError(objHint, err, resumen, resolveClientFilterFromQuery(t));
+      if (msg) return msg;
+    }
+  }
+
+  const batch = await ejecutarResumenHorasSlaVariosObjetivos(toolCtx, {
+    fecha_referencia: fechaRef,
+    todos_servicios_activos_mes: true,
+    limite: 12,
+  });
+  const err = String(batch.error ?? '').trim();
+  if (err) {
+    if (err === 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ') {
+      return 'Tu perfil no tiene permiso para consultar contratos SLA. Necesitás lectura en **Servicios y SLA** o **Planificación**.';
+    }
+    return `No pude consultar horas vendidas del SLA (${err}). Revisá **Servicios y SLA**.`;
+  }
+  const reply = formatMultiSlaHoursReply(batch, null);
+  console.info('[assistant] deterministic sla sold hours aggregate', { mes: batch.mes_yyyy_mm, consultados: batch.consultados });
+  return reply.slice(0, 7500);
+}
+
 async function tryDeterministicMultiSlaHoursReply(
   t: string,
   toolCtx: AssistantToolContext,
@@ -2159,22 +2227,28 @@ export async function tryDeterministicDataReply(
 
   if (!shouldSkipDeterministicRouter(raw, recent)) {
     try {
-      const liqEmp = await tryDeterministicLiquidacionEmpresaReply(t, toolCtx, recent);
-      if (liqEmp?.trim()) return liqEmp.trim();
-    } catch (e) {
-      console.warn('[assistant] tryDeterministicLiquidacionEmpresaReply', e);
-    }
-    try {
       const multiSla = await tryDeterministicMultiSlaHoursReply(t, toolCtx, recent);
       if (multiSla?.trim()) return multiSla.trim();
     } catch (e) {
       console.warn('[assistant] tryDeterministicMultiSlaHoursReply', e);
     }
     try {
+      const slaSold = await tryDeterministicSlaSoldHoursAggregateReply(t, toolCtx, recent);
+      if (slaSold?.trim()) return slaSold.trim();
+    } catch (e) {
+      console.warn('[assistant] tryDeterministicSlaSoldHoursAggregateReply', e);
+    }
+    try {
       const slaPlanReply = await tryDeterministicSlaHoursToPlanReply(raw, t, toolCtx, recent);
       if (slaPlanReply?.trim()) return slaPlanReply.trim();
     } catch (e) {
       console.warn('[assistant] tryDeterministicSlaHoursToPlanReply', e);
+    }
+    try {
+      const liqEmp = await tryDeterministicLiquidacionEmpresaReply(t, toolCtx, recent);
+      if (liqEmp?.trim()) return liqEmp.trim();
+    } catch (e) {
+      console.warn('[assistant] tryDeterministicLiquidacionEmpresaReply', e);
     }
     try {
       const turnosDet = await tryDeterministicEmployeeTurnosDetailReply(raw, t, toolCtx, recent);

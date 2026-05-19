@@ -356,6 +356,30 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
     respuesta_ideal_bullet:
       'Pasos numerados: Planificación y Turnos → Cliente → Objetivo → mes → grilla → Publicar cronograma.',
   },
+  {
+    id: 168,
+    categoria: 'servicios_sla',
+    pregunta_usuario: 'cuantas horas vendidas en el servicio / cuantas horas vendidas',
+    herramienta_sugerida: 'resumen_horas_sla_varios_objetivos',
+    respuesta_ideal_bullet:
+      'Horas vendidas SLA del contrato (no liquidación ni fichadas). todos_servicios_activos_mes o resumen_horas_objetivo_sla_periodo; vendidas, planificadas, pendientes.',
+  },
+  {
+    id: 169,
+    categoria: 'servicios_sla',
+    pregunta_usuario: 'total de horas del servicio / el servicio SLA activo cuantas horas tiene vendidas',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet:
+      'Primera cifra: horas_vendidas_sla_mes; no usar resumen_horas_liquidacion_empresa_periodo.',
+  },
+  {
+    id: 170,
+    categoria: 'servicios_sla',
+    pregunta_usuario: 'de cuantas horas en mayo (seguimiento tras servicio activo)',
+    herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
+    respuesta_ideal_bullet:
+      'Seguimiento SLA del hilo; objetivo del mensaje previo (ej. H. Misericordia); no buscar objetivo «cuantas horas».',
+  },
 ];
 
 export const ASSISTANT_TRAINING_PAIR_COUNT = ASSISTANT_TRAINING_PAIRS.length;
