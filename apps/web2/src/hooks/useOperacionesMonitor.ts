@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 
 const getSafeDate = (val: any) => { if (!val) return null; try { if (val.toDate) return val.toDate(); if (val.seconds) return new Date(val.seconds * 1000); return new Date(val); } catch (e) { return null; } };
 const isSameDay = (d1: Date, d2: Date) => d1 && d2 && d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
@@ -90,38 +90,53 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const mapEmps = (docs: any[]) => docs.map(d => ({ id: d.id, fullName: `${d.data().lastName} ${d.data().firstName}`, ...d.data() }));
         const empQ = scopeEmpresa ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId)) : collection(db, 'empleados');
         unsubs.push(onSnapshot(empQ, snap => {
-            setEmployees(mapEmps(snap.docs));
+            const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
+            setEmployees(mapEmps(docs));
         }));
 
         const buildObjectives = (docs: any[]) => { const objs: any[] = []; docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); return objs; };
         const clientsQ = scopeEmpresa ? query(collection(db, 'clients'), where('empresaId', '==', empresaId)) : collection(db, 'clients');
         unsubs.push(onSnapshot(clientsQ, snap => {
-            setObjectives(buildObjectives(snap.docs));
+            const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
+            setObjectives(buildObjectives(docs));
         }));
 
         const svcQ = query(collection(db, 'servicios_sla'), where('status', '==', 'active'));
         unsubs.push(onSnapshot(svcQ, snap => {
-            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setServicesSLA(scopeEmpresa ? rows.filter(r => String((r as any).empresaId || '') === empresaId) : rows);
+            const rows = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(r => belongsToEmpresaView(r, empresaId, migracionCompleta));
+            setServicesSLA(rows);
         }));
         const today = new Date();
         const yearMonth = `${today.getFullYear()}_${today.getMonth() + 1}`;
         unsubs.push(onSnapshot(collection(db, 'planificacion_estados'), snap => {
             const map: Record<string, boolean> = {};
-            snap.docs.forEach(d => { if (d.id.endsWith(`_${yearMonth}`)) map[d.id] = true; });
+            snap.docs.forEach(d => {
+                if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
+                if (d.id.endsWith(`_${yearMonth}`)) map[d.id] = true;
+            });
             setPublishStatusMap(map);
         }));
         const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
-        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => { setRecentLogs(snap.docs.map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details }))); }));
+        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+            setRecentLogs(snap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details })));
+        }));
         return () => { unsubs.forEach(u => u()); };
     }, [empresaId, migracionCompleta, scopeEmpresa]);
 
     useEffect(() => {
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
         const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
-        const unsub = onSnapshot(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(start)), where('startTime', '<=', Timestamp.fromDate(end))), (snap) => { setRawShifts(snap.docs.map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) }))); });
+        const unsub = onSnapshot(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(start)), where('startTime', '<=', Timestamp.fromDate(end))), (snap) => {
+            setRawShifts(snap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
+        });
         return () => unsub();
-    }, []);
+    }, [empresaId, migracionCompleta]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
     const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);

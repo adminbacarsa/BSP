@@ -4,8 +4,8 @@
  * existentes y marca la empresa como migrada en su propio documento.
  */
 import {
-  collection, getDocs, writeBatch, doc, setDoc,
-  query, where, Query, CollectionReference,
+  collection, getDocs, writeBatch, doc, setDoc, getDoc, deleteDoc, updateDoc,
+  query, where, Query, CollectionReference, DocumentReference,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -35,16 +35,28 @@ export interface ProgresoMigracion {
 }
 
 /**
- * Recorre todas las colecciones y agrega `empresaId` a los documentos que no lo tienen.
- * Al finalizar marca `migracionCompleta: true` en el documento de la empresa.
+ * Recorre colecciones y agrega `empresaId` solo a documentos legacy sin tenant.
+ * Solo Bacarsa puede ejecutar la re-etiqueta masiva (datos históricos sin empresaId).
+ * Otras empresas: solo se marca migracionCompleta sin tocar documentos globales.
  */
 export async function migrarEmpresa(
   empresaId: string,
   onProgreso: (p: ProgresoMigracion) => void
 ): Promise<void> {
   try {
-    // 1. Cargar todos los snapshots en paralelo
-    onProgreso({ mensaje: 'Leyendo colecciones...', procesados: 0, total: 0, completa: false });
+    const id = String(empresaId ?? '').trim();
+    if (id.toLowerCase() !== 'bacarsa') {
+      await marcarMigracionCompleta(id);
+      onProgreso({
+        mensaje: 'Empresa marcada como migrada (sin re-etiquetar datos de otras empresas).',
+        procesados: 0,
+        total: 0,
+        completa: true,
+      });
+      return;
+    }
+
+    onProgreso({ mensaje: 'Leyendo colecciones legacy de Bacarsa...', procesados: 0, total: 0, completa: false });
 
     const snapshots = await Promise.allSettled(
       COLECCIONES.map(col => getDocs(collection(db, col)))
@@ -75,7 +87,7 @@ export async function migrarEmpresa(
     for (let i = 0; i < tareas.length; i += 490) {
       const lote = tareas.slice(i, i + 490);
       const batch = writeBatch(db);
-      lote.forEach(({ ref }) => batch.update(ref, { empresaId }));
+      lote.forEach(({ ref }) => batch.update(ref, { empresaId: id }));
       await batch.commit();
       procesados += lote.length;
       onProgreso({
@@ -191,23 +203,111 @@ export function shouldScopeQueriesToEmpresa(empresaId: string, migracionCompleta
   return id.toLowerCase() !== 'bacarsa';
 }
 
-export function belongsToEmpresa(
+/**
+ * Visibilidad de un documento para la empresa activa.
+ * Bacarsa legacy: incluye sin empresaId o empresaId=bacarsa; excluye otras empresas (ej. prueba_sa).
+ */
+export function belongsToEmpresaView(
   data: { empresaId?: unknown },
   empresaId: string,
-  scopeEmpresa: boolean,
+  migracionCompleta: boolean,
 ): boolean {
-  if (!scopeEmpresa) return true;
-  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+  const id = String(empresaId ?? '').trim();
+  const docEmp = String(data?.empresaId ?? '').trim();
+  if (shouldScopeQueriesToEmpresa(id, migracionCompleta)) {
+    return docEmp === id;
+  }
+  if (id.toLowerCase() === 'bacarsa') {
+    return !docEmp || docEmp.toLowerCase() === 'bacarsa';
+  }
+  return !docEmp || docEmp === id;
+}
+
+async function deleteDocsInBatches(refs: { ref: ReturnType<typeof doc> }[]): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < refs.length; i += 490) {
+    const batch = writeBatch(db);
+    refs.slice(i, i + 490).forEach((r) => batch.delete(r.ref));
+    await batch.commit();
+    deleted += Math.min(490, refs.length - i);
+  }
+  return deleted;
+}
+
+/**
+ * Elimina un cliente solo si pertenece a la empresa activa.
+ * Turnos y SLA se borran acotados por empresaId cuando corresponde.
+ */
+export async function deleteClientForEmpresa(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+): Promise<{ deletedTurnos: number; deletedSla: number }> {
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+  const clientRef = doc(db, 'clients', clientId);
+  const clientSnap = await getDoc(clientRef);
+  if (!clientSnap.exists()) {
+    throw new Error('Cliente no encontrado');
+  }
+  const clientData = clientSnap.data();
+  if (!belongsToEmpresaView(clientData, empresaId, migracionCompleta)) {
+    const docEmp = String(clientData.empresaId ?? '').trim() || 'sin empresa';
+    throw new Error(
+      `Este cliente pertenece a «${docEmp}». No se puede eliminar desde «${empresaId}».`,
+    );
+  }
+
+  const turnosQ = scopeEmpresa && empresaId
+    ? query(
+        collection(db, 'turnos'),
+        where('clientId', '==', clientId),
+        where('empresaId', '==', empresaId),
+      )
+    : query(collection(db, 'turnos'), where('clientId', '==', clientId));
+
+  const slaQ = scopeEmpresa && empresaId
+    ? query(
+        collection(db, 'servicios_sla'),
+        where('clientId', '==', clientId),
+        where('empresaId', '==', empresaId),
+      )
+    : query(collection(db, 'servicios_sla'), where('clientId', '==', clientId));
+
+  const [turnosSnap, slaSnap] = await Promise.all([getDocs(turnosQ), getDocs(slaQ)]);
+
+  const turnosToDelete = turnosSnap.docs.filter((d) =>
+    belongsToEmpresaView(d.data(), empresaId, migracionCompleta),
+  );
+  const slaToDelete = slaSnap.docs.filter((d) =>
+    belongsToEmpresaView(d.data(), empresaId, migracionCompleta),
+  );
+
+  const deletedTurnos = await deleteDocsInBatches(turnosToDelete.map((d) => ({ ref: d.ref })));
+  const deletedSla = await deleteDocsInBatches(slaToDelete.map((d) => ({ ref: d.ref })));
+
+  await deleteDoc(clientRef);
+  return { deletedTurnos, deletedSla };
 }
 
 export function filterRowsByEmpresa<T extends { empresaId?: unknown }>(
   rows: T[],
   empresaId: string,
   scopeEmpresa: boolean,
+  migracionCompleta = false,
 ): T[] {
-  if (!scopeEmpresa) return rows;
-  const id = String(empresaId ?? '').trim();
-  return rows.filter(r => String(r.empresaId ?? '').trim() === id);
+  if (!String(empresaId ?? '').trim()) return rows;
+  return rows.filter((r) => belongsToEmpresaView(r, empresaId, migracionCompleta));
+}
+
+export function belongsToEmpresa(
+  data: { empresaId?: unknown },
+  empresaId: string,
+  scopeEmpresa: boolean,
+  migracionCompleta = false,
+): boolean {
+  if (!String(empresaId ?? '').trim()) return true;
+  if (!scopeEmpresa) return belongsToEmpresaView(data, empresaId, migracionCompleta);
+  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
 }
 
 /** SLA legacy sin empresaId: incluir si clientId pertenece a un cliente de la empresa (planificación). */

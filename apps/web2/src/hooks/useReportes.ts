@@ -227,7 +227,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             const slaMap: Record<string, number> = {};
             slaSnap.docs.forEach(d => {
                 const sla = d.data();
-                if (scopeEmpresa && !belongsToEmpresa(sla, empresaId, true)) return;
+                if (scopeEmpresa && !belongsToEmpresa(sla, empresaId, scopeEmpresa, migracionCompleta)) return;
                 if (!sla.objectiveId || !sla.startDate || !sla.endDate) return;
                 const slaStart = new Date(`${sla.startDate}T00:00:00`);
                 const slaEnd   = new Date(`${sla.endDate}T23:59:59`);
@@ -378,6 +378,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 snap.docs.map(d => ({ id: d.id, ...d.data() })),
                 empresaId,
                 scopeEmpresa,
+                migracionCompleta,
             );
             
             setAuditLogs(logs.sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds));

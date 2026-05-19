@@ -10,7 +10,7 @@ import {
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { auth, db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import {
@@ -287,13 +287,19 @@ function AdminDashboard() {
 
       // 1. CLIENTES
       let cCount = 0, oCount = 0;
-      clientsSnap.forEach(doc => { cCount++; const d = doc.data(); oCount += (d.objetivos || d.objectives || []).length; });
+      clientsSnap.forEach(d => {
+        const data = d.data();
+        if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        cCount++;
+        oCount += (data.objetivos || data.objectives || []).length;
+      });
 
       // 2. SERVICIOS SLA
       let svcCount = 0, totalSlaH = 0, nightSlaH = 0, holSlaH = 0;
       const svcList: {client:string; objective:string; hrs:number}[] = [];
       svcSnap.forEach(doc => {
         const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         const sd = d.startDate || '', ed = d.endDate || '';
         if (sd <= monthStr + '-31' && ed >= monthStr + '-01') {
           svcCount++;
@@ -308,6 +314,7 @@ function AdminDashboard() {
       let totalEmp = 0;
       empSnap.forEach(doc => {
         const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         empMap[doc.id] = d.nombre ? `${d.nombre} ${d.apellido || ''}`.trim() : (d.name || doc.id);
         if (['active','activo','activa'].includes((d.status || '').toLowerCase())) totalEmp++;
       });
@@ -320,6 +327,7 @@ function AdminDashboard() {
       const cutoffStr = cutoff.toISOString().split('T')[0];
       ausSnap.forEach(doc => {
         const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         const from = d.startDate || d.date || '', to = d.endDate || d.date || from;
         const reason = d.type || d.reason || d.motivo || 'Sin motivo';
         if (from <= todayStr && to >= todayStr) {
@@ -334,6 +342,7 @@ function AdminDashboard() {
       const distMap: Record<string, number> = {};
       empSnap.forEach(doc => {
         const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         if (['active','activo','activa'].includes((d.status||'').toLowerCase())) {
           const obj = d.preferredObjectiveName || d.objectiveName || 'Sin Objetivo';
           distMap[obj] = (distMap[obj] || 0) + 1;
@@ -347,7 +356,7 @@ function AdminDashboard() {
       let presentesHoy = new Set<string>(), enServicioActivo = new Set<string>();
       turnosSnap.forEach(doc => {
         const s = doc.data();
-        if (scopeEmpresa && s.empresaId && s.empresaId !== empresaId) return;
+        if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
         if (s.status === 'Canceled') return;
         if (s.employeeId && s.employeeId !== 'VACANTE' && !empMap[s.employeeId]) return;
         totalTurnos++;
@@ -370,7 +379,7 @@ function AdminDashboard() {
       const empHrsMap: Record<string,number> = {};
       monthTurnosSnap.forEach(doc => {
         const s = doc.data();
-        if (scopeEmpresa && s.empresaId && s.empresaId !== empresaId) return;
+        if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
         if (s.status === 'Canceled') return;
         if (!s.employeeId || s.employeeId === 'VACANTE' || !empMap[s.employeeId]) return;
         const code = (s.code || s.type || '').toString().toUpperCase();
@@ -460,7 +469,11 @@ function AdminDashboard() {
             </div>
           </div>
           <button
-            onClick={() => setRefreshKey(k => k+1)}
+            onClick={() => {
+              try { localStorage.removeItem(cacheKeyForEmpresa(empresaId)); } catch {}
+              setFromCache(false);
+              setRefreshKey(k => k + 1);
+            }}
             disabled={loading || isRefreshing}
             className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
           >

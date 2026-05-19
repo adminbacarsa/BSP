@@ -12,7 +12,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, onSnapshot, limit } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { useToast } from '@/context/ToastContext';
 import {
     Users, Search, Plus, Edit2, Trash2,
@@ -386,12 +386,17 @@ export default function EmployeesPage() {
           ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
           : collection(db, 'clients'),
       );
-      setClients(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setClients(
+        cSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(c => belongsToEmpresaView(c, empresaId, migracionCompleta)),
+      );
       const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active')));
       const slaRows = filterRowsByEmpresa(
         sSnap.docs.map(d => ({ id: d.data().objectiveId || d.id, docId: d.id, name: d.data().objectiveName || d.data().name, clientId: d.data().clientId, empresaId: d.data().empresaId })),
         empresaId,
         scopeEmpresa,
+        migracionCompleta,
       );
       setAllObjectives(slaRows);
     } catch (e) {}

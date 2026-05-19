@@ -537,9 +537,9 @@ export default function AnalisisPage() {
           getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
           getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
         ]);
-        setServices(filterRowsByEmpresa(sSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa));
+        setServices(filterRowsByEmpresa(sSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa, migracionCompleta));
         setEmployees(
-          filterRowsByEmpresa(eSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa)
+          filterRowsByEmpresa(eSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa, migracionCompleta)
             .filter((e: any) => !['inactive','baja','inactivo'].includes((e.status||'').toLowerCase())),
         );
       } catch(e) { console.error(e); }

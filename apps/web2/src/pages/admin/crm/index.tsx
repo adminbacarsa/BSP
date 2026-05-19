@@ -24,7 +24,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa, belongsToEmpresaView, deleteClientForEmpresa } from '@/lib/multiempresa';
 import {
   AlertCircle,
   BarChart3,
@@ -374,7 +374,9 @@ export default function CRMPage() {
       const snap = scopeEmpresa
         ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')))
         : await getDocs(query(collection(db, 'clients'), orderBy('name')));
-      const data = snap.docs.map((x) => ({ id: x.id, ...x.data() }));
+      const data = snap.docs
+        .map((x) => ({ id: x.id, ...x.data() }))
+        .filter((c) => belongsToEmpresaView(c, empresaId, migracionCompleta));
       setClients(data);
     } catch (e) {
       console.error(e);
@@ -397,6 +399,7 @@ export default function CRMPage() {
           srv.docs.map((x) => ({ id: x.id, ...x.data() })),
           empresaId,
           scopeEmpresa,
+          migracionCompleta,
         ),
       );
       setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
@@ -554,7 +557,7 @@ export default function CRMPage() {
     setSavingNewClient(true);
     try {
       const payload: any = { ...newClientForm, status: 'ACTIVO', createdAt: serverTimestamp() };
-      if (shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) && empresaId) payload.empresaId = empresaId;
+      if (empresaId) payload.empresaId = empresaId;
       await addDoc(collection(db, 'clients'), payload);
       toast.success(`"${newClientForm.name}" creado`);
       setNewClientOpen(false);
@@ -1195,20 +1198,15 @@ export default function CRMPage() {
                   {isSuperAdmin && (
                     <button
                       onClick={async () => {
-                        if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nSe eliminarán también todos los turnos asociados.`)) return;
+                        const empresaLabel = empresa?.name || empresaId;
+                        if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                         try {
-                          const shiftsSnap = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', c.id)));
-                          for (let i = 0; i < shiftsSnap.docs.length; i += 400) {
-                            const batch = writeBatch(db);
-                            shiftsSnap.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
-                            await batch.commit();
-                          }
-                          await deleteDoc(doc(db, 'clients', c.id));
-                          toast.success(`"${c.name}" eliminado`);
+                          const { deletedTurnos, deletedSla } = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
+                          toast.success(`"${c.name}" eliminado (${deletedTurnos} turnos, ${deletedSla} SLA)`);
                           fetchClients();
                           close();
-                        } catch (e) {
-                          toast.error('Error al eliminar el cliente');
+                        } catch (e: unknown) {
+                          toast.error(e instanceof Error ? e.message : 'Error al eliminar el cliente');
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
@@ -1253,23 +1251,21 @@ export default function CRMPage() {
                 {isSuperAdmin && (
                   <button
                     onClick={async () => {
-                      if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEsta acción no se puede deshacer.\n\nSe eliminarán también todos los turnos asociados.`)) return;
+                      const empresaLabel = empresa?.name || empresaId;
+                      if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                       try {
-                        // Borrar todos los turnos del cliente en lotes de 400
-                        const shiftsSnap = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', selectedClient.id)));
-                        for (let i = 0; i < shiftsSnap.docs.length; i += 400) {
-                          const batch = writeBatch(db);
-                          shiftsSnap.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
-                          await batch.commit();
-                        }
-                        await deleteDoc(doc(db, 'clients', selectedClient.id));
-                        toast.success(`"${selectedClient.name}" eliminado (${shiftsSnap.size} turnos eliminados)`);
+                        const { deletedTurnos, deletedSla } = await deleteClientForEmpresa(
+                          selectedClient.id,
+                          empresaId,
+                          migracionCompleta,
+                        );
+                        toast.success(`"${selectedClient.name}" eliminado (${deletedTurnos} turnos, ${deletedSla} SLA)`);
                         setSelectedClient(null);
                         setView('list');
                         fetchClients();
-                      } catch (e) {
+                      } catch (e: unknown) {
                         console.error(e);
-                        toast.error('Error al eliminar el cliente');
+                        toast.error(e instanceof Error ? e.message : 'Error al eliminar el cliente');
                       }
                     }}
                     className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-500 hover:bg-rose-50 text-xs font-black uppercase transition-colors"
