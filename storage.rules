@@ -1,0 +1,59 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSystemUserDoc() {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/system_users/$(request.auth.uid));
+    }
+
+    function isSuperAdminClaim() {
+      return isSignedIn() && request.auth.token.role in [
+        'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'superadmin'
+      ];
+    }
+
+    function systemUserEmpresaId() {
+      return firestore.get(/databases/(default)/documents/system_users/$(request.auth.uid))
+        .data.get('empresaId', '');
+    }
+
+    function canUploadBackupRestore(empresaId) {
+      return isSystemUserDoc() && (
+        isSuperAdminClaim()
+        || empresaId == systemUserEmpresaId()
+        || empresaId == 'platform'
+      );
+    }
+
+    // Subida temporal de .json para restauración (solo admins; lectura vía Admin SDK en Functions).
+    match /backup-restore/{empresaId}/{jobId}/{fileName} {
+      allow write: if canUploadBackupRestore(empresaId)
+        && fileName.matches('.*\\.json')
+        && request.resource.size < 512 * 1024 * 1024
+        && request.resource.contentType.matches('application/json.*');
+      allow read: if false;
+    }
+
+    match /absences/{userId}/{fileName} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /credenciales/{empDocId}/{fileName} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /libro_guardia/{objectiveId}/{fileName} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /alerts/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}

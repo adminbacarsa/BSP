@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { initializeFirestore, getFirestore, persistentLocalCache, persistentSingleTabManager, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-import { getStorage } from 'firebase/storage';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -62,6 +62,11 @@ export function ensureFirebaseEmulatorsConnected(): void {
   } catch {
     /* ya conectado */
   }
+  try {
+    connectStorageEmulator(storage, host, 9199);
+  } catch {
+    /* ya conectado */
+  }
 }
 
 // En emulador: sin IndexedDB (evita mezclar prod + localhost). En prod: persistencia offline.
@@ -78,7 +83,7 @@ if (typeof window === 'undefined') {
   }
   ensureFirebaseEmulatorsConnected();
   console.info(
-    `[Firebase] Modo emulador activo → ${getEmulatorHost()} (auth 9099, firestore 8080, functions 5001) 🧪`,
+    `[Firebase] Modo emulador activo → ${getEmulatorHost()} (auth 9099, firestore 8080, functions 5001, storage 9199) 🧪`,
   );
 } else {
   try {
