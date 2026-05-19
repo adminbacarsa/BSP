@@ -26,9 +26,11 @@ const FAB_STORAGE_KEY = 'cosp-assistant-fab-pos';
 function CospShieldIcon({
   size,
   className = '',
+  style,
 }: {
   size: number;
   className?: string;
+  style?: React.CSSProperties;
 }) {
   return (
     <svg
@@ -38,6 +40,7 @@ function CospShieldIcon({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`shrink-0 ${className}`}
+      style={style}
       aria-hidden
     >
       <path
@@ -310,7 +313,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
       }
     }, []);
 
-  if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) {
+  if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) return null;
+  if (empresa !== null && empresa.assistantEnabled === false) {
     return null;
   }
 

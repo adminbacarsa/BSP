@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { doc, onSnapshot, collection, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
+import { SUPERADMIN_EMPRESA_STORAGE_KEY } from '@/lib/multiempresa';
 
 export interface Empresa {
   id: string;
@@ -12,6 +13,7 @@ export interface Empresa {
   plan?: string;
   active?: boolean;
   primaryColor?: string;
+  assistantEnabled?: boolean;
 }
 
 interface EmpresaContextType {
@@ -43,17 +45,26 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loadingEmpresa, setLoadingEmpresa] = useState(true);
 
-  // Cuando el auth carga el empresaId del usuario, sincronizamos
+  // Cuando el auth carga el empresaId del usuario, sincronizamos (superadmin conserva selección en sesión)
   useEffect(() => {
-    if (authEmpresaId !== undefined) setEmpresaId(authEmpresaId || '');
-  }, [authEmpresaId]);
+    if (authEmpresaId === undefined) return;
+    if (isSuperAdmin) {
+      const saved =
+        typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
+      setEmpresaId(saved || authEmpresaId || '');
+    } else {
+      setEmpresaId(authEmpresaId || 'bacarsa');
+    }
+  }, [authEmpresaId, isSuperAdmin]);
 
   // Superadmin sin empresa seleccionada → auto-seleccionar la primera de la lista
   useEffect(() => {
-    if (isSuperAdmin && !empresaId && empresas.length > 0) {
-      setEmpresaId(empresas[0].id);
-    }
-  }, [isSuperAdmin, empresaId, empresas.length]);
+    if (!isSuperAdmin || empresaId || empresas.length === 0) return;
+    const saved =
+      typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
+    const pick = saved && empresas.some(e => e.id === saved) ? saved : empresas[0].id;
+    setEmpresaId(pick);
+  }, [isSuperAdmin, empresaId, empresas]);
 
   // Suscripción al documento de la empresa activa
   useEffect(() => {
@@ -101,7 +112,13 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   }, [isSuperAdmin]);
 
   const switchEmpresa = (id: string) => {
-    if (isSuperAdmin) setEmpresaId(id);
+    if (!isSuperAdmin) return;
+    setEmpresaId(id);
+    try {
+      sessionStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, id);
+    } catch {
+      /* ignore */
+    }
   };
 
   return (

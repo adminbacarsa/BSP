@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, type ProgresoMigracion } from '@/lib/multiempresa';
@@ -9,10 +9,40 @@ export default function EmpresasTab() {
   const { isSuperAdmin } = useAuth();
   const { empresa, empresas, empresaId, switchEmpresa } = useEmpresa();
 
-  // Formulario de empresa
+  // Formulario nueva empresa
   const [form, setForm] = useState({ name: '', cuit: '', direccion: '', plan: 'standard' });
   const [showNueva, setShowNueva] = useState(false);
   const [guardando, setGuardando] = useState(false);
+
+  // Formulario edición empresa activa
+  const [editForm, setEditForm] = useState({ name: '', cuit: '', direccion: '' });
+  const [guardandoEdit, setGuardandoEdit] = useState(false);
+
+  React.useEffect(() => {
+    setEditForm({
+      name: empresa?.name || '',
+      cuit: (empresa as any)?.cuit || '',
+      direccion: (empresa as any)?.direccion || '',
+    });
+  }, [empresa?.id, empresa?.name, (empresa as any)?.cuit, (empresa as any)?.direccion]);
+
+  const handleGuardarActual = async () => {
+    if (!empresa) return;
+    if (!editForm.name.trim()) return toast.error('El nombre es obligatorio');
+    setGuardandoEdit(true);
+    try {
+      await guardarEmpresa(empresa.id, {
+        name: editForm.name.trim(),
+        cuit: editForm.cuit.trim(),
+        direccion: editForm.direccion.trim(),
+      });
+      toast.success('Empresa actualizada');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoEdit(false);
+    }
+  };
 
   // Color de empresa
   const DEFAULT_COLOR = '#6366f1';
@@ -20,7 +50,6 @@ export default function EmpresasTab() {
   const [colorForm, setColorForm] = useState(empresa?.primaryColor || DEFAULT_COLOR);
   const [guardandoColor, setGuardandoColor] = useState(false);
 
-  // Sincronizar color cuando cambia la empresa activa
   React.useEffect(() => {
     setColorForm(empresa?.primaryColor || DEFAULT_COLOR);
   }, [empresa?.id, empresa?.primaryColor]);
@@ -38,27 +67,26 @@ export default function EmpresasTab() {
     }
   };
 
-  // Migración
-  const [progreso, setProgreso] = useState<ProgresoMigracion | null>(null);
-  const [migrando, setMigrando] = useState(false);
+  // Asistente IA
+  const [guardandoAsistente, setGuardandoAsistente] = useState(false);
+  const asistentActivo = empresa?.assistantEnabled !== false;
 
-  // ── Guardar/editar empresa actual ───────────────────────────────────────────
-  const handleGuardarActual = async () => {
+  const handleToggleAsistente = async () => {
     if (!empresa) return;
-    setGuardando(true);
+    setGuardandoAsistente(true);
     try {
-      await guardarEmpresa(empresa.id, {
-        name: empresa.name,
-        cuit: (empresa as any).cuit || '',
-        direccion: (empresa as any).direccion || '',
-      });
-      toast.success('Empresa actualizada');
+      await guardarEmpresa(empresa.id, { assistantEnabled: !asistentActivo } as any);
+      toast.success(asistentActivo ? 'Asistente desactivado' : 'Asistente activado');
     } catch {
       toast.error('Error al guardar');
     } finally {
-      setGuardando(false);
+      setGuardandoAsistente(false);
     }
   };
+
+  // Migración
+  const [progreso, setProgreso] = useState<ProgresoMigracion | null>(null);
+  const [migrando, setMigrando] = useState(false);
 
   // ── Crear nueva empresa ─────────────────────────────────────────────────────
   const handleCrearEmpresa = async () => {
@@ -194,6 +222,55 @@ export default function EmpresasTab() {
         </div>
       )}
 
+      {/* ── Datos de empresa activa ── */}
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Building2 size={18} className="text-indigo-600" />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Datos de empresa</h3>
+          </div>
+          <p className="text-xs text-slate-500 font-medium mb-5">Editá el nombre y los datos de la empresa activa.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div className="md:col-span-2">
+              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Nombre *</label>
+              <input
+                value={editForm.name}
+                onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="Ej: Bacar SA"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">CUIT</label>
+              <input
+                value={editForm.cuit}
+                onChange={e => setEditForm(f => ({ ...f, cuit: e.target.value }))}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="30-00000000-0"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección</label>
+              <input
+                value={editForm.direccion}
+                onChange={e => setEditForm(f => ({ ...f, direccion: e.target.value }))}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="Calle 123, Ciudad"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={handleGuardarActual}
+              disabled={guardandoEdit}
+              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            >
+              {guardandoEdit ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar cambios
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Color de empresa ── */}
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -251,6 +328,41 @@ export default function EmpresasTab() {
               <div className="w-3 h-6 rounded opacity-60" style={{ backgroundColor: colorForm }} />
               <div className="w-3 h-6 rounded opacity-30" style={{ backgroundColor: colorForm }} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Asistente IA ── */}
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <Bot size={18} className="text-indigo-600" />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Asistente IA</h3>
+          </div>
+          <p className="text-xs text-slate-500 font-medium mb-5">
+            Habilitá o deshabilitá el globo flotante del asistente COSP para esta empresa.
+          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-bold text-slate-700">
+                {asistentActivo ? 'Asistente activo' : 'Asistente desactivado'}
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {asistentActivo ? 'El globo de chat aparece en todas las pantallas.' : 'El globo no aparece para esta empresa.'}
+              </p>
+            </div>
+            <button
+              onClick={handleToggleAsistente}
+              disabled={guardandoAsistente}
+              className={`relative inline-flex h-7 w-13 items-center rounded-full transition-colors focus:outline-none disabled:opacity-60 ${asistentActivo ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              style={{ width: '3.25rem' }}
+              title={asistentActivo ? 'Desactivar asistente' : 'Activar asistente'}
+            >
+              {guardandoAsistente
+                ? <Loader2 size={12} className="absolute left-1/2 -translate-x-1/2 animate-spin text-white" />
+                : <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${asistentActivo ? 'translate-x-[1.625rem]' : 'translate-x-[0.25rem]'}`} />
+              }
+            </button>
           </div>
         </div>
       )}
