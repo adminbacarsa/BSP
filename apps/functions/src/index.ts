@@ -3,7 +3,7 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { runBackup } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
-import { runRestore, RestoreMode } from './backup/restore.service';
+import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
 import { createNestApp } from './main';
 import { INestApplicationContext } from '@nestjs/common';
 
@@ -1755,31 +1755,79 @@ export const restoreBackup = functions
     if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
       throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
     }
-    const { driveFileId, mode, jobId, empresaId: claimedEmpresa } = data as {
-      driveFileId: string;
+    const {
+      driveFileId,
+      storagePath,
+      fileName: uploadedFileName,
+      mode,
+      jobId,
+      empresaId: claimedEmpresa,
+    } = data as {
+      driveFileId?: string;
+      storagePath?: string;
+      fileName?: string;
       mode: RestoreMode;
       jobId?: string;
       empresaId?: string;
     };
-    if (!driveFileId) throw new functions.https.HttpsError('invalid-argument', 'driveFileId requerido');
+    if (!driveFileId && !storagePath) {
+      throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');
+    }
     if (!['merge', 'full'].includes(mode)) throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
 
     const db = admin.firestore();
-    const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
-    if (!metaSnap.empty) {
-      const meta = metaSnap.docs[0].data();
-      const backupEmpresa = String(meta.empresaId ?? '').trim();
-      const backupScoped = meta.scopeEmpresa === true;
-      const sessionEmpresa = String(claimedEmpresa ?? '').trim();
-      if (backupScoped && backupEmpresa && sessionEmpresa && backupEmpresa.toLowerCase() !== sessionEmpresa.toLowerCase()) {
-        throw new functions.https.HttpsError('permission-denied', 'El backup no pertenece a la empresa activa.');
+    let empresaId = String(claimedEmpresa ?? '').trim();
+    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
+    if (sysUser.exists) {
+      const sysRole = String(sysUser.data()?.role ?? '');
+      const isSuper =
+        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
+        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
+      const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
+      if (!isSuper) empresaId = profileEmpresa || 'bacarsa';
+      else if (!empresaId) empresaId = profileEmpresa;
+    }
+
+    let scopeEmpresa = false;
+    if (empresaId) {
+      const empSnap = await db.collection('empresas').doc(empresaId).get();
+      const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
+      scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+    }
+
+    const restoreOpts = { empresaId, scopeEmpresa };
+
+    if (driveFileId) {
+      const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
+      if (!metaSnap.empty) {
+        const meta = metaSnap.docs[0].data();
+        const backupEmpresa = String(meta.empresaId ?? '').trim();
+        const backupScoped = meta.scopeEmpresa === true;
+        if (backupScoped && backupEmpresa && empresaId && backupEmpresa.toLowerCase() !== empresaId.toLowerCase()) {
+          throw new functions.https.HttpsError('permission-denied', 'El backup no pertenece a la empresa activa.');
+        }
+      }
+    }
+
+    if (storagePath) {
+      const safePath = String(storagePath).trim();
+      if (!safePath.startsWith('backup-restore/') || safePath.includes('..')) {
+        throw new functions.https.HttpsError('invalid-argument', 'storagePath inválido');
       }
     }
 
     try {
-      return await runRestore(driveFileId, mode, jobId);
+      if (storagePath) {
+        const name = String(uploadedFileName ?? storagePath.split('/').pop() ?? 'backup.json').trim();
+        return await runRestoreFromStorage(storagePath, name, mode, jobId, restoreOpts);
+      }
+      return await runRestore(driveFileId!, mode, jobId, restoreOpts);
     } catch (e: any) {
-      throw new functions.https.HttpsError('internal', e?.message || 'Error al restaurar');
+      const msg = e?.message || 'Error al restaurar';
+      if (/pertenece a otra empresa|plataforma completa/i.test(msg)) {
+        throw new functions.https.HttpsError('permission-denied', msg);
+      }
+      throw new functions.https.HttpsError('internal', msg);
     }
   });
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { db, functions } from '@/lib/firebase';
+import { db, functions, storage } from '@/lib/firebase';
+import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
@@ -70,7 +71,13 @@ export default function BackupTab() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [lastResult, setLastResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [restoreModal, setRestoreModal] = useState<{ backup: BackupRecord; mode: 'merge' | 'full' } | null>(null);
+  const [restoreModal, setRestoreModal] = useState<{
+    backup: BackupRecord | null;
+    storagePath?: string;
+    fileName: string;
+    mode: 'merge' | 'full';
+  } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
   const [loadedVersion, setLoadedVersion] = useState<LoadedVersion | null>(null);
@@ -122,6 +129,47 @@ export default function BackupTab() {
     } finally { setRunning(false); }
   };
 
+  const validateBackupJsonForEmpresa = (backup: Record<string, unknown>) => {
+    const meta = (backup._meta ?? {}) as Record<string, unknown>;
+    const backupEmpresa = String(meta.empresaId ?? '').trim();
+    if (!scopeEmpresa || !empresaId) return;
+    if (meta.scopeEmpresa === true && backupEmpresa && backupEmpresa !== empresaId) {
+      throw new Error('El archivo pertenece a otra empresa.');
+    }
+    if (!backupEmpresa && meta.scopeEmpresa !== true) {
+      throw new Error('Este backup es de plataforma completa y no puede importarse en esta empresa.');
+    }
+  };
+
+  const handleSelectUploadFile = async (file: File) => {
+    setLastResult(null);
+    setUploading(true);
+    setProgress({ done: 0, total: 0, phase: 'Validando archivo…' });
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text) as Record<string, unknown>;
+      validateBackupJsonForEmpresa(backup);
+
+      setProgress({ done: 0, total: 100, phase: 'Subiendo archivo…' });
+      const jobStamp = Date.now();
+      const safeName = file.name.replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'backup.json';
+      const path = `backup-restore/${empresaId || 'platform'}/${jobStamp}/${safeName}`;
+      await uploadBytes(storageRef(storage, path), file, { contentType: 'application/json' });
+
+      setRestoreModal({
+        backup: null,
+        storagePath: path,
+        fileName: file.name,
+        mode: 'merge',
+      });
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al subir el backup' });
+    } finally {
+      setUploading(false);
+      setProgress(null);
+    }
+  };
+
   // Carga un backup JSON local directo al emulador desde el browser
   const handleLoadLocalFile = async (file: File) => {
     setLastResult(null);
@@ -129,6 +177,7 @@ export default function BackupTab() {
     try {
       const text = await file.text();
       const backup = JSON.parse(text);
+      validateBackupJsonForEmpresa(backup as Record<string, unknown>);
 
       const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, any[]][];
       const totalDocs = cols.reduce((acc, [, docs]) => acc + (docs?.length ?? 0), 0);
@@ -190,12 +239,20 @@ export default function BackupTab() {
         setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
       });
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 540000 });
-      const res: any = await fn({
-        driveFileId: restoreModal.backup.driveFileId,
+      const payload: Record<string, unknown> = {
         mode: restoreModal.mode,
         jobId,
         empresaId: empresaId || '',
-      });
+        fileName: restoreModal.fileName,
+      };
+      if (restoreModal.storagePath) {
+        payload.storagePath = restoreModal.storagePath;
+      } else if (restoreModal.backup?.driveFileId) {
+        payload.driveFileId = restoreModal.backup.driveFileId;
+      } else {
+        throw new Error('Origen de restauración no definido');
+      }
+      const res: any = await fn(payload);
       const d = res.data;
       setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored.toLocaleString()} docs en ${(d.durationMs/1000).toFixed(1)}s` });
       setRestoreModal(null);
@@ -236,6 +293,50 @@ export default function BackupTab() {
         <div className={`flex items-start gap-3 p-4 rounded-xl border font-bold text-sm ${lastResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           {lastResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
           {lastResult.msg}
+        </div>
+      )}
+
+      {/* ── Subir backup descargado (producción) ── */}
+      {!IS_EMULATOR && (
+        <div className="bg-indigo-50 dark:bg-indigo-950/30 border-2 border-indigo-200 dark:border-indigo-800 rounded-2xl p-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/50 rounded-xl flex items-center justify-center shrink-0">
+              <Upload size={18} className="text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-sm text-indigo-900 dark:text-indigo-100">Restaurar backup descargado</h3>
+              <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-0.5 mb-4">
+                Si descargaste un <b>.json</b> desde Drive (u otro origen), subilo acá para restaurarlo en la empresa activa.
+                Después elegís <b>Merge</b> (seguro) o <b>Full</b> (reemplaza datos de la empresa).
+              </p>
+              {progress && uploading ? (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-bold text-indigo-800 dark:text-indigo-200">
+                    <span>{progress.phase}</span>
+                  </div>
+                  <div className="h-2.5 bg-indigo-100 dark:bg-indigo-900 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500 animate-pulse rounded-full w-1/3" />
+                  </div>
+                </div>
+              ) : (
+                <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-sm cursor-pointer transition-colors shadow disabled:opacity-60">
+                  <Upload size={15} />
+                  {uploading ? 'Subiendo…' : 'Seleccionar backup .json'}
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    className="hidden"
+                    disabled={uploading || restoring}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleSelectUploadFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -368,11 +469,11 @@ export default function BackupTab() {
                 )}
                 {b.status === 'ok' && !IS_EMULATOR && (
                   <>
-                    <button onClick={() => setRestoreModal({ backup: b, mode: 'merge' })}
+                    <button onClick={() => setRestoreModal({ backup: b, fileName: b.fileName, mode: 'merge' })}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-emerald-600 hover:bg-emerald-50 rounded-lg border border-emerald-200 transition-colors">
                       <RotateCcw size={12} /> Merge
                     </button>
-                    <button onClick={() => setRestoreModal({ backup: b, mode: 'full' })}
+                    <button onClick={() => setRestoreModal({ backup: b, fileName: b.fileName, mode: 'full' })}
                       className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors">
                       <ShieldAlert size={12} /> Full
                     </button>
@@ -396,14 +497,32 @@ export default function BackupTab() {
                 <h3 className="font-black text-lg text-slate-900 dark:text-white">
                   {restoreModal.mode === 'full' ? 'Restauración Completa' : 'Restauración Merge'}
                 </h3>
-                <p className="text-xs text-slate-500 font-bold">{restoreModal.backup.fileName}</p>
+                <p className="text-xs text-slate-500 font-bold">{restoreModal.fileName}</p>
               </div>
               <button onClick={() => setRestoreModal(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X size={20}/></button>
             </div>
-            <div className={`p-4 rounded-xl mb-6 text-sm font-bold ${restoreModal.mode === 'full' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
+            <div className={`p-4 rounded-xl mb-4 text-sm font-bold ${restoreModal.mode === 'full' ? 'bg-rose-50 text-rose-800 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'}`}>
               {restoreModal.mode === 'full'
-                ? <><ShieldAlert size={14} className="inline mr-1.5"/>ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.</>
+                ? <><ShieldAlert size={14} className="inline mr-1.5"/>{restoreModal.storagePath ? 'ATENCIÓN: reemplazará los datos de esta empresa en las colecciones del backup.' : 'ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.'}</>
                 : <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>}
+            </div>
+            <div className="flex gap-2 mb-6">
+              <button
+                type="button"
+                disabled={restoring}
+                onClick={() => setRestoreModal((m) => (m ? { ...m, mode: 'merge' } : m))}
+                className={`flex-1 py-2 rounded-lg text-xs font-black border transition-colors ${restoreModal.mode === 'merge' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                Merge
+              </button>
+              <button
+                type="button"
+                disabled={restoring}
+                onClick={() => setRestoreModal((m) => (m ? { ...m, mode: 'full' } : m))}
+                className={`flex-1 py-2 rounded-lg text-xs font-black border transition-colors ${restoreModal.mode === 'full' ? 'bg-rose-600 text-white border-rose-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                Full
+              </button>
             </div>
             {restoring && progress && (
               <div className="mb-5 space-y-2">
