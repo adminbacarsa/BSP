@@ -83,7 +83,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       <div className="p-4 flex items-center gap-4 flex-wrap">
       <button
         onClick={onToggleSidebar}
-        className="p-2 rounded-lg hover:bg-black/5 transition-colors shrink-0"
+        className="p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
         style={{ color: 'var(--topbar-text)' }}
       >
         <Menu size={22} />
