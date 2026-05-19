@@ -184,6 +184,53 @@ function deserializeFields(obj: any): any {
   return result;
 }
 
+function sanitizeForFirestore(obj: unknown): unknown {
+  if (obj === undefined) return undefined;
+  if (obj === null) return null;
+  if (obj instanceof admin.firestore.Timestamp) return obj;
+  if (obj instanceof admin.firestore.GeoPoint) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
+  }
+  if (typeof obj !== 'object') return obj;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (v === undefined) continue;
+    const sanitized = sanitizeForFirestore(v);
+    if (sanitized !== undefined) out[k] = sanitized;
+  }
+  return out;
+}
+
+async function commitWriteBatch(
+  db: FirebaseFirestore.Firestore,
+  ops: Array<{ ref: FirebaseFirestore.DocumentReference; data: Record<string, unknown>; merge: boolean }>,
+): Promise<number> {
+  if (ops.length === 0) return 0;
+  try {
+    const batch = db.batch();
+    ops.forEach(({ ref, data, merge }) => {
+      if (merge) batch.set(ref, data, { merge: true });
+      else batch.set(ref, data);
+    });
+    await batch.commit();
+    return ops.length;
+  } catch (e) {
+    if (ops.length <= 1) throw e;
+    const mid = Math.ceil(ops.length / 2);
+    return (
+      (await commitWriteBatch(db, ops.slice(0, mid)))
+      + (await commitWriteBatch(db, ops.slice(mid)))
+    );
+  }
+}
+
+function writeBatchSizeForCollection(colName: string): number {
+  if (colName === 'turnos') return 40;
+  if (colName === 'clients' || colName === 'servicios_sla') return 60;
+  return 120;
+}
+
 function isPlatformBackup(payload: Record<string, unknown>): boolean {
   const meta = (payload._meta ?? {}) as Record<string, unknown>;
   const backupEmpresa = String(meta.empresaId ?? '').trim();
@@ -297,6 +344,11 @@ export async function runRestoreFromPayload(
     return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
   };
 
+  let docsRestored = 0;
+  let docsDeleted = 0;
+  let total = 0;
+
+  try {
   await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
 
   const { _meta, _auth_users, ...collections } = payload;
@@ -321,46 +373,51 @@ export async function runRestoreFromPayload(
     .filter(([, docs]) => docs.length > 0)
     .sort((a, b) => collectionSortIndex(a[0]) - collectionSortIndex(b[0]));
 
-  const total = filteredEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
+  total = filteredEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
   await setJob({ phase: 'Preparando restauración…', total });
 
-  let docsRestored = 0;
-  let docsDeleted = 0;
-  const BATCH_SIZE = 400;
+  const DELETE_BATCH_SIZE = 400;
   const idMaps: IdMaps = {};
+  const PROGRESS_EVERY = 150;
 
   for (let ci = 0; ci < filteredEntries.length; ci++) {
     const [colName, docs] = filteredEntries[ci];
-    await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored });
+    await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored, total });
 
-    docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, BATCH_SIZE);
+    docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, DELETE_BATCH_SIZE);
 
-    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-      const batch = db.batch();
-      const chunk = docs.slice(i, i + BATCH_SIZE) as any[];
-      let written = 0;
-      chunk.forEach((doc) => {
-        const { _id, ...fields } = doc;
-        if (!_id) return;
-        let clean = deserializeFields(fields) as Record<string, unknown>;
-        if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
-          clean.empresaId = opts.empresaId;
-          clean = remapCloneDocumentFields(colName, clean, idMaps, db);
-        }
-        const writeId = retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)
-          ? allocateCloneDocId(db, colName, String(_id), idMaps)
-          : String(_id);
-        const ref = db.collection(colName).doc(writeId);
-        if (mode === 'full') {
-          batch.set(ref, clean);
-        } else {
-          batch.set(ref, clean, { merge: true });
-        }
-        written++;
-      });
-      await batch.commit();
-      docsRestored += written;
+    const writeBatchSize = writeBatchSizeForCollection(colName);
+    let pendingOps: Array<{ ref: FirebaseFirestore.DocumentReference; data: Record<string, unknown>; merge: boolean }> = [];
+
+    const flushPending = async () => {
+      if (pendingOps.length === 0) return;
+      docsRestored += await commitWriteBatch(db, pendingOps);
+      pendingOps = [];
+      await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored, total });
+    };
+
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      const { _id, ...fields } = doc;
+      if (!_id) continue;
+      let clean = sanitizeForFirestore(deserializeFields(fields)) as Record<string, unknown>;
+      if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
+        clean.empresaId = opts.empresaId;
+        clean = remapCloneDocumentFields(colName, clean, idMaps, db) as Record<string, unknown>;
+      }
+      const writeId = retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)
+        ? allocateCloneDocId(db, colName, String(_id), idMaps)
+        : String(_id);
+      const ref = db.collection(colName).doc(writeId);
+      pendingOps.push({ ref, data: clean, merge: mode === 'merge' });
+
+      if (pendingOps.length >= writeBatchSize) {
+        await flushPending();
+      } else if (docsRestored + pendingOps.length > 0 && (docsRestored + pendingOps.length) % PROGRESS_EVERY === 0) {
+        await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored: docsRestored + pendingOps.length, total });
+      }
     }
+    await flushPending();
   }
 
   await setJob({ status: 'done', phase: 'Completado', docsRestored, total });
@@ -384,6 +441,17 @@ export async function runRestoreFromPayload(
     docsDeleted,
     durationMs: Date.now() - t0,
   };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await setJob({
+      status: 'error',
+      phase: 'Error en restauración',
+      error: msg.slice(0, 500),
+      docsRestored,
+      total,
+    });
+    throw e;
+  }
 }
 
 export async function runRestore(driveFileId: string, mode: RestoreMode, jobId?: string, opts: RestoreOptions = {}): Promise<RestoreResult> {

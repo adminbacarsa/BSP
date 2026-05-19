@@ -138,6 +138,59 @@ function deserializeFields(obj) {
     }
     return result;
 }
+function sanitizeForFirestore(obj) {
+    if (obj === undefined)
+        return undefined;
+    if (obj === null)
+        return null;
+    if (obj instanceof admin.firestore.Timestamp)
+        return obj;
+    if (obj instanceof admin.firestore.GeoPoint)
+        return obj;
+    if (Array.isArray(obj)) {
+        return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
+    }
+    if (typeof obj !== 'object')
+        return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+        if (v === undefined)
+            continue;
+        const sanitized = sanitizeForFirestore(v);
+        if (sanitized !== undefined)
+            out[k] = sanitized;
+    }
+    return out;
+}
+async function commitWriteBatch(db, ops) {
+    if (ops.length === 0)
+        return 0;
+    try {
+        const batch = db.batch();
+        ops.forEach(({ ref, data, merge }) => {
+            if (merge)
+                batch.set(ref, data, { merge: true });
+            else
+                batch.set(ref, data);
+        });
+        await batch.commit();
+        return ops.length;
+    }
+    catch (e) {
+        if (ops.length <= 1)
+            throw e;
+        const mid = Math.ceil(ops.length / 2);
+        return ((await commitWriteBatch(db, ops.slice(0, mid)))
+            + (await commitWriteBatch(db, ops.slice(mid))));
+    }
+}
+function writeBatchSizeForCollection(colName) {
+    if (colName === 'turnos')
+        return 40;
+    if (colName === 'clients' || colName === 'servicios_sla')
+        return 60;
+    return 120;
+}
 function isPlatformBackup(payload) {
     const meta = (payload._meta ?? {});
     const backupEmpresa = String(meta.empresaId ?? '').trim();
@@ -224,35 +277,44 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
             return Promise.resolve();
         return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
     };
-    await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
-    const { _meta, _auth_users, ...collections } = payload;
-    const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && docs.length > 0);
-    const filteredEntries = colEntries
-        .map(([colName, docs]) => {
-        const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantImport, sourceEmpresaId));
-        return [colName, filtered];
-    })
-        .filter(([, docs]) => docs.length > 0)
-        .sort((a, b) => collectionSortIndex(a[0]) - collectionSortIndex(b[0]));
-    const total = filteredEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
-    await setJob({ phase: 'Preparando restauración…', total });
     let docsRestored = 0;
     let docsDeleted = 0;
-    const BATCH_SIZE = 400;
-    const idMaps = {};
-    for (let ci = 0; ci < filteredEntries.length; ci++) {
-        const [colName, docs] = filteredEntries[ci];
-        await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored });
-        docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, BATCH_SIZE);
-        for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-            const batch = db.batch();
-            const chunk = docs.slice(i, i + BATCH_SIZE);
-            let written = 0;
-            chunk.forEach((doc) => {
+    let total = 0;
+    try {
+        await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
+        const { _meta, _auth_users, ...collections } = payload;
+        const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && docs.length > 0);
+        const filteredEntries = colEntries
+            .map(([colName, docs]) => {
+            const filtered = docs.filter((doc) => docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantImport, sourceEmpresaId));
+            return [colName, filtered];
+        })
+            .filter(([, docs]) => docs.length > 0)
+            .sort((a, b) => collectionSortIndex(a[0]) - collectionSortIndex(b[0]));
+        total = filteredEntries.reduce((acc, [, docs]) => acc + docs.length, 0);
+        await setJob({ phase: 'Preparando restauración…', total });
+        const DELETE_BATCH_SIZE = 400;
+        const idMaps = {};
+        const PROGRESS_EVERY = 150;
+        for (let ci = 0; ci < filteredEntries.length; ci++) {
+            const [colName, docs] = filteredEntries[ci];
+            await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored, total });
+            docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, DELETE_BATCH_SIZE);
+            const writeBatchSize = writeBatchSizeForCollection(colName);
+            let pendingOps = [];
+            const flushPending = async () => {
+                if (pendingOps.length === 0)
+                    return;
+                docsRestored += await commitWriteBatch(db, pendingOps);
+                pendingOps = [];
+                await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored, total });
+            };
+            for (let i = 0; i < docs.length; i++) {
+                const doc = docs[i];
                 const { _id, ...fields } = doc;
                 if (!_id)
-                    return;
-                let clean = deserializeFields(fields);
+                    continue;
+                let clean = sanitizeForFirestore(deserializeFields(fields));
                 if (retagEmpresaId && EMPRESA_SCOPED_COLLECTIONS.has(colName)) {
                     clean.empresaId = opts.empresaId;
                     clean = remapCloneDocumentFields(colName, clean, idMaps, db);
@@ -261,37 +323,47 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}) 
                     ? allocateCloneDocId(db, colName, String(_id), idMaps)
                     : String(_id);
                 const ref = db.collection(colName).doc(writeId);
-                if (mode === 'full') {
-                    batch.set(ref, clean);
+                pendingOps.push({ ref, data: clean, merge: mode === 'merge' });
+                if (pendingOps.length >= writeBatchSize) {
+                    await flushPending();
                 }
-                else {
-                    batch.set(ref, clean, { merge: true });
+                else if (docsRestored + pendingOps.length > 0 && (docsRestored + pendingOps.length) % PROGRESS_EVERY === 0) {
+                    await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored: docsRestored + pendingOps.length, total });
                 }
-                written++;
-            });
-            await batch.commit();
-            docsRestored += written;
+            }
+            await flushPending();
         }
+        await setJob({ status: 'done', phase: 'Completado', docsRestored, total });
+        await db.collection('audit_logs').add({
+            action: 'RESTORE_BACKUP',
+            module: 'SISTEMA',
+            actorName: 'Admin',
+            details: tenantImport
+                ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
+                : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
+        });
+        return {
+            mode,
+            fileName,
+            collections: filteredEntries.map(([c]) => c),
+            docsRestored,
+            docsDeleted,
+            durationMs: Date.now() - t0,
+        };
     }
-    await setJob({ status: 'done', phase: 'Completado', docsRestored, total });
-    await db.collection('audit_logs').add({
-        action: 'RESTORE_BACKUP',
-        module: 'SISTEMA',
-        actorName: 'Admin',
-        details: tenantImport
-            ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
-            : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
-    });
-    return {
-        mode,
-        fileName,
-        collections: filteredEntries.map(([c]) => c),
-        docsRestored,
-        docsDeleted,
-        durationMs: Date.now() - t0,
-    };
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await setJob({
+            status: 'error',
+            phase: 'Error en restauración',
+            error: msg.slice(0, 500),
+            docsRestored,
+            total,
+        });
+        throw e;
+    }
 }
 async function runRestore(driveFileId, mode, jobId, opts = {}) {
     const db = admin.firestore();

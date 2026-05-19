@@ -80,6 +80,18 @@ function resolveBackupRecordImportKind(
   );
 }
 
+function formatRestoreError(e: unknown): string {
+  const err = e as { message?: string; code?: string };
+  const msg = String(err?.message ?? '').trim();
+  if (/deadline-exceeded|timeout/i.test(`${err?.code ?? ''} ${msg}`)) {
+    return 'La restauración tardó demasiado. Revisá si los datos quedaron incompletos y volvé a intentar.';
+  }
+  if (/no such object/i.test(msg)) {
+    return 'El archivo subido ya no está en Storage. Volvé a subir el backup JSON y confirmá de inmediato.';
+  }
+  return msg || 'Error al restaurar';
+}
+
 // Deserializa { _seconds, _nanoseconds } → Firestore Timestamp recursivamente
 const deserialize = (obj: any): any => {
   if (obj === null || obj === undefined) return obj;
@@ -280,6 +292,9 @@ export default function BackupTab() {
         const d = snap.data();
         if (!d) return;
         setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
+        if (d.status === 'error' && d.error) {
+          setLastResult({ ok: false, msg: String(d.error) });
+        }
       });
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 540000 });
       const payload: Record<string, unknown> = {

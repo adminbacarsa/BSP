@@ -1474,7 +1474,7 @@ exports.triggerBackup = functions
     }
 });
 exports.restoreBackup = functions
-    .runWith({ timeoutSeconds: 540, memory: '1GB' })
+    .runWith({ timeoutSeconds: 540, memory: '2GB' })
     .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
     const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId, empresaId: claimedEmpresa, tenantImport: requestedTenantImport, sourceEmpresaId: claimedSourceEmpresa, } = data;
@@ -1543,6 +1543,13 @@ exports.restoreBackup = functions
     }
     catch (e) {
         const msg = e?.message || 'Error al restaurar';
+        if (jobId) {
+            await db.collection('restore_jobs').doc(jobId).set({
+                status: 'error',
+                phase: 'Error en restauración',
+                error: msg.slice(0, 500),
+            }, { merge: true }).catch(() => undefined);
+        }
         if (/pertenece a otra empresa|plataforma completa/i.test(msg)) {
             throw new functions.https.HttpsError('permission-denied', msg);
         }
