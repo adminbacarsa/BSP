@@ -109,7 +109,9 @@ service cloud.firestore {
 
     // 5. Usuarios del Sistema
     match /system_users/{userId} {
-      allow read, write: if isAdmin();
+      // Lectura propia: necesaria para firestore.get() en reglas de Storage (backup upload)
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
     }
 
     // 6. Tokens de dispositivos

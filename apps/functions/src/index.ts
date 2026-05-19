@@ -606,6 +606,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
   
   const { email, password, firstName, lastName, role, empresaId } = data;
+  const roleNorm = normalizeBackupRole(role);
 
   try {
     const userRecord = await admin.auth().createUser({
@@ -614,14 +615,14 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       displayName: `${firstName} ${lastName}`
     });
 
-    await admin.auth().setCustomUserClaims(userRecord.uid, { role, type: 'SYSTEM' });
+    await admin.auth().setCustomUserClaims(userRecord.uid, { role: roleNorm, type: 'SYSTEM' });
 
     await admin.firestore().collection("system_users").doc(userRecord.uid).set({
       uid: userRecord.uid,
       firstName,
       lastName,
       email,
-      role,
+      role: roleNorm,
       empresaId: empresaId ?? 'bacarsa',
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -631,6 +632,38 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   } catch (error: any) {
     throw new functions.https.HttpsError("internal", error.message);
   }
+});
+
+/** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
+export const syncSystemUserClaims = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+  }
+  const targetUid = String((data as { uid?: string })?.uid ?? context.auth.uid).trim();
+  const db = admin.firestore();
+
+  if (targetUid !== context.auth.uid) {
+    const callerSnap = await db.collection('system_users').doc(context.auth.uid).get();
+    const callerRole = normalizeBackupRole(callerSnap.data()?.role);
+    const tokenRole = normalizeBackupRole(context.auth.token?.role);
+    const callerSuper =
+      callerRole === 'SUPERADMIN' || callerRole === 'SUPER_ADMIN' ||
+      tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
+    if (!callerSuper) {
+      throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede sincronizar otros usuarios.');
+    }
+  }
+
+  const snap = await db.collection('system_users').doc(targetUid).get();
+  if (!snap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
+  }
+  const role = normalizeBackupRole(snap.data()?.role);
+  if (!role) {
+    throw new functions.https.HttpsError('failed-precondition', 'El usuario no tiene rol asignado.');
+  }
+  await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
+  return { ok: true, uid: targetUid, role };
 });
 
 /** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */

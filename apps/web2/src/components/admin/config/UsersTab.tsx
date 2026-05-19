@@ -96,6 +96,8 @@ export default function UsersTab() {
                         empresaId:     efectivaEmpresaId,
                         supervisorPin: formData.supervisorPin || null,
                     });
+                    const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
+                    await syncFn({ uid: formData.id });
                     resolve('Usuario actualizado correctamente');
                 } else {
                     const createFn = httpsCallable(functions, 'crearUsuarioSistema');

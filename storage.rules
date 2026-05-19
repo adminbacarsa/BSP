@@ -11,9 +11,12 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/system_users/$(request.auth.uid));
     }
 
+    function systemUserData() {
+      return firestore.get(/databases/(default)/documents/system_users/$(request.auth.uid)).data;
+    }
+
     function systemUserRoleLower() {
-      return firestore.get(/databases/(default)/documents/system_users/$(request.auth.uid))
-        .data.get('role', '').lower();
+      return systemUserData().get('role', '').lower();
     }
 
     function tokenRoleLower() {
@@ -22,10 +25,17 @@ service firebase.storage {
         : '';
     }
 
+    function isPanelTokenType() {
+      return isSignedIn() && request.auth.token.type in [
+        'SYSTEM', 'system_user', 'SYSTEM_USER', 'system'
+      ];
+    }
+
     function isSuperAdminRole(roleLower) {
       return roleLower == 'superadmin'
         || roleLower == 'super_admin'
-        || roleLower == 'super admin';
+        || roleLower == 'super admin'
+        || roleLower.matches('super[_\\s-]*admin');
     }
 
     function isSuperAdmin() {
@@ -36,8 +46,7 @@ service firebase.storage {
     }
 
     function systemUserEmpresaId() {
-      return firestore.get(/databases/(default)/documents/system_users/$(request.auth.uid))
-        .data.get('empresaId', '');
+      return systemUserData().get('empresaId', '');
     }
 
     function empresaIdsMatch(pathEmpresaId, profileEmpresaId) {
@@ -59,7 +68,7 @@ service firebase.storage {
       return isSignedIn() && (
         isSuperAdmin()
         || (
-          isSystemUserDoc() && (
+          (isSystemUserDoc() || isPanelTokenType()) && (
             empresaIdsMatch(empresaId, systemUserEmpresaId())
             || empresaId == 'platform'
           )

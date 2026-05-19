@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -482,19 +482,20 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
     const { email, password, firstName, lastName, role, empresaId } = data;
+    const roleNorm = normalizeBackupRole(role);
     try {
         const userRecord = await admin.auth().createUser({
             email,
             password,
             displayName: `${firstName} ${lastName}`
         });
-        await admin.auth().setCustomUserClaims(userRecord.uid, { role, type: 'SYSTEM' });
+        await admin.auth().setCustomUserClaims(userRecord.uid, { role: roleNorm, type: 'SYSTEM' });
         await admin.firestore().collection("system_users").doc(userRecord.uid).set({
             uid: userRecord.uid,
             firstName,
             lastName,
             email,
-            role,
+            role: roleNorm,
             empresaId: empresaId ?? 'bacarsa',
             status: 'ACTIVE',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -504,6 +505,33 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     catch (error) {
         throw new functions.https.HttpsError("internal", error.message);
     }
+});
+exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+    }
+    const targetUid = String(data?.uid ?? context.auth.uid).trim();
+    const db = admin.firestore();
+    if (targetUid !== context.auth.uid) {
+        const callerSnap = await db.collection('system_users').doc(context.auth.uid).get();
+        const callerRole = normalizeBackupRole(callerSnap.data()?.role);
+        const tokenRole = normalizeBackupRole(context.auth.token?.role);
+        const callerSuper = callerRole === 'SUPERADMIN' || callerRole === 'SUPER_ADMIN' ||
+            tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN';
+        if (!callerSuper) {
+            throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede sincronizar otros usuarios.');
+        }
+    }
+    const snap = await db.collection('system_users').doc(targetUid).get();
+    if (!snap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
+    }
+    const role = normalizeBackupRole(snap.data()?.role);
+    if (!role) {
+        throw new functions.https.HttpsError('failed-precondition', 'El usuario no tiene rol asignado.');
+    }
+    await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
+    return { ok: true, uid: targetUid, role };
 });
 function normalizeSystemRole(role) {
     return String(role ?? "").trim().toUpperCase().replace(/\s+/g, "_");
