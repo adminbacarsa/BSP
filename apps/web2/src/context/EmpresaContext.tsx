@@ -50,7 +50,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
     if (authEmpresaId === undefined) return;
     if (isSuperAdmin) {
       const saved =
-        typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
+        typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
       setEmpresaId(saved || authEmpresaId || '');
     } else {
       setEmpresaId(authEmpresaId || 'bacarsa');
@@ -61,7 +61,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   useEffect(() => {
     if (!isSuperAdmin || empresaId || empresas.length === 0) return;
     const saved =
-      typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
+      typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
     const pick = saved && empresas.some(e => e.id === saved) ? saved : empresas[0].id;
     setEmpresaId(pick);
   }, [isSuperAdmin, empresaId, empresas]);
@@ -115,7 +115,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
     if (!isSuperAdmin) return;
     setEmpresaId(id);
     try {
-      sessionStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, id);
+      localStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, id);
     } catch {
       /* ignore */
     }
