@@ -117,9 +117,11 @@ export default function EmpresasTab() {
     if (!deleteTarget) return;
     setDeleteStep('deleting');
     try {
+      // Cambiar empresa activa ANTES de borrar para que el listener se desuscriba
+      // antes de recibir la notificación de eliminación (evita la auto-recreación).
+      if (empresaId === deleteTarget.id) switchEmpresa('bacarsa');
       await eliminarEmpresaYDatos(deleteTarget.id, p => setDeleteProgreso(p));
       toast.success(`Empresa "${deleteTarget.name}" y todos sus datos eliminados`);
-      if (empresaId === deleteTarget.id) switchEmpresa('bacarsa');
       cerrarEliminar();
     } catch (err: any) {
       toast.error(err?.message || 'Error al eliminar');

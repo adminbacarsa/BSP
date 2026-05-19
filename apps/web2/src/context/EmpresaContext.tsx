@@ -85,13 +85,18 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
           }
           setEmpresa({ id: snap.id, name: defaultName, ...data });
         } else {
-          // Documento no existe — lo creamos automáticamente
+          // Documento no existe.
+          // Solo auto-crear para 'bacarsa' (empresa default del sistema).
+          // Para otras empresas NO recrear: si el doc fue borrado deliberadamente
+          // el listener no debe resucitarlo.
           setEmpresa({ id: empresaId, name: defaultName });
-          setDoc(
-            doc(db, 'empresas', empresaId),
-            { name: defaultName, active: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-            { merge: true }
-          ).catch(() => {});
+          if (empresaId === 'bacarsa') {
+            setDoc(
+              doc(db, 'empresas', empresaId),
+              { name: defaultName, active: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+              { merge: true }
+            ).catch(() => {});
+          }
         }
         setLoadingEmpresa(false);
       },
