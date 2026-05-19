@@ -28,6 +28,7 @@ exports.buildEmpresaMetricsSnapshotForPrompt = buildEmpresaMetricsSnapshotForPro
 exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
+const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const assistantLiquidacionAggregate_1 = require("./assistantLiquidacionAggregate");
 const assistantSlaHours_1 = require("./assistantSlaHours");
 const AR_DAY_OFFSET = '-03:00';
@@ -219,7 +220,7 @@ function enrichOperacionesDiaRowsWithNombres(rows, nombres) {
         return { ...r, empleado_etiqueta: etiqueta };
     });
 }
-async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objectiveMap, fecha) {
+async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objectiveMap, fecha, scopeEmpresa) {
     const objectiveIds = new Set(objectiveMap.keys());
     const { start, end } = monitorWideWindow(fecha);
     let qsnap;
@@ -335,16 +336,16 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objective
     let outMapped = rows.map(({ shiftTsMs, ...rest }) => rest);
     const empIds = [...new Set(outMapped.map((r) => r.employee_firestore_id).filter(Boolean))];
     if (empIds.length > 0 && empresaId) {
-        const nombresMap = await empleadosNombresBatch(db, empresaId, empIds);
+        const nombresMap = await empleadosNombresBatch(db, empresaId, empIds, scopeEmpresa);
         outMapped = enrichOperacionesDiaRowsWithNombres(outMapped, nombresMap);
     }
     return { rows: outMapped, truncadoConsultaTurnos: qsnap.size >= exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT };
 }
-async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
+async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId, scopeEmpresa) {
     const out = new Map();
     const filt = filterObjectiveId?.trim();
-    const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(480).get();
-    for (const d of snap.docs) {
+    const docs = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, empresaId, scopeEmpresa, 480);
+    for (const d of docs) {
         const data = d.data();
         const clientName = String(data.name ?? '').trim() || d.id;
         const objetivos = data.objetivos;
@@ -371,11 +372,11 @@ async function objectivesMapForEmpresa(db, empresaId, filterObjectiveId) {
     }
     return out;
 }
-async function objectivesMapWithCoordsForEmpresa(db, empresaId, filterObjectiveId) {
+async function objectivesMapWithCoordsForEmpresa(db, empresaId, filterObjectiveId, scopeEmpresa) {
     const out = new Map();
     const filt = filterObjectiveId?.trim();
-    const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(480).get();
-    for (const d of snap.docs) {
+    const docs = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, empresaId, scopeEmpresa, 480);
+    for (const d of docs) {
         const data = d.data();
         const clientName = String(data.name ?? '').trim() || d.id;
         const objetivos = data.objetivos;
@@ -499,12 +500,12 @@ function empleadoEtiquetaPareceIdFirestore(etiqueta, empId) {
         return true;
     return e.length >= 10 && !/\s/.test(e) && /^[a-zA-Z0-9_-]+$/.test(e);
 }
-async function empleadosNombreMapEmpresa(db, empresaId) {
+async function empleadosNombreMapEmpresa(db, empresaId, scopeEmpresa) {
     const out = new Map();
-    if (!empresaId)
+    if (!empresaId && scopeEmpresa)
         return out;
-    const snap = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
-    for (const d of snap.docs) {
+    const docs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, empresaId, scopeEmpresa, 900);
+    for (const d of docs) {
         const row = d.data();
         const ln = String(row.lastName ?? '').trim();
         const fn = String(row.firstName ?? '').trim();
@@ -515,8 +516,8 @@ async function empleadosNombreMapEmpresa(db, empresaId) {
     }
     return out;
 }
-async function empleadosNombresBatch(db, empresaId, empIds) {
-    const out = await empleadosNombreMapEmpresa(db, empresaId);
+async function empleadosNombresBatch(db, empresaId, empIds, scopeEmpresa) {
+    const out = await empleadosNombreMapEmpresa(db, empresaId, scopeEmpresa);
     const uniq = [...new Set(empIds)].filter(Boolean);
     const missing = uniq.filter((id) => {
         const n = out.get(id);
@@ -532,7 +533,7 @@ async function empleadosNombresBatch(db, empresaId, empIds) {
             continue;
         const row = s.data();
         const empE = String(row.empresaId ?? '').trim();
-        if (empE && empresaId && empE.toLowerCase() !== empresaId.toLowerCase())
+        if (scopeEmpresa && empresaId && empE.toLowerCase() !== empresaId.toLowerCase())
             continue;
         const nombre = nombreLegibleFromEmpleadoRow(row);
         if (nombre)
@@ -615,7 +616,7 @@ function buildFrancoRetResumenPorObjetivo(rows) {
     }))
         .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'));
 }
-async function empleadosCoordsBatch(db, empresaId, empIds) {
+async function empleadosCoordsBatch(db, empresaId, empIds, scopeEmpresa) {
     const out = new Map();
     const uniq = [...new Set(empIds)].filter(Boolean);
     const refs = uniq.map((id) => db.collection('empleados').doc(id));
@@ -626,7 +627,7 @@ async function empleadosCoordsBatch(db, empresaId, empIds) {
             continue;
         const row = s.data();
         const empE = String(row.empresaId ?? '').trim();
-        if (empE && empE.toLowerCase() !== empresaId.toLowerCase())
+        if (scopeEmpresa && empresaId && empE.toLowerCase() !== empresaId.toLowerCase())
             continue;
         const lat = row.lat != null ? Number(row.lat) : NaN;
         const lng = row.lng != null ? Number(row.lng) : NaN;
@@ -654,18 +655,18 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
         lim = 80;
     lim = Math.max(8, Math.min(160, lim));
     const db = admin.firestore();
-    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined);
+    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined, ctx.scopeEmpresa);
     if (objectiveMap.size === 0) {
         return { fecha_referencia: fecha, nota: 'sin_objetivos_para_esta_empresa', cuenta: 0, filas: [] };
     }
     const { rows: rawCollected, truncado } = await collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo);
     const empIdsAll = [...new Set(rawCollected.map((r) => r.employee_firestore_id))];
-    const nombresMap = await empleadosNombresBatch(db, ctx.empresaId, empIdsAll);
+    const nombresMap = await empleadosNombresBatch(db, ctx.empresaId, empIdsAll, ctx.scopeEmpresa);
     const raw = enrichFrancoRetRowsWithNombres(rawCollected, nombresMap);
     const resumen_por_objetivo = buildFrancoRetResumenPorObjetivo(raw);
     const idCerc = String(args.id_objetivo_cercania ?? '').trim();
     if (idCerc) {
-        const withCoords = await objectivesMapWithCoordsForEmpresa(db, ctx.empresaId, undefined);
+        const withCoords = await objectivesMapWithCoordsForEmpresa(db, ctx.empresaId, undefined, ctx.scopeEmpresa);
         const target = withCoords.get(idCerc);
         if (!target) {
             return { error: 'objetivo_no_encontrado_en_empresa', hint: 'usar id Firestore del objetivo (CRM).' };
@@ -678,7 +679,7 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
             };
         }
         const empIds = [...new Set(raw.map((r) => r.employee_firestore_id))];
-        const coords = await empleadosCoordsBatch(db, ctx.empresaId, empIds);
+        const coords = await empleadosCoordsBatch(db, ctx.empresaId, empIds, ctx.scopeEmpresa);
         const scored = [];
         const sinCoord = [];
         for (const r of raw) {
@@ -797,9 +798,8 @@ function slaCampoFechaYmD(raw) {
     }
     return '';
 }
-async function empresaClientIdsSet(db, empresaId) {
-    const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(520).get();
-    return new Set(snap.docs.map((d) => d.id));
+async function empresaClientIdsSet(db, empresaId, scopeEmpresa) {
+    return (0, assistantEmpresaScope_1.empresaClientIdsSetScoped)(db, empresaId, scopeEmpresa);
 }
 function chunkIds(arr, size) {
     const out = [];
@@ -846,14 +846,13 @@ function arRangeTimestamps(desdeYsMmDd, hastaYsMmDd) {
         end: firestore_1.Timestamp.fromMillis(t1),
     };
 }
-async function assertEmployeeInEmpresa(db, employeeDocId, empresaId) {
+async function assertEmployeeInEmpresa(db, employeeDocId, empresaId, scopeEmpresa) {
     const ref = db.collection('empleados').doc(employeeDocId);
     const snap = await ref.get();
     if (!snap.exists)
         return null;
     const data = snap.data() || {};
-    const empE = String(data.empresaId ?? '').trim();
-    if (empresaId && empE && empE.toLowerCase() !== empresaId.toLowerCase())
+    if (!(0, assistantEmpresaScope_1.belongsToEmpresa)(data, empresaId, scopeEmpresa))
         return null;
     return data;
 }
@@ -876,10 +875,10 @@ async function ejecutarBuscarEmpleadosPorNombre(ctx, args) {
         limite = 8;
     limite = Math.min(15, limite);
     const db = admin.firestore();
-    const snap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(400).get();
+    const empDocs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 400);
     const needle = norm(textoRaw.replace(/,/g, ' ').replace(/\s+/g, ' '));
     const out = [];
-    for (const d of snap.docs) {
+    for (const d of empDocs) {
         const data = d.data();
         const hay = buildEmpleadoSearchHaystack(data);
         if (!hay)
@@ -931,9 +930,9 @@ async function ejecutarListadoEmpleadosEmpresa(ctx, args) {
     const needle = filtroRaw.length >= 2 ? norm(filtroRaw.replace(/,/g, ' ').replace(/\s+/g, ' ')) : '';
     const soloPanel = args.solo_activos_nomina_panel === true;
     const db = admin.firestore();
-    const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+    const qsnap = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 900);
     const rows = [];
-    for (const d of qsnap.docs) {
+    for (const d of qsnap) {
         const data = d.data();
         if (soloPanel && !esEmpleadoNominaTarjetaDashboard(data.status))
             continue;
@@ -960,7 +959,7 @@ async function ejecutarListadoEmpleadosEmpresa(ctx, args) {
     rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'es', { sensitivity: 'base' }));
     const sliced = rows.slice(0, limite);
     const truncadoLista = rows.length > limite;
-    const truncadoFirestore = qsnap.size >= 900;
+    const truncadoFirestore = qsnap.length >= 900;
     return {
         filtro_texto_usado: filtroRaw || null,
         solo_activos_nomina_panel: soloPanel,
@@ -988,7 +987,7 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
         limite = 12;
     limite = Math.min(20, limite);
     const db = admin.firestore();
-    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const snap = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 480);
     const out = [];
     const pushObj = (clientDocId, clientName, oid, oname, o) => {
         const lat = o?.lat != null ? Number(o.lat) : NaN;
@@ -1002,7 +1001,7 @@ async function ejecutarBuscarObjetivosPorNombre(ctx, args) {
             tiene_coordenadas: has,
         });
     };
-    for (const d of snap.docs) {
+    for (const d of snap) {
         const data = d.data();
         const clientName = String(data.name ?? '').trim() || d.id;
         const objetivosRaw = data.objetivos ?? data.objectives;
@@ -1055,12 +1054,12 @@ async function ejecutarContarClientesEmpresa(ctx, _args) {
         return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
     }
     const db = admin.firestore();
-    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const snap = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 480);
     let activos = 0;
     let inactivos = 0;
     let objetivosTotal = 0;
     const muestraActivos = [];
-    for (const d of snap.docs) {
+    for (const d of snap) {
         const data = d.data();
         const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
         const inactivo = st === 'INACTIVO';
@@ -1080,7 +1079,7 @@ async function ejecutarContarClientesEmpresa(ctx, _args) {
         cuenta_clientes_inactivos: inactivos,
         cuenta_total_clientes: activos + inactivos,
         cuenta_objetivos_embebidos_en_clientes: objetivosTotal,
-        truncado_loteFirestore_480: snap.size >= 480,
+        truncado_loteFirestore_480: snap.length >= 480,
         muestra_primeros_clientes_activos: muestraActivos,
         nota_tras_herramienta: 'Respondé cuenta_clientes_activos (o total si preguntan todos) en la primera oración. Para **lista completa** de nombres usá **listado_clientes_empresa**, no esta muestra de 10.',
     };
@@ -1095,11 +1094,11 @@ async function ejecutarListadoClientesEmpresa(ctx, args) {
     limite = Math.min(120, limite);
     const soloActivos = args.solo_activos !== false;
     const db = admin.firestore();
-    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const snap = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 480);
     const rows = [];
     let activos = 0;
     let inactivos = 0;
-    for (const d of snap.docs) {
+    for (const d of snap) {
         const data = d.data();
         const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
         const inactivo = st === 'INACTIVO';
@@ -1125,7 +1124,7 @@ async function ejecutarListadoClientesEmpresa(ctx, args) {
         cuenta_en_resultado: sliced.length,
         muestra_clientes: sliced.map((r) => ({ nombre: r.nombre, status: r.status })),
         truncado_por_limite_muestra: rows.length > limite,
-        truncado_loteFirestore_480: snap.size >= 480,
+        truncado_loteFirestore_480: snap.length >= 480,
         nota_tras_herramienta: 'Listá **todos** los nombres de muestra_clientes en orden alfabético. Si cuenta_en_resultado < cuenta_clientes_activos, decí cuántos faltan por límite del chat; no digas «lista completa» si truncado_por_limite_muestra.',
     };
 }
@@ -1199,13 +1198,13 @@ async function ejecutarAuditarCompletitudDatosClientesEmpresa(ctx, args) {
     const soloActivos = args.solo_activos !== false;
     const filtroCliente = String(args.texto_cliente ?? '').trim().toLowerCase();
     const db = admin.firestore();
-    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const snap = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 480);
     const rows = [];
     let activos = 0;
     let inactivos = 0;
     let completos = 0;
     let incompletos = 0;
-    for (const d of snap.docs) {
+    for (const d of snap) {
         const data = d.data();
         const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
         const inactivo = st === 'INACTIVO';
@@ -1262,7 +1261,7 @@ async function ejecutarAuditarCompletitudDatosClientesEmpresa(ctx, args) {
         advertencias_objetivos_no_bloquean: 'Objetivos sin dirección o sin GPS se listan como advertencia; no impiden marcar al cliente como completo.',
         clientes_incompletos: muestraIncompletos,
         truncado_incompletos: incompletosRows.length > limite,
-        truncado_loteFirestore_480: snap.size >= 480,
+        truncado_loteFirestore_480: snap.length >= 480,
         pasos_completar_en_crm: 'Clientes y Objetivos → elegir cliente → Datos fiscales (CUIT, razón social, contacto) → pestaña Objetivos (nombre, dirección, GPS).',
         nota_tras_herramienta: 'Respondé cuántos completos vs incompletos. Listá **todos** los de clientes_incompletos con campos_faltantes. Si cuenta_incompletos=0, decí que están completos según criterios CRM. Indicá pasos_completar_en_crm si hay faltantes.',
     };
@@ -1279,9 +1278,9 @@ async function ejecutarListarObjetivosCliente(ctx, args) {
         limite = 40;
     limite = Math.min(60, limite);
     const db = admin.firestore();
-    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const snap = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 480);
     const matches = [];
-    for (const d of snap.docs) {
+    for (const d of snap) {
         const data = d.data();
         const clientName = String(data.name ?? '').trim() || d.id;
         if (!clientHaystackMatchesNeedle(textoRaw, clientName))
@@ -1350,7 +1349,7 @@ async function ejecutarConsultarTurnosEmpleado(ctx, args) {
         return { error: 'falta_id_firestore_empleado_primero_usar_buscar_empleados' };
     }
     const db = admin.firestore();
-    const empRow = await assertEmployeeInEmpresa(db, empId, ctx.empresaId);
+    const empRow = await assertEmployeeInEmpresa(db, empId, ctx.empresaId, ctx.scopeEmpresa);
     if (!empRow)
         return { error: 'empleado_inexistente_o_fuera_de_empresa' };
     let desde = String(args.fecha_desde ?? '').trim();
@@ -1580,7 +1579,7 @@ async function ejecutarResumenHorasEmpleadoPeriodo(ctx, args) {
         return { error: 'falta_id_firestore_empleado_primero_usar_buscar_empleados' };
     }
     const db = admin.firestore();
-    const empRow = await assertEmployeeInEmpresa(db, empId, ctx.empresaId);
+    const empRow = await assertEmployeeInEmpresa(db, empId, ctx.empresaId, ctx.scopeEmpresa);
     if (!empRow)
         return { error: 'empleado_inexistente_o_fuera_de_empresa' };
     const desde = String(args.fecha_desde ?? '').trim();
@@ -1709,7 +1708,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
         return { error: e?.message ?? 'fecha_invalida' };
     }
     const db = admin.firestore();
-    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj, ctx.scopeEmpresa);
     if (objectiveMap.size === 0) {
         return {
             fecha_referencia: fecha,
@@ -1721,7 +1720,7 @@ async function ejecutarResumenPresenciasObjetivosDia(ctx, args) {
     let visibleRows;
     let truncadoConsultaTurnos;
     try {
-        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha));
+        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha, ctx.scopeEmpresa));
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1803,7 +1802,7 @@ async function ejecutarListadoTurnosOperativosDia(ctx, args) {
     const db = admin.firestore();
     let objectiveMap;
     try {
-        objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj);
+        objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj, ctx.scopeEmpresa);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1820,7 +1819,7 @@ async function ejecutarListadoTurnosOperativosDia(ctx, args) {
     let visibleRows;
     let truncadoConsultaTurnos;
     try {
-        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha));
+        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha, ctx.scopeEmpresa));
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1861,7 +1860,7 @@ async function ejecutarContarServiciosSlaVigentesEmpresa(ctx, args) {
         return { error: e?.message ?? 'fecha_invalida' };
     }
     const db = admin.firestore();
-    const clientIds = await empresaClientIdsSet(db, ctx.empresaId);
+    const clientIds = await empresaClientIdsSet(db, ctx.empresaId, ctx.scopeEmpresa);
     if (clientIds.size === 0) {
         return {
             fecha_referencia: fecha,
@@ -1946,8 +1945,8 @@ async function ejecutarContarServiciosSlaVigentesEmpresa(ctx, args) {
         nota_tras_herramienta: 'Respondé con cuenta_para_tarjeta_servicios_activos_del_mes cuando la pregunta sea «cuántos servicios activos» como en el panel o la tarjeta del mes (coincide con el KPI del módulo Servicios). Usá cuenta_objetivos_distintos_con_sla_en_ese_mes si hablan de «objetivos» o tarjetas por sitio. Usá cuenta_contratos_vigentes_en_el_dia_referencia solo si piden explícitamente vigentes «hoy» / en esa fecha con sentido contractual estricto. No inventes cifras. Si listan nombres de contratos o SLA, usá solo los textos del array muestra_contratos_en_mes (campos cliente y objetivo); si la muestra no alcanza, decí que hay más y que vean Servicios y SLA; no inventes títulos comerciales.',
     };
 }
-async function loadServiciosSlaDocsEmpresa(db, empresaId) {
-    const clientIds = await empresaClientIdsSet(db, empresaId);
+async function loadServiciosSlaDocsEmpresa(db, empresaId, scopeEmpresa) {
+    const clientIds = await empresaClientIdsSet(db, empresaId, scopeEmpresa);
     if (clientIds.size === 0)
         return [];
     const idList = Array.from(clientIds);
@@ -1998,12 +1997,12 @@ async function ejecutarResumenHorasObjetivoSlaPeriodo(ctx, args) {
         objectiveId = String(coincidencias[0].id_objetivo ?? '').trim();
     }
     const db = admin.firestore();
-    const allSla = await loadServiciosSlaDocsEmpresa(db, ctx.empresaId);
+    const allSla = await loadServiciosSlaDocsEmpresa(db, ctx.empresaId, ctx.scopeEmpresa);
     const matches = [];
     const needleNorm = textoObj.length >= 2 ? norm(textoObj.replace(/,/g, ' ')) : '';
     let metaNameNorm = '';
     if (objectiveId) {
-        const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId);
+        const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId, ctx.scopeEmpresa);
         metaNameNorm = norm(String(objMeta.get(objectiveId)?.name ?? ''));
     }
     const slaMatchesObjective = (row) => {
@@ -2124,7 +2123,7 @@ async function ejecutarResumenHorasObjetivoSlaPeriodo(ctx, args) {
     const vendidas = pick.vendidas.horas_vendidas_mes;
     const pendiente = Math.round(Math.max(0, vendidas - horasPlanificadas) * 10) / 10;
     const exceso = Math.round(Math.max(0, horasPlanificadas - vendidas) * 10) / 10;
-    const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId);
+    const objMeta = await objectivesMapForEmpresa(db, ctx.empresaId, objectiveId, ctx.scopeEmpresa);
     const meta = objMeta.get(objectiveId);
     return {
         objetivo: {
@@ -2302,7 +2301,7 @@ async function ejecutarResumenHorasLiquidacionEmpresaPeriodo(ctx, args) {
         return { error: e instanceof Error ? e.message : 'fecha_invalida' };
     }
     try {
-        const agg = await (0, assistantLiquidacionAggregate_1.aggregateLiquidacionEmpresaPeriodo)(admin.firestore(), ctx.empresaId, fechaDesde, fechaHasta);
+        const agg = await (0, assistantLiquidacionAggregate_1.aggregateLiquidacionEmpresaPeriodo)(admin.firestore(), ctx.empresaId, fechaDesde, fechaHasta, ctx.scopeEmpresa);
         return {
             ...agg,
             mes_yyyy_mm: fechaDesde.slice(0, 7),
@@ -2356,9 +2355,9 @@ async function ejecutarListadoEmpleadosHorasPlanificadasUmbral(ctx, args) {
         return { error: e instanceof Error ? e.message : 'fecha_invalida' };
     }
     const db = admin.firestore();
-    const empSnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+    const empSnap = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 900);
     const empMap = new Map();
-    for (const d of empSnap.docs) {
+    for (const d of empSnap) {
         const data = d.data();
         const ln = String(data.lastName ?? '').trim();
         const fn = String(data.firstName ?? '').trim();
@@ -2383,8 +2382,7 @@ async function ejecutarListadoEmpleadosHorasPlanificadasUmbral(ctx, args) {
             continue;
         if (row.isUnassigned === true)
             continue;
-        const empE = String(row.empresaId ?? '').trim();
-        if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase())
+        if (!(0, assistantEmpresaScope_1.turnoRowBelongsToEmpresa)(row, ctx.empresaId, ctx.scopeEmpresa))
             continue;
         const empId = String(row.employeeId ?? '').trim();
         if (!empId || empId === 'VACANTE' || !empMap.has(empId))
@@ -2485,9 +2483,9 @@ async function ejecutarListadoEmpleadosSinTurnosPlanificados(ctx, args) {
     }
     const soloPanel = args.solo_activos_nomina_panel === true;
     const db = admin.firestore();
-    const empSnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+    const empSnap = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 900);
     const activos = [];
-    for (const d of empSnap.docs) {
+    for (const d of empSnap) {
         const data = d.data();
         const st = data.status;
         if (soloPanel) {
@@ -2520,8 +2518,7 @@ async function ejecutarListadoEmpleadosSinTurnosPlanificados(ctx, args) {
         const row = doc.data();
         if (!shiftCountsAsPlanificacionAsignada(row))
             continue;
-        const empE = String(row.empresaId ?? '').trim();
-        if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase())
+        if (!(0, assistantEmpresaScope_1.turnoRowBelongsToEmpresa)(row, ctx.empresaId, ctx.scopeEmpresa))
             continue;
         const empId = String(row.employeeId ?? '').trim();
         if (empId)
@@ -2549,7 +2546,7 @@ async function ejecutarListadoEmpleadosSinTurnosPlanificados(ctx, args) {
         muestra_empleados_sin_turno: muestra,
         truncado_por_limite_muestra: sinTurno.length > limite,
         truncado_consulta_turnos_limite: qsnap.size >= TURNOS_PLANIFICADOS_UMBRAL_LIM,
-        truncado_loteFirestore_900: empSnap.size >= 900,
+        truncado_loteFirestore_900: empSnap.length >= 900,
         criterio: 'Legajos activos sin ningún turno asignado en el rango (incluye F/V/L como planificación; excluye vacantes y cancelados).',
         nota_tras_herramienta: 'Respondé cuenta_sin_ningun_turno vs cuenta_legajos_activos_evaluados. Listá todos los de muestra_empleados_sin_turno. Si 0, decilo claro. Para cargar turnos orientá a Planificación y Turnos.',
     };
@@ -2581,16 +2578,13 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
     }
     const ym = fechaRef.slice(0, 7);
     const db = admin.firestore();
-    const qsnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+    const qsnap = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 900);
     let activosPanelNomina = 0;
     let activosRrhhAmplio = 0;
     let inactivosExplicitos = 0;
     const muestra = [];
-    for (const d of qsnap.docs) {
+    for (const d of qsnap) {
         const row = d.data();
-        const empE = String(row.empresaId ?? '').trim();
-        if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase())
-            continue;
         const st = row.status;
         if (esEmpleadoNominaTarjetaDashboard(st))
             activosPanelNomina += 1;
@@ -2617,7 +2611,7 @@ async function ejecutarContarEmpleadosPlantillaEmpresa(ctx, args) {
         cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado: activosRrhhAmplio,
         cuenta_legajos_inactivos_explicitos: inactivosExplicitos,
         cuenta_total_en_lote: activosRrhhAmplio + inactivosExplicitos,
-        truncado_loteFirestore_900: qsnap.size >= 900,
+        truncado_loteFirestore_900: qsnap.length >= 900,
         criterios: {
             panel_dashboard: 'cuenta_para_tarjeta_panel_empleados_nomina = legajos con status exactamente activo/active/activa (misma regla que tarjeta EMPLEADOS EN NÓMINA del panel).',
             rrhh_lista: 'cuenta_legajos_operativos_criterio_rrhh_incluye_sin_estado = activo/active o vacío u otros no marcados inactivo (lista RRHH).',

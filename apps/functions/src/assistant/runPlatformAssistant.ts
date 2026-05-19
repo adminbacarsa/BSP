@@ -22,6 +22,7 @@ import {
   looksLikeFalseEmptyTurnosReply,
 } from './assistantDeterministicRouter';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
+import { resolveAssistantEmpresaScope } from './assistantEmpresaScope';
 
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
@@ -330,9 +331,16 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   const clientDeploy = normalizeClientDeploy(payload.clientDeploy);
   const deployContextBlock = buildDeployContextBlock(clientDeploy);
 
+  let scopeEmpresa = false;
+  if (empresaForTools.trim()) {
+    const scopeInfo = await resolveAssistantEmpresaScope(admin.firestore(), empresaForTools);
+    scopeEmpresa = scopeInfo.scopeEmpresa;
+  }
+
   const toolCtx: AssistantToolContext = {
     persona: profile.persona,
     empresaId: empresaForTools,
+    scopeEmpresa,
     readableModuleKeys: profile.readableModuleKeys,
     selfEmployeeFirestoreId: selfEmployeeId,
     referenceDateYsMmDd: referenceYsMmDd,

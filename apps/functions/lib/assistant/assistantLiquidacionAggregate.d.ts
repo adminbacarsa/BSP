@@ -28,4 +28,4 @@ export type LiquidacionEmpresaAggregate = {
         al_100_ft: number;
     }>;
 };
-export declare function aggregateLiquidacionEmpresaPeriodo(db: FirebaseFirestore.Firestore, empresaId: string, fechaDesde: string, fechaHasta: string): Promise<LiquidacionEmpresaAggregate>;
+export declare function aggregateLiquidacionEmpresaPeriodo(db: FirebaseFirestore.Firestore, empresaId: string, fechaDesde: string, fechaHasta: string, scopeEmpresa: boolean): Promise<LiquidacionEmpresaAggregate>;

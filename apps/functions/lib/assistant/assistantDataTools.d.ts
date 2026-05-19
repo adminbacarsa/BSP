@@ -3,6 +3,7 @@ export declare const ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
 export type AssistantToolContext = {
     persona: AssistantPersona;
     empresaId: string;
+    scopeEmpresa: boolean;
     readableModuleKeys: string[];
     selfEmployeeFirestoreId: string | null;
     referenceDateYsMmDd: string;

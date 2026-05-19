@@ -9,6 +9,7 @@ const assistantDataTools_1 = require("./assistantDataTools");
 const assistantToolDeclarations_1 = require("./assistantToolDeclarations");
 const assistantDeterministicRouter_1 = require("./assistantDeterministicRouter");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");
+const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
 
@@ -256,9 +257,15 @@ async function runPlatformAssistant(uid, payload) {
     const referenceYsMmDd = clientYmd || serverTodayCordobaYsMmDd();
     const clientDeploy = normalizeClientDeploy(payload.clientDeploy);
     const deployContextBlock = buildDeployContextBlock(clientDeploy);
+    let scopeEmpresa = false;
+    if (empresaForTools.trim()) {
+        const scopeInfo = await (0, assistantEmpresaScope_1.resolveAssistantEmpresaScope)(admin.firestore(), empresaForTools);
+        scopeEmpresa = scopeInfo.scopeEmpresa;
+    }
     const toolCtx = {
         persona: profile.persona,
         empresaId: empresaForTools,
+        scopeEmpresa,
         readableModuleKeys: profile.readableModuleKeys,
         selfEmployeeFirestoreId: selfEmployeeId,
         referenceDateYsMmDd: referenceYsMmDd,

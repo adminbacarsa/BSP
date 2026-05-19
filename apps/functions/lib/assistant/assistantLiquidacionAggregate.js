@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.aggregateLiquidacionEmpresaPeriodo = aggregateLiquidacionEmpresaPeriodo;
 const firestore_1 = require("firebase-admin/firestore");
+const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const TRUE_NON_WORK = new Set(['F', 'FF', 'FP', 'AA', 'FT']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
@@ -65,17 +66,17 @@ const getNightDuration = (start, end) => {
 const clampStart = (real, plan, tolMin = 5) => (real.getTime() - plan.getTime()) / 60000 <= tolMin ? plan : real;
 const clampEnd = (real, plan, tolMin = 5) => Math.abs((real.getTime() - plan.getTime()) / 60000) <= tolMin ? plan : real;
 const round = (n) => Math.round(n * 10) / 10;
-async function aggregateLiquidacionEmpresaPeriodo(db, empresaId, fechaDesde, fechaHasta) {
+async function aggregateLiquidacionEmpresaPeriodo(db, empresaId, fechaDesde, fechaHasta, scopeEmpresa) {
     const { start, end } = arRangeTimestamps(fechaDesde, fechaHasta);
-    const empSnap = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
+    const empDocs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, empresaId, scopeEmpresa, 900);
     const empMap = new Map();
-    empSnap.forEach((d) => {
+    for (const d of empDocs) {
         const data = d.data();
         const name = String(data.name ?? '').trim() ||
             `${String(data.lastName ?? '').trim()}, ${String(data.firstName ?? '').trim()}`.trim() ||
             'Sin nombre';
         empMap.set(d.id, name);
-    });
+    }
     const holidays = new Set();
     const holSnap = await db.collection('feriados').limit(400).get();
     holSnap.forEach((d) => {
@@ -119,7 +120,7 @@ async function aggregateLiquidacionEmpresaPeriodo(db, empresaId, fechaDesde, fec
         const empId = String(data.employeeId ?? '').trim();
         if (!empId || empId === 'VACANTE' || !empMap.has(empId))
             continue;
-        if (data.empresaId && String(data.empresaId) !== empresaId)
+        if (!(0, assistantEmpresaScope_1.turnoRowBelongsToEmpresa)(data, empresaId, scopeEmpresa))
             continue;
         const code = String(data.code ?? '').trim().toUpperCase();
         const status = String(data.status ?? '').toUpperCase();

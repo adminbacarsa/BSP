@@ -3,6 +3,7 @@
  */
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { queryEmpleadosDocsScoped, turnoRowBelongsToEmpresa } from './assistantEmpresaScope';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const TRUE_NON_WORK = new Set(['F', 'FF', 'FP', 'AA', 'FT']);
@@ -109,19 +110,20 @@ export async function aggregateLiquidacionEmpresaPeriodo(
   empresaId: string,
   fechaDesde: string,
   fechaHasta: string,
+  scopeEmpresa: boolean,
 ): Promise<LiquidacionEmpresaAggregate> {
   const { start, end } = arRangeTimestamps(fechaDesde, fechaHasta);
 
-  const empSnap = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
+  const empDocs = await queryEmpleadosDocsScoped(db, empresaId, scopeEmpresa, 900);
   const empMap = new Map<string, string>();
-  empSnap.forEach((d) => {
+  for (const d of empDocs) {
     const data = d.data();
     const name =
       String(data.name ?? '').trim() ||
       `${String(data.lastName ?? '').trim()}, ${String(data.firstName ?? '').trim()}`.trim() ||
       'Sin nombre';
     empMap.set(d.id, name);
-  });
+  }
 
   const holidays = new Set<string>();
   const holSnap = await db.collection('feriados').limit(400).get();
@@ -178,7 +180,7 @@ export async function aggregateLiquidacionEmpresaPeriodo(
 
     const empId = String(data.employeeId ?? '').trim();
     if (!empId || empId === 'VACANTE' || !empMap.has(empId)) continue;
-    if (data.empresaId && String(data.empresaId) !== empresaId) continue;
+    if (!turnoRowBelongsToEmpresa(data, empresaId, scopeEmpresa)) continue;
 
     const code = String(data.code ?? '').trim().toUpperCase();
     const status = String(data.status ?? '').toUpperCase();
