@@ -50,10 +50,5 @@ service firebase.storage {
     match /libro_guardia/{objectiveId}/{fileName} {
       allow read, write: if isSignedIn();
     }
-
-    match /alerts/{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if false;
-    }
   }
 }

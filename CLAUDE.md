@@ -86,7 +86,6 @@ cronoapp/
 │   │       ├── auth/          ← Gestión de usuarios Auth
 │   │       ├── data-management/ ← CRUD empleados, clientes, etc.
 │   │       └── scheduling/    ← Lógica de turnos y patrones
-│   └── nvr-agent/             ← Agente Java para cámaras NVR
 ├── firebase.json              ← Config Firebase + emuladores
 ├── firestore.rules            ← Reglas de seguridad Firestore
 ├── CLAUDE.md                  ← Este archivo

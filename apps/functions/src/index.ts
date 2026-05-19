@@ -986,8 +986,6 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
   return { success: true, results };
 });
 
-// NVR removido — las funciones que no se pueden borrar de GCP quedan huérfanas en la nube.
-
 // =========================================================
 // 14. ACCESO AL PORTAL DE CLIENTES
 // =========================================================

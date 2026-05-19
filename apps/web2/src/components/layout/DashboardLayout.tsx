@@ -19,9 +19,6 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/dashboard'))       return 'Dashboard';
   if (pathname.startsWith('/admin/operaciones'))     return 'Operaciones | COSP';
   if (pathname.startsWith('/admin/planificacion'))   return 'Planificador';
-  if (pathname.startsWith('/admin/camera-routes'))   return 'NVR | Servidor';
-  if (pathname.startsWith('/admin/reportes-eventos-camaras')) return 'Reporte eventos';
-  if (pathname.startsWith('/admin/alertas-dashboard')) return 'Dashboard alertas';
   if (pathname.startsWith('/admin/crm'))             return 'CRM Clientes';
   if (pathname.startsWith('/admin/servicios'))       return 'Servicios';
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';

@@ -11,7 +11,6 @@ const ADMIN_PREFIXES: [string, string][] = [
   ['/admin/rrhh', 'RRHH'],
   ['/admin/planificacion', 'PLANNING'],
   ['/admin/operaciones', 'OPERATIONS'],
-  ['/admin/camera-routes', 'OPERATIONS'],
   ['/admin/dashboard', 'DASHBOARD'],
   ['/admin', 'DASHBOARD'],
 ];
