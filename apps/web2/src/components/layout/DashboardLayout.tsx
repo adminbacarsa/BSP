@@ -12,7 +12,7 @@ import {
   Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
-import { applyCompanyTheme, removeCompanyTheme } from '@/lib/companyTheme';
+import { applyCompanyTheme } from '@/lib/companyTheme';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -178,13 +178,9 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     setIsHovered(false);
   }, [router.pathname]);
 
-  // Inyecta/revierte variables CSS de color de empresa + overrides Tailwind en páginas
+  // Inyecta variables CSS de color de empresa (indigo por default si no hay color configurado)
   useEffect(() => {
-    if (empresa?.primaryColor) {
-      applyCompanyTheme(empresa.primaryColor);
-    } else {
-      removeCompanyTheme();
-    }
+    applyCompanyTheme(empresa?.primaryColor || '#6366f1');
   }, [empresa?.primaryColor]);
 
   const handleLogout = async () => {
