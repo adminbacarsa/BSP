@@ -38,10 +38,26 @@ service firebase.storage {
         || roleLower.matches('super[_\\s-]*admin');
     }
 
+    function normalizedTokenRoleUpper() {
+      return tokenRoleLower().replace(' ', '_').upper();
+    }
+
+    function normalizedSystemRoleUpper() {
+      return isSystemUserDoc()
+        ? systemUserRoleLower().replace(' ', '_').upper()
+        : '';
+    }
+
     function isSuperAdmin() {
       return isSignedIn() && (
         isSuperAdminRole(tokenRoleLower())
-        || (isSystemUserDoc() && isSuperAdminRole(systemUserRoleLower()))
+        || normalizedTokenRoleUpper() == 'SUPERADMIN'
+        || normalizedTokenRoleUpper() == 'SUPER_ADMIN'
+        || (isSystemUserDoc() && (
+          isSuperAdminRole(systemUserRoleLower())
+          || normalizedSystemRoleUpper() == 'SUPERADMIN'
+          || normalizedSystemRoleUpper() == 'SUPER_ADMIN'
+        ))
       );
     }
 
@@ -54,7 +70,7 @@ service firebase.storage {
     }
 
     function validBackupJsonUpload(fileName) {
-      return fileName.matches('(?i).+\\.json$')
+      return fileName.matches('.*\\.json$')
         && request.resource.size < 512 * 1024 * 1024
         && (
           request.resource.contentType.matches('application/json.*')
@@ -78,7 +94,7 @@ service firebase.storage {
 
     match /backup-restore/{empresaId}/{jobId}/{fileName} {
       allow write: if canUploadBackupRestore(empresaId) && validBackupJsonUpload(fileName);
-      allow read: if false;
+      allow read: if canUploadBackupRestore(empresaId);
     }
 
     match /absences/{userId}/{fileName} {

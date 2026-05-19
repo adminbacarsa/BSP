@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions, storage } from '@/lib/firebase';
-import { ref as storageRef, uploadBytes, getMetadata } from 'firebase/storage';
+import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
@@ -192,7 +192,6 @@ export default function BackupTab() {
           : new Blob([await file.arrayBuffer()], { type: 'application/json' });
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, payload, { contentType: 'application/json' });
-      await getMetadata(fileRef);
 
       setRestoreModal({
         backup: null,
