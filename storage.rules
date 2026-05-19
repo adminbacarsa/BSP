@@ -11,10 +11,28 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/system_users/$(request.auth.uid));
     }
 
-    function isSuperAdminClaim() {
-      return isSignedIn() && request.auth.token.role in [
-        'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'superadmin'
-      ];
+    function systemUserRoleLower() {
+      return firestore.get(/databases/(default)/documents/system_users/$(request.auth.uid))
+        .data.get('role', '').lower();
+    }
+
+    function tokenRoleLower() {
+      return ('role' in request.auth.token)
+        ? request.auth.token.role.lower()
+        : '';
+    }
+
+    function isSuperAdminRole(roleLower) {
+      return roleLower == 'superadmin'
+        || roleLower == 'super_admin'
+        || roleLower == 'super admin';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        isSuperAdminRole(tokenRoleLower())
+        || (isSystemUserDoc() && isSuperAdminRole(systemUserRoleLower()))
+      );
     }
 
     function systemUserEmpresaId() {
@@ -22,20 +40,35 @@ service firebase.storage {
         .data.get('empresaId', '');
     }
 
+    function empresaIdsMatch(pathEmpresaId, profileEmpresaId) {
+      return pathEmpresaId.lower() == profileEmpresaId.lower();
+    }
+
+    function validBackupJsonUpload(fileName) {
+      return fileName.matches('(?i).+\\.json$')
+        && request.resource.size < 512 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('application/json.*')
+          || request.resource.contentType == 'application/octet-stream'
+          || request.resource.contentType == 'text/plain'
+          || request.resource.contentType == 'binary/octet-stream'
+        );
+    }
+
     function canUploadBackupRestore(empresaId) {
-      return isSystemUserDoc() && (
-        isSuperAdminClaim()
-        || empresaId == systemUserEmpresaId()
-        || empresaId == 'platform'
+      return isSignedIn() && (
+        isSuperAdmin()
+        || (
+          isSystemUserDoc() && (
+            empresaIdsMatch(empresaId, systemUserEmpresaId())
+            || empresaId == 'platform'
+          )
+        )
       );
     }
 
-    // Subida temporal de .json para restauración (solo admins; lectura vía Admin SDK en Functions).
     match /backup-restore/{empresaId}/{jobId}/{fileName} {
-      allow write: if canUploadBackupRestore(empresaId)
-        && fileName.matches('.*\\.json')
-        && request.resource.size < 512 * 1024 * 1024
-        && request.resource.contentType.matches('application/json.*');
+      allow write: if canUploadBackupRestore(empresaId) && validBackupJsonUpload(fileName);
       allow read: if false;
     }
 

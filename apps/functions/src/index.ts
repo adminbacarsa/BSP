@@ -1695,13 +1695,27 @@ export const gestionarVacantes = functions
 // =========================================================
 // BACKUP — Firestore → Google Drive
 // =========================================================
+function normalizeBackupRole(role: unknown): string {
+  return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+async function assertBackupCallableAllowed(context: functions.https.CallableContext): Promise<void> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+  }
+  const tokenRole = normalizeBackupRole(context.auth.token?.role);
+  if (tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN' || tokenRole === 'ADMIN') return;
+
+  const sysUser = await admin.firestore().collection('system_users').doc(context.auth.uid).get();
+  if (sysUser.exists) return;
+
+  throw new functions.https.HttpsError('permission-denied', 'Solo usuarios del panel de administración pueden usar backups.');
+}
+
 export const triggerBackup = functions
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
   .https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-    const role = context.auth.token.role as string;
-    const allowed = ['admin', 'superadmin', 'SuperAdmin'];
-    if (!allowed.includes(role)) throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
+    await assertBackupCallableAllowed(context);
 
     const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
     if (!folderId) throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
@@ -1748,11 +1762,7 @@ export const triggerBackup = functions
 export const restoreBackup = functions
   .runWith({ timeoutSeconds: 540, memory: '1GB' })
   .https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-    const role = context.auth.token.role as string;
-    if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
-      throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
-    }
+    await assertBackupCallableAllowed(context);
     const {
       driveFileId,
       storagePath,

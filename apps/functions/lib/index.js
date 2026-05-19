@@ -1386,15 +1386,25 @@ exports.gestionarVacantes = functions
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
     return null;
 });
+function normalizeBackupRole(role) {
+    return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+async function assertBackupCallableAllowed(context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+    }
+    const tokenRole = normalizeBackupRole(context.auth.token?.role);
+    if (tokenRole === 'SUPERADMIN' || tokenRole === 'SUPER_ADMIN' || tokenRole === 'ADMIN')
+        return;
+    const sysUser = await admin.firestore().collection('system_users').doc(context.auth.uid).get();
+    if (sysUser.exists)
+        return;
+    throw new functions.https.HttpsError('permission-denied', 'Solo usuarios del panel de administración pueden usar backups.');
+}
 exports.triggerBackup = functions
     .runWith({ timeoutSeconds: 540, memory: '512MB' })
     .https.onCall(async (data, context) => {
-    if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-    const role = context.auth.token.role;
-    const allowed = ['admin', 'superadmin', 'SuperAdmin'];
-    if (!allowed.includes(role))
-        throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
+    await assertBackupCallableAllowed(context);
     const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
     if (!folderId)
         throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
@@ -1438,12 +1448,7 @@ exports.triggerBackup = functions
 exports.restoreBackup = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB' })
     .https.onCall(async (data, context) => {
-    if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
-    const role = context.auth.token.role;
-    if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
-        throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
-    }
+    await assertBackupCallableAllowed(context);
     const { driveFileId, storagePath, fileName: uploadedFileName, mode, jobId, empresaId: claimedEmpresa, } = data;
     if (!driveFileId && !storagePath) {
         throw new functions.https.HttpsError('invalid-argument', 'driveFileId o storagePath requerido');

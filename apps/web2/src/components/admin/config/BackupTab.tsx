@@ -154,7 +154,11 @@ export default function BackupTab() {
       const jobStamp = Date.now();
       const safeName = file.name.replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'backup.json';
       const path = `backup-restore/${empresaId || 'platform'}/${jobStamp}/${safeName}`;
-      await uploadBytes(storageRef(storage, path), file, { contentType: 'application/json' });
+      const payload =
+        file.type === 'application/json'
+          ? file
+          : new Blob([await file.arrayBuffer()], { type: 'application/json' });
+      await uploadBytes(storageRef(storage, path), payload, { contentType: 'application/json' });
 
       setRestoreModal({
         backup: null,
@@ -164,7 +168,12 @@ export default function BackupTab() {
         platformImport,
       });
     } catch (e: any) {
-      setLastResult({ ok: false, msg: e?.message || 'Error al subir el backup' });
+      const code = String(e?.code ?? '');
+      let msg = e?.message || 'Error al subir el backup';
+      if (code.includes('storage/unauthorized') || /unauthorized/i.test(msg)) {
+        msg = `Sin permiso para subir el backup a la empresa «${empresaId}». Verificá que tu usuario esté en system_users y que, si no sos superadmin, tu perfil tenga empresaId=${empresaId}.`;
+      }
+      setLastResult({ ok: false, msg });
     } finally {
       setUploading(false);
       setProgress(null);
