@@ -316,15 +316,24 @@ async function runRestore(driveFileId, mode, jobId, opts = {}) {
     const payload = JSON.parse(fileRes.data);
     return runRestoreFromPayload(payload, fileName, mode, jobId, opts);
 }
+function getBackupStorageBucketName() {
+    const fromEnv = String(process.env.FIREBASE_STORAGE_BUCKET ?? process.env.GCLOUD_STORAGE_BUCKET ?? '').trim();
+    if (fromEnv)
+        return fromEnv;
+    const projectId = String(process.env.GCLOUD_PROJECT ?? process.env.GCP_PROJECT ?? 'comtroldata').trim();
+    return `${projectId}.firebasestorage.app`;
+}
 async function runRestoreFromStorage(storagePath, fileName, mode, jobId, opts = {}) {
-    const bucket = admin.storage().bucket();
-    const [buf] = await bucket.file(storagePath).download();
+    const bucket = admin.storage().bucket(getBackupStorageBucketName());
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+        throw new Error('El archivo de backup no está en Storage. Volvé a subir el JSON y confirmá la restauración de inmediato (si un intento anterior falló, hay que subirlo otra vez).');
+    }
+    const [buf] = await file.download();
     const payload = JSON.parse(buf.toString('utf8'));
-    try {
-        return await runRestoreFromPayload(payload, fileName, mode, jobId, opts);
-    }
-    finally {
-        bucket.file(storagePath).delete({ ignoreNotFound: true }).catch(() => undefined);
-    }
+    const result = await runRestoreFromPayload(payload, fileName, mode, jobId, opts);
+    await file.delete({ ignoreNotFound: true }).catch(() => undefined);
+    return result;
 }
 //# sourceMappingURL=restore.service.js.map

@@ -1886,6 +1886,9 @@ export const restoreBackup = functions
       if (/pertenece a otra empresa|plataforma completa/i.test(msg)) {
         throw new functions.https.HttpsError('permission-denied', msg);
       }
+      if (/no such object|no está en Storage/i.test(msg)) {
+        throw new functions.https.HttpsError('failed-precondition', msg);
+      }
       throw new functions.https.HttpsError('internal', msg);
     }
   });

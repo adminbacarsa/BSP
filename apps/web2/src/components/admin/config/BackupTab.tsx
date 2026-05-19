@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions, storage } from '@/lib/firebase';
-import { ref as storageRef, uploadBytes } from 'firebase/storage';
+import { ref as storageRef, uploadBytes, getMetadata } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
@@ -190,7 +190,9 @@ export default function BackupTab() {
         file.type === 'application/json'
           ? file
           : new Blob([await file.arrayBuffer()], { type: 'application/json' });
-      await uploadBytes(storageRef(storage, path), payload, { contentType: 'application/json' });
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, payload, { contentType: 'application/json' });
+      await getMetadata(fileRef);
 
       setRestoreModal({
         backup: null,
@@ -302,8 +304,8 @@ export default function BackupTab() {
       const d = res.data;
       setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored.toLocaleString()} docs en ${(d.durationMs/1000).toFixed(1)}s` });
       setRestoreModal(null);
-    } catch (e: any) {
-      setLastResult({ ok: false, msg: e?.message || 'Error al restaurar' });
+    } catch (e: unknown) {
+      setLastResult({ ok: false, msg: formatRestoreError(e) });
     } finally {
       unsub?.();
       setRestoring(false);
