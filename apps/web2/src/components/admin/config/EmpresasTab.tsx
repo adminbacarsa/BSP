@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, TriangleAlert } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -188,41 +188,66 @@ export default function EmpresasTab() {
             </button>
           </div>
 
+          {/* Filtro inactivas */}
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={() => setMostrarInactivas(v => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black border transition-colors ${mostrarInactivas ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'}`}>
+              {mostrarInactivas ? <Eye size={11} /> : <EyeOff size={11} />}
+              {mostrarInactivas ? 'Ocultar inactivas' : 'Mostrar inactivas'}
+            </button>
+          </div>
+
           {/* Lista */}
           <div className="space-y-2 mb-4">
             {empresas.length === 0 && (
               <p className="text-sm text-slate-400 font-medium py-4 text-center">Sin empresas registradas aún</p>
             )}
-            {empresas.map(e => (
-              <div
-                key={e.id}
-                onClick={() => switchEmpresa(e.id)}
-                className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                  e.id === empresaId
-                    ? 'bg-indigo-50 border-indigo-300 shadow-sm'
-                    : 'bg-slate-50 border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/50'
+            {empresas
+              .filter(e => mostrarInactivas || e.active !== false)
+              .map(e => (
+              <div key={e.id}
+                className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                  e.active === false ? 'opacity-50 bg-slate-50 border-slate-200' :
+                  e.id === empresaId ? 'bg-indigo-50 border-indigo-300 shadow-sm' : 'bg-slate-50 border-slate-200'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm text-white"
-                    style={{ backgroundColor: (e as any).primaryColor || (e.id === empresaId ? '#6366f1' : '#94a3b8') }}
-                  >
+                <div className="flex items-center gap-3 cursor-pointer flex-1 min-w-0" onClick={() => e.active !== false && switchEmpresa(e.id)}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm text-white shrink-0"
+                    style={{ backgroundColor: (e as any).primaryColor || '#94a3b8' }}>
                     {(e.name || e.id || '?').charAt(0).toUpperCase()}
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800">{e.name || e.id}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-800 truncate">{e.name || e.id}</p>
                     <p className="text-[10px] text-slate-400 font-mono">{e.id}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0 ml-2">
                   {(e as any).migracionCompleta && (
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hidden sm:flex items-center gap-1">
                       <CheckCircle2 size={10} /> Migrada
                     </span>
                   )}
-                  {e.id === empresaId && (
+                  {e.id === empresaId && e.active !== false && (
                     <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">Activa</span>
+                  )}
+                  {e.active === false && (
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Inactiva</span>
+                  )}
+                  {/* Toggle activo/inactivo */}
+                  {e.id !== 'bacarsa' && (
+                    <button onClick={() => handleToggleActivo(e)} disabled={toggling === e.id}
+                      title={e.active === false ? 'Reactivar empresa' : 'Desactivar empresa'}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-40">
+                      {toggling === e.id ? <Loader2 size={14} className="animate-spin" /> : e.active === false ? <Eye size={14} /> : <EyeOff size={14} />}
+                    </button>
+                  )}
+                  {/* Eliminar — solo si no es activa ni bacarsa */}
+                  {e.id !== 'bacarsa' && e.id !== empresaId && (
+                    <button onClick={() => abrirEliminar(e)}
+                      title="Eliminar empresa y todos sus datos"
+                      className="p-1.5 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
+                      <Trash2 size={14} />
+                    </button>
                   )}
                 </div>
               </div>
@@ -472,6 +497,99 @@ export default function EmpresasTab() {
           El <strong>SuperAdmin</strong> puede ver y cambiar entre todas las empresas desde el selector en el topbar.
         </p>
       </div>
+
+      {/* ── Modal eliminación ── */}
+      {deleteStep !== 'idle' && deleteTarget && (
+        <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+
+            {/* Step 1: advertencia */}
+            {deleteStep === 'confirm1' && (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                    <AlertTriangle size={20} className="text-rose-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">Eliminar empresa</p>
+                    <p className="text-xs text-slate-500">Esta acción <strong>no se puede deshacer</strong></p>
+                  </div>
+                </div>
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 space-y-1">
+                  <p className="text-xs font-black text-rose-700 uppercase tracking-wide mb-2">Se eliminará permanentemente:</p>
+                  {['Empresa: ' + deleteTarget.name, 'Turnos', 'Empleados', 'Clientes', 'Servicios SLA', 'Ausencias y novedades', 'Planificaciones'].map(item => (
+                    <p key={item} className="text-xs text-rose-600 flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full bg-rose-400 shrink-0" /> {item}
+                    </p>
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={cerrarEliminar} className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
+                  <button onClick={() => setDeleteStep('confirm2')}
+                    className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-black hover:bg-rose-700">
+                    Entiendo, continuar
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2: confirmar escribiendo el ID */}
+            {deleteStep === 'confirm2' && (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                    <Trash2 size={20} className="text-rose-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-800">Confirmación final</p>
+                    <p className="text-xs text-slate-500">Segunda validación requerida</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-600 mb-2">
+                    Escribí el ID de la empresa para confirmar: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-700">{deleteTarget.id}</code>
+                  </p>
+                  <input
+                    value={deleteConfirmInput}
+                    onChange={e => setDeleteConfirmInput(e.target.value)}
+                    placeholder={`Escribí: ${deleteTarget.id}`}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-rose-400"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={cerrarEliminar} className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
+                  <button
+                    onClick={handleEliminar}
+                    disabled={deleteConfirmInput.trim() !== deleteTarget.id}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-black hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 size={13} /> Eliminar todo
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 3: progreso */}
+            {deleteStep === 'deleting' && (
+              <>
+                <div className="flex items-center gap-3">
+                  <Loader2 size={22} className="animate-spin text-rose-500 shrink-0" />
+                  <p className="text-sm font-black text-slate-800">Eliminando datos...</p>
+                </div>
+                {deleteProgreso && (
+                  <div className="bg-slate-50 rounded-xl p-3 space-y-1">
+                    <p className="text-xs text-slate-600 font-medium">Colección: <strong>{deleteProgreso.coleccion}</strong></p>
+                    <p className="text-xs text-slate-500">{deleteProgreso.eliminados} documentos eliminados</p>
+                  </div>
+                )}
+                <p className="text-[10px] text-slate-400 text-center">No cerres esta ventana</p>
+              </>
+            )}
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
