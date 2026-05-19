@@ -36,8 +36,23 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'contar_clientes_empresa',
-        description: 'Cuenta clientes de la empresa en CRM (colección clients): activos, inactivos y total de objetivos/sedes embebidos. Usar para «cuántos clientes tenemos», «clientes activos».',
+        description: 'Cuenta clientes de la empresa en CRM (colección clients): activos, inactivos y total de objetivos/sedes embebidos. Usar para «cuántos clientes tenemos», «clientes activos». Para **listar nombres** (lista completa, todos los clientes) usá **listado_clientes_empresa**.',
         parameters: { type: generative_ai_1.SchemaType.OBJECT, properties: {}, required: [] },
+    },
+    {
+        name: 'listado_clientes_empresa',
+        description: 'Lista **todos** los nombres de clientes CRM de la empresa (activos por defecto). Usar para «qué clientes hay», «lista completa de clientes», «los demás clientes», «listado de todos los clientes». No confundir con contar_clientes_empresa (solo cuenta + muestra de 10).',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                solo_activos: {
+                    type: generative_ai_1.SchemaType.BOOLEAN,
+                    description: 'Si true (default), solo clientes activos.',
+                },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (default 120).' },
+            },
+            required: [],
+        },
     },
     {
         name: 'listar_objetivos_cliente',

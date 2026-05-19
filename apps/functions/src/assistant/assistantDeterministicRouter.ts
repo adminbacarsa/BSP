@@ -13,6 +13,7 @@ import {
   ejecutarListadoFrancoRetDia,
   ejecutarBuscarObjetivosPorNombre,
   ejecutarContarClientesEmpresa,
+  ejecutarListadoClientesEmpresa,
   ejecutarListarObjetivosCliente,
   ejecutarContarEmpleadosPlantillaEmpresa,
   formatListadoFrancoRetParaChat,
@@ -71,15 +72,32 @@ function addDaysToYmd(refYmd: string, days: number): string {
   return ymdToString(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
 }
 
-/** «solo casisa», «servicios activos de casisa», etc. */
+/** «solo casisa», «servicios activos de casisa», etc. — no «solo veo 10» ni «solo muestras». */
+function isFalsePositiveSlaClientFilter(name: string, fullNorm: string): boolean {
+  const n = normText(name);
+  if (/^\d+$/.test(n.replace(/\s/g, ''))) return true;
+  if (/\b(veo|muestras?|muestra|primeros?|listado|lista|demas|otros?|restantes|decime|dijiste|eran|faltan?)\b/.test(n)) {
+    return true;
+  }
+  if (/\b\d+\s*(clientes?|hs?|horas?)\b/.test(n)) return true;
+  if (/\bpor\s+que\b/.test(fullNorm)) return true;
+  return false;
+}
+
 function extractClientFilterFromQuery(t: string): string | null {
   const n = normText(t);
+  if (/\bsolo\s+(veo|muestras?|muestra|primeros?|los?\s+\d+\b)/.test(n)) return null;
+  if (/\bpor\s+que\s+solo\s+(muestras?|10|veo)\b/.test(n)) return null;
+
   const solo = n.match(
     /\bsolo\s+(?:los?\s+)?(?:servicios?\s+activos?\s+(?:de\s+)?)?([a-z0-9][a-z0-9\s.-]{2,40})/,
   );
   if (solo?.[1]) {
     const name = solo[1].trim();
-    if (!/^(servicios?|activos?|contratos?|de|del)$/i.test(name)) return name;
+    if (!/^(servicios?|activos?|contratos?|de|del)$/i.test(name) && !isFalsePositiveSlaClientFilter(name, n)) {
+      if (/\bservicios?\s+activos?\s+(?:de\s+)?/.test(n)) return name;
+      if (/^\s*solo\s+(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/.test(n)) return name;
+    }
   }
   const de = n.match(/\b(?:servicios?\s+activos?\s+)?(?:de|del)\s+(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/);
   if (de?.[1]) return de[1];
@@ -903,6 +921,7 @@ function shouldSkipDeterministicRouter(raw: string, recent: AssistantRecentMessa
   if (matchTurnosPlanificadosDiaIntent(t)) return false;
   if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   if (matchEmployeePlannedHoursThresholdFollowUp(t, recent)) return false;
+  if (matchClientListIntent(t, recent)) return false;
   if (resolveClientFilterFromQuery(t)) return false;
   if (matchWhoOnShiftTodayIntent(t)) return false;
   if (matchFrancoRetDiaIntent(t, recent)) return false;
@@ -958,8 +977,69 @@ function matchEmployeeCountIntent(
 }
 
 function matchClientCountIntent(t: string): boolean {
+  if (/\b(listado|lista|todos?\s+los?\s+clientes?|que\s+clientes?\s+hay|cuales?\s+son\s+los?\s+clientes?)\b/.test(t)) {
+    return false;
+  }
   if (!/\b(cuántos|cuantos|cuántas|cuantas|numero|número|total)\b/.test(t)) return false;
   return /\b(clientes?)\b/.test(t);
+}
+
+function recentClientListThread(recent: AssistantRecentMessage[]): boolean {
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+    const c = recent[i].content || '';
+    if (/\b\d+\s+clientes?\s+activos?/.test(c)) return true;
+    if (/\bclientes?\s+activos?\s+(?:en\s+)?(?:la\s+)?(?:plataforma|empresa|crm)/i.test(c)) return true;
+    if (/\b(primeros?\s+10|muestra.*clientes|lista completa de los clientes)/i.test(c)) return true;
+    if (/\bCORBLOCK|CORDOBA ATHLETIC|LOTERÍA-CASINOS|LOTERIA-CASINOS/.test(c)) return true;
+  }
+  return false;
+}
+
+function matchClientListIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (matchClientObjectivesIntent(t)) return false;
+  if (/\bobjetivos?\s+(?:de|del)\s+[a-z]/i.test(t)) return false;
+  if (
+    /\b(listado|lista)\s+(?:completa?\s+)?(?:de\s+)?(?:todos?\s+)?(?:los?\s+)?clientes?/.test(t) ||
+    /\b(todos?\s+los?\s+clientes?|clientes?\s+(?:activos?\s+)?(?:en\s+)?(?:la\s+)?(?:plataforma|empresa|crm)|que\s+clientes?\s+hay|cuales?\s+son\s+los?\s+clientes?|nombres?\s+de\s+(?:todos?\s+)?(?:los?\s+)?clientes?)/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\b(los?\s+demas|lista\s+completa|restantes|faltan?\s+(?:los?\s+)?otros|por\s+que\s+solo\s+(?:muestras?|10|veo)|solo\s+(?:veo|muestras?)\s+\d+)/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (recentClientListThread(recent)) {
+    if (/\b(demas|restantes|completa|otros|lista|listado|nombres?|faltan|21|10|muestras?)\b/.test(t)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function formatDeterministicClientListReply(data: Record<string, unknown>): string {
+  const activos = Number(data.cuenta_clientes_activos ?? 0);
+  const inactivos = Number(data.cuenta_clientes_inactivos ?? 0);
+  const lista = (data.muestra_clientes ?? []) as Array<{ nombre?: string; status?: string }>;
+  const trunc = data.truncado_por_limite_muestra === true || data.truncado_loteFirestore_480 === true;
+  const mostrados = Number(data.cuenta_en_resultado ?? lista.length);
+
+  let body = `Según **Firestore** (CRM), hay **${activos}** cliente(s) **activo(s)**`;
+  if (inactivos > 0) body += ` y **${inactivos}** inactivo(s)`;
+  body += `.\n\n**Listado${activos > mostrados ? ` (${mostrados} de ${activos} activos)` : ''}:**\n\n`;
+  for (const c of lista) {
+    const st = String(c.status ?? '').trim();
+    const tag = st && st.toUpperCase() !== 'ACTIVO' ? ` (${st})` : '';
+    body += `- **${String(c.nombre ?? '—')}**${tag}\n`;
+  }
+  if (trunc) {
+    body += `\n*Nota:* la lista está acotada en el chat; el detalle completo está en **Clientes y Objetivos**.\n`;
+  }
+  return body.trim();
 }
 
 function extractClientNameFromQuery(t: string): string | null {
@@ -1480,8 +1560,24 @@ export function looksLikeFalseEmptyTurnosReply(text: string): boolean {
   return /\b(planificad|manana|mañana|ayer|hoy|trunos?)\b/.test(t);
 }
 
-async function tryDeterministicCrmReply(t: string, toolCtx: AssistantToolContext): Promise<string | null> {
+async function tryDeterministicCrmReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[] = [],
+): Promise<string | null> {
   if (!canQueryClientsCrm(toolCtx)) return null;
+
+  if (matchClientListIntent(t, recent)) {
+    const r = await ejecutarListadoClientesEmpresa(toolCtx, { solo_activos: true, limite: 120 });
+    const err = String(r.error ?? '').trim();
+    if (err) {
+      if (err === 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar') {
+        return 'Tu perfil no tiene permiso para consultar **Clientes y Objetivos**. Necesitás lectura en ese módulo.';
+      }
+      return null;
+    }
+    return formatDeterministicClientListReply(r).slice(0, 7500);
+  }
 
   if (matchClientCountIntent(t)) {
     const r = await ejecutarContarClientesEmpresa(toolCtx, {});
@@ -1648,6 +1744,7 @@ async function tryDeterministicMultiSlaHoursReply(
   recent: AssistantRecentMessage[],
 ): Promise<string | null> {
   if (matchEmployeePlannedHoursThresholdIntent(t)) return null;
+  if (matchClientListIntent(t, recent)) return null;
 
   const pairsRaw = extractClienteObjetivoPairsFromRecent(recent);
   const clientFilter = resolveClientFilterFromQuery(t);
@@ -1802,7 +1899,7 @@ export async function tryDeterministicDataReply(
   }
 
   try {
-    const crm = await tryDeterministicCrmReply(t, toolCtx);
+    const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
     if (crm?.trim()) return crm.trim();
   } catch (e) {
     console.warn('[assistant] tryDeterministicCrmReply', e);
@@ -1856,7 +1953,7 @@ export async function tryDeterministicDataReply(
   const wantEmp = matchEmployeeCountIntent(t, mk, pathname, recent);
   const wantSla = matchSlaCountIntent(t);
   const wantOps = matchOpsDayAggregateIntent(t);
-  const wantClients = matchClientCountIntent(t);
+  const wantClients = matchClientCountIntent(t) || matchClientListIntent(t, recent);
   const wantClientObjs = matchClientObjectivesIntent(t);
 
   if (!wantEmp && !wantSla && !wantOps && !wantClients && !wantClientObjs) return null;
@@ -1864,7 +1961,7 @@ export async function tryDeterministicDataReply(
   const blocks: string[] = [];
 
   if (wantClients || wantClientObjs) {
-    const crm = await tryDeterministicCrmReply(t, toolCtx);
+    const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
     if (crm?.trim()) blocks.push(crm.trim());
   }
 

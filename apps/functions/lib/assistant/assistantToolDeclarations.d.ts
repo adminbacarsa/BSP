@@ -15,6 +15,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             };
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -51,6 +52,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
                 description: string;
             };
             texto?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -76,6 +78,41 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
         properties: {
             texto?: undefined;
             limite?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
+            texto_cliente?: undefined;
+            fecha_referencia?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
+            solo_activos: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
             texto_cliente?: undefined;
@@ -112,6 +149,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
@@ -142,6 +180,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
@@ -180,6 +219,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             fecha?: undefined;
@@ -212,6 +252,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -248,6 +289,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -288,6 +330,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -316,6 +359,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             fecha_referencia?: undefined;
             id_firestore_empleado?: undefined;
@@ -358,6 +402,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
@@ -393,6 +438,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             limite?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha?: undefined;
@@ -439,6 +485,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
@@ -481,6 +528,7 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             texto?: undefined;
             filtro_texto?: undefined;
             solo_activos_nomina_panel?: undefined;
+            solo_activos?: undefined;
             texto_cliente?: undefined;
             id_firestore_empleado?: undefined;
             fecha?: undefined;

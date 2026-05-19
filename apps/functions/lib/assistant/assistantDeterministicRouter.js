@@ -51,13 +51,34 @@ function addDaysToYmd(refYmd, days) {
     dt.setDate(dt.getDate() + days);
     return ymdToString(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
 }
+function isFalsePositiveSlaClientFilter(name, fullNorm) {
+    const n = normText(name);
+    if (/^\d+$/.test(n.replace(/\s/g, '')))
+        return true;
+    if (/\b(veo|muestras?|muestra|primeros?|listado|lista|demas|otros?|restantes|decime|dijiste|eran|faltan?)\b/.test(n)) {
+        return true;
+    }
+    if (/\b\d+\s*(clientes?|hs?|horas?)\b/.test(n))
+        return true;
+    if (/\bpor\s+que\b/.test(fullNorm))
+        return true;
+    return false;
+}
 function extractClientFilterFromQuery(t) {
     const n = normText(t);
+    if (/\bsolo\s+(veo|muestras?|muestra|primeros?|los?\s+\d+\b)/.test(n))
+        return null;
+    if (/\bpor\s+que\s+solo\s+(muestras?|10|veo)\b/.test(n))
+        return null;
     const solo = n.match(/\bsolo\s+(?:los?\s+)?(?:servicios?\s+activos?\s+(?:de\s+)?)?([a-z0-9][a-z0-9\s.-]{2,40})/);
     if (solo?.[1]) {
         const name = solo[1].trim();
-        if (!/^(servicios?|activos?|contratos?|de|del)$/i.test(name))
-            return name;
+        if (!/^(servicios?|activos?|contratos?|de|del)$/i.test(name) && !isFalsePositiveSlaClientFilter(name, n)) {
+            if (/\bservicios?\s+activos?\s+(?:de\s+)?/.test(n))
+                return name;
+            if (/^\s*solo\s+(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/.test(n))
+                return name;
+        }
     }
     const de = n.match(/\b(?:servicios?\s+activos?\s+)?(?:de|del)\s+(casisa|loteria|ministerio|bacarsa|ypf|shell)\b/);
     if (de?.[1])
@@ -837,6 +858,8 @@ function shouldSkipDeterministicRouter(raw, recent = []) {
         return false;
     if (matchEmployeePlannedHoursThresholdFollowUp(t, recent))
         return false;
+    if (matchClientListIntent(t, recent))
+        return false;
     if (resolveClientFilterFromQuery(t))
         return false;
     if (matchWhoOnShiftTodayIntent(t))
@@ -887,9 +910,65 @@ function matchEmployeeCountIntent(t, moduleKey, pathname, recent = []) {
     return false;
 }
 function matchClientCountIntent(t) {
+    if (/\b(listado|lista|todos?\s+los?\s+clientes?|que\s+clientes?\s+hay|cuales?\s+son\s+los?\s+clientes?)\b/.test(t)) {
+        return false;
+    }
     if (!/\b(cuántos|cuantos|cuántas|cuantas|numero|número|total)\b/.test(t))
         return false;
     return /\b(clientes?)\b/.test(t);
+}
+function recentClientListThread(recent) {
+    for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+        const c = recent[i].content || '';
+        if (/\b\d+\s+clientes?\s+activos?/.test(c))
+            return true;
+        if (/\bclientes?\s+activos?\s+(?:en\s+)?(?:la\s+)?(?:plataforma|empresa|crm)/i.test(c))
+            return true;
+        if (/\b(primeros?\s+10|muestra.*clientes|lista completa de los clientes)/i.test(c))
+            return true;
+        if (/\bCORBLOCK|CORDOBA ATHLETIC|LOTERÍA-CASINOS|LOTERIA-CASINOS/.test(c))
+            return true;
+    }
+    return false;
+}
+function matchClientListIntent(t, recent) {
+    if (matchClientObjectivesIntent(t))
+        return false;
+    if (/\bobjetivos?\s+(?:de|del)\s+[a-z]/i.test(t))
+        return false;
+    if (/\b(listado|lista)\s+(?:completa?\s+)?(?:de\s+)?(?:todos?\s+)?(?:los?\s+)?clientes?/.test(t) ||
+        /\b(todos?\s+los?\s+clientes?|clientes?\s+(?:activos?\s+)?(?:en\s+)?(?:la\s+)?(?:plataforma|empresa|crm)|que\s+clientes?\s+hay|cuales?\s+son\s+los?\s+clientes?|nombres?\s+de\s+(?:todos?\s+)?(?:los?\s+)?clientes?)/.test(t)) {
+        return true;
+    }
+    if (/\b(los?\s+demas|lista\s+completa|restantes|faltan?\s+(?:los?\s+)?otros|por\s+que\s+solo\s+(?:muestras?|10|veo)|solo\s+(?:veo|muestras?)\s+\d+)/.test(t)) {
+        return true;
+    }
+    if (recentClientListThread(recent)) {
+        if (/\b(demas|restantes|completa|otros|lista|listado|nombres?|faltan|21|10|muestras?)\b/.test(t)) {
+            return true;
+        }
+    }
+    return false;
+}
+function formatDeterministicClientListReply(data) {
+    const activos = Number(data.cuenta_clientes_activos ?? 0);
+    const inactivos = Number(data.cuenta_clientes_inactivos ?? 0);
+    const lista = (data.muestra_clientes ?? []);
+    const trunc = data.truncado_por_limite_muestra === true || data.truncado_loteFirestore_480 === true;
+    const mostrados = Number(data.cuenta_en_resultado ?? lista.length);
+    let body = `Según **Firestore** (CRM), hay **${activos}** cliente(s) **activo(s)**`;
+    if (inactivos > 0)
+        body += ` y **${inactivos}** inactivo(s)`;
+    body += `.\n\n**Listado${activos > mostrados ? ` (${mostrados} de ${activos} activos)` : ''}:**\n\n`;
+    for (const c of lista) {
+        const st = String(c.status ?? '').trim();
+        const tag = st && st.toUpperCase() !== 'ACTIVO' ? ` (${st})` : '';
+        body += `- **${String(c.nombre ?? '—')}**${tag}\n`;
+    }
+    if (trunc) {
+        body += `\n*Nota:* la lista está acotada en el chat; el detalle completo está en **Clientes y Objetivos**.\n`;
+    }
+    return body.trim();
 }
 function extractClientNameFromQuery(t) {
     const m1 = t.match(/\bobjetivos?\s+(?:de|del)\s+(?:cliente\s+)?(.+?)(?:\?|$)/i);
@@ -1351,9 +1430,20 @@ function looksLikeFalseEmptyTurnosReply(text) {
         return false;
     return /\b(planificad|manana|mañana|ayer|hoy|trunos?)\b/.test(t);
 }
-async function tryDeterministicCrmReply(t, toolCtx) {
+async function tryDeterministicCrmReply(t, toolCtx, recent = []) {
     if (!(0, assistantDataTools_1.canQueryClientsCrm)(toolCtx))
         return null;
+    if (matchClientListIntent(t, recent)) {
+        const r = await (0, assistantDataTools_1.ejecutarListadoClientesEmpresa)(toolCtx, { solo_activos: true, limite: 120 });
+        const err = String(r.error ?? '').trim();
+        if (err) {
+            if (err === 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar') {
+                return 'Tu perfil no tiene permiso para consultar **Clientes y Objetivos**. Necesitás lectura en ese módulo.';
+            }
+            return null;
+        }
+        return formatDeterministicClientListReply(r).slice(0, 7500);
+    }
     if (matchClientCountIntent(t)) {
         const r = await (0, assistantDataTools_1.ejecutarContarClientesEmpresa)(toolCtx, {});
         const err = String(r.error ?? '').trim();
@@ -1503,6 +1593,8 @@ function shouldPrefetchOperationsMetricsInSnapshot(lastUser) {
 async function tryDeterministicMultiSlaHoursReply(t, toolCtx, recent) {
     if (matchEmployeePlannedHoursThresholdIntent(t))
         return null;
+    if (matchClientListIntent(t, recent))
+        return null;
     const pairsRaw = extractClienteObjetivoPairsFromRecent(recent);
     const clientFilter = resolveClientFilterFromQuery(t);
     let allActive = matchSlaAllActiveServicesIntent(t, recent);
@@ -1634,7 +1726,7 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
         console.warn('[assistant] tryDeterministicTurnosHoyReply', e);
     }
     try {
-        const crm = await tryDeterministicCrmReply(t, toolCtx);
+        const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
         if (crm?.trim())
             return crm.trim();
     }
@@ -1699,13 +1791,13 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     const wantEmp = matchEmployeeCountIntent(t, mk, pathname, recent);
     const wantSla = matchSlaCountIntent(t);
     const wantOps = matchOpsDayAggregateIntent(t);
-    const wantClients = matchClientCountIntent(t);
+    const wantClients = matchClientCountIntent(t) || matchClientListIntent(t, recent);
     const wantClientObjs = matchClientObjectivesIntent(t);
     if (!wantEmp && !wantSla && !wantOps && !wantClients && !wantClientObjs)
         return null;
     const blocks = [];
     if (wantClients || wantClientObjs) {
-        const crm = await tryDeterministicCrmReply(t, toolCtx);
+        const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
         if (crm?.trim())
             blocks.push(crm.trim());
     }

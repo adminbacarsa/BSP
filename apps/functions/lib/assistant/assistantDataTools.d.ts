@@ -31,6 +31,10 @@ export declare function ejecutarBuscarObjetivosPorNombre(ctx: AssistantToolConte
     limite?: number;
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarContarClientesEmpresa(ctx: AssistantToolContext, _args: Record<string, unknown>): Promise<Record<string, unknown>>;
+export declare function ejecutarListadoClientesEmpresa(ctx: AssistantToolContext, args: {
+    solo_activos?: boolean;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarListarObjetivosCliente(ctx: AssistantToolContext, args: {
     texto_cliente?: string;
     limite?: number;

@@ -269,6 +269,20 @@ exports.ASSISTANT_TRAINING_PAIRS = [
         herramienta_sugerida: 'listado_turnos_operativos_dia',
         respuesta_ideal_bullet: 'Aclarar: son N turnos visibles; ausentes vs sin marcación; listar nombres agrupados por sitio/hora.',
     },
+    {
+        id: 162,
+        categoria: 'crm',
+        pregunta_usuario: 'listado de todos los clientes / quiero la lista completa (21 activos)',
+        herramienta_sugerida: 'listado_clientes_empresa',
+        respuesta_ideal_bullet: 'Listar los 21 nombres alfabéticos; no repetir solo 10; no decir que no hay tool.',
+    },
+    {
+        id: 163,
+        categoria: 'crm',
+        pregunta_usuario: 'solo veo 10 me dijiste que eran 21 / por que solo muestras 10',
+        herramienta_sugerida: 'listado_clientes_empresa',
+        respuesta_ideal_bullet: 'Seguimiento CRM; no interpretar como filtro SLA; listado_clientes_empresa con los 21.',
+    },
 ];
 exports.ASSISTANT_TRAINING_PAIR_COUNT = exports.ASSISTANT_TRAINING_PAIRS.length;
 //# sourceMappingURL=assistantTrainingPairs.js.map

@@ -30,7 +30,9 @@
     "backup:import": "node scripts/import-backup.js",
     "emulators": "node scripts/run-emulators.js",
     "emulators:light": "node scripts/run-emulators.js --without-functions",
-    "seed": "node scripts/seed-lab.js"
+    "seed": "node scripts/seed-lab.js",
+    "lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1",
+    "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart"
   },
   "keywords": [
     "firebase",

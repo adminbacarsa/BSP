@@ -10,6 +10,7 @@ exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
 exports.ejecutarListadoEmpleadosEmpresa = ejecutarListadoEmpleadosEmpresa;
 exports.ejecutarBuscarObjetivosPorNombre = ejecutarBuscarObjetivosPorNombre;
 exports.ejecutarContarClientesEmpresa = ejecutarContarClientesEmpresa;
+exports.ejecutarListadoClientesEmpresa = ejecutarListadoClientesEmpresa;
 exports.ejecutarListarObjetivosCliente = ejecutarListarObjetivosCliente;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenHorasEmpleadoPeriodo = ejecutarResumenHorasEmpleadoPeriodo;
@@ -1079,7 +1080,51 @@ async function ejecutarContarClientesEmpresa(ctx, _args) {
         cuenta_objetivos_embebidos_en_clientes: objetivosTotal,
         truncado_loteFirestore_480: snap.size >= 480,
         muestra_primeros_clientes_activos: muestraActivos,
-        nota_tras_herramienta: 'Respondé cuenta_clientes_activos (o total si preguntan todos) en la primera oración. Objetivos embebidos = sedes en CRM, no contratos SLA.',
+        nota_tras_herramienta: 'Respondé cuenta_clientes_activos (o total si preguntan todos) en la primera oración. Para **lista completa** de nombres usá **listado_clientes_empresa**, no esta muestra de 10.',
+    };
+}
+async function ejecutarListadoClientesEmpresa(ctx, args) {
+    if (!canQueryClientsCrm(ctx)) {
+        return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+    }
+    let limite = Math.floor(Number(args.limite ?? 120));
+    if (!Number.isFinite(limite) || limite < 8)
+        limite = 120;
+    limite = Math.min(120, limite);
+    const soloActivos = args.solo_activos !== false;
+    const db = admin.firestore();
+    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const rows = [];
+    let activos = 0;
+    let inactivos = 0;
+    for (const d of snap.docs) {
+        const data = d.data();
+        const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
+        const inactivo = st === 'INACTIVO';
+        if (inactivo)
+            inactivos += 1;
+        else
+            activos += 1;
+        if (soloActivos && inactivo)
+            continue;
+        const nombre = String(data.name ?? '').trim() || d.id;
+        rows.push({
+            nombre: nombre.slice(0, 120),
+            status: st || 'ACTIVO',
+            sortKey: norm(nombre),
+        });
+    }
+    rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'es', { sensitivity: 'base' }));
+    const sliced = rows.slice(0, limite);
+    return {
+        solo_activos: soloActivos,
+        cuenta_clientes_activos: activos,
+        cuenta_clientes_inactivos: inactivos,
+        cuenta_en_resultado: sliced.length,
+        muestra_clientes: sliced.map((r) => ({ nombre: r.nombre, status: r.status })),
+        truncado_por_limite_muestra: rows.length > limite,
+        truncado_loteFirestore_480: snap.size >= 480,
+        nota_tras_herramienta: 'Listá **todos** los nombres de muestra_clientes en orden alfabético. Si cuenta_en_resultado < cuenta_clientes_activos, decí cuántos faltan por límite del chat; no digas «lista completa» si truncado_por_limite_muestra.',
     };
 }
 async function ejecutarListarObjetivosCliente(ctx, args) {
@@ -2461,6 +2506,12 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
     }
     else if (name === 'contar_clientes_empresa') {
         raw = await ejecutarContarClientesEmpresa(ctx, args);
+    }
+    else if (name === 'listado_clientes_empresa') {
+        raw = await ejecutarListadoClientesEmpresa(ctx, {
+            solo_activos: args.solo_activos !== false,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
     }
     else if (name === 'listar_objetivos_cliente') {
         raw = await ejecutarListarObjetivosCliente(ctx, {
