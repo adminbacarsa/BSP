@@ -562,15 +562,15 @@ export default function BackupTab() {
               {restoreModal.tenantImport && scopeEmpresa ? (
                 <>
                   <ShieldAlert size={14} className="inline mr-1.5" />
-                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos al tenant destino con su <code>empresaId</code>. El origen no se modifica.
+                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos al tenant destino con IDs nuevos. El origen no se modifica. No se importan usuarios del panel ni auditoría.
                 </>
               ) : restoreModal.platformImport && scopeEmpresa ? (
                 <>
                   <ShieldAlert size={14} className="inline mr-1.5" />
-                  Backup de plataforma (Bacarsa): se copiarán empleados, clientes, turnos y demás datos al tenant <b>{empresa?.name || empresaId}</b>, etiquetándolos con su <code>empresaId</code>. No se modifican los datos legacy de Bacarsa.
+                  Backup de plataforma (Bacarsa): se copiarán empleados, clientes, turnos y demás datos al tenant <b>{empresa?.name || empresaId}</b>, con IDs nuevos y su <code>empresaId</code>. No se modifican los datos legacy de Bacarsa.
                 </>
               ) : restoreModal.mode === 'full' ? (
-                <><ShieldAlert size={14} className="inline mr-1.5"/>{restoreModal.storagePath ? 'ATENCIÓN: reemplazará los datos de esta empresa en las colecciones del backup.' : 'ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.'}</>
+                <><ShieldAlert size={14} className="inline mr-1.5"/>{scopeEmpresa && empresaId ? `ATENCIÓN: reemplazará solo los datos de ${empresa?.name || empresaId} en las colecciones del backup. Las demás empresas no se tocan.` : restoreModal.storagePath ? 'ATENCIÓN: reemplazará los datos de esta empresa en las colecciones del backup.' : 'ATENCIÓN: Esto borrará y reemplazará TODOS los datos actuales. No se puede deshacer.'}</>
               ) : (
                 <><RotateCcw size={14} className="inline mr-1.5"/>Modo seguro: escribe los documentos del backup sin borrar datos existentes.</>
               )}
