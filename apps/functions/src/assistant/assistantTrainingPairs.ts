@@ -324,6 +324,14 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
     respuesta_ideal_bullet:
       'Seguimiento CRM; no interpretar como filtro SLA; listado_clientes_empresa con los 21.',
   },
+  {
+    id: 164,
+    categoria: 'crm',
+    pregunta_usuario: 'tienen todos los datos completados los clientes / clientes con datos incompletos',
+    herramienta_sugerida: 'auditar_completitud_datos_clientes_empresa',
+    respuesta_ideal_bullet:
+      'X completos vs Y incompletos; listar incompletos con CUIT/contacto/objetivos faltantes; pasos en Clientes y Objetivos.',
+  },
 ];
 
 export const ASSISTANT_TRAINING_PAIR_COUNT = ASSISTANT_TRAINING_PAIRS.length;

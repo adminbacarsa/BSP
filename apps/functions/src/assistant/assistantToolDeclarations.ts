@@ -58,6 +58,26 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'auditar_completitud_datos_clientes_empresa',
+    description:
+      'Revisa si los clientes CRM tienen datos recomendados completos: CUIT, razón social, contacto, dirección/ciudad y al menos un objetivo/sede. Usar para «¿tienen todos los datos completados?», «clientes con datos incompletos», «falta CUIT/contacto», «auditar CRM». Opcional filtrar un cliente por nombre.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        solo_activos: {
+          type: SchemaType.BOOLEAN,
+          description: 'Si true (default), solo clientes activos.',
+        },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de incompletos en la muestra (default 45).' },
+        texto_cliente: {
+          type: SchemaType.STRING,
+          description: 'Opcional: auditar solo clientes cuyo nombre contenga este texto.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'listar_objetivos_cliente',
     description:
       'Lista objetivos/sedes embebidos de un cliente por nombre comercial (ej. CASISA, Lotería). Usar para «objetivos de CASISA», «cuántas sedes tiene el cliente X».',

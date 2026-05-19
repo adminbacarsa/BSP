@@ -138,6 +138,43 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
     parameters: {
         type: SchemaType;
         properties: {
+            solo_activos: {
+                type: SchemaType;
+                description: string;
+            };
+            limite: {
+                type: SchemaType;
+                description: string;
+            };
+            texto_cliente: {
+                type: SchemaType;
+                description: string;
+            };
+            texto?: undefined;
+            filtro_texto?: undefined;
+            solo_activos_nomina_panel?: undefined;
+            fecha_referencia?: undefined;
+            id_firestore_empleado?: undefined;
+            fecha_desde?: undefined;
+            fecha_hasta?: undefined;
+            fecha?: undefined;
+            id_objetivo?: undefined;
+            tipo?: undefined;
+            id_objetivo_cercania?: undefined;
+            texto_objetivo?: undefined;
+            id_servicio_sla?: undefined;
+            textos_objetivo?: undefined;
+            todos_servicios_activos_mes?: undefined;
+            umbral_horas?: undefined;
+        };
+        required: any[];
+    };
+} | {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: {
             texto_cliente: {
                 type: SchemaType;
                 description: string;

@@ -11,6 +11,7 @@ exports.ejecutarListadoEmpleadosEmpresa = ejecutarListadoEmpleadosEmpresa;
 exports.ejecutarBuscarObjetivosPorNombre = ejecutarBuscarObjetivosPorNombre;
 exports.ejecutarContarClientesEmpresa = ejecutarContarClientesEmpresa;
 exports.ejecutarListadoClientesEmpresa = ejecutarListadoClientesEmpresa;
+exports.ejecutarAuditarCompletitudDatosClientesEmpresa = ejecutarAuditarCompletitudDatosClientesEmpresa;
 exports.ejecutarListarObjetivosCliente = ejecutarListarObjetivosCliente;
 exports.ejecutarConsultarTurnosEmpleado = ejecutarConsultarTurnosEmpleado;
 exports.ejecutarResumenHorasEmpleadoPeriodo = ejecutarResumenHorasEmpleadoPeriodo;
@@ -1125,6 +1126,144 @@ async function ejecutarListadoClientesEmpresa(ctx, args) {
         truncado_por_limite_muestra: rows.length > limite,
         truncado_loteFirestore_480: snap.size >= 480,
         nota_tras_herramienta: 'Listá **todos** los nombres de muestra_clientes en orden alfabético. Si cuenta_en_resultado < cuenta_clientes_activos, decí cuántos faltan por límite del chat; no digas «lista completa» si truncado_por_limite_muestra.',
+    };
+}
+function campoCrmLleno(val) {
+    if (val == null)
+        return false;
+    if (typeof val === 'number')
+        return Number.isFinite(val);
+    return String(val).trim().length > 0;
+}
+function objetivosClienteCrm(data) {
+    const raw = data.objetivos ?? data.objectives;
+    if (!Array.isArray(raw))
+        return [];
+    return raw.filter((o) => o && typeof o === 'object');
+}
+function auditarCompletitudClienteCrm(data) {
+    const campos_faltantes = [];
+    const advertencias_objetivos = [];
+    if (!campoCrmLleno(data.taxId))
+        campos_faltantes.push('CUIT');
+    if (!campoCrmLleno(data.legalName))
+        campos_faltantes.push('razón social');
+    const tieneContacto = campoCrmLleno(data.contactName) || campoCrmLleno(data.phone) || campoCrmLleno(data.email);
+    if (!tieneContacto)
+        campos_faltantes.push('contacto (nombre, teléfono o email)');
+    if (!campoCrmLleno(data.address) && !campoCrmLleno(data.city)) {
+        campos_faltantes.push('dirección o ciudad');
+    }
+    const objs = objetivosClienteCrm(data);
+    if (objs.length === 0) {
+        campos_faltantes.push('objetivo/sede (al menos uno)');
+    }
+    else {
+        for (const o of objs) {
+            const oname = String(o.name ?? '').trim() || 'objetivo sin nombre';
+            if (!campoCrmLleno(o.name)) {
+                advertencias_objetivos.push(`${oname}: sin nombre`);
+                continue;
+            }
+            if (!campoCrmLleno(o.address))
+                advertencias_objetivos.push(`${oname}: sin dirección`);
+            const lat = o.lat ?? o.latitude;
+            const lng = o.lng ?? o.longitude;
+            const tieneCoords = lat != null &&
+                lng != null &&
+                String(lat).trim() !== '' &&
+                String(lng).trim() !== '' &&
+                Number.isFinite(Number(lat)) &&
+                Number.isFinite(Number(lng));
+            if (campoCrmLleno(o.address) && !tieneCoords) {
+                advertencias_objetivos.push(`${oname}: sin coordenadas GPS`);
+            }
+        }
+    }
+    return {
+        completo: campos_faltantes.length === 0,
+        campos_faltantes,
+        advertencias_objetivos,
+        cantidad_objetivos: objs.length,
+    };
+}
+async function ejecutarAuditarCompletitudDatosClientesEmpresa(ctx, args) {
+    if (!canQueryClientsCrm(ctx)) {
+        return { error: 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar' };
+    }
+    let limite = Math.floor(Number(args.limite ?? 45));
+    if (!Number.isFinite(limite) || limite < 5)
+        limite = 45;
+    limite = Math.min(60, limite);
+    const soloActivos = args.solo_activos !== false;
+    const filtroCliente = String(args.texto_cliente ?? '').trim().toLowerCase();
+    const db = admin.firestore();
+    const snap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).limit(480).get();
+    const rows = [];
+    let activos = 0;
+    let inactivos = 0;
+    let completos = 0;
+    let incompletos = 0;
+    for (const d of snap.docs) {
+        const data = d.data();
+        const st = String(data.status ?? 'ACTIVO').trim().toUpperCase();
+        const inactivo = st === 'INACTIVO';
+        if (inactivo)
+            inactivos += 1;
+        else
+            activos += 1;
+        if (soloActivos && inactivo)
+            continue;
+        const nombre = String(data.name ?? '').trim() || d.id;
+        if (filtroCliente.length >= 2 && !norm(nombre).includes(norm(filtroCliente)))
+            continue;
+        const audit = auditarCompletitudClienteCrm(data);
+        if (audit.completo)
+            completos += 1;
+        else
+            incompletos += 1;
+        rows.push({
+            nombre: nombre.slice(0, 120),
+            id_cliente: d.id,
+            status: st || 'ACTIVO',
+            completo: audit.completo,
+            campos_faltantes: audit.campos_faltantes,
+            advertencias_objetivos: audit.advertencias_objetivos.slice(0, 6),
+            cantidad_objetivos: audit.cantidad_objetivos,
+            sortKey: norm(nombre),
+        });
+    }
+    rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'es', { sensitivity: 'base' }));
+    const evaluados = rows.length;
+    const incompletosRows = rows.filter((r) => !r.completo);
+    const muestraIncompletos = incompletosRows.slice(0, limite).map((r) => ({
+        nombre: r.nombre,
+        status: r.status,
+        campos_faltantes: r.campos_faltantes,
+        advertencias_objetivos: r.advertencias_objetivos,
+        cantidad_objetivos: r.cantidad_objetivos,
+    }));
+    return {
+        solo_activos: soloActivos,
+        filtro_texto_cliente: filtroCliente || undefined,
+        cuenta_clientes_activos: activos,
+        cuenta_clientes_inactivos: inactivos,
+        cuenta_evaluados: evaluados,
+        cuenta_completos: completos,
+        cuenta_incompletos: incompletos,
+        criterios_completitud: [
+            'CUIT (taxId)',
+            'razón social (legalName)',
+            'contacto: nombre, teléfono o email',
+            'dirección o ciudad',
+            'al menos un objetivo/sede con nombre',
+        ],
+        advertencias_objetivos_no_bloquean: 'Objetivos sin dirección o sin GPS se listan como advertencia; no impiden marcar al cliente como completo.',
+        clientes_incompletos: muestraIncompletos,
+        truncado_incompletos: incompletosRows.length > limite,
+        truncado_loteFirestore_480: snap.size >= 480,
+        pasos_completar_en_crm: 'Clientes y Objetivos → elegir cliente → Datos fiscales (CUIT, razón social, contacto) → pestaña Objetivos (nombre, dirección, GPS).',
+        nota_tras_herramienta: 'Respondé cuántos completos vs incompletos. Listá **todos** los de clientes_incompletos con campos_faltantes. Si cuenta_incompletos=0, decí que están completos según criterios CRM. Indicá pasos_completar_en_crm si hay faltantes.',
     };
 }
 async function ejecutarListarObjetivosCliente(ctx, args) {
@@ -2511,6 +2650,13 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
         raw = await ejecutarListadoClientesEmpresa(ctx, {
             solo_activos: args.solo_activos !== false,
             limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'auditar_completitud_datos_clientes_empresa') {
+        raw = await ejecutarAuditarCompletitudDatosClientesEmpresa(ctx, {
+            solo_activos: args.solo_activos !== false,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+            texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
         });
     }
     else if (name === 'listar_objetivos_cliente') {

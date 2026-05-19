@@ -950,6 +950,69 @@ function matchClientListIntent(t, recent) {
     }
     return false;
 }
+function recentClientCompletenessThread(recent) {
+    for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+        const c = recent[i].content || '';
+        if (/\b(datos?\s+complet|completitud|incomplet|faltan?\s+datos|cuit|raz[oó]n\s+social)\b/i.test(c)) {
+            if (/\bclientes?\b/i.test(c))
+                return true;
+        }
+        if (/\bcompletos?\s+vs\s+incompletos?\b/i.test(c))
+            return true;
+    }
+    return false;
+}
+function matchClientCompletenessIntent(t, recent) {
+    if (matchClientObjectivesIntent(t))
+        return false;
+    if (/\b(datos?\s+complet|completitud|completados?|completas?|carga\s+incompleta|faltan?\s+datos|datos\s+faltantes?|auditar?\s+(?:el\s+)?crm)\b/.test(t) &&
+        /\b(clientes?|crm|plataforma|empresa)\b/.test(t)) {
+        return true;
+    }
+    if (/\b(todos?\s+(?:sus\s+)?datos|informaci[oó]n\s+completa)\b/.test(t) && /\bclientes?\b/.test(t)) {
+        return true;
+    }
+    if (/\b(cuit|raz[oó]n\s+social|contacto)\b/.test(t) && /\b(falta|faltan|sin|incomplet)\b/.test(t)) {
+        if (/\b(clientes?|crm)\b/.test(t))
+            return true;
+    }
+    if (recentClientListThread(recent) || recentClientCompletenessThread(recent)) {
+        if (/\b(complet|datos|faltan|cargad|incomplet|cuit|contacto)\b/.test(t))
+            return true;
+    }
+    return false;
+}
+function formatDeterministicClientCompletenessReply(data) {
+    const activos = Number(data.cuenta_clientes_activos ?? 0);
+    const evaluados = Number(data.cuenta_evaluados ?? 0);
+    const completos = Number(data.cuenta_completos ?? 0);
+    const incompletos = Number(data.cuenta_incompletos ?? 0);
+    const filtro = String(data.filtro_texto_cliente ?? '').trim();
+    const lista = (data.clientes_incompletos ?? []);
+    const trunc = data.truncado_incompletos === true;
+    let body = `Según **Firestore** (CRM), de **${evaluados || activos}** cliente(s) activo(s) evaluado(s):\n\n`;
+    body += `- **${completos}** con datos recomendados **completos**\n`;
+    body += `- **${incompletos}** con datos **incompletos**\n\n`;
+    body += `**Criterios:** CUIT, razón social, contacto (nombre/tel/email), dirección o ciudad, y al menos un objetivo/sede.\n`;
+    if (incompletos === 0) {
+        body += `\nTodos los clientes evaluados tienen los datos recomendados completos.`;
+        return body.trim();
+    }
+    body += `\n**Clientes con faltantes${filtro ? ` (filtro: ${filtro})` : ''}:**\n\n`;
+    for (const c of lista) {
+        const falt = (c.campos_faltantes ?? []).join(', ') || '—';
+        body += `- **${String(c.nombre ?? '—')}**: falta ${falt}`;
+        const adv = (c.advertencias_objetivos ?? []).filter(Boolean);
+        if (adv.length > 0)
+            body += ` · avisos objetivos: ${adv.join('; ')}`;
+        body += '\n';
+    }
+    if (trunc) {
+        body += `\n*Nota:* hay más incompletos; el detalle está en **Clientes y Objetivos**.\n`;
+    }
+    body += `\n**Para completar:** Clientes y Objetivos → elegir cliente → datos fiscales y pestaña **Objetivos** (dirección y GPS).`;
+    return body.trim();
+}
 function formatDeterministicClientListReply(data) {
     const activos = Number(data.cuenta_clientes_activos ?? 0);
     const inactivos = Number(data.cuenta_clientes_inactivos ?? 0);
@@ -1433,6 +1496,22 @@ function looksLikeFalseEmptyTurnosReply(text) {
 async function tryDeterministicCrmReply(t, toolCtx, recent = []) {
     if (!(0, assistantDataTools_1.canQueryClientsCrm)(toolCtx))
         return null;
+    if (matchClientCompletenessIntent(t, recent)) {
+        const textoCliente = extractClientNameFromQuery(t) ?? undefined;
+        const r = await (0, assistantDataTools_1.ejecutarAuditarCompletitudDatosClientesEmpresa)(toolCtx, {
+            solo_activos: true,
+            limite: 45,
+            texto_cliente: textoCliente,
+        });
+        const err = String(r.error ?? '').trim();
+        if (err) {
+            if (err === 'sin_permiso_crm_clientes_requiere_modulo_clientes_o_similar') {
+                return 'Tu perfil no tiene permiso para consultar **Clientes y Objetivos**. Necesitás lectura en ese módulo.';
+            }
+            return null;
+        }
+        return formatDeterministicClientCompletenessReply(r).slice(0, 7500);
+    }
     if (matchClientListIntent(t, recent)) {
         const r = await (0, assistantDataTools_1.ejecutarListadoClientesEmpresa)(toolCtx, { solo_activos: true, limite: 120 });
         const err = String(r.error ?? '').trim();
@@ -1594,6 +1673,8 @@ async function tryDeterministicMultiSlaHoursReply(t, toolCtx, recent) {
     if (matchEmployeePlannedHoursThresholdIntent(t))
         return null;
     if (matchClientListIntent(t, recent))
+        return null;
+    if (matchClientCompletenessIntent(t, recent))
         return null;
     const pairsRaw = extractClienteObjetivoPairsFromRecent(recent);
     const clientFilter = resolveClientFilterFromQuery(t);
