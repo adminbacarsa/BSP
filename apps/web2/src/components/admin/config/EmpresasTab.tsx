@@ -233,16 +233,16 @@ export default function EmpresasTab() {
                   {e.active === false && (
                     <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Inactiva</span>
                   )}
-                  {/* Toggle activo/inactivo */}
-                  {e.id !== 'bacarsa' && (
+                  {/* Toggle activo/inactivo — bloqueado si es la empresa activa */}
+                  {e.id !== empresaId && (
                     <button onClick={() => handleToggleActivo(e)} disabled={toggling === e.id}
                       title={e.active === false ? 'Reactivar empresa' : 'Desactivar empresa'}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-40">
                       {toggling === e.id ? <Loader2 size={14} className="animate-spin" /> : e.active === false ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
                   )}
-                  {/* Eliminar — solo si no es activa ni bacarsa */}
-                  {e.id !== 'bacarsa' && e.id !== empresaId && (
+                  {/* Eliminar — bloqueado solo si es la empresa activa */}
+                  {e.id !== empresaId && (
                     <button onClick={() => abrirEliminar(e)}
                       title="Eliminar empresa y todos sus datos"
                       className="p-1.5 rounded-lg text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">

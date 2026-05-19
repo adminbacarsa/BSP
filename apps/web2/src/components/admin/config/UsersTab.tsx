@@ -39,10 +39,11 @@ export default function UsersTab() {
 
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
-            // SuperAdmin ve todos; el resto solo ve los de su empresa
+            // SuperAdmin ve todos; el resto ve los de su empresa + los superadmins (siempre visibles en todas)
+            const isSA = (u: any) => ['SUPERADMIN','SUPER_ADMIN'].includes((u.role || '').toUpperCase());
             const filtered = isSuperAdmin
                 ? allUsers
-                : allUsers.filter(u => (u.empresaId || 'bacarsa') === myEmpresaId);
+                : allUsers.filter(u => isSA(u) || (u.empresaId || 'bacarsa') === myEmpresaId);
 
             setUsers(filtered);
             setRolesList(rSnap.docs.map(d => ({ id: d.id, ...d.data() })));

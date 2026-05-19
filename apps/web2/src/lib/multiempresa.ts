@@ -155,7 +155,7 @@ export async function eliminarEmpresaYDatos(
   empresaId: string,
   onProgreso: (p: ProgresoEliminacion) => void
 ): Promise<void> {
-  if (!empresaId || empresaId === 'bacarsa') throw new Error('No se puede eliminar esta empresa');
+  if (!empresaId) throw new Error('No se puede eliminar esta empresa');
 
   let totalEliminados = 0;
 
