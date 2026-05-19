@@ -2831,6 +2831,152 @@ export async function ejecutarListadoEmpleadosHorasPlanificadasUmbral(
   };
 }
 
+/** Cualquier asignación en grilla/planificación (incluye F/V/L; excluye vacantes y cancelados). */
+function shiftCountsAsPlanificacionAsignada(row: Record<string, unknown>): boolean {
+  if (row.isUnassigned === true) return false;
+  const st = String(row.status ?? '').toLowerCase();
+  if (st.includes('cancel') || st.includes('delet')) return false;
+  if (String(row.type ?? '').toUpperCase() === 'NOVEDAD') return false;
+  const empId = String(row.employeeId ?? '').trim();
+  if (!empId || empId === 'VACANTE') return false;
+  return true;
+}
+
+/**
+ * Legajos activos de la empresa sin ningún turno asignado en el rango (mes por defecto).
+ * Cuenta F/V/L como planificación; excluye vacantes y turnos cancelados.
+ */
+export async function ejecutarListadoEmpleadosSinTurnosPlanificados(
+  ctx: AssistantToolContext,
+  args: {
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    fecha_referencia?: string;
+    limite?: number;
+    solo_activos_nomina_panel?: boolean;
+  },
+): Promise<Record<string, unknown>> {
+  if (!canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_para_consultar_turnos' };
+  }
+  if (!canUseEmployeeSearch(ctx)) {
+    return { error: 'sin_permiso_para_buscar_personal' };
+  }
+  if (!ctx.empresaId.trim()) {
+    return { error: 'falta_empresa_en_sesion' };
+  }
+
+  let fechaDesde = String(args.fecha_desde ?? '').trim();
+  let fechaHasta = String(args.fecha_hasta ?? '').trim();
+  const ref = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+
+  if (!fechaDesde || !fechaHasta) {
+    try {
+      const p = parseYmd(ref);
+      const mm = String(p.m).padStart(2, '0');
+      const lastD = new Date(p.y, p.m, 0).getDate();
+      fechaDesde = `${p.y}-${mm}-01`;
+      fechaHasta = `${p.y}-${mm}-${String(lastD).padStart(2, '0')}`;
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+    }
+  }
+
+  try {
+    parseYmd(fechaDesde);
+    parseYmd(fechaHasta);
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+  }
+
+  let start: Timestamp;
+  let end: Timestamp;
+  try {
+    ({ start, end } = arRangeTimestamps(fechaDesde, fechaHasta));
+  } catch (e: unknown) {
+    return { error: e instanceof Error ? e.message : 'fecha_invalida' };
+  }
+
+  const soloPanel = args.solo_activos_nomina_panel === true;
+  const db = admin.firestore();
+  const empSnap = await db.collection('empleados').where('empresaId', '==', ctx.empresaId).limit(900).get();
+
+  type EmpRow = { id: string; nombre: string; legajo: string; sortKey: string };
+  const activos: EmpRow[] = [];
+
+  for (const d of empSnap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    const st = data.status;
+    if (soloPanel) {
+      if (!esEmpleadoNominaTarjetaDashboard(st)) continue;
+    } else if (!esLegajoActivoComoPantallaRRHH(st)) {
+      continue;
+    }
+
+    const ln = String(data.lastName ?? '').trim();
+    const fn = String(data.firstName ?? '').trim();
+    const nombre =
+      [ln, fn].filter(Boolean).join(', ') ||
+      String(data.name ?? data.nombre ?? '').trim() ||
+      '(sin nombre en legajo)';
+
+    activos.push({
+      id: d.id,
+      nombre: nombre.slice(0, 120),
+      legajo: String(data.fileNumber ?? '').trim(),
+      sortKey: norm(`${ln} ${fn} ${nombre}`),
+    });
+  }
+
+  const qsnap = await db
+    .collection('turnos')
+    .where('startTime', '>=', start)
+    .where('startTime', '<=', end)
+    .limit(TURNOS_PLANIFICADOS_UMBRAL_LIM)
+    .get();
+
+  const conTurno = new Set<string>();
+  for (const doc of qsnap.docs) {
+    const row = doc.data() as Record<string, unknown>;
+    if (!shiftCountsAsPlanificacionAsignada(row)) continue;
+    const empE = String(row.empresaId ?? '').trim();
+    if (empE && empE.toLowerCase() !== ctx.empresaId.toLowerCase()) continue;
+    const empId = String(row.employeeId ?? '').trim();
+    if (empId) conTurno.add(empId);
+  }
+
+  const sinTurno = activos.filter((e) => !conTurno.has(e.id));
+  const conTurnoActivos = activos.length - sinTurno.length;
+  sinTurno.sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'es', { sensitivity: 'base' }));
+
+  let limite = Math.floor(Number(args.limite ?? 60));
+  if (!Number.isFinite(limite) || limite < 5) limite = 60;
+  limite = Math.min(90, limite);
+
+  const muestra = sinTurno.slice(0, limite).map((e) => ({
+    id_firestore: e.id,
+    nombre: e.nombre,
+    legajo: e.legajo || undefined,
+  }));
+
+  return {
+    rango: { desde_inclusive: fechaDesde, hasta_inclusive: fechaHasta },
+    mes_yyyy_mm: fechaDesde.slice(0, 7),
+    solo_activos_nomina_panel: soloPanel,
+    cuenta_legajos_activos_evaluados: activos.length,
+    cuenta_con_al_menos_un_turno: conTurnoActivos,
+    cuenta_sin_ningun_turno: sinTurno.length,
+    muestra_empleados_sin_turno: muestra,
+    truncado_por_limite_muestra: sinTurno.length > limite,
+    truncado_consulta_turnos_limite: qsnap.size >= TURNOS_PLANIFICADOS_UMBRAL_LIM,
+    truncado_loteFirestore_900: empSnap.size >= 900,
+    criterio:
+      'Legajos activos sin ningún turno asignado en el rango (incluye F/V/L como planificación; excluye vacantes y cancelados).',
+    nota_tras_herramienta:
+      'Respondé cuenta_sin_ningun_turno vs cuenta_legajos_activos_evaluados. Listá todos los de muestra_empleados_sin_turno. Si 0, decilo claro. Para cargar turnos orientá a Planificación y Turnos.',
+  };
+}
+
 /** Lista RRHH: activo/active o sin estado → activo; inactivo/inactive → baja. */
 function esLegajoActivoComoPantallaRRHH(statusRaw: unknown): boolean {
   const s = String(statusRaw ?? '').trim().toLowerCase();
@@ -3098,6 +3244,14 @@ async function dispatchAssistantToolCallInner(
       fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
       fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'listado_empleados_sin_turnos_planificados') {
+    raw = await ejecutarListadoEmpleadosSinTurnosPlanificados(ctx, {
+      fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+      fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+      solo_activos_nomina_panel: args.solo_activos_nomina_panel === true,
     });
   } else if (name === 'resumen_horas_empleado_periodo') {
     let fechaDesde = String(args.fecha_desde ?? '').trim();

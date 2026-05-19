@@ -332,6 +332,30 @@ export const ASSISTANT_TRAINING_PAIRS: AssistantTrainingPair[] = [
     respuesta_ideal_bullet:
       'X completos vs Y incompletos; listar incompletos con CUIT/contacto/objetivos faltantes; pasos en Clientes y Objetivos.',
   },
+  {
+    id: 165,
+    categoria: 'crm',
+    pregunta_usuario: 'cuales son? (tras contar 21 clientes activos)',
+    herramienta_sugerida: 'listado_clientes_empresa',
+    respuesta_ideal_bullet:
+      'Seguimiento vago; listado_clientes_empresa con los 21 nombres; no decir que no hay tool.',
+  },
+  {
+    id: 166,
+    categoria: 'rrhh',
+    pregunta_usuario: 'a que colaboradores no les planifique ningun turno',
+    herramienta_sugerida: 'listado_empleados_sin_turnos_planificados',
+    respuesta_ideal_bullet:
+      'Totales con/sin turno en el mes; listar nombres; orientar a Planificación para cargar grilla.',
+  },
+  {
+    id: 167,
+    categoria: 'planificacion_ui',
+    pregunta_usuario: 'como publico un cronograma (desde Dashboard u otro módulo)',
+    herramienta_sugerida: undefined,
+    respuesta_ideal_bullet:
+      'Pasos numerados: Planificación y Turnos → Cliente → Objetivo → mes → grilla → Publicar cronograma.',
+  },
 ];
 
 export const ASSISTANT_TRAINING_PAIR_COUNT = ASSISTANT_TRAINING_PAIRS.length;

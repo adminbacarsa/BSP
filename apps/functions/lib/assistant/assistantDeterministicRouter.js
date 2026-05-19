@@ -944,7 +944,7 @@ function matchClientListIntent(t, recent) {
         return true;
     }
     if (recentClientListThread(recent)) {
-        if (/\b(demas|restantes|completa|otros|lista|listado|nombres?|faltan|21|10|muestras?)\b/.test(t)) {
+        if (/\b(demas|restantes|completa|otros|lista|listado|nombres?|faltan|21|10|muestras?|cuales?\s+son|listame|nombralos)\b/.test(t)) {
             return true;
         }
     }
@@ -1294,6 +1294,79 @@ async function tryDeterministicPlannedHoursThresholdReply(t, toolCtx, recent) {
     });
     return reply.slice(0, 7500);
 }
+function matchEmpleadosSinTurnosPlanificadosIntent(t) {
+    if (/\b(mas\s+de|más\s+de|supera|umbral|200)\b/.test(t) && /\bhoras?\b/.test(t))
+        return false;
+    if (/\b(a\s+)?qu[eé]\s+colaboradores?\b/.test(t) &&
+        /\b(no\s+les|sin\s+turno|ningun|ningún|no\s+planif)\b/.test(t)) {
+        return true;
+    }
+    return (/\b(sin\s+turno|sin\s+planif|no\s+les?\s+planif|ningun\s+turno|ningún\s+turno|no\s+tienen?\s+turno|sin\s+nada\s+en\s+la\s+grilla)\b/.test(t) && /\b(planif|turno|colaborador|empleado|vigilador|guardia|nomina|nómina|legajo)\b/.test(t));
+}
+function formatDeterministicEmpleadosSinTurnosReply(data, rangeLabel) {
+    const evaluados = Number(data.cuenta_legajos_activos_evaluados ?? 0);
+    const sinTurno = Number(data.cuenta_sin_ningun_turno ?? 0);
+    const conTurno = Number(data.cuenta_con_al_menos_un_turno ?? 0);
+    const lista = (data.muestra_empleados_sin_turno ?? []);
+    const trunc = data.truncado_por_limite_muestra === true ||
+        data.truncado_consulta_turnos_limite === true ||
+        data.truncado_loteFirestore_900 === true;
+    let body = `Según **Firestore** (legajos activos vs turnos en **${rangeLabel}**):\n\n`;
+    body += `- **${evaluados}** colaborador(es) activo(s) evaluado(s)\n`;
+    body += `- **${conTurno}** con al menos un turno asignado en el período\n`;
+    body += `- **${sinTurno}** **sin ningún turno** planificado\n\n`;
+    if (sinTurno === 0) {
+        body += `Todos los legajos activos tienen al menos un turno asignado en ese mes (incluye francos F y licencias).`;
+        return body.trim();
+    }
+    body += `**Colaboradores sin turno en el período:**\n\n`;
+    for (const e of lista) {
+        const leg = String(e.legajo ?? '').trim();
+        body += `- **${String(e.nombre ?? '—')}**${leg ? ` (legajo ${leg})` : ''}\n`;
+    }
+    if (trunc) {
+        body += `\n*Nota:* la lista puede estar acotada; el detalle completo está en **Planificación y Turnos**.\n`;
+    }
+    body += `\nPara cargar turnos: **Planificación y Turnos** → **Cliente** / **Objetivo** → grilla del mes.`;
+    return body.trim();
+}
+async function tryDeterministicEmpleadosSinTurnosReply(t, toolCtx, recent) {
+    if (!matchEmpleadosSinTurnosPlanificadosIntent(t))
+        return null;
+    let range = extractMonthRangeFromHoursQuery(t, toolCtx.referenceDateYsMmDd);
+    if (!range) {
+        range = extractMonthRangeFromHoursQuery(recent
+            .slice(-6)
+            .map((m) => m.content)
+            .join(' '), toolCtx.referenceDateYsMmDd);
+    }
+    if (!range) {
+        try {
+            const ref = parseRefYmd(extractMonthRefYmdFromRecentMessages(recent, toolCtx.referenceDateYsMmDd));
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+        catch {
+            const ref = parseRefYmd(toolCtx.referenceDateYsMmDd);
+            range = monthRangeYsMmDd(ref.y, ref.m);
+        }
+    }
+    const data = await (0, assistantDataTools_1.ejecutarListadoEmpleadosSinTurnosPlanificados)(toolCtx, {
+        fecha_desde: range.desde,
+        fecha_hasta: range.hasta,
+        limite: 60,
+    });
+    const err = String(data.error ?? '').trim();
+    if (err) {
+        if (err === 'sin_permiso_para_consultar_turnos') {
+            return 'Tu perfil no tiene permiso para consultar turnos. Necesitás lectura en **Planificación**, **Operaciones** o **Reportes**.';
+        }
+        if (err === 'sin_permiso_para_buscar_personal') {
+            return 'Tu perfil no tiene permiso para listar legajos. Necesitás lectura en **RRHH** o **Planificación**.';
+        }
+        return `No pude listar colaboradores sin turnos (${err}).`;
+    }
+    return formatDeterministicEmpleadosSinTurnosReply(data, range.label).slice(0, 7500);
+}
 function formatMultiSlaHoursReply(batch, clientFilter) {
     const mes = String(batch.mes_yyyy_mm ?? '');
     let resultados = (batch.resultados ?? []);
@@ -1631,6 +1704,39 @@ function matchPlanningUiOnlyIntent(t, moduleKey) {
     }
     return /\b(como|cómo|donde|dónde|planificar|publicar|grilla|asignar|auto|cronograma|mes|columna|fila)\b/.test(t);
 }
+function matchPlanificacionHowToIntent(t) {
+    if (/\b(cuántos|cuantas|horas?|quien|quién|presentes|ausentes|legajo|nomina|nómina|sla|turno\s+hoy)\b/.test(t)) {
+        return false;
+    }
+    if (/\b(publicar|cronograma|cornograma|grilla|planificar|asignar\s+turno)\b/.test(t)) {
+        if (/\b(como|cómo|donde|dónde|pasos|ayuda|tutorial|comom)\b/.test(t))
+            return true;
+    }
+    if (/\b(comom?|publico|publicar)\b/.test(t) && /\b(cronograma|cornograma|grilla)\b/.test(t))
+        return true;
+    return false;
+}
+function tryDeterministicPlanificacionHowToReply(t) {
+    if (!matchPlanificacionHowToIntent(t))
+        return null;
+    const publish = /\b(publicar|publico|cronograma|cornograma|comom)\b/.test(t) ||
+        (/\b(grilla)\b/.test(t) && /\b(como|cómo)\b/.test(t));
+    if (publish) {
+        return ('**Publicar un cronograma en COSP**\n\n' +
+            '1. Menú lateral → **Planificación y Turnos**.\n\n' +
+            '2. Elegí **Cliente** y **Objetivo** (sede).\n\n' +
+            '3. Navegá al **mes** del cronograma (flechas de período junto al título).\n\n' +
+            '4. Revisá o completá la **grilla** (códigos M/T/N, francos F, licencias, etc.).\n\n' +
+            '5. Clic en **Publicar cronograma** en la barra de acciones de la grilla.\n\n' +
+            'Tras publicar, los turnos planificados quedan visibles para operaciones y el portal del empleado según las reglas de la empresa.').slice(0, 7500);
+    }
+    const guide = (0, cospKnowledge_1.operationalGuideForModuleKey)('PLANNING');
+    if (!guide.trim())
+        return null;
+    const body = guide.replace(/^GUÍA OPERATIVA[^\n]*\n/, '').trim();
+    return (`**Planificación en COSP**\n\n${body.slice(0, 1500)}\n\n` +
+        `Para datos concretos (quién trabaja, horas SLA vs planificadas), decime cliente/objetivo y mes.`).slice(0, 7500);
+}
 function tryDeterministicPlanningUiReply(moduleKey) {
     if (!moduleKey || (moduleKey !== 'PLANNING' && moduleKey !== 'PLANNING_AI'))
         return null;
@@ -1652,6 +1758,8 @@ function shouldPrefetchMetricsSnapshot(lastUser, moduleKey, recentMessages = [])
         return false;
     const recent = recentMessages.slice(-8);
     if (matchTurnosHoyFollowUpIntent(t, recent))
+        return false;
+    if (matchPlanificacionHowToIntent(t))
         return false;
     if (matchPlanningUiOnlyIntent(t, typeof moduleKey === 'string' ? moduleKey.trim() || null : null))
         return false;
@@ -1806,6 +1914,9 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     catch (e) {
         console.warn('[assistant] tryDeterministicTurnosHoyReply', e);
     }
+    const planHowTo = tryDeterministicPlanificacionHowToReply(t);
+    if (planHowTo?.trim())
+        return planHowTo.trim();
     try {
         const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
         if (crm?.trim())
@@ -1826,6 +1937,14 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     }
     catch (e) {
         console.warn('[assistant] tryDeterministicPlannedHoursThresholdReply', e);
+    }
+    try {
+        const sinPlan = await tryDeterministicEmpleadosSinTurnosReply(t, toolCtx, recent);
+        if (sinPlan?.trim())
+            return sinPlan.trim();
+    }
+    catch (e) {
+        console.warn('[assistant] tryDeterministicEmpleadosSinTurnosReply', e);
     }
     if (!shouldSkipDeterministicRouter(raw, recent)) {
         try {

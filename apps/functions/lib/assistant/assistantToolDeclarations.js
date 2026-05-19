@@ -269,6 +269,27 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
     {
+        name: 'listado_empleados_sin_turnos_planificados',
+        description: 'Para «a qué colaboradores no les planifiqué turno», «empleados sin turnos en el mes», «quién no tiene nada en la grilla»: legajos activos sin ningún turno asignado en el rango (mes por defecto; F/V/L cuentan como planificación). No confundir con horas > umbral ni con ausentes del día.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha_referencia: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'YYYY-MM-DD dentro del mes a evaluar (default mes de clientToday).',
+                },
+                fecha_desde: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD inicio inclusive.' },
+                fecha_hasta: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD fin inclusive.' },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (default 60, máx 90).' },
+                solo_activos_nomina_panel: {
+                    type: generative_ai_1.SchemaType.BOOLEAN,
+                    description: 'Si true, solo status activo/active/activa como tarjeta nómina del panel.',
+                },
+            },
+            required: [],
+        },
+    },
+    {
         name: 'listado_empleados_horas_planificadas_umbral',
         description: 'Para «vigiladores/empleados con más de 200 h planificadas en mayo», «quién supera X horas planificadas por empleado»: lista legajos cuya suma horas_planificadas_cobertura en el mes/rango supera umbral_horas (default 200). No usar para SLA de un objetivo ni bolsa 200 de liquidación/fichadas. fecha_referencia = día del mes; o fecha_desde/fecha_hasta.',
         parameters: {

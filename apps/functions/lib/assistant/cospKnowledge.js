@@ -48,6 +48,16 @@ Para ubicar quién tiene algo planificado en un día dado dentro de ese mes:
 3. En la **grilla**, ubicá **la columna del día buscado** y recorré las filas de guardias: la celda muestra código CCT/franco/licencia/etc. donde esté cargado algo.
 
 4. Si el objetivo muestra sólo coberturas operativas o “no aparece” la planificación al guardia hasta que RRHH/publique: mencioná **publicación de planificación** del mes/objetivo (documento planificacion_estados en backend; en UI suele estar el flujo «publicar/notificar cronograma» cuando el usuario lo use).
+
+**Publicar cronograma** (pasos concretos en la UI):
+
+1. Menú lateral → **Planificación y Turnos**.
+2. Elegí **Cliente** y **Objetivo** (sede).
+3. Navegá al **mes** del cronograma (flechas de período junto al título).
+4. Revisá o completá la **grilla** (códigos M/T/N, francos F, licencias, etc.).
+5. Clic en **Publicar cronograma** en la barra de acciones de la grilla.
+
+Tras publicar, los turnos planificados quedan visibles según las reglas de la empresa (operaciones, portal empleado, etc.).
 `.trim();
 const OPERATIONS_OPS = `
 Operaciones: monitor en tiempo cercano por objetivos/puestos; vacantes, ausencias tardías, fichadas. Usá filtros de fecha/período o barra lateral según apareza en esa versión cuando el usuario no vea algo.

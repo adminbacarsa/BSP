@@ -91,6 +91,13 @@ export declare function ejecutarListadoEmpleadosHorasPlanificadasUmbral(ctx: Ass
     fecha_referencia?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
+export declare function ejecutarListadoEmpleadosSinTurnosPlanificados(ctx: AssistantToolContext, args: {
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    fecha_referencia?: string;
+    limite?: number;
+    solo_activos_nomina_panel?: boolean;
+}): Promise<Record<string, unknown>>;
 export declare function ejecutarContarEmpleadosPlantillaEmpresa(ctx: AssistantToolContext, args: {
     fecha_referencia?: string;
 }): Promise<Record<string, unknown>>;
