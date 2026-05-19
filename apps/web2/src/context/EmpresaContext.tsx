@@ -9,6 +9,9 @@ export interface Empresa {
   name: string;
   cuit?: string;
   direccion?: string;
+  website?: string;
+  email?: string;
+  phone?: string;
   logo?: string;
   plan?: string;
   active?: boolean;

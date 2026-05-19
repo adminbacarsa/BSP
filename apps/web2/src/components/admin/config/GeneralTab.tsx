@@ -10,11 +10,13 @@ import { httpsCallable } from 'firebase/functions';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 
 const PHRASE_DELETE_ALL_SHIFTS = 'BORRAR TODOS LOS TURNOS';
 
 export default function GeneralTab() {
     const { isSuperAdmin, userRole } = useAuth();
+    const { empresaId } = useEmpresa();
     const canRunMassDelete =
         isSuperAdmin ||
         (userRole || '').trim().toUpperCase().replace(/\s+/g, '_') === 'ADMIN';
@@ -29,28 +31,34 @@ export default function GeneralTab() {
     // TEMA SELECCIONADO
     const [theme, setTheme] = useState('light');
 
-    // Cargar datos de organización desde Firestore
+    // Cargar datos de organización desde Firestore (por empresa activa)
     useEffect(() => {
         const saved = (localStorage.getItem('cosp-theme') || localStorage.getItem('theme') || 'light') as any;
         setTheme(saved);
+    }, []);
 
-        getDoc(doc(db, 'configuracion', 'general'))
+    useEffect(() => {
+        if (!empresaId) return;
+        setLoadingCompany(true);
+        getDoc(doc(db, 'empresas', empresaId))
             .then(snap => {
                 if (snap.exists()) {
                     const data = snap.data();
                     setCompany({
                         name:    data.name    || '',
                         cuit:    data.cuit    || '',
-                        address: data.address || '',
+                        address: data.direccion || data.address || '',
                         website: data.website || '',
                         email:   data.email   || '',
                         phone:   data.phone   || '',
                     });
+                } else {
+                    setCompany({ name: '', cuit: '', address: '', website: '', email: '', phone: '' });
                 }
             })
             .catch(() => {})
             .finally(() => setLoadingCompany(false));
-    }, []);
+    }, [empresaId]);
 
     const handleApplyTheme = (newTheme: string) => {
         setTheme(newTheme);
@@ -60,9 +68,14 @@ export default function GeneralTab() {
     const handleChange = (e: any) => setCompany({ ...company, [e.target.name]: e.target.value });
 
     const handleSaveCompany = async () => {
+        if (!empresaId) return;
         setSavingCompany(true);
         try {
-            await setDoc(doc(db, 'configuracion', 'general'), company, { merge: true });
+            await setDoc(
+                doc(db, 'empresas', empresaId),
+                { name: company.name, cuit: company.cuit, direccion: company.address, website: company.website, email: company.email, phone: company.phone, updatedAt: new Date().toISOString() },
+                { merge: true }
+            );
             toast.success('Datos de organización guardados');
         } catch (err: any) {
             toast.error('Error al guardar: ' + (err?.message || err));
