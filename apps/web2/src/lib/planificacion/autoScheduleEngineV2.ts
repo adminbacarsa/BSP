@@ -1209,8 +1209,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Cada positionGroups.forEach corre assignOffsets de forma independiente:
     // el 2º empleado de posición-A y el 2º de posición-B obtienen ambos offset=2
     // → descansan los mismos días → la banda T (o M, N…) queda sin cobertura.
-    // Redistribuimos los offsets de empleados sin ancla histórica para que la
-    // misma banda esté cubierta cada día del mes desde distintos puestos.
+    // Redistribuye los offsets en toda la banda (incluyendo empleados con trailing
+    // duplicado) para que los francos queden distribuidos uniformemente.
     {
         const _gGroups = new Map<string, string[]>(); // key = `${shift}|${cycleLen}`
         ctx.employees.forEach(emp => {
@@ -1225,20 +1225,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (ids.length <= 1) return;
             const ecl = empCycleLen[ids[0]] ?? cycleLen;
             const total = ids.length;
-            // Empleados con trailing real: offset fijado por continuidad cross-mes → no mover.
-            const anchored = new Set(ids.filter(id => {
-                const tw = ctx.prevMonthTrailingWorkDays?.[id];
-                const tr = ctx.prevMonthTrailingRestDays?.[id];
-                return ((tw as number) > 0) || ((tr as number) > 0);
-            }));
-            const free = ids.filter(id => !anchored.has(id));
-            if (free.length === 0) return;
-            const usedSlots = new Set<number>(
-                ids.filter(id => anchored.has(id)).map(id => empGroupIdx[id] ?? 0)
-            );
-            free.sort((a, b) => (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0));
-            free.forEach((empId, i) => {
-                let off = Math.floor(i * ecl / Math.max(1, total));
+            const hasTrail = (id: string): boolean =>
+                ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
+                ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
+            // Ordenar: empleados con trailing primero (intentan conservar su offset
+            // para continuidad cross-mes), luego por offset actual ascendente.
+            const sorted = [...ids].sort((a, b) => {
+                if (hasTrail(a) !== hasTrail(b)) return hasTrail(a) ? -1 : 1;
+                return (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0);
+            });
+            // Asignación global: cada empleado toma su offset preferido si está libre,
+            // si no, el siguiente disponible. Incluye empleados con trailing duplicado.
+            const usedSlots = new Set<number>();
+            sorted.forEach((empId, i) => {
+                const preferred = hasTrail(empId)
+                    ? (empGroupIdx[empId] ?? 0)
+                    : Math.floor(i * ecl / Math.max(1, total));
+                let off = preferred;
                 let tries = 0;
                 while (usedSlots.has(off) && tries < ecl) { off = (off + 1) % ecl; tries++; }
                 usedSlots.add(off);
@@ -1440,7 +1443,13 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
             const a = assignments.find((x) => x.empId === eid && x.dateStr === ds)
                 ?? syntheticPrevAssignments.find((x) => x.empId === eid && x.dateStr === ds);
-            if (!a) return null;
+            if (!a) {
+                // Día de ciclo-trabajo aún no asignado (el fallback F/RET aún no corrió):
+                // tratarlo como día ocupado (0h) para que el check de días consecutivos
+                // vea la racha completa y bloquee antes de llegar a 7+.
+                if (cycleWorkDays[eid]?.has(ds)) return { code: 'RET', hours: 0, startTime: '00:00' };
+                return null;
+            }
             const c = String(a.code || '').toUpperCase();
             // RET y francos no son turnos trabajados: deben reportar 0 horas
             const isNonWork = c === 'RET' || FRANCO_SET.has(c);

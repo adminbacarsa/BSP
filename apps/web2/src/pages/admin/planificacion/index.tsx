@@ -337,7 +337,7 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>(['6+2']);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     /** Rotar turnos entre ciclos (M→T→N→M…). Si el puesto solo tiene 1 turno, no afecta. */
-    const [autoRotateShifts, setAutoRotateShifts] = useState(false);
+    const [autoRotateShifts, setAutoRotateShifts] = useState(true);
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
