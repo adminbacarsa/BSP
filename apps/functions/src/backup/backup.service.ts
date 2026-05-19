@@ -6,7 +6,24 @@ const EXCLUDE_COLLECTIONS = new Set<string>([
   // ninguna por ahora — system_backups se incluye para que el emulador muestre el historial
 ]);
 
-const MAX_DOCS_PER_COLLECTION = 50000; // límite de seguridad por colección
+/** Colecciones con campo empresaId (misma lista que migración multiempresa). */
+const EMPRESA_SCOPED_COLLECTIONS = new Set([
+  'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
+  'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
+  'objetivos', 'audit_logs', 'user_notifications', 'system_users',
+]);
+
+const MAX_DOCS_PER_COLLECTION = 50000;
+
+export interface BackupOptions {
+  empresaId?: string;
+  scopeEmpresa?: boolean;
+}
+
+function docBelongsToEmpresa(data: Record<string, unknown>, empresaId: string, scopeEmpresa: boolean): boolean {
+  if (!scopeEmpresa) return true;
+  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+}
 
 export interface BackupResult {
   id: string;
@@ -19,6 +36,7 @@ export interface BackupResult {
   createdAt: string;
   status: 'ok' | 'error';
   error?: string;
+  empresaId?: string;
 }
 
 async function exportAuthUsers(): Promise<any[]> {
@@ -40,29 +58,54 @@ async function exportAuthUsers(): Promise<any[]> {
   return users;
 }
 
-export async function runBackup(folderId: string): Promise<BackupResult> {
+export async function runBackup(folderId: string, opts: BackupOptions = {}): Promise<BackupResult> {
   const db = admin.firestore();
+  const empresaId = String(opts.empresaId ?? '').trim();
+  const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
   const data: Record<string, any[]> = {};
   let totalDocs = 0;
   const exportedCollections: string[] = [];
 
-  // Exportar usuarios de Firebase Auth
-  const authUsers = await exportAuthUsers();
+  const authUsers = scopeEmpresa ? [] : await exportAuthUsers();
 
-  // Descubrir todas las colecciones automáticamente
   const rootCollections = await db.listCollections();
 
   for (const colRef of rootCollections) {
     const col = colRef.id;
     if (EXCLUDE_COLLECTIONS.has(col)) continue;
+
+    if (col === 'empresas' && scopeEmpresa) {
+      try {
+        const snap = await db.collection('empresas').doc(empresaId).get();
+        if (snap.exists) {
+          data[col] = [{ _id: snap.id, ...snap.data() }];
+          totalDocs += 1;
+          exportedCollections.push(col);
+        }
+      } catch { /* omit */ }
+      continue;
+    }
+
     try {
       const snap = await db.collection(col).limit(MAX_DOCS_PER_COLLECTION).get();
-      if (!snap.empty) {
-        data[col] = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
-        totalDocs += snap.size;
+      if (snap.empty) continue;
+
+      const docs = snap.docs
+        .map(d => ({ _id: d.id, ...d.data() as Record<string, unknown> }))
+        .filter(row => {
+          if (!scopeEmpresa) return true;
+          if (EMPRESA_SCOPED_COLLECTIONS.has(col)) {
+            return docBelongsToEmpresa(row, empresaId, true);
+          }
+          return false;
+        });
+
+      if (docs.length > 0) {
+        data[col] = docs;
+        totalDocs += docs.length;
         exportedCollections.push(col);
       }
-    } catch (_) {
+    } catch {
       // colección sin permisos, se omite
     }
   }
@@ -70,7 +113,9 @@ export async function runBackup(folderId: string): Promise<BackupResult> {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toISOString().slice(11, 16).replace(':', '-');
-  const fileName = `backup_${dateStr}_${timeStr}.json`;
+  const fileName = scopeEmpresa
+    ? `backup_${empresaId}_${dateStr}_${timeStr}.json`
+    : `backup_${dateStr}_${timeStr}.json`;
 
   const payload = {
     _meta: {
@@ -79,6 +124,7 @@ export async function runBackup(folderId: string): Promise<BackupResult> {
       collections: exportedCollections,
       totalDocs,
       authUsers: authUsers.length,
+      ...(scopeEmpresa ? { empresaId, scopeEmpresa: true } : {}),
     },
     _auth_users: authUsers,
     ...data,
@@ -120,6 +166,8 @@ export async function runBackup(folderId: string): Promise<BackupResult> {
     totalDocs,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     status: 'ok',
+    ...(empresaId ? { empresaId } : {}),
+    ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
   });
 
   return {
@@ -132,5 +180,6 @@ export async function runBackup(folderId: string): Promise<BackupResult> {
     totalDocs,
     createdAt: now.toISOString(),
     status: 'ok',
+    ...(empresaId ? { empresaId } : {}),
   };
 }

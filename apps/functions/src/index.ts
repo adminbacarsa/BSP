@@ -2,6 +2,7 @@ import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { runBackup } from './backup/backup.service';
+import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, RestoreMode } from './backup/restore.service';
 import { createNestApp } from './main';
 import { INestApplicationContext } from '@nestjs/common';
@@ -1698,7 +1699,7 @@ export const gestionarVacantes = functions
 // =========================================================
 export const triggerBackup = functions
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
-  .https.onCall(async (_data, context) => {
+  .https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
     const role = context.auth.token.role as string;
     const allowed = ['admin', 'superadmin', 'SuperAdmin'];
@@ -1707,15 +1708,40 @@ export const triggerBackup = functions
     const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
     if (!folderId) throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
 
+    const db = admin.firestore();
+    const claimedEmpresa = String((data as { empresaId?: string })?.empresaId ?? '').trim();
+    let empresaId = claimedEmpresa;
+    const sysUser = await db.collection('system_users').doc(context.auth.uid).get();
+    if (sysUser.exists) {
+      const sysRole = String(sysUser.data()?.role ?? '');
+      const isSuper =
+        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPERADMIN' ||
+        sysRole.trim().toUpperCase().replace(/\s+/g, '_') === 'SUPER_ADMIN';
+      const profileEmpresa = String(sysUser.data()?.empresaId ?? '').trim();
+      if (!isSuper) {
+        empresaId = profileEmpresa || 'bacarsa';
+      } else if (!empresaId) {
+        empresaId = profileEmpresa;
+      }
+    }
+
+    let scopeEmpresa = false;
+    if (empresaId) {
+      const empSnap = await db.collection('empresas').doc(empresaId).get();
+      const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
+      scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+    }
+
     try {
-      const result = await runBackup(folderId);
+      const result = await runBackup(folderId, { empresaId, scopeEmpresa });
       return result;
     } catch (e: any) {
-      const db = admin.firestore();
       await db.collection('system_backups').add({
         status: 'error',
         error: e?.message || 'Error desconocido',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(empresaId ? { empresaId } : {}),
+        ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
       });
       throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
     }
@@ -1729,9 +1755,26 @@ export const restoreBackup = functions
     if (!['admin', 'superadmin', 'SuperAdmin'].includes(role)) {
       throw new functions.https.HttpsError('permission-denied', 'Solo administradores');
     }
-    const { driveFileId, mode, jobId } = data as { driveFileId: string; mode: RestoreMode; jobId?: string };
+    const { driveFileId, mode, jobId, empresaId: claimedEmpresa } = data as {
+      driveFileId: string;
+      mode: RestoreMode;
+      jobId?: string;
+      empresaId?: string;
+    };
     if (!driveFileId) throw new functions.https.HttpsError('invalid-argument', 'driveFileId requerido');
     if (!['merge', 'full'].includes(mode)) throw new functions.https.HttpsError('invalid-argument', 'mode debe ser merge o full');
+
+    const db = admin.firestore();
+    const metaSnap = await db.collection('system_backups').where('driveFileId', '==', driveFileId).limit(1).get();
+    if (!metaSnap.empty) {
+      const meta = metaSnap.docs[0].data();
+      const backupEmpresa = String(meta.empresaId ?? '').trim();
+      const backupScoped = meta.scopeEmpresa === true;
+      const sessionEmpresa = String(claimedEmpresa ?? '').trim();
+      if (backupScoped && backupEmpresa && sessionEmpresa && backupEmpresa.toLowerCase() !== sessionEmpresa.toLowerCase()) {
+        throw new functions.https.HttpsError('permission-denied', 'El backup no pertenece a la empresa activa.');
+      }
+    }
 
     try {
       return await runRestore(driveFileId, mode, jobId);

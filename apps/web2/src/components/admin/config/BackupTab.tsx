@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions } from '@/lib/firebase';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { shouldScopeQueriesToEmpresa, filterRowsByEmpresa } from '@/lib/multiempresa';
 
 const STORAGE_KEY = 'emulator_loaded_backup';
 
@@ -28,6 +30,8 @@ interface BackupRecord {
   createdAt: any;
   status: 'ok' | 'error';
   error?: string;
+  empresaId?: string;
+  scopeEmpresa?: boolean;
 }
 
 const fmt = (bytes: number) => {
@@ -58,6 +62,10 @@ const deserialize = (obj: any): any => {
 };
 
 export default function BackupTab() {
+  const { empresaId, empresa } = useEmpresa();
+  const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -79,19 +87,35 @@ export default function BackupTab() {
 
   // Suscripción Firestore (producción: remota / emulador: local localhost:8080)
   useEffect(() => {
-    const q = query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(20));
+    if (!empresaId) return;
+    setLoading(true);
+    setBackups([]);
+
+    const q = scopeEmpresa
+      ? query(collection(db, 'system_backups'), where('empresaId', '==', empresaId), limit(40))
+      : query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(20));
+
     const unsub = onSnapshot(q, snap => {
-      setBackups(snap.docs.map(d => ({ id: d.id, ...d.data() } as BackupRecord)));
+      let rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as BackupRecord));
+      if (scopeEmpresa) {
+        rows = filterRowsByEmpresa(rows, empresaId, true);
+        rows.sort((a, b) => {
+          const ta = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : new Date(a.createdAt ?? 0).getTime();
+          const tb = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : new Date(b.createdAt ?? 0).getTime();
+          return tb - ta;
+        });
+      }
+      setBackups(rows.slice(0, 20));
       setLoading(false);
-    });
+    }, () => setLoading(false));
     return unsub;
-  }, []);
+  }, [empresaId, scopeEmpresa]);
 
   const handleRunBackup = async () => {
     setRunning(true); setLastResult(null);
     try {
       const fn = httpsCallable(functions, 'triggerBackup');
-      const res: any = await fn({});
+      const res: any = await fn({ empresaId: empresaId || '' });
       setLastResult({ ok: true, msg: `Backup creado: ${res.data.fileName} (${fmt(res.data.sizeBytes)}, ${res.data.totalDocs} docs)` });
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al crear backup' });
@@ -166,7 +190,12 @@ export default function BackupTab() {
         setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
       });
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 540000 });
-      const res: any = await fn({ driveFileId: restoreModal.backup.driveFileId, mode: restoreModal.mode, jobId });
+      const res: any = await fn({
+        driveFileId: restoreModal.backup.driveFileId,
+        mode: restoreModal.mode,
+        jobId,
+        empresaId: empresaId || '',
+      });
       const d = res.data;
       setLastResult({ ok: true, msg: `Restauración ${d.mode === 'full' ? 'completa' : 'merge'} exitosa — ${d.docsRestored.toLocaleString()} docs en ${(d.durationMs/1000).toFixed(1)}s` });
       setRestoreModal(null);
