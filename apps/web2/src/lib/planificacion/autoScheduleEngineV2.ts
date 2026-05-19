@@ -1104,6 +1104,39 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         return ring[slot % ring.length];
     };
 
+    // ── BAND BASE: offset inicial por banda de turno ──────────────────────────
+    // Cada banda (N, T, M, rotativo) recibe un offset base distinto, uniformemente
+    // espaciado dentro del ciclo. Todos los empleados de la misma banda arrancan
+    // en el mismo offset → descansan los mismos días. Las bandas distintas tienen
+    // offsets escalonados → nunca descansan a la vez → cobertura sin RETs.
+    const positionBandBase: Record<string, number> = {};
+    {
+        const BAND_ORDER: Record<string, number> = { N: 0, N12: 1, T: 2, M: 3, D12: 4 };
+        const bandToPositions = new Map<string, string[]>();
+        Object.entries(positionGroups).forEach(([pName, empIds]) => {
+            if (empIds.length === 0) return;
+            const p = ctx.positions.find(pp => pp.positionName === pName);
+            if (!p) return;
+            const sd = ctx.daysInMonth.find(d => positionIsActiveOn(p, ctx.getDayLetter(ctx.getDateKey(d))));
+            const sl = sd ? ctx.getDayLetter(ctx.getDateKey(sd)) : 'L';
+            const codes = effectiveShiftsForPositionDay(p, sl, ctx.autoCycles)
+                .map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+            const band = codes.length === 1 ? codes[0] : (codes.length > 1 ? '__ROT__' : '__NONE__');
+            if (!bandToPositions.has(band)) bandToPositions.set(band, []);
+            bandToPositions.get(band)!.push(pName);
+        });
+        const sortedBands = [...bandToPositions.keys()].sort((a, b) => {
+            if (a === '__ROT__') return 1; if (b === '__ROT__') return -1;
+            if (a === '__NONE__') return 1; if (b === '__NONE__') return -1;
+            return (BAND_ORDER[a] ?? 50) - (BAND_ORDER[b] ?? 50);
+        });
+        const nb = Math.max(1, sortedBands.length);
+        sortedBands.forEach((band, i) => {
+            const base = Math.round(i * cycleLen / nb);
+            bandToPositions.get(band)!.forEach(pName => { positionBandBase[pName] = base; });
+        });
+    }
+
     Object.entries(positionGroups).forEach(([posName, empIds]) => {
         const pos = ctx.positions.find((p) => p.positionName === posName);
         if (!pos) return;
@@ -1148,19 +1181,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         });
         // Offsets de franco: separados por tipo de turno (8h vs 12h) para que
         // cada subgrupo tenga offsets distribuidos sobre SU propio cycleLen.
-        // cF≥2 → evitar offset=cycleLen-1 (causa franco huérfano al inicio del mes).
         const empIds8h = empIds.filter(id => !(has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12));
         const empIds12h = empIds.filter(id => has4x2 && (SHIFT_HRS_DEFAULT[(empPrimaryShift[id] || '').toUpperCase()] ?? 8) >= 12);
+        // Base de offset para esta banda de turno (pre-calculado arriba).
+        const bandBase = positionBandBase[posName] ?? (ctx.distributedOffsetSeed ?? 0);
         const assignOffsets = (group: string[], eCL: number, eCF: number) => {
             const eCycleLen = eCL + eCF;
-            const seed = ctx.distributedOffsetSeed ?? 0;
 
-            // ── Offsets individuales desde datos del mes anterior ──────────────────────────
-            // Para cada empleado: offset = trailingWorkDays % cycleLen (fórmula exacta que
-            // garantiza continuidad cross-mes sin crear rachas > cL días).
-            // Si hay duplicados (varios trabajaron la misma racha), se desplazan hacia adelante
-            // (+1, +2, ...) NUNCA hacia atrás para no crear violaciones cross-mes.
-            // Rango seguro de desplazamiento: [desiredOffset, cycleLen-1].
+            // Empleados con datos del mes anterior: offset = trailingWorkDays % cycleLen
+            // (garantiza continuidad cross-mes). Todos los de la misma banda comparten el
+            // mismo offset → "doble patrón" correcto para servicios qty=grupo.
             const desiredByEmp = new Map<string, number>();
             group.forEach(empId => {
                 const tw = ctx.prevMonthTrailingWorkDays?.[empId];
@@ -1170,29 +1200,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             });
 
             const assignedOffsets = new Map<string, number>();
-            const usedOffsets = new Set<number>();
 
-            // Ordenar por offset deseado para que los duplicados se desplacen en orden
-            const withData = group.filter(id => desiredByEmp.has(id))
-                .sort((a, b) => (desiredByEmp.get(a)!) - (desiredByEmp.get(b)!));
-            withData.forEach(empId => {
-                const base = desiredByEmp.get(empId)!;
-                // Buscar el menor offset ≥ base no usado (sin wrapping para evitar violaciones)
-                let off = base;
-                while (usedOffsets.has(off) && off < eCycleLen) off++;
-                if (off >= eCycleLen) off = eCycleLen - 1; // último slot válido (día franco)
-                usedOffsets.add(off);
-                assignedOffsets.set(empId, off);
+            // Con trailing: offset deseado directo (sin dedup → mismo trailing = mismo offset)
+            group.filter(id => desiredByEmp.has(id)).forEach(empId => {
+                assignedOffsets.set(empId, desiredByEmp.get(empId)!);
             });
 
-            // ── Empleados sin datos históricos: distribución uniforme evitando slots usados ──
-            const withoutData = group.filter(id => !desiredByEmp.has(id));
-            withoutData.forEach((empId, i) => {
-                let off = (Math.floor((i * eCycleLen) / Math.max(1, withoutData.length)) + seed) % eCycleLen;
-                let tries = 0;
-                while (usedOffsets.has(off) && tries < eCycleLen) { off = (off + 1) % eCycleLen; tries++; }
-                usedOffsets.add(off);
-                assignedOffsets.set(empId, off);
+            // Sin trailing: todos reciben el base de su banda (mismo offset = correcto)
+            const bandOff = bandBase % eCycleLen;
+            group.filter(id => !desiredByEmp.has(id)).forEach(empId => {
+                assignedOffsets.set(empId, bandOff);
             });
 
             group.forEach(empId => {
@@ -1205,45 +1222,24 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         assignOffsets(empIds12h, 4, 2); // 4+2 siempre
     });
 
-    // ── GLOBAL STAGGER: evitar francos simultáneos entre puestos ─────────────
-    // Cada positionGroups.forEach corre assignOffsets de forma independiente:
-    // el 2º empleado de posición-A y el 2º de posición-B obtienen ambos offset=2
-    // → descansan los mismos días → la banda T (o M, N…) queda sin cobertura.
-    // Redistribuye los offsets en toda la banda (incluyendo empleados con trailing
-    // duplicado) para que los francos queden distribuidos uniformemente.
+    // ── DEDUP TRAILING: empleados con datos históricos en el mismo puesto ──────
+    // Los empleados sin trailing ya recibieron el base de su banda (offset idéntico = correcto).
+    // Los empleados con trailing pueden coincidir si trabajaron la misma racha el mes anterior;
+    // en ese caso se desplazan hacia adelante para evitar que el motor los trate como un solo bloque.
     {
-        const _gGroups = new Map<string, string[]>(); // key = `${shift}|${cycleLen}`
-        ctx.employees.forEach(emp => {
-            const sc = (empPrimaryShift[emp.id] || '').toUpperCase();
-            if (!sc) return;
-            const ecl = empCycleLen[emp.id] ?? cycleLen;
-            const k = `${sc}|${ecl}`;
-            if (!_gGroups.has(k)) _gGroups.set(k, []);
-            _gGroups.get(k)!.push(emp.id);
-        });
-        _gGroups.forEach(ids => {
-            if (ids.length <= 1) return;
-            const ecl = empCycleLen[ids[0]] ?? cycleLen;
-            const total = ids.length;
-            const hasTrail = (id: string): boolean =>
+        Object.entries(positionGroups).forEach(([, empIds]) => {
+            const hasTrail = (id: string) =>
                 ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
                 ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
-            // Ordenar: empleados con trailing primero (intentan conservar su offset
-            // para continuidad cross-mes), luego por offset actual ascendente.
-            const sorted = [...ids].sort((a, b) => {
-                if (hasTrail(a) !== hasTrail(b)) return hasTrail(a) ? -1 : 1;
-                return (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0);
-            });
-            // Asignación global: cada empleado toma su offset preferido si está libre,
-            // si no, el siguiente disponible. Incluye empleados con trailing duplicado.
+            const trailEmps = empIds.filter(hasTrail);
+            if (trailEmps.length <= 1) return;
+            const eCycleLen2 = empCycleLen[trailEmps[0]] ?? cycleLen;
             const usedSlots = new Set<number>();
-            sorted.forEach((empId, i) => {
-                const preferred = hasTrail(empId)
-                    ? (empGroupIdx[empId] ?? 0)
-                    : Math.floor(i * ecl / Math.max(1, total));
-                let off = preferred;
+            const sorted = [...trailEmps].sort((a, b) => (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0));
+            sorted.forEach(empId => {
+                let off = empGroupIdx[empId] ?? 0;
                 let tries = 0;
-                while (usedSlots.has(off) && tries < ecl) { off = (off + 1) % ecl; tries++; }
+                while (usedSlots.has(off) && tries < eCycleLen2) { off = (off + 1) % eCycleLen2; tries++; }
                 usedSlots.add(off);
                 empGroupIdx[empId] = off;
             });
