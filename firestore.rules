@@ -344,6 +344,20 @@ service cloud.firestore {
       allow update, delete: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
+    match /restore_jobs/{jobId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.requestedBy == request.auth.uid
+      );
+      allow write: if false;
+    }
+
+    match /empresa_migrate_jobs/{jobId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.requestedBy == request.auth.uid
+      );
+      allow write: if false;
+    }
+
     match /planificaciones_historial/{docId} {
       allow read, write: if isAdmin();
     }

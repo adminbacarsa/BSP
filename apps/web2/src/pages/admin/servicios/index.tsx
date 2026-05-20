@@ -20,6 +20,7 @@ import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
   deleteDocsByIdsForEmpresa, deleteSlaForEmpresa, TenantIsolationError,
 } from '@/lib/multiempresa';
+import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 
@@ -1030,7 +1031,7 @@ export default function ServiciosSLAPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {groupedServices.map(group => {
                 const latestSrv = group.services[0];
-                const hasActive = group.services.some(s => s.status === 'active');
+                const hasActive = group.services.some(s => isSlaContractActive(s.status));
                 const isExpanded = expandedGroups.has(group.key);
                 return (
                   <div key={group.key} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
@@ -1090,8 +1091,8 @@ export default function ServiciosSLAPage() {
                                 <div className="flex items-center gap-2 mb-2">
                                   <Calendar size={10} className="text-slate-400 shrink-0"/>
                                   <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">{srv.startDate} → {srv.endDate}</span>
-                                  <span className={`ml-auto text-[8px] font-black px-1.5 py-0.5 rounded-full ${srv.status === 'active' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
-                                    {srv.status === 'active' ? 'Activo' : 'Inactivo'}
+                                  <span className={`ml-auto text-[8px] font-black px-1.5 py-0.5 rounded-full ${isSlaContractActive(srv.status) ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
+                                    {isSlaContractActive(srv.status) ? 'Activo' : 'Inactivo'}
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2">
@@ -1244,7 +1245,7 @@ export default function ServiciosSLAPage() {
               </div>
             </div>
           }
-          accentFn={s => s.status === 'active' ? 'bg-indigo-700' : 'bg-slate-300'}
+          accentFn={s => isSlaContractActive(s.status) ? 'bg-indigo-700' : 'bg-slate-300'}
           renderCardSummary={srv => {
             const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
             return (
@@ -1254,8 +1255,8 @@ export default function ServiciosSLAPage() {
                     <h3 className="font-black text-sm text-slate-800 dark:text-white uppercase truncate">{srv.clientName || 'Sin Cliente'}</h3>
                     <p className="text-xs font-bold text-indigo-500 mt-0.5 flex items-center gap-1 truncate uppercase"><MapPin size={10}/> {srv.objectiveName || 'General'}</p>
                   </div>
-                  <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${srv.status === 'active' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400'}`}>
-                    {srv.status === 'active' ? 'Activo' : 'Inactivo'}
+                  <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${isSlaContractActive(srv.status) ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400'}`}>
+                    {isSlaContractActive(srv.status) ? 'Activo' : 'Inactivo'}
                   </span>
                 </div>
                 <div className="mt-3">

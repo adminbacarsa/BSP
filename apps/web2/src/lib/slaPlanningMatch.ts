@@ -13,6 +13,13 @@ export type SlaPlanningRow = {
   [key: string]: unknown;
 };
 
+/** Contrato operativo activo (tolerante a mayúsculas / español). */
+export function isSlaContractActive(status: unknown): boolean {
+  const st = String(status ?? '').trim().toLowerCase();
+  if (!st) return true;
+  return st !== 'inactive' && st !== 'inactivo' && st !== 'cancelled' && st !== 'cancelado';
+}
+
 function normObjectiveKey(value: unknown): string {
   return String(value ?? '')
     .trim()
@@ -81,10 +88,7 @@ export function pickSlaForPlanningMonth(
   year: number,
   month: number,
 ): { vigente: SlaPlanningRow | null; hasExactMatch: boolean; fallback: SlaPlanningRow | null } {
-  const active = matching.filter((s) => {
-    const st = String(s.status ?? '').toLowerCase();
-    return st !== 'inactive' && st !== 'inactivo' && st !== 'cancelled';
-  });
+  const active = matching.filter((s) => isSlaContractActive(s.status));
   const pool = active.length > 0 ? active : matching;
   const vigente = pool.find((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month)) ?? null;
   const fallback =

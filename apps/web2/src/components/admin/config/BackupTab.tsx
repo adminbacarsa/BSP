@@ -350,14 +350,33 @@ export default function BackupTab() {
         throw new Error('Origen de restauración no definido');
       }
 
+      const RESTORE_POLL_MS = 45 * 60 * 1000;
       const donePromise = new Promise<Record<string, unknown>>((resolve, reject) => {
-        unsub = onSnapshot(jobRef, (snap) => {
-          const d = snap.data();
-          if (!d) return;
-          setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? '' });
-          if (d.status === 'done') resolve(d);
-          if (d.status === 'error') reject(new Error(String(d.error ?? 'Error al restaurar')));
-        });
+        const timeoutId = window.setTimeout(() => {
+          reject(new Error(
+            'La restauración no terminó en 45 minutos. Revisá Configuración → Backups o los logs de processRestoreJob en Cloud Functions.',
+          ));
+        }, RESTORE_POLL_MS);
+        unsub = onSnapshot(
+          jobRef,
+          (snap) => {
+            const d = snap.data();
+            if (!d) return;
+            setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? String(d.status ?? '') });
+            if (d.status === 'done') {
+              window.clearTimeout(timeoutId);
+              resolve(d);
+            }
+            if (d.status === 'error') {
+              window.clearTimeout(timeoutId);
+              reject(new Error(String(d.error ?? 'Error al restaurar')));
+            }
+          },
+          (err) => {
+            window.clearTimeout(timeoutId);
+            reject(new Error(err?.message || 'Sin permiso para leer el progreso de restauración (restore_jobs)'));
+          },
+        );
       });
 
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 120000 });

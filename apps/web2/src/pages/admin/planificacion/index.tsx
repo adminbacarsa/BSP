@@ -22,6 +22,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
     shouldScopeQueriesToEmpresa,
+    empresaCollectionQuery,
     stampEmpresaId,
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
@@ -31,6 +32,7 @@ import { toYyyyMmDd } from '@/lib/firestoreDates';
 import {
     filterSlasForPlanningTenant,
     formatSlaRangeHint,
+    isSlaContractActive,
     objectiveMatchKeys,
     pickSlaForPlanningMonth,
     slaMatchesObjective,
@@ -1392,8 +1394,8 @@ export default function PlanificacionPage() {
                     structure.push({ positionName: 'General', shifts: [{code:'M',hours:8},{code:'T',hours:8},{code:'N',hours:8}], qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' });
                     setHasActiveSLA(false);
                 } else {
-                    // Solo habilita edición si hay un servicio que cubre efectivamente el mes visualizado
-                    setHasActiveSLA(hasExactMatch);
+                    const hasActiveContract = matching.some((s) => isSlaContractActive(s.status));
+                    setHasActiveSLA(hasExactMatch || (hasActiveContract && !!srvForStructure));
                 }
                 setPositionStructure(structure);
                 setSlaVendidas(hasExactMatch ? (srvForStructure?.totalMonthlyHours || 0) : 0);
@@ -1410,10 +1412,7 @@ export default function PlanificacionPage() {
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
-        const slaMapQ = scopeEmpresa
-            ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-            : collection(db, 'servicios_sla');
-        getDocs(slaMapQ).then(snap => {
+        getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
             const m: Record<string, string> = {};
             snap.docs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
@@ -1422,12 +1421,8 @@ export default function PlanificacionPage() {
             setSlaIdToObjId(m);
         }).catch(() => {});
 
-        const clientsQ = scopeEmpresa
-            ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
-            : collection(db, 'clients');
-        const empleadosQ = scopeEmpresa
-            ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
-            : collection(db, 'empleados');
+        const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
+        const empleadosQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
 
         const unsubC = onSnapshot(clientsQ, snap => {
             setClients(snap.docs.map(d => ({id: d.id, ...d.data()})));
@@ -1438,9 +1433,7 @@ export default function PlanificacionPage() {
             setEmployees(map(snap));
         }, (e) => console.error('[plan] empleados error:', e));
 
-        const turnosQ = scopeEmpresa
-            ? query(collection(db, 'turnos'), where('empresaId', '==', empresaId))
-            : collection(db, 'turnos');
+        const turnosQ = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
         const unsubS = onSnapshot(turnosQ, snap => {
             const map: any = {};
             snap.docs.forEach(d => {
@@ -1536,9 +1529,7 @@ export default function PlanificacionPage() {
             () => setNotifLogs([])
         );
 
-        const ausenciasQ = scopeEmpresa
-            ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId))
-            : collection(db, 'ausencias');
+        const ausenciasQ = empresaCollectionQuery('ausencias', empresaId, scopeEmpresa);
         const unsubA = onSnapshot(ausenciasQ, snap => {
             const map: any = {};
             snap.docs.forEach(d => {

@@ -223,6 +223,10 @@ export function belongsToEmpresaView(
   const id = String(empresaId ?? '').trim();
   const docEmp = String(data?.empresaId ?? '').trim();
   if (shouldScopeQueriesToEmpresa(id, migracionCompleta)) {
+    // Bacarsa con migración: turnos/SLA legacy sin empresaId siguen siendo de Bacarsa (no de prueba_sa).
+    if (id.toLowerCase() === 'bacarsa') {
+      return !docEmp || tenantEmpresaIdsMatch(docEmp, id);
+    }
     return tenantEmpresaIdsMatch(docEmp, id);
   }
   if (id.toLowerCase() === 'bacarsa') {
@@ -586,6 +590,22 @@ export function empresaScopedQuery(
   const col = collection(db, colName);
   if (!scopeEmpresa || !String(empresaId ?? '').trim()) return col;
   return query(col, where('empresaId', '==', String(empresaId).trim()));
+}
+
+/**
+ * Query tenant: Bacarsa incluye documentos legacy sin empresaId (no aparecen en equality filter).
+ * El filtro belongsToEmpresaView descarta otras empresas en memoria.
+ */
+export function empresaCollectionQuery(
+  colName: string,
+  empresaId: string,
+  scopeEmpresa: boolean,
+): Query | CollectionReference {
+  const col = collection(db, colName);
+  const id = String(empresaId ?? '').trim();
+  if (!scopeEmpresa || !id) return col;
+  if (id.toLowerCase() === 'bacarsa') return col;
+  return query(col, where('empresaId', '==', id));
 }
 
 export const SUPERADMIN_EMPRESA_STORAGE_KEY = 'cosp_superadmin_empresa_id';
