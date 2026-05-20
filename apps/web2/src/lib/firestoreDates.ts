@@ -8,10 +8,26 @@ export function toYyyyMmDd(value: unknown): string {
     const d = value.toDate();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
-  if (typeof value === 'object' && value !== null && 'seconds' in (value as Record<string, unknown>)) {
-    const o = value as { seconds: number; nanoseconds?: number };
-    const d = new Timestamp(o.seconds, o.nanoseconds ?? 0).toDate();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const o = value as {
+      seconds?: number;
+      _seconds?: number;
+      nanoseconds?: number;
+      _nanoseconds?: number;
+      toDate?: () => Date;
+    };
+    if (typeof o.toDate === 'function') {
+      const d = o.toDate();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    const sec = o.seconds ?? o._seconds;
+    if (typeof sec === 'number') {
+      const d = new Timestamp(sec, o.nanoseconds ?? o._nanoseconds ?? 0).toDate();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
   }
   return String(value).trim().slice(0, 10);
 }

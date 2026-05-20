@@ -34,9 +34,8 @@ import { toYyyyMmDd } from '@/lib/firestoreDates';
 import {
     filterSlasForPlanningTenant,
     formatSlaRangeHint,
-    objectiveMatchKeys,
     pickSlaForPlanningMonth,
-    slaMatchesObjective,
+    slaMatchesPlanningObjective,
 } from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -1343,7 +1342,7 @@ export default function PlanificacionPage() {
                 const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
                 const snap = await getDocs(q);
                 const clientRow = clients.find((c) => c.id === selectedClient);
-                const objKeys = objectiveMatchKeys(selectedObjective, clientRow?.objetivos);
+                const clientObjetivos = clientRow?.objetivos;
                 const allDocs = filterSlasForPlanningTenant(
                     snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
                     empresaId,
@@ -1351,7 +1350,9 @@ export default function PlanificacionPage() {
                     tenantClientIds,
                 );
 
-                const matching = allDocs.filter((d) => slaMatchesObjective(d, objKeys, slaIdToObjId));
+                const matching = allDocs.filter((d) =>
+                    slaMatchesPlanningObjective(d, selectedObjective, clientObjetivos, slaIdToObjId),
+                );
 
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
@@ -1373,30 +1374,31 @@ export default function PlanificacionPage() {
                 const structure: any[] = [];
                 if (srvForStructure?.positions) {
                     const positionsIterable = Array.isArray(srvForStructure.positions) ? srvForStructure.positions : Object.values(srvForStructure.positions);
+                    const defaultShifts = [{ code: 'M', hours: 8 }, { code: 'T', hours: 8 }, { code: 'N', hours: 8 }];
                     positionsIterable.forEach((pos: any) => {
-                        if (pos && (pos.allowedShiftTypes?.length > 0 || pos.shifts?.length > 0)) {
-                            const rawQty = pos.quantity || pos.qty || pos.pax || pos.cant || pos.cantidad || pos.cant_guardias || pos.dotacion || pos.guardias || pos.plazas || pos.cupo || pos.staff || pos.personal || pos.recursos || 1;
-                            const cleanQty = typeof rawQty === 'string' ? rawQty.trim() : rawQty;
-                            const parsedQty = parseInt(String(cleanQty), 10);
-                            structure.push({
-                                positionName: pos.name || pos.positionName || 'General',
-                                shifts: pos.allowedShiftTypes || pos.shifts,
-                                qty: !isNaN(parsedQty) && parsedQty > 0 ? parsedQty : 1,
-                                activeDays: pos.activeDays || ['L','M','X','J','V','S','D'],
-                                coverageType: pos.coverageType || srvForStructure.coverageType || '24hs',
-                                _serviceId: srvForStructure.id,
-                                _serviceRange: `${toYyyyMmDd(srvForStructure.startDate) || '?'} → ${toYyyyMmDd(srvForStructure.endDate) || '?'}`,
-                            });
-                        }
+                        if (!pos) return;
+                        const shiftList = pos.allowedShiftTypes || pos.shifts;
+                        const hasShifts = Array.isArray(shiftList) && shiftList.length > 0;
+                        if (!hasShifts && !hasExactMatch) return;
+                        const rawQty = pos.quantity || pos.qty || pos.pax || pos.cant || pos.cantidad || pos.cant_guardias || pos.dotacion || pos.guardias || pos.plazas || pos.cupo || pos.staff || pos.personal || pos.recursos || 1;
+                        const cleanQty = typeof rawQty === 'string' ? rawQty.trim() : rawQty;
+                        const parsedQty = parseInt(String(cleanQty), 10);
+                        structure.push({
+                            positionName: pos.name || pos.positionName || 'General',
+                            shifts: hasShifts ? shiftList : defaultShifts,
+                            qty: !isNaN(parsedQty) && parsedQty > 0 ? parsedQty : 1,
+                            activeDays: pos.activeDays || ['L','M','X','J','V','S','D'],
+                            coverageType: pos.coverageType || srvForStructure.coverageType || '24hs',
+                            _serviceId: srvForStructure.id,
+                            _serviceRange: `${toYyyyMmDd(srvForStructure.startDate) || '?'} → ${toYyyyMmDd(srvForStructure.endDate) || '?'}`,
+                        });
                     });
                 }
                 if (structure.length === 0) {
                     console.warn("CRONO: No se encontró estructura válida. Activando Fallback.");
                     structure.push({ positionName: 'General', shifts: [{code:'M',hours:8},{code:'T',hours:8},{code:'N',hours:8}], qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' });
-                    setHasActiveSLA(false);
-                } else {
-                    setHasActiveSLA(hasExactMatch);
                 }
+                setHasActiveSLA(hasExactMatch);
                 setPositionStructure(structure);
                 setSlaVendidas(hasExactMatch ? (srvForStructure?.totalMonthlyHours || 0) : 0);
             } catch (e) {
@@ -3055,14 +3057,15 @@ export default function PlanificacionPage() {
             const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
             const snap = await getDocs(q);
             const clientRow = clients.find((c) => c.id === selectedClient);
-            const objKeys = objectiveMatchKeys(selectedObjective, clientRow?.objetivos);
             const allDocs = filterSlasForPlanningTenant(
                 snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
                 empresaId,
                 scopeEmpresa,
                 tenantClientIds,
             );
-            const matching = allDocs.filter((d) => slaMatchesObjective(d, objKeys, slaIdToObjId));
+            const matching = allDocs.filter((d) =>
+                slaMatchesPlanningObjective(d, selectedObjective, clientRow?.objetivos, slaIdToObjId),
+            );
             const y = currentDate.getFullYear(), m = currentDate.getMonth();
             const { vigente, fallback } = pickSlaForPlanningMonth(matching, y, m);
             const srv = vigente ?? fallback;

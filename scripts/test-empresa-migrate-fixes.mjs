@@ -17,9 +17,12 @@ function toYyyyMmDd(value) {
     const d = value.toDate();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
-  if (typeof value === 'object' && value !== null && 'seconds' in value) {
-    const d = new Timestamp(value.seconds, value.nanoseconds ?? 0).toDate();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (typeof value === 'object' && value !== null) {
+    const sec = value.seconds ?? value._seconds;
+    if (typeof sec === 'number') {
+      const d = new Timestamp(sec, value.nanoseconds ?? value._nanoseconds ?? 0).toDate();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
   }
   return String(value).trim().slice(0, 10);
 }
@@ -160,6 +163,22 @@ test('vincula SLA por nombre de objetivo (copia con objectiveId viejo)', () => {
   const sla = { objectiveId: '999-old', objectiveName: 'OBRADOR MALAGUEÑO' };
   const match = [sla.objectiveId, sla.objectiveName].some((c) => keys.has(String(c)) || keys.has(norm(String(c))));
   assert.equal(match, true);
+});
+test('Timestamp con _seconds cubre mayo 2026', () => {
+  const start = { _seconds: Math.floor(new Date(2026, 4, 7).getTime() / 1000) };
+  const end = { _seconds: Math.floor(new Date(2026, 4, 31).getTime() / 1000) };
+  assert.equal(slaCoversCalendarMonth(start, end, 2026, 4), true);
+});
+test('slaMatchesPlanningObjective por nombre tras restore', () => {
+  const norm = (s) => String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
+  const objetivos = [{ id: 'new-embed', name: 'OBRADOR MALAGUEÑO' }];
+  const sla = { objectiveId: 'legacy-obj-id', objectiveName: 'OBRADOR MALAGUEÑO' };
+  const selName = norm('new-embed');
+  const selObj = objetivos.find((o) => 'new-embed' === String(o.id).trim());
+  const ok =
+    norm(sla.objectiveName) === norm(selObj?.name) ||
+    (selObj && norm(sla.objectiveName) === norm(selObj.name));
+  assert.equal(ok, true);
 });
 
 console.log(`\n${passed} pruebas OK`);

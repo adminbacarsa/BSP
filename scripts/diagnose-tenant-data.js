@@ -38,7 +38,36 @@ function parseArgs() {
 }
 
 function norm(s) {
-  return String(s ?? '').trim().toLowerCase();
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '');
+}
+
+function toYyyyMmDd(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim().slice(0, 10);
+  if (value && typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'object') {
+    const sec = value.seconds ?? value._seconds;
+    if (typeof sec === 'number') {
+      const d = new Date(sec * 1000);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return String(value).trim().slice(0, 10);
+}
+
+function slaCoversMonth(startDate, endDate, year, month) {
+  const start = toYyyyMmDd(startDate) || '1970-01-01';
+  const end = toYyyyMmDd(endDate) || '2099-12-31';
+  const viewStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const viewEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, '0')}`;
+  return start <= viewEnd && end >= viewStart;
 }
 
 async function main() {
@@ -89,6 +118,34 @@ async function main() {
           if (te && te.toLowerCase() !== empresaId.toLowerCase()) wrongEmp += 1;
         });
         console.log(`    objetivo ${o.name} (${oid}): turnos=${forObj}, otra empresaId=${wrongEmp}`);
+
+        const slaSnap = await db.collection('servicios_sla').where('clientId', '==', c.id).get();
+        const slaForObj = slaSnap.docs.filter((d) => {
+          const data = d.data();
+          const on = norm(data.objectiveName);
+          const oi = String(data.objectiveId ?? '');
+          return (
+            oi === String(oid) ||
+            on === norm(o.name) ||
+            on.includes(norm(objectiveName || o.name))
+          );
+        });
+        console.log(`      servicios_sla vinculados: ${slaForObj.length}`);
+        for (const s of slaForObj) {
+          const data = s.data();
+          const start = toYyyyMmDd(data.startDate);
+          const end = toYyyyMmDd(data.endDate);
+          const may2026 = slaCoversMonth(data.startDate, data.endDate, 2026, 4);
+          console.log(
+            `        ${s.id} status=${data.status || '(vacío)'} objectiveId=${data.objectiveId} objectiveName=${data.objectiveName}`,
+          );
+          console.log(
+            `          fechas ${start} → ${end} (tipo start=${data.startDate?.constructor?.name || typeof data.startDate}) mayo2026=${may2026} empresaId=${data.empresaId || '(legacy)'}`,
+          );
+          const pos = data.positions;
+          const posN = Array.isArray(pos) ? pos.length : pos && typeof pos === 'object' ? Object.keys(pos).length : 0;
+          console.log(`          puestos=${posN} totalMonthlyHours=${data.totalMonthlyHours ?? '?'}`);
+        }
       }
     }
   }

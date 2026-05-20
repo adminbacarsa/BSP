@@ -53,8 +53,56 @@ export function objectiveMatchKeys(
     add(obj.id);
     add(obj.objectiveId);
     add(obj.name);
+    const targetName = normObjectiveKey(obj.name);
+    if (targetName && clientObjetivos?.length) {
+      for (const o of clientObjetivos) {
+        if (normObjectiveKey(o?.name) !== targetName) continue;
+        add(o.id);
+        add(o.objectiveId);
+        add(o.name);
+      }
+    }
   }
   return keys;
+}
+
+/** Mismo objetivo lógico aunque el SLA conserve un objectiveId distinto (restore / legacy). */
+export function slaMatchesPlanningObjective(
+  sla: SlaPlanningRow,
+  selectedObjective: string,
+  clientObjetivos?: Array<{ id?: string; name?: string; objectiveId?: string }>,
+  slaIdToObjectiveId?: Record<string, string>,
+): boolean {
+  const keys = objectiveMatchKeys(selectedObjective, clientObjetivos);
+  if (slaMatchesObjective(sla, keys, slaIdToObjectiveId)) return true;
+
+  const sel = String(selectedObjective ?? '').trim();
+  if (!sel || !clientObjetivos?.length) return false;
+
+  const selObj =
+    clientObjetivos.find(
+      (o) =>
+        sel === String(o?.id ?? '').trim() ||
+        sel === String(o?.name ?? '').trim() ||
+        sel === String(o?.objectiveId ?? '').trim(),
+    ) ?? null;
+  const selName = normObjectiveKey(selObj?.name ?? sel);
+  const slaName = normObjectiveKey(sla.objectiveName);
+  if (selName && slaName && selName === slaName) return true;
+
+  const slaOid = String(sla.objectiveId ?? '').trim();
+  if (!slaOid) return false;
+  const slaLinked = clientObjetivos.find(
+    (o) =>
+      slaOid === String(o?.id ?? '').trim() ||
+      slaOid === String(o?.objectiveId ?? '').trim() ||
+      slaOid === String(o?.name ?? '').trim() ||
+      normObjectiveKey(o?.name) === normObjectiveKey(slaOid),
+  );
+  if (slaLinked && selObj && normObjectiveKey(slaLinked.name) === normObjectiveKey(selObj.name)) {
+    return true;
+  }
+  return false;
 }
 
 export function slaMatchesObjective(
