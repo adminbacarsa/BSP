@@ -174,7 +174,7 @@ service cloud.firestore {
     }
 
     match /empleados/{employeeId} {
-      allow read: if isAdmin() || request.auth != null;
+      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();
@@ -188,21 +188,21 @@ service cloud.firestore {
     }
 
     match /objetivos/{objectiveId} {
-      allow read: if request.auth != null;
+      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
 
     match /clientes/{clientId} {
-      allow read: if request.auth != null;
+      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
 
     match /clients/{clientId} {
-      allow read: if request.auth != null;
+      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -298,7 +298,8 @@ service cloud.firestore {
     }
 
     match /user_notifications/{notifId} {
-      allow read, update: if request.auth != null;
+      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
+      allow update: if request.auth != null;
       allow create: if isAdmin();
       allow delete: if isAdmin();
     }
