@@ -79,7 +79,7 @@ export async function executeEmpresaMigrateJob(jobId: string): Promise<void> {
   const resumeColIndex = Number(data.resumeColIndex ?? 0);
   const partial = {
     startColIndex: resumeColIndex,
-    collectionsPerRun: 1,
+    collectionsPerRun: 999,
     idMaps: deserializeIdMaps(data.idMaps),
     docsCopied: Number(data.docsCopied ?? 0),
     docsDeleted: Number(data.docsDeleted ?? 0),
