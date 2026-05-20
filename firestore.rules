@@ -98,6 +98,11 @@ service cloud.firestore {
         : '';
     }
 
+    function systemUserHasAllEmpresas() {
+      return isSystemUserDoc() &&
+        get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('allEmpresas', false) == true;
+    }
+
     function bacarsaLegacyOpen() {
       return userEmpresaId() == 'bacarsa' &&
         exists(/databases/$(database)/documents/empresas/bacarsa) &&
@@ -109,12 +114,18 @@ service cloud.firestore {
     }
 
     function tenantMatches(data) {
-      return isSuperAdmin() || (
+      return isSuperAdmin() || systemUserHasAllEmpresas() || (
         userEmpresaId() != '' && (
           docEmpresaId(data) == userEmpresaId() ||
           (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
         )
       );
+    }
+
+    function systemUserVisibleToAdmin(data) {
+      return roleValueIsSuperAdmin(data.get('role', '')) ||
+        data.get('allEmpresas', false) == true ||
+        tenantMatches(data);
     }
 
     function tenantAdminRead() {
@@ -254,7 +265,7 @@ service cloud.firestore {
 
     match /system_users/{userId} {
       allow read: if isOwner(userId) || isSuperAdmin() || (
-        isAdmin() && tenantMatches(resource.data)
+        isAdmin() && systemUserVisibleToAdmin(resource.data)
       );
       allow create, update, delete: if isSuperAdmin();
     }

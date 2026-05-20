@@ -42,7 +42,8 @@ const EmpresaContext = createContext<EmpresaContextType>({
 export const useEmpresa = () => useContext(EmpresaContext);
 
 export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => {
-  const { empresaId: authEmpresaId, isSuperAdmin } = useAuth();
+  const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas } = useAuth();
+  const canSwitchEmpresa = isSuperAdmin || allEmpresas;
   const [empresaId, setEmpresaId] = useState(authEmpresaId || '');
   const [empresa, setEmpresa] = useState<Empresa | null>(null);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
@@ -51,23 +52,23 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   // Cuando el auth carga el empresaId del usuario, sincronizamos (superadmin conserva selección en sesión)
   useEffect(() => {
     if (authEmpresaId === undefined) return;
-    if (isSuperAdmin) {
+    if (canSwitchEmpresa) {
       const saved =
         typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
       setEmpresaId(saved || authEmpresaId || '');
     } else {
       setEmpresaId(authEmpresaId || 'bacarsa');
     }
-  }, [authEmpresaId, isSuperAdmin]);
+  }, [authEmpresaId, canSwitchEmpresa]);
 
   // Superadmin sin empresa seleccionada → auto-seleccionar la primera de la lista
   useEffect(() => {
-    if (!isSuperAdmin || empresaId || empresas.length === 0) return;
+    if (!canSwitchEmpresa || empresaId || empresas.length === 0) return;
     const saved =
       typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
     const pick = saved && empresas.some(e => e.id === saved) ? saved : empresas[0].id;
     setEmpresaId(pick);
-  }, [isSuperAdmin, empresaId, empresas]);
+  }, [canSwitchEmpresa, empresaId, empresas]);
 
   // Suscripción al documento de la empresa activa
   useEffect(() => {
@@ -110,17 +111,17 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
 
   // Superadmin: carga todas las empresas para el selector
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!canSwitchEmpresa) return;
     const unsub = onSnapshot(
       collection(db, 'empresas'),
       snap => setEmpresas(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Empresa, 'id'>) }))),
       () => {}
     );
     return () => unsub();
-  }, [isSuperAdmin]);
+  }, [canSwitchEmpresa]);
 
   const switchEmpresa = (id: string) => {
-    if (!isSuperAdmin) return;
+    if (!canSwitchEmpresa) return;
     setEmpresaId(id);
     try {
       localStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, id);

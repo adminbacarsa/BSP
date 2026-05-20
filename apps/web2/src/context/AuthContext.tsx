@@ -35,6 +35,8 @@ interface AuthContextType {
   /** Permisos del rol en Firestore `roles/{id}.permissions` */
   rolePermissions: Record<string, string[]>;
   isSuperAdmin: boolean;
+  /** Bypass tenant en permisos de rol (multi-empresa sin ser SuperAdmin). */
+  allEmpresas: boolean;
   /** Lectura mínima sobre un módulo (clave SYSTEM_MODULES, ej. CONFIG, CLIENTS). */
   canReadModule: (moduleKey: string) => boolean;
   /** ID de la empresa a la que pertenece el usuario. Default: 'bacarsa' */
@@ -50,6 +52,7 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: true,
   rolePermissions: {},
   isSuperAdmin: false,
+  allEmpresas: false,
   canReadModule: () => false,
   empresaId: 'bacarsa',
 });
@@ -63,6 +66,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [assignedClientId, setAssignedClientId] = useState<string | null>(null);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   const [empresaId, setEmpresaId] = useState<string>('bacarsa');
+  const [allEmpresas, setAllEmpresas] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -80,13 +84,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
           const snap = await getDoc(doc(db, 'system_users', u.uid));
           if (snap.exists()) {
-            const role = snap.data().role || null;
+            const data = snap.data();
+            const role = data.role || null;
+            const multiEmpresa = data.allEmpresas === true;
             setUserRole(role);
-            setAssignedClientId(snap.data().assignedClientId || null);
+            setAssignedClientId(data.assignedClientId || null);
+            setAllEmpresas(multiEmpresa);
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
-            setEmpresaId(isSuper
-              ? (snap.data().empresaId || '')
-              : (snap.data().empresaId || 'bacarsa'));
+            setEmpresaId(isSuper || multiEmpresa
+              ? (data.empresaId || '')
+              : (data.empresaId || 'bacarsa'));
             if (isSuper) {
               setRolePermissions(fullSuperAdminPermissions());
             } else if (role) {
@@ -94,8 +101,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               if (roleSnap.exists()) {
                 const roleData = roleSnap.data();
                 const roleEmp = String(roleData?.empresaId ?? '').trim();
-                const userEmp = String(snap.data().empresaId || 'bacarsa').trim();
-                if (roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
+                const userEmp = String(data.empresaId || 'bacarsa').trim();
+                if (!multiEmpresa && roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
                   setRolePermissions({});
                 } else {
                   setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
@@ -123,6 +130,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           } else {
             setUserRole(tokenRole);
             setAssignedClientId(null);
+            setAllEmpresas(false);
             const isSuper = isSuperAdminRoleId(tokenRole);
             setEmpresaId(isSuper ? '' : 'bacarsa');
             if (isSuper) {
@@ -167,6 +175,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setAssignedClientId(null);
         setRolePermissions({});
         setEmpresaId('bacarsa');
+        setAllEmpresas(false);
       }
       setLoading(false);
     });
@@ -205,6 +214,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         isAdmin,
         rolePermissions,
         isSuperAdmin,
+        allEmpresas,
         canReadModule,
         empresaId,
       }}

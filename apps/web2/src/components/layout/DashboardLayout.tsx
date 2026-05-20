@@ -34,12 +34,13 @@ function getTitleByPath(pathname: string): string | null {
 // ─── TOPBAR ──────────────────────────────────────────────────────────────────
 function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: boolean; onToggleSidebar: () => void }) {
   const router = useRouter();
-  const { user, assignedClientId, isSuperAdmin, userRole: authUserRole } = useAuth();
+  const { user, assignedClientId, isSuperAdmin, allEmpresas, userRole: authUserRole } = useAuth();
   const { empresa, empresas, switchEmpresa, empresaId } = useEmpresa();
   const pageHeader = usePageHeader();
   const [isOnline, setIsOnline] = useState(true);
   const [claimRole, setClaimRole] = useState('');
   const [showEmpresaDrop, setShowEmpresaDrop] = useState(false);
+  const canSwitchEmpresa = isSuperAdmin || allEmpresas;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -88,6 +89,14 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       <span className="font-black uppercase tracking-tight shrink-0 text-sm" style={{ color: 'var(--topbar-text)' }}>
         {title}
       </span>
+      {canSwitchEmpresa && !isSuperAdmin && (
+        <span
+          className="text-[10px] font-black uppercase tracking-wide text-indigo-900 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded-full"
+          title="Usuario multi-empresa: podés cambiar el tenant activo desde el selector."
+        >
+          Multi-empresa
+        </span>
+      )}
       {isSuperAdmin && (
         <span
           className="text-[10px] font-black uppercase tracking-wide text-amber-900 bg-amber-200 border border-amber-400 px-2 py-0.5 rounded-full"
@@ -105,22 +114,22 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       {empresa && (
         <div className="relative">
           <button
-            onClick={() => isSuperAdmin && setShowEmpresaDrop(d => !d)}
+            onClick={() => canSwitchEmpresa && setShowEmpresaDrop(d => !d)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black border transition-colors ${
-              isSuperAdmin ? 'cursor-pointer' : 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
+              canSwitchEmpresa ? 'cursor-pointer' : 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
             }`}
-            style={isSuperAdmin ? {
+            style={canSwitchEmpresa ? {
               backgroundColor: 'var(--company-primary, #4f46e5)',
               color: '#ffffff',
               borderColor: 'var(--company-primary, #4338ca)',
             } : undefined}
-            title={isSuperAdmin ? 'Cambiar empresa' : empresa.name}
+            title={canSwitchEmpresa ? 'Cambiar empresa' : empresa.name}
           >
             <Building2 size={12} />
             <span className="hidden sm:inline max-w-[120px] truncate">{empresa.name || empresa.id}</span>
-            {isSuperAdmin && <ChevronDown size={11} />}
+            {canSwitchEmpresa && <ChevronDown size={11} />}
           </button>
-          {isSuperAdmin && showEmpresaDrop && (
+          {canSwitchEmpresa && showEmpresaDrop && (
             <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl min-w-[200px] max-h-64 overflow-y-auto">
               {empresas.length === 0 && (
                 <p className="px-4 py-3 text-xs text-slate-400">Sin empresas registradas</p>

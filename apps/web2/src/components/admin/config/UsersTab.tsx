@@ -1,12 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { isSuperAdminRole, superAdminRoleLabel } from '@/lib/roles';
+import { isSuperAdminRole } from '@/lib/roles';
+import {
+    ALL_EMPRESAS_VALUE,
+    isAllEmpresasUser,
+    empresaToFormValue,
+    empresaFromFormValue,
+} from '@/lib/systemUser';
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
@@ -22,8 +28,6 @@ export default function UsersTab() {
     const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false };
     const [formData, setFormData] = useState(initialForm);
 
-    // Empresas disponibles para el dropdown del modal
-    // SuperAdmin ve todas; el resto ve solo la suya
     const empresasDropdown = isSuperAdmin
         ? empresas
         : empresas.filter(e => e.id === myEmpresaId);
@@ -40,11 +44,13 @@ export default function UsersTab() {
 
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
-            // SuperAdmin ve todos; el resto ve los de su empresa + los superadmins (siempre visibles en todas)
-            const isSA = (u: any) => isSuperAdminRole(u.role);
             const filtered = isSuperAdmin
                 ? allUsers
-                : allUsers.filter(u => isSA(u) || (u.empresaId || 'bacarsa') === myEmpresaId);
+                : allUsers.filter(u =>
+                    isSuperAdminRole(u.role) ||
+                    isAllEmpresasUser(u) ||
+                    (u.empresaId || 'bacarsa') === myEmpresaId
+                );
 
             setUsers(filtered);
             setRolesList(rSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -58,7 +64,6 @@ export default function UsersTab() {
 
     const handleOpenCreate = () => {
         setEditMode(false);
-        // Superadmin puede crear usuarios para cualquier empresa — no pre-seleccionar
         setFormData({ ...initialForm, empresaId: isSuperAdmin ? '' : myEmpresaId });
         setIsModalOpen(true);
     };
@@ -72,7 +77,7 @@ export default function UsersTab() {
             email: user.email,
             password: '',
             role: user.role,
-            empresaId: user.empresaId || myEmpresaId,
+            empresaId: empresaToFormValue(user),
             supervisorPin: user.supervisorPin || '',
             showPin: false,
         });
@@ -85,18 +90,24 @@ export default function UsersTab() {
 
         const promise = new Promise(async (resolve, reject) => {
             try {
-                // Superadmin no lleva empresa fija
-                const roleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes((formData.role || '').toUpperCase());
-                const efectivaEmpresaId = roleIsSuperAdmin ? '' : (formData.empresaId || myEmpresaId);
+                const roleIsSuperAdmin = isSuperAdminRole(formData.role);
+                const { empresaId: efectivaEmpresaId, allEmpresas } = empresaFromFormValue(
+                    formData.empresaId,
+                    roleIsSuperAdmin,
+                );
 
                 if (editMode) {
-                    await updateDoc(doc(db, 'system_users', formData.id), {
+                    const patch: Record<string, unknown> = {
                         firstName:     formData.firstName,
                         lastName:      formData.lastName,
                         role:          formData.role,
                         empresaId:     efectivaEmpresaId,
                         supervisorPin: formData.supervisorPin || null,
-                    });
+                    };
+                    if (allEmpresas) patch.allEmpresas = true;
+                    else patch.allEmpresas = deleteField();
+
+                    await updateDoc(doc(db, 'system_users', formData.id), patch);
                     const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
                     await syncFn({ uid: formData.id });
                     resolve('Usuario actualizado correctamente');
@@ -109,6 +120,7 @@ export default function UsersTab() {
                         password:      formData.password,
                         role:          formData.role,
                         empresaId:     efectivaEmpresaId,
+                        allEmpresas,
                         supervisorPin: formData.supervisorPin || null,
                     });
                     resolve('Usuario creado y acceso concedido');
@@ -148,12 +160,10 @@ export default function UsersTab() {
     const getEmpresaName = (id: string) =>
         empresas.find(e => e.id === id)?.name || id || '—';
 
-    // El rol seleccionado en el form es superadmin → no lleva empresa
-    const formRoleIsSuperAdmin = ['SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes((formData.role || '').toUpperCase());
+    const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
 
     return (
         <div className="space-y-6 animate-in fade-in">
-            {/* Header */}
             <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <div className="flex items-center gap-4">
                     <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400">
@@ -175,7 +185,6 @@ export default function UsersTab() {
                 </button>
             </div>
 
-            {/* Tabla */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                 <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
@@ -214,9 +223,9 @@ export default function UsersTab() {
                                     )}
                                 </td>
                                 <td className="p-5">
-                                    {isSuperAdminRole(u.role) ? (
+                                    {isAllEmpresasUser(u) ? (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold">
-                                            <Shield size={12}/> Todas
+                                            <Shield size={12}/> Todas las empresas
                                         </span>
                                     ) : u.empresaId ? (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
@@ -247,7 +256,6 @@ export default function UsersTab() {
                 )}
             </div>
 
-            {/* Modal crear / editar */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
                     <div className="bg-white dark:bg-slate-800 rounded-[2rem] w-full max-w-lg p-8 shadow-2xl animate-in zoom-in-95 border border-slate-100 dark:border-slate-700">
@@ -296,12 +304,11 @@ export default function UsersTab() {
                                     className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
                                     value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
                                     <option value="">Seleccionar Rol...</option>
-                                    {/* Opción SUPERADMIN hardcodeada — solo visible para superadmins */}
                                     {isSuperAdmin && (
                                         <option value="SUPERADMIN">⭐ Superadmin</option>
                                     )}
                                     {rolesList
-                                        .filter(r => !['SUPERADMIN','SUPER_ADMIN'].includes(r.id.toUpperCase()))
+                                        .filter(r => !isSuperAdminRole(r.id))
                                         .map(r => (
                                             <option key={r.id} value={r.id}>{r.name || r.id}</option>
                                         ))
@@ -309,7 +316,6 @@ export default function UsersTab() {
                                 </select>
                             </div>
 
-                            {/* Empresa — oculto para rol superadmin */}
                             {formRoleIsSuperAdmin ? (
                                 <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-2">
                                     <Shield size={14}/> Superadmin — acceso a todas las empresas sin restricción
@@ -322,9 +328,12 @@ export default function UsersTab() {
                                     </label>
                                     {isSuperAdmin ? (
                                         <select
+                                            required
                                             className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-700 dark:text-white outline-none"
-                                            value={formData.empresaId} onChange={e => setFormData({ ...formData, empresaId: e.target.value })}>
-                                            <option value="">— Sin empresa asignada —</option>
+                                            value={formData.empresaId}
+                                            onChange={e => setFormData({ ...formData, empresaId: e.target.value })}>
+                                            <option value="">— Seleccionar empresa —</option>
+                                            <option value={ALL_EMPRESAS_VALUE}>🌐 Todas las empresas</option>
                                             {empresasDropdown.map(e => <option key={e.id} value={e.id}>{e.name || e.id}</option>)}
                                         </select>
                                     ) : (
@@ -336,7 +345,6 @@ export default function UsersTab() {
                                 </div>
                             )}
 
-                            {/* PIN DE AUTORIZACIÓN SUPERVISOR */}
                             <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-100 dark:border-indigo-800 rounded-xl">
                                 <div className="flex items-center gap-2 mb-3">
                                     <LockKeyhole size={14} className="text-indigo-600"/>

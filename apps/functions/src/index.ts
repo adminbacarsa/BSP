@@ -60,6 +60,9 @@ async function getService<T>(service: new (...args: any[]) => T): Promise<T> {
 
 // Roles Administrativos
 const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manager', 'Manager', 'Operator', 'Supervisor'];
+
+/** Alineado con web2 `ALL_EMPRESAS_VALUE` en systemUser.ts */
+const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
 
 
@@ -643,12 +646,33 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId } = data;
-  const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
-  if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-    throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
-  }
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
   const roleNorm = normalizeBackupRole(role);
+  const roleIsSuper = isSuperAdminBackupRole(roleNorm);
+  const multiEmpresa =
+    !roleIsSuper &&
+    (rawAllEmpresas === true || String(rawEmpresaId ?? '').trim() === ALL_EMPRESAS_SENTINEL);
+
+  if ((roleIsSuper || multiEmpresa) && !caller.isSuper) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Solo superadmin puede crear usuarios SuperAdmin o multi-empresa.',
+    );
+  }
+
+  let targetEmpresaId = '';
+  let allEmpresas = false;
+  if (roleIsSuper) {
+    targetEmpresaId = '';
+  } else if (multiEmpresa) {
+    targetEmpresaId = '';
+    allEmpresas = true;
+  } else {
+    targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim() || 'bacarsa';
+    if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
+      throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+    }
+  }
 
   try {
     const userRecord = await admin.auth().createUser({
@@ -666,6 +690,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       email,
       role: roleNorm,
       empresaId: targetEmpresaId,
+      ...(allEmpresas ? { allEmpresas: true } : {}),
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
