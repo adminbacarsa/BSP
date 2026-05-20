@@ -297,7 +297,7 @@ export default function EmployeesPage() {
       }
     });
   }, []);
-  const registrarAuditoria = async (accion: string, detalle: string) => { try { const auth = getAuth(); const u = auth.currentUser; await addDoc(collection(db, 'audit_logs'), { timestamp: serverTimestamp(), actorUid: u?.uid || "unknown", actorName: u?.displayName || u?.email || "Desc", action: accion, module: 'RRHH', details: detalle, metadata: { platform: 'web' } }); } catch (error) {} };
+  const registrarAuditoria = async (accion: string, detalle: string) => { try { const auth = getAuth(); const u = auth.currentUser; await addDoc(collection(db, 'audit_logs'), { timestamp: serverTimestamp(), actorUid: u?.uid || "unknown", actorName: u?.displayName || u?.email || "Desc", action: accion, module: 'RRHH', details: detalle, empresaId, metadata: { platform: 'web' } }); } catch (error) {} };
 
   const getCycleDates = (refDate: Date, startDay: number = 26) => { const year = refDate.getFullYear(); const month = refDate.getMonth(); const start = new Date(year, month - 1, startDay); start.setHours(0,0,0,0); const end = new Date(year, month, startDay - 1); end.setHours(23,59,59,999); return { start, end }; };
 
