@@ -20,6 +20,7 @@ interface LoadedVersion {
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 const PROJECT_ID  = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'comtroldata';
+const FUNCTIONS_LOGS_URL = `https://console.cloud.google.com/functions/list?project=${PROJECT_ID}`;
 
 async function refreshAuthTokenForBackup() {
   await auth.currentUser?.getIdToken(true);
@@ -125,15 +126,20 @@ function resolveBackupRecordImportKind(
 }
 
 function formatRestoreError(e: unknown): string {
-  const err = e as { message?: string; code?: string };
+  const err = e as { message?: string; code?: string; details?: unknown };
+  const code = String(err?.code ?? '').trim();
   const msg = String(err?.message ?? '').trim();
-  if (/deadline-exceeded|timeout/i.test(`${err?.code ?? ''} ${msg}`)) {
-    return 'La restauración tardó demasiado. Revisá si los datos quedaron incompletos y volvé a intentar.';
+  const codeHint = code ? ` (${code})` : '';
+  if (/deadline-exceeded|timeout/i.test(`${code} ${msg}`)) {
+    return `La restauración tardó demasiado${codeHint}. Revisá si los datos quedaron incompletos y volvé a intentar. Logs: ${FUNCTIONS_LOGS_URL}`;
   }
   if (/no such object/i.test(msg)) {
     return 'El archivo subido ya no está en Storage. Volvé a subir el backup JSON y confirmá de inmediato.';
   }
-  return msg || 'Error al restaurar';
+  if (/permission-denied|unauthenticated/i.test(`${code} ${msg}`)) {
+    return `${msg || 'Sin permiso'}${codeHint}. Verificá rol de panel y firestore.rules (restore_jobs).`;
+  }
+  return (msg || 'Error al restaurar') + codeHint;
 }
 
 // Deserializa { _seconds, _nanoseconds } → Firestore Timestamp recursivamente
@@ -328,9 +334,11 @@ export default function BackupTab() {
   const handleRestore = async () => {
     if (!restoreModal) return;
     setRestoring(true); setLastResult(null);
+    setProgress({ done: 0, total: 0, phase: 'Encolando restauración…' });
     const jobId = `restore_${Date.now()}`;
     const jobRef = fsDoc(db, 'restore_jobs', jobId);
     let unsub: (() => void) | null = null;
+    let stagnationTimeoutId: ReturnType<typeof window.setTimeout> | null = null;
     try {
       const payload: Record<string, unknown> = {
         mode: restoreModal.tenantImport ? 'full' : restoreModal.mode,
@@ -351,37 +359,76 @@ export default function BackupTab() {
       }
 
       const RESTORE_POLL_MS = 45 * 60 * 1000;
+      const RESTORE_STAGNATION_MS = 2 * 60 * 1000;
+      const RESTORE_QUEUED_STAGNATION_MS = 30 * 1000;
+      let lastDone = 0;
+      let lastStatus = '';
       const donePromise = new Promise<Record<string, unknown>>((resolve, reject) => {
+        const fail = (msg: string) => {
+          if (stagnationTimeoutId) window.clearTimeout(stagnationTimeoutId);
+          window.clearTimeout(timeoutId);
+          reject(new Error(msg));
+        };
+        const resetStagnationTimeout = (d?: Record<string, unknown>) => {
+          if (stagnationTimeoutId) window.clearTimeout(stagnationTimeoutId);
+          const status = String(d?.status ?? '');
+          const done = Number(d?.docsRestored ?? 0);
+          const total = Number(d?.total ?? 0);
+          const ms =
+            status === 'queued' && total === 0 && done === 0
+              ? RESTORE_QUEUED_STAGNATION_MS
+              : RESTORE_STAGNATION_MS;
+          stagnationTimeoutId = window.setTimeout(() => {
+            const hint =
+              status === 'queued'
+                ? `El job no arrancó en ${RESTORE_QUEUED_STAGNATION_MS / 1000}s. Desplegá functions:restoreBackup y functions:processRestoreJob (4GB). Logs: ${FUNCTIONS_LOGS_URL}`
+                : `La restauración no avanzó. Si quedó en «${d?.phase ?? status}», revisá processRestoreJob. Logs: ${FUNCTIONS_LOGS_URL}`;
+            fail(hint);
+          }, ms);
+        };
         const timeoutId = window.setTimeout(() => {
-          reject(new Error(
-            'La restauración no terminó en 45 minutos. Revisá Configuración → Backups o los logs de processRestoreJob en Cloud Functions.',
-          ));
+          fail(
+            `La restauración no terminó en 45 minutos. Logs processRestoreJob: ${FUNCTIONS_LOGS_URL}`,
+          );
         }, RESTORE_POLL_MS);
+        resetStagnationTimeout();
         unsub = onSnapshot(
           jobRef,
           (snap) => {
             const d = snap.data();
             if (!d) return;
-            setProgress({ done: d.docsRestored ?? 0, total: d.total ?? 0, phase: d.phase ?? String(d.status ?? '') });
+            const done = Number(d.docsRestored ?? 0);
+            const status = String(d.status ?? '');
+            setProgress({ done, total: d.total ?? 0, phase: d.phase ?? status });
+            if (done > lastDone || status !== lastStatus) {
+              lastDone = done;
+              lastStatus = status;
+              resetStagnationTimeout(d);
+            }
             if (d.status === 'done') {
+              if (stagnationTimeoutId) window.clearTimeout(stagnationTimeoutId);
               window.clearTimeout(timeoutId);
               resolve(d);
             }
             if (d.status === 'error') {
-              window.clearTimeout(timeoutId);
-              reject(new Error(String(d.error ?? 'Error al restaurar')));
+              fail(String(d.error ?? 'Error al restaurar'));
             }
           },
           (err) => {
-            window.clearTimeout(timeoutId);
-            reject(new Error(err?.message || 'Sin permiso para leer el progreso de restauración (restore_jobs)'));
+            fail(err?.message || 'Sin permiso para leer el progreso de restauración (restore_jobs). Desplegá firestore.rules.');
           },
         );
       });
 
       const fn = httpsCallable(functions, 'restoreBackup', { timeout: 120000 });
       await refreshAuthTokenForBackup();
-      await fn(payload);
+      try {
+        await fn(payload);
+      } catch (callableErr: unknown) {
+        const msg = formatRestoreError(callableErr);
+        toast.error(msg);
+        throw callableErr;
+      }
 
       const d = await donePromise;
       const durationMs = Number(d.durationMs ?? 0);
@@ -393,6 +440,7 @@ export default function BackupTab() {
     } catch (e: unknown) {
       setLastResult({ ok: false, msg: formatRestoreError(e) });
     } finally {
+      if (stagnationTimeoutId) window.clearTimeout(stagnationTimeoutId);
       unsub?.();
       setRestoring(false);
       setProgress(null);

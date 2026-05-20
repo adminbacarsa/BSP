@@ -7,13 +7,41 @@ export function shouldScopeQueriesToEmpresa(empresaId: string, migracionCompleta
   return id.toLowerCase() !== 'bacarsa';
 }
 
+export function tenantEmpresaIdsMatch(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+  const x = norm(a);
+  const y = norm(b);
+  return !!x && !!y && x === y;
+}
+
+/** Alineado a apps/web2/src/lib/multiempresa.ts belongsToEmpresaView */
+export function belongsToEmpresaView(
+  data: { empresaId?: unknown },
+  empresaId: string,
+  migracionCompleta: boolean,
+): boolean {
+  const id = String(empresaId ?? '').trim();
+  const docEmp = String(data?.empresaId ?? '').trim();
+  if (shouldScopeQueriesToEmpresa(id, migracionCompleta)) {
+    if (id.toLowerCase() === 'bacarsa') {
+      return !docEmp || tenantEmpresaIdsMatch(docEmp, id);
+    }
+    return tenantEmpresaIdsMatch(docEmp, id);
+  }
+  if (id.toLowerCase() === 'bacarsa') {
+    return !docEmp || docEmp.toLowerCase() === 'bacarsa';
+  }
+  return !docEmp || tenantEmpresaIdsMatch(docEmp, id);
+}
+
 export function belongsToEmpresa(
   data: { empresaId?: unknown },
   empresaId: string,
   scopeEmpresa: boolean,
+  migracionCompleta = false,
 ): boolean {
   if (!scopeEmpresa) return true;
-  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+  return belongsToEmpresaView(data, empresaId, migracionCompleta);
 }
 
 export async function resolveAssistantEmpresaScope(

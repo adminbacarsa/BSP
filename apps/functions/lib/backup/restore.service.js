@@ -366,7 +366,9 @@ function docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantIm
         }
         if (platformImport) {
             const docEmpresa = String(doc.empresaId ?? '').trim();
-            return !docEmpresa || docEmpresa === opts.empresaId;
+            if (!docEmpresa)
+                return true;
+            return docEmpresa.toLowerCase() === String(opts.empresaId ?? '').trim().toLowerCase();
         }
         if (tenantImport) {
             const docEmpresa = String(doc.empresaId ?? '').trim();
@@ -374,7 +376,7 @@ function docIncludedInScopedRestore(colName, doc, opts, platformImport, tenantIm
                 return true;
             return docEmpresa.toLowerCase() === sourceEmpresaId.toLowerCase();
         }
-        return (0, assistantEmpresaScope_1.belongsToEmpresa)(doc, opts.empresaId, true);
+        return (0, assistantEmpresaScope_1.belongsToEmpresaView)(doc, String(opts.empresaId ?? ''), opts.migracionCompleta === true);
     }
     return false;
 }
@@ -536,6 +538,15 @@ async function runRestore(driveFileId, mode, jobId, opts = {}, partial = {}) {
     return runRestoreFromPayload(payload, fileName, mode, jobId, opts, partial);
 }
 async function runRestoreFromStorage(storagePath, fileName, mode, jobId, opts = {}, partial = {}) {
+    const db = admin.firestore();
+    const setJob = (data) => {
+        if (!jobId)
+            return Promise.resolve();
+        return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
+    };
+    if ((partial.startColIndex ?? 0) === 0) {
+        await setJob({ phase: 'Descargando backup desde Storage…' });
+    }
     const payload = await downloadBackupPayloadFromStorage(storagePath);
     const result = await runRestoreFromPayload(payload, fileName, mode, jobId, opts, partial);
     if (result.isComplete) {

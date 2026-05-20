@@ -1536,6 +1536,7 @@ exports.restoreBackup = functions
             fileName,
             empresaId: restoreOpts.empresaId ?? '',
             scopeEmpresa: restoreOpts.scopeEmpresa === true,
+            migracionCompleta: restoreOpts.migracionCompleta === true,
             tenantImport: restoreOpts.tenantImport === true,
             sourceEmpresaId: restoreOpts.sourceEmpresaId ?? '',
             storagePath: storagePath || null,
@@ -1548,9 +1549,6 @@ exports.restoreBackup = functions
             idMaps: null,
             error: null,
             queuedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        void (0, restore_job_runner_1.executeRestoreJob)(jobId).catch((err) => {
-            console.error('[restoreBackup] executeRestoreJob failed', jobId, err);
         });
         return { jobId, queued: true };
     }
@@ -1573,15 +1571,43 @@ exports.processRestoreJob = functions
     const after = change.after;
     if (!after.exists)
         return;
-    const status = String(after.data()?.status ?? '');
-    if (status !== 'queued')
-        return;
+    const data = after.data() ?? {};
+    const status = String(data.status ?? '');
     const beforeStatus = change.before.exists
         ? String(change.before.data()?.status ?? '')
         : '';
-    if (beforeStatus === 'queued')
-        return;
     const jobId = after.id;
+    const shouldRunQueued = status === 'queued' && beforeStatus !== 'queued';
+    const STUCK_RUNNING_MS = 3 * 60 * 1000;
+    let shouldRecoverStuck = false;
+    if (status === 'running' && beforeStatus === 'running') {
+        const startedAt = data.startedAt?.toDate?.();
+        if (startedAt && Date.now() - startedAt.getTime() > STUCK_RUNNING_MS) {
+            shouldRecoverStuck = true;
+        }
+    }
+    if (!shouldRunQueued && !shouldRecoverStuck)
+        return;
+    if (shouldRecoverStuck) {
+        const db = admin.firestore();
+        const reclaimed = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(after.ref);
+            const cur = String(snap.data()?.status ?? '');
+            if (cur !== 'running')
+                return false;
+            const started = snap.data()?.startedAt?.toDate?.();
+            if (!started || Date.now() - started.getTime() <= STUCK_RUNNING_MS)
+                return false;
+            tx.update(after.ref, {
+                status: 'queued',
+                phase: 'Reintentando tras timeout del worker anterior…',
+                error: null,
+            });
+            return true;
+        });
+        if (!reclaimed)
+            return;
+    }
     try {
         await (0, restore_job_runner_1.executeRestoreJob)(jobId);
     }

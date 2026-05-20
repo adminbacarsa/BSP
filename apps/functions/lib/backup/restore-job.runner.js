@@ -34,9 +34,10 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
         throw new Error('Import cross-tenant: usá solo Full Restore. Merge duplica empleados, clientes y turnos.');
     }
     let scopeEmpresa = false;
+    let migracionCompleta = false;
     if (empresaId) {
         const empSnap = await db.collection('empresas').doc(empresaId).get();
-        const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
+        migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
         scopeEmpresa = (0, assistantEmpresaScope_1.shouldScopeQueriesToEmpresa)(empresaId, migracionCompleta);
     }
     if (driveFileId && !tenantImport) {
@@ -59,6 +60,7 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     const restoreOpts = {
         empresaId,
         scopeEmpresa,
+        migracionCompleta,
         ...(tenantImport
             ? {
                 tenantImport: true,
@@ -88,7 +90,7 @@ async function executeRestoreJob(jobId) {
             return false;
         tx.update(jobRef, {
             status: 'running',
-            phase: 'Iniciando restauración…',
+            phase: 'Preparando restauración…',
             startedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         return true;
@@ -100,6 +102,7 @@ async function executeRestoreJob(jobId) {
     const restoreOpts = {
         empresaId: String(data.empresaId ?? '').trim() || undefined,
         scopeEmpresa: data.scopeEmpresa === true,
+        migracionCompleta: data.migracionCompleta === true,
         ...(data.tenantImport === true
             ? {
                 tenantImport: true,
@@ -111,17 +114,36 @@ async function executeRestoreJob(jobId) {
     const storagePath = String(data.storagePath ?? '').trim();
     const driveFileId = String(data.driveFileId ?? '').trim();
     const resumeColIndex = Number(data.resumeColIndex ?? 0);
-    const partial = {
-        startColIndex: resumeColIndex,
-        collectionsPerRun: 1,
-        idMaps: (0, restore_service_1.deserializeIdMaps)(data.idMaps),
-        docsRestored: Number(data.docsRestored ?? 0),
-        docsDeleted: Number(data.docsDeleted ?? 0),
-    };
-    try {
-        const result = storagePath
+    const runChunk = async (colIndex, idMaps, docsRestored, docsDeleted) => {
+        const partial = {
+            startColIndex: colIndex,
+            collectionsPerRun: 50,
+            idMaps,
+            docsRestored,
+            docsDeleted,
+        };
+        return storagePath
             ? await (0, restore_service_1.runRestoreFromStorage)(storagePath, fileName, effectiveMode, jobId, restoreOpts, partial)
             : await (0, restore_service_1.runRestore)(driveFileId, effectiveMode, jobId, restoreOpts, partial);
+    };
+    try {
+        let colIndex = resumeColIndex;
+        let idMaps = (0, restore_service_1.deserializeIdMaps)(data.idMaps);
+        let docsRestored = Number(data.docsRestored ?? 0);
+        let docsDeleted = Number(data.docsDeleted ?? 0);
+        let lastResult = null;
+        for (let guard = 0; guard < 80; guard++) {
+            lastResult = await runChunk(colIndex, idMaps, docsRestored, docsDeleted);
+            docsRestored = lastResult.docsRestored;
+            docsDeleted = lastResult.docsDeleted;
+            idMaps = lastResult.idMaps ?? idMaps;
+            if (lastResult.isComplete)
+                break;
+            colIndex = lastResult.nextColIndex ?? colIndex + 1;
+        }
+        const result = lastResult;
+        if (!result)
+            return;
         if (result.isComplete) {
             await jobRef.set({
                 status: 'done',
@@ -136,8 +158,8 @@ async function executeRestoreJob(jobId) {
         }
         await jobRef.set({
             status: 'queued',
-            resumeColIndex: result.nextColIndex ?? resumeColIndex + 1,
-            idMaps: (0, restore_service_1.serializeIdMaps)(result.idMaps ?? partial.idMaps ?? {}),
+            resumeColIndex: result.nextColIndex ?? colIndex,
+            idMaps: (0, restore_service_1.serializeIdMaps)(result.idMaps ?? idMaps),
             docsRestored: result.docsRestored,
             docsDeleted: result.docsDeleted,
             phase: `Encolado ${(result.nextColIndex ?? 0) + 1}/${result.totalCollections ?? '?'}`,

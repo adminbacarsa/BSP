@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shouldScopeQueriesToEmpresa = shouldScopeQueriesToEmpresa;
+exports.tenantEmpresaIdsMatch = tenantEmpresaIdsMatch;
+exports.belongsToEmpresaView = belongsToEmpresaView;
 exports.belongsToEmpresa = belongsToEmpresa;
 exports.resolveAssistantEmpresaScope = resolveAssistantEmpresaScope;
 exports.queryCollectionDocsScoped = queryCollectionDocsScoped;
@@ -16,10 +18,30 @@ function shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) {
         return true;
     return id.toLowerCase() !== 'bacarsa';
 }
-function belongsToEmpresa(data, empresaId, scopeEmpresa) {
+function tenantEmpresaIdsMatch(a, b) {
+    const norm = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+    const x = norm(a);
+    const y = norm(b);
+    return !!x && !!y && x === y;
+}
+function belongsToEmpresaView(data, empresaId, migracionCompleta) {
+    const id = String(empresaId ?? '').trim();
+    const docEmp = String(data?.empresaId ?? '').trim();
+    if (shouldScopeQueriesToEmpresa(id, migracionCompleta)) {
+        if (id.toLowerCase() === 'bacarsa') {
+            return !docEmp || tenantEmpresaIdsMatch(docEmp, id);
+        }
+        return tenantEmpresaIdsMatch(docEmp, id);
+    }
+    if (id.toLowerCase() === 'bacarsa') {
+        return !docEmp || docEmp.toLowerCase() === 'bacarsa';
+    }
+    return !docEmp || tenantEmpresaIdsMatch(docEmp, id);
+}
+function belongsToEmpresa(data, empresaId, scopeEmpresa, migracionCompleta = false) {
     if (!scopeEmpresa)
         return true;
-    return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+    return belongsToEmpresaView(data, empresaId, migracionCompleta);
 }
 async function resolveAssistantEmpresaScope(db, empresaId) {
     const id = String(empresaId ?? '').trim();

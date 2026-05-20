@@ -25,6 +25,7 @@ export declare function deleteBackupStorageFile(storagePath: string): Promise<vo
 export interface RestoreOptions {
     empresaId?: string;
     scopeEmpresa?: boolean;
+    migracionCompleta?: boolean;
     tenantImport?: boolean;
     sourceEmpresaId?: string;
 }

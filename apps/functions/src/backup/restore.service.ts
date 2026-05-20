@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { belongsToEmpresa } from '../assistant/assistantEmpresaScope';
+import { belongsToEmpresaView } from '../assistant/assistantEmpresaScope';
 
 export type RestoreMode = 'merge' | 'full';
 
@@ -70,6 +70,7 @@ function getBackupStorageBucketName(): string {
 export interface RestoreOptions {
   empresaId?: string;
   scopeEmpresa?: boolean;
+  migracionCompleta?: boolean;
   /** Copiar backup de otra empresa al tenant destino (superadmin). */
   tenantImport?: boolean;
   sourceEmpresaId?: string;
@@ -450,14 +451,19 @@ function docIncludedInScopedRestore(
     }
     if (platformImport) {
       const docEmpresa = String(doc.empresaId ?? '').trim();
-      return !docEmpresa || docEmpresa === opts.empresaId;
+      if (!docEmpresa) return true;
+      return docEmpresa.toLowerCase() === String(opts.empresaId ?? '').trim().toLowerCase();
     }
     if (tenantImport) {
       const docEmpresa = String(doc.empresaId ?? '').trim();
       if (!docEmpresa) return true;
       return docEmpresa.toLowerCase() === sourceEmpresaId.toLowerCase();
     }
-    return belongsToEmpresa(doc, opts.empresaId, true);
+    return belongsToEmpresaView(
+      doc,
+      String(opts.empresaId ?? ''),
+      opts.migracionCompleta === true,
+    );
   }
   return false;
 }
@@ -702,6 +708,14 @@ export async function runRestoreFromStorage(
   opts: RestoreOptions = {},
   partial: RestorePartialState = {},
 ): Promise<RestoreResult> {
+  const db = admin.firestore();
+  const setJob = (data: object) => {
+    if (!jobId) return Promise.resolve();
+    return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
+  };
+  if ((partial.startColIndex ?? 0) === 0) {
+    await setJob({ phase: 'Descargando backup desde Storage…' });
+  }
   const payload = await downloadBackupPayloadFromStorage(storagePath);
   const result = await runRestoreFromPayload(payload, fileName, mode, jobId, opts, partial);
   if (result.isComplete) {

@@ -1,7 +1,11 @@
 export declare function shouldScopeQueriesToEmpresa(empresaId: string, migracionCompleta: boolean): boolean;
+export declare function tenantEmpresaIdsMatch(a: unknown, b: unknown): boolean;
+export declare function belongsToEmpresaView(data: {
+    empresaId?: unknown;
+}, empresaId: string, migracionCompleta: boolean): boolean;
 export declare function belongsToEmpresa(data: {
     empresaId?: unknown;
-}, empresaId: string, scopeEmpresa: boolean): boolean;
+}, empresaId: string, scopeEmpresa: boolean, migracionCompleta?: boolean): boolean;
 export declare function resolveAssistantEmpresaScope(db: FirebaseFirestore.Firestore, empresaId: string): Promise<{
     scopeEmpresa: boolean;
     migracionCompleta: boolean;

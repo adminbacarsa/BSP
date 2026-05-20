@@ -67,9 +67,10 @@ export async function assertRestoreRequestAllowed(
   }
 
   let scopeEmpresa = false;
+  let migracionCompleta = false;
   if (empresaId) {
     const empSnap = await db.collection('empresas').doc(empresaId).get();
-    const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
+    migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
     scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   }
 
@@ -95,6 +96,7 @@ export async function assertRestoreRequestAllowed(
   const restoreOpts: RestoreOptions = {
     empresaId,
     scopeEmpresa,
+    migracionCompleta,
     ...(tenantImport
       ? {
           tenantImport: true,
@@ -129,7 +131,7 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
     if (status !== 'queued') return false;
     tx.update(jobRef, {
       status: 'running',
-      phase: 'Iniciando restauración…',
+      phase: 'Preparando restauración…',
       startedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return true;
@@ -141,6 +143,7 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
   const restoreOpts: RestoreOptions = {
     empresaId: String(data.empresaId ?? '').trim() || undefined,
     scopeEmpresa: data.scopeEmpresa === true,
+    migracionCompleta: data.migracionCompleta === true,
     ...(data.tenantImport === true
       ? {
           tenantImport: true,
@@ -152,18 +155,38 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
   const storagePath = String(data.storagePath ?? '').trim();
   const driveFileId = String(data.driveFileId ?? '').trim();
   const resumeColIndex = Number(data.resumeColIndex ?? 0);
-  const partial = {
-    startColIndex: resumeColIndex,
-    collectionsPerRun: 1,
-    idMaps: deserializeIdMaps(data.idMaps),
-    docsRestored: Number(data.docsRestored ?? 0),
-    docsDeleted: Number(data.docsDeleted ?? 0),
+
+  const runChunk = async (colIndex: number, idMaps: ReturnType<typeof deserializeIdMaps>, docsRestored: number, docsDeleted: number) => {
+    const partial = {
+      startColIndex: colIndex,
+      collectionsPerRun: 50,
+      idMaps,
+      docsRestored,
+      docsDeleted,
+    };
+    return storagePath
+      ? await runRestoreFromStorage(storagePath, fileName, effectiveMode, jobId, restoreOpts, partial)
+      : await runRestore(driveFileId, effectiveMode, jobId, restoreOpts, partial);
   };
 
   try {
-    const result = storagePath
-      ? await runRestoreFromStorage(storagePath, fileName, effectiveMode, jobId, restoreOpts, partial)
-      : await runRestore(driveFileId, effectiveMode, jobId, restoreOpts, partial);
+    let colIndex = resumeColIndex;
+    let idMaps = deserializeIdMaps(data.idMaps);
+    let docsRestored = Number(data.docsRestored ?? 0);
+    let docsDeleted = Number(data.docsDeleted ?? 0);
+    let lastResult: Awaited<ReturnType<typeof runChunk>> | null = null;
+
+    for (let guard = 0; guard < 80; guard++) {
+      lastResult = await runChunk(colIndex, idMaps, docsRestored, docsDeleted);
+      docsRestored = lastResult.docsRestored;
+      docsDeleted = lastResult.docsDeleted;
+      idMaps = lastResult.idMaps ?? idMaps;
+      if (lastResult.isComplete) break;
+      colIndex = lastResult.nextColIndex ?? colIndex + 1;
+    }
+
+    const result = lastResult;
+    if (!result) return;
 
     if (result.isComplete) {
       await jobRef.set({
@@ -180,8 +203,8 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
 
     await jobRef.set({
       status: 'queued',
-      resumeColIndex: result.nextColIndex ?? resumeColIndex + 1,
-      idMaps: serializeIdMaps(result.idMaps ?? partial.idMaps ?? {}),
+      resumeColIndex: result.nextColIndex ?? colIndex,
+      idMaps: serializeIdMaps(result.idMaps ?? idMaps),
       docsRestored: result.docsRestored,
       docsDeleted: result.docsDeleted,
       phase: `Encolado ${(result.nextColIndex ?? 0) + 1}/${result.totalCollections ?? '?'}`,
