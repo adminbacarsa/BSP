@@ -12,6 +12,7 @@ exports.runRestoreFromPayload = runRestoreFromPayload;
 exports.runRestore = runRestore;
 exports.runRestoreFromStorage = runRestoreFromStorage;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
 function serializeIdMaps(idMaps) {
     const out = {};
@@ -115,7 +116,7 @@ function normalizeSlaDateField(value) {
         return value;
     if (typeof value === 'string')
         return value.trim().slice(0, 10);
-    if (value instanceof admin.firestore.Timestamp) {
+    if (value instanceof firestore_1.Timestamp) {
         const d = value.toDate();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
@@ -123,7 +124,7 @@ function normalizeSlaDateField(value) {
         const o = value;
         const sec = o._seconds ?? o.seconds;
         if (typeof sec === 'number') {
-            const d = new admin.firestore.Timestamp(sec, o._nanoseconds ?? o.nanoseconds ?? 0).toDate();
+            const d = new firestore_1.Timestamp(sec, o._nanoseconds ?? o.nanoseconds ?? 0).toDate();
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         }
     }
@@ -194,7 +195,7 @@ async function deleteDocsWithoutEmpresaId(db, colName, batchSize) {
     let docsDeleted = 0;
     let last;
     for (;;) {
-        let q = db.collection(colName).orderBy(admin.firestore.FieldPath.documentId()).limit(batchSize);
+        let q = db.collection(colName).orderBy(firestore_1.FieldPath.documentId()).limit(batchSize);
         if (last)
             q = q.startAfter(last);
         const snap = await q.get();
@@ -232,7 +233,7 @@ function deserializeFields(obj) {
     if (Array.isArray(obj))
         return obj.map(deserializeFields);
     if (typeof obj._seconds === 'number' && typeof obj._nanoseconds === 'number') {
-        return new admin.firestore.Timestamp(obj._seconds, obj._nanoseconds);
+        return new firestore_1.Timestamp(obj._seconds, obj._nanoseconds);
     }
     const result = {};
     for (const [k, v] of Object.entries(obj)) {
@@ -245,9 +246,9 @@ function sanitizeForFirestore(obj) {
         return undefined;
     if (obj === null)
         return null;
-    if (obj instanceof admin.firestore.Timestamp)
+    if (obj instanceof firestore_1.Timestamp)
         return obj;
-    if (obj instanceof admin.firestore.GeoPoint)
+    if (obj instanceof firestore_1.GeoPoint)
         return obj;
     if (Array.isArray(obj)) {
         return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
@@ -440,7 +441,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
     let total = 0;
     try {
         if ((partial.startColIndex ?? 0) === 0) {
-            await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: partial.docsRestored ?? 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
+            await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: partial.docsRestored ?? 0, total: 0, startedAt: firestore_1.FieldValue.serverTimestamp() });
         }
         const { _meta, _auth_users, ...collections } = payload;
         const colEntries = Object.entries(collections).filter(([, docs]) => Array.isArray(docs) && docs.length > 0);
@@ -477,7 +478,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
                 details: tenantImport
                     ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${effectiveMode}) desde ${fileName} — ${docsRestored} docs`
                     : `Restauración ${effectiveMode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
-                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                timestamp: firestore_1.FieldValue.serverTimestamp(),
                 ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
             });
         }
@@ -521,7 +522,7 @@ async function runRestore(driveFileId, mode, jobId, opts = {}, partial = {}) {
             return Promise.resolve();
         return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
     };
-    await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
+    await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: firestore_1.FieldValue.serverTimestamp() });
     const { google } = await Promise.resolve().then(() => require('googleapis'));
     const auth = new google.auth.GoogleAuth({
         scopes: ['https://www.googleapis.com/auth/drive.readonly'],

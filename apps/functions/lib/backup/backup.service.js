@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runBackup = runBackup;
 exports.resolveDriveBackupFolderId = resolveDriveBackupFolderId;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const stream_1 = require("stream");
 const EXCLUDE_COLLECTIONS = new Set([]);
 const EMPRESA_SCOPED_COLLECTIONS = new Set([
@@ -14,7 +15,12 @@ const MAX_DOCS_PER_COLLECTION = 50000;
 function docBelongsToEmpresa(data, empresaId, scopeEmpresa) {
     if (!scopeEmpresa)
         return true;
-    return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+    const docEmpId = String(data.empresaId ?? '').trim();
+    if (docEmpId === empresaId)
+        return true;
+    if (empresaId === 'bacarsa' && docEmpId === '')
+        return true;
+    return false;
 }
 async function exportAuthUsers() {
     const users = [];
@@ -120,7 +126,7 @@ async function runBackup(folderId, opts = {}) {
     });
     const driveFileId = driveRes.data.id;
     const driveLink = driveRes.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
-    const ref = await db.collection('system_backups').add({
+    const backupDoc = {
         driveFileId,
         driveLink,
         fileName,
@@ -128,11 +134,19 @@ async function runBackup(folderId, opts = {}) {
         collections: exportedCollections,
         totalDocs,
         driveBackupFolderId: folderId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
         status: 'ok',
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-    });
+    };
+    let ref;
+    if (scopeEmpresa && empresaId) {
+        ref = db.collection('system_backups').doc(`${empresaId}_latest`);
+        await ref.set(backupDoc);
+    }
+    else {
+        ref = await db.collection('system_backups').add(backupDoc);
+    }
     return {
         id: ref.id,
         driveFileId,

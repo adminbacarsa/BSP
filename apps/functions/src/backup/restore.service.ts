@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldPath, FieldValue, Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import { belongsToEmpresaView } from '../assistant/assistantEmpresaScope';
 
 export type RestoreMode = 'merge' | 'full';
@@ -160,7 +161,7 @@ function remapObjectiveIdWithNameFallback(
 function normalizeSlaDateField(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === 'string') return value.trim().slice(0, 10);
-  if (value instanceof admin.firestore.Timestamp) {
+  if (value instanceof Timestamp) {
     const d = value.toDate();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
@@ -168,7 +169,7 @@ function normalizeSlaDateField(value: unknown): unknown {
     const o = value as { _seconds?: number; seconds?: number; _nanoseconds?: number; nanoseconds?: number };
     const sec = o._seconds ?? o.seconds;
     if (typeof sec === 'number') {
-      const d = new admin.firestore.Timestamp(sec, o._nanoseconds ?? o.nanoseconds ?? 0).toDate();
+      const d = new Timestamp(sec, o._nanoseconds ?? o.nanoseconds ?? 0).toDate();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
   }
@@ -255,7 +256,7 @@ async function deleteDocsWithoutEmpresaId(
   let docsDeleted = 0;
   let last: FirebaseFirestore.QueryDocumentSnapshot | undefined;
   for (;;) {
-    let q: FirebaseFirestore.Query = db.collection(colName).orderBy(admin.firestore.FieldPath.documentId()).limit(batchSize);
+    let q: FirebaseFirestore.Query = db.collection(colName).orderBy(FieldPath.documentId()).limit(batchSize);
     if (last) q = q.startAfter(last);
     const snap = await q.get();
     if (snap.empty) break;
@@ -294,7 +295,7 @@ function deserializeFields(obj: any): any {
   if (Array.isArray(obj)) return obj.map(deserializeFields);
 
   if (typeof obj._seconds === 'number' && typeof obj._nanoseconds === 'number') {
-    return new admin.firestore.Timestamp(obj._seconds, obj._nanoseconds);
+    return new Timestamp(obj._seconds, obj._nanoseconds);
   }
 
   const result: any = {};
@@ -307,8 +308,8 @@ function deserializeFields(obj: any): any {
 function sanitizeForFirestore(obj: unknown): unknown {
   if (obj === undefined) return undefined;
   if (obj === null) return null;
-  if (obj instanceof admin.firestore.Timestamp) return obj;
-  if (obj instanceof admin.firestore.GeoPoint) return obj;
+  if (obj instanceof Timestamp) return obj;
+  if (obj instanceof GeoPoint) return obj;
   if (Array.isArray(obj)) {
     return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
   }
@@ -554,7 +555,7 @@ export async function runRestoreFromPayload(
 
   try {
   if ((partial.startColIndex ?? 0) === 0) {
-    await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: partial.docsRestored ?? 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
+    await setJob({ status: 'running', phase: 'Preparando restauración…', docsRestored: partial.docsRestored ?? 0, total: 0, startedAt: FieldValue.serverTimestamp() });
   }
 
   const { _meta, _auth_users, ...collections } = payload;
@@ -626,7 +627,7 @@ export async function runRestoreFromPayload(
       details: tenantImport
         ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${effectiveMode}) desde ${fileName} — ${docsRestored} docs`
         : `Restauración ${effectiveMode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: FieldValue.serverTimestamp(),
       ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
     });
   } else {
@@ -677,7 +678,7 @@ export async function runRestore(
     return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });
   };
 
-  await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: admin.firestore.FieldValue.serverTimestamp() });
+  await setJob({ status: 'running', phase: 'Descargando backup de Drive…', docsRestored: 0, total: 0, startedAt: FieldValue.serverTimestamp() });
 
   const { google } = await import('googleapis');
   const auth = new google.auth.GoogleAuth({

@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { shouldScopeQueriesToEmpresa } from '../assistant/assistantEmpresaScope';
 import {
   resolveBackupCaller,
@@ -132,7 +133,7 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
     tx.update(jobRef, {
       status: 'running',
       phase: 'Preparando restauración…',
-      startedAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt: FieldValue.serverTimestamp(),
     });
     return true;
   });
@@ -196,7 +197,7 @@ export async function executeRestoreJob(jobId: string): Promise<void> {
         docsDeleted: result.docsDeleted,
         durationMs: result.durationMs,
         collections: result.collections,
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       return;
     }

@@ -22,9 +22,9 @@ function sanitizeForFirestore(obj) {
         return undefined;
     if (obj === null)
         return null;
-    if (obj instanceof admin.firestore.Timestamp)
+    if (obj instanceof firestore_1.Timestamp)
         return obj;
-    if (obj instanceof admin.firestore.GeoPoint)
+    if (obj instanceof firestore_1.GeoPoint)
         return obj;
     if (Array.isArray(obj)) {
         return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
@@ -68,7 +68,7 @@ async function readSourceDocs(db, colName, sourceEmpresaId) {
     for (;;) {
         let q = db
             .collection(colName)
-            .orderBy(admin.firestore.FieldPath.documentId())
+            .orderBy(firestore_1.FieldPath.documentId())
             .limit(400);
         if (last)
             q = q.startAfter(last);

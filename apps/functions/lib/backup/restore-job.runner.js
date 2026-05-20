@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.assertRestoreRequestAllowed = assertRestoreRequestAllowed;
 exports.executeRestoreJob = executeRestoreJob;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
 const backup_auth_util_1 = require("./backup-auth.util");
 const restore_service_1 = require("./restore.service");
@@ -91,7 +92,7 @@ async function executeRestoreJob(jobId) {
         tx.update(jobRef, {
             status: 'running',
             phase: 'Preparando restauración…',
-            startedAt: admin.firestore.FieldValue.serverTimestamp(),
+            startedAt: firestore_1.FieldValue.serverTimestamp(),
         });
         return true;
     });
@@ -152,7 +153,7 @@ async function executeRestoreJob(jobId) {
                 docsDeleted: result.docsDeleted,
                 durationMs: result.durationMs,
                 collections: result.collections,
-                completedAt: admin.firestore.FieldValue.serverTimestamp(),
+                completedAt: firestore_1.FieldValue.serverTimestamp(),
             }, { merge: true });
             return;
         }

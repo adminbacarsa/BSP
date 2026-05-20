@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import {
   allocateCloneDocId,
   deleteDocsWhereEmpresaId,
@@ -48,8 +48,8 @@ function belongsToSourceEmpresa(data: Record<string, unknown>, sourceEmpresaId: 
 function sanitizeForFirestore(obj: unknown): unknown {
   if (obj === undefined) return undefined;
   if (obj === null) return null;
-  if (obj instanceof admin.firestore.Timestamp) return obj;
-  if (obj instanceof admin.firestore.GeoPoint) return obj;
+  if (obj instanceof Timestamp) return obj;
+  if (obj instanceof GeoPoint) return obj;
   if (Array.isArray(obj)) {
     return obj.map((item) => sanitizeForFirestore(item)).filter((item) => item !== undefined);
   }
@@ -91,7 +91,7 @@ async function readSourceDocs(
   for (;;) {
     let q: FirebaseFirestore.Query = db
       .collection(colName)
-      .orderBy(admin.firestore.FieldPath.documentId())
+      .orderBy(FieldPath.documentId())
       .limit(400);
     if (last) q = q.startAfter(last);
     const snap = await q.get();

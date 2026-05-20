@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { Readable } from 'stream';
 
 // Colecciones a excluir del backup
@@ -168,12 +169,12 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     collections: exportedCollections,
     totalDocs,
     driveBackupFolderId: folderId,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
     status: 'ok',
     ...(empresaId ? { empresaId } : {}),
     ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
   };
-  let ref: admin.firestore.DocumentReference;
+  let ref: FirebaseFirestore.DocumentReference;
   if (scopeEmpresa && empresaId) {
     ref = db.collection('system_backups').doc(`${empresaId}_latest`);
     await ref.set(backupDoc);
