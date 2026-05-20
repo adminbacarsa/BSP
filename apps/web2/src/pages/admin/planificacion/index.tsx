@@ -33,9 +33,13 @@ import {
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import {
     filterSlasForPlanningTenant,
+    filterSlasForPlanningContext,
     formatSlaRangeHint,
     pickSlaForPlanningMonth,
-    slaMatchesPlanningObjective,
+    planningMonthHasActiveSla,
+    slaBelongsToPlanningClient,
+    buildPlanningPositionStructure,
+    DEFAULT_PLANNING_SHIFTS,
 } from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -1339,31 +1343,37 @@ export default function PlanificacionPage() {
         }
         const fetchSLA = async () => {
             try {
-                const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
-                const snap = await getDocs(q);
-                const clientRow = clients.find((c) => c.id === selectedClient);
-                const clientObjetivos = clientRow?.objetivos;
+                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
                 const allDocs = filterSlasForPlanningTenant(
                     snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
                     empresaId,
                     scopeEmpresa,
                     tenantClientIds,
                 );
-
-                const matching = allDocs.filter((d) =>
-                    slaMatchesPlanningObjective(d, selectedObjective, clientObjetivos, slaIdToObjId),
+                const clientDocs = allDocs.filter((d) =>
+                    slaBelongsToPlanningClient(d, selectedClient, clients),
+                );
+                const matching = filterSlasForPlanningContext(
+                    allDocs,
+                    selectedClient,
+                    selectedObjective,
+                    clients,
+                    slaIdToObjId,
                 );
 
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
-                const { vigente: srv, hasExactMatch } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                const srvForStructure = srv;
+                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
+                const srvForStructure = srv ?? fallback;
+                const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
 
-                if (!hasExactMatch) {
+                if (!monthHasSla) {
                     if (matching.length > 0) {
                         setSlaPlanningHint(`contratos del objetivo: ${formatSlaRangeHint(matching)}`);
+                    } else if (clientDocs.length > 0) {
+                        setSlaPlanningHint(`${clientDocs.length} contrato(s) del cliente no vinculan a este objetivo — revisá Servicios`);
                     } else if (allDocs.length > 0) {
-                        setSlaPlanningHint(`${allDocs.length} contrato(s) del cliente no vinculan a este objetivo — revisá Servicios`);
+                        setSlaPlanningHint(`${allDocs.length} contrato(s) en Servicios no coinciden con este cliente (revisá clientId tras restore)`);
                     } else {
                         setSlaPlanningHint('sin contratos en Servicios para este cliente');
                     }
@@ -1371,36 +1381,25 @@ export default function PlanificacionPage() {
                     setSlaPlanningHint('');
                 }
 
-                const structure: any[] = [];
-                if (srvForStructure?.positions) {
-                    const positionsIterable = Array.isArray(srvForStructure.positions) ? srvForStructure.positions : Object.values(srvForStructure.positions);
-                    const defaultShifts = [{ code: 'M', hours: 8 }, { code: 'T', hours: 8 }, { code: 'N', hours: 8 }];
-                    positionsIterable.forEach((pos: any) => {
-                        if (!pos) return;
-                        const shiftList = pos.allowedShiftTypes || pos.shifts;
-                        const hasShifts = Array.isArray(shiftList) && shiftList.length > 0;
-                        if (!hasShifts && !hasExactMatch) return;
-                        const rawQty = pos.quantity || pos.qty || pos.pax || pos.cant || pos.cantidad || pos.cant_guardias || pos.dotacion || pos.guardias || pos.plazas || pos.cupo || pos.staff || pos.personal || pos.recursos || 1;
-                        const cleanQty = typeof rawQty === 'string' ? rawQty.trim() : rawQty;
-                        const parsedQty = parseInt(String(cleanQty), 10);
-                        structure.push({
-                            positionName: pos.name || pos.positionName || 'General',
-                            shifts: hasShifts ? shiftList : defaultShifts,
-                            qty: !isNaN(parsedQty) && parsedQty > 0 ? parsedQty : 1,
-                            activeDays: pos.activeDays || ['L','M','X','J','V','S','D'],
-                            coverageType: pos.coverageType || srvForStructure.coverageType || '24hs',
-                            _serviceId: srvForStructure.id,
-                            _serviceRange: `${toYyyyMmDd(srvForStructure.startDate) || '?'} → ${toYyyyMmDd(srvForStructure.endDate) || '?'}`,
-                        });
-                    });
-                }
+                const { structure, usedSlaFallback } = buildPlanningPositionStructure(srvForStructure, {
+                    monthHasSla,
+                    hasExactMatch,
+                });
                 if (structure.length === 0) {
-                    console.warn("CRONO: No se encontró estructura válida. Activando Fallback.");
-                    structure.push({ positionName: 'General', shifts: [{code:'M',hours:8},{code:'T',hours:8},{code:'N',hours:8}], qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' });
+                    console.warn('CRONO: Sin contrato SLA para este mes; estructura mínima de respaldo.');
+                    structure.push({
+                        positionName: 'General',
+                        shifts: DEFAULT_PLANNING_SHIFTS.map((s) => ({ ...s })),
+                        qty: 1,
+                        activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+                        coverageType: '24hs',
+                    });
+                } else if (usedSlaFallback) {
+                    console.info('CRONO: Contrato SLA vigente sin puestos/turnos configurados; usando M/T/N por defecto.');
                 }
-                setHasActiveSLA(hasExactMatch);
+                setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
-                setSlaVendidas(hasExactMatch ? (srvForStructure?.totalMonthlyHours || 0) : 0);
+                setSlaVendidas(monthHasSla ? (Number(srvForStructure?.totalMonthlyHours) || 0) : 0);
             } catch (e) {
                 console.error("CRONO SLA ERROR:", e);
                 setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
@@ -3055,17 +3054,19 @@ export default function PlanificacionPage() {
         if (!selectedClient || !selectedObjective) { toast.error('Seleccioná cliente y objetivo'); return; }
         setSlaDebugLoading(true);
         try {
-            const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
-            const snap = await getDocs(q);
-            const clientRow = clients.find((c) => c.id === selectedClient);
+            const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
             const allDocs = filterSlasForPlanningTenant(
                 snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
                 empresaId,
                 scopeEmpresa,
                 tenantClientIds,
             );
-            const matching = allDocs.filter((d) =>
-                slaMatchesPlanningObjective(d, selectedObjective, clientRow?.objetivos, slaIdToObjId),
+            const matching = filterSlasForPlanningContext(
+                allDocs,
+                selectedClient,
+                selectedObjective,
+                clients,
+                slaIdToObjId,
             );
             const y = currentDate.getFullYear(), m = currentDate.getMonth();
             const { vigente, fallback } = pickSlaForPlanningMonth(matching, y, m);
