@@ -4,7 +4,8 @@ import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant } from '@/services/slaService'; 
 import { useToast } from '@/context/ToastContext';
 import { db } from '@/lib/firebase';
-import { getAuth, onAuthStateChanged } from 'firebase/auth'; 
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
 import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy,
@@ -688,9 +689,15 @@ export default function ServiciosSLAPage() {
       }
       addToast('Guardado correctamente', 'success');
       setView('list');
-    } catch (e) { 
-        addToast('Error al guardar', 'error'); 
+    } catch (e: unknown) {
         console.error(e);
+        if (e instanceof TenantIsolationError) {
+          addToast(e.message, 'error');
+        } else if (e instanceof FirebaseError && e.code === 'permission-denied') {
+          addToast('Permiso denegado en Firestore. Verificá rol/empresa o pedí redeploy de reglas.', 'error');
+        } else {
+          addToast(e instanceof Error ? e.message : 'Error al guardar', 'error');
+        }
     }
   };
 

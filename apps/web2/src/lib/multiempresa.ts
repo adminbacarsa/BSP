@@ -236,19 +236,19 @@ export function belongsToEmpresaView(
 }
 
 /**
- * Propiedad estricta para escrituras/borrados (más estricto que la vista en pantalla).
- * Bacarsa legacy: docs sin empresaId o empresaId=bacarsa.
+ * Propiedad para escrituras/borrados. Bacarsa: sin empresaId o empresaId=bacarsa
+ * (alineado con belongsToEmpresaView y firestore bacarsaTenantDocMatches).
  * Otras empresas: empresaId debe coincidir exactamente.
  */
 export function isTenantWriteOwner(
   data: { empresaId?: unknown },
   empresaId: string,
-  migracionCompleta: boolean,
+  _migracionCompleta: boolean,
 ): boolean {
   const id = String(empresaId ?? '').trim();
   if (!id) return false;
   const docEmp = String(data?.empresaId ?? '').trim();
-  if (id.toLowerCase() === 'bacarsa' && !migracionCompleta) {
+  if (id.toLowerCase() === 'bacarsa') {
     return !docEmp || docEmp.toLowerCase() === 'bacarsa';
   }
   return tenantEmpresaIdsMatch(docEmp, id);
