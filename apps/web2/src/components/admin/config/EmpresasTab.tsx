@@ -664,33 +664,66 @@ export default function EmpresasTab() {
                 <X size={20} />
               </button>
             </div>
-            <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-xs text-violet-900 font-medium space-y-2">
-              <p>Se <strong>borrarán todos los datos</strong> actuales de «{empresa?.name || empresaId}» y se copiarán desde origen con IDs nuevos.</p>
-              <p>«{copySourceEmpresa?.name || copySourceId}» (origen) <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-600 mb-2">
-                Escribí <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-violet-700">{empresaId}</code> para confirmar:
-              </p>
-              <input
-                value={copyConfirmInput}
-                onChange={(e) => setCopyConfirmInput(e.target.value)}
-                placeholder={empresaId}
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
-                autoFocus
-              />
-            </div>
+            {copyRunning ? (
+              <div className="space-y-4">
+                <p className="text-sm font-bold text-violet-800 truncate">{copyProgress?.phase || 'Procesando…'}</p>
+                {(() => {
+                  const match = copyProgress?.phase?.match(/\((\d+)\/(\d+)\)/);
+                  const done = match ? parseInt(match[1]) : 0;
+                  const total = match ? parseInt(match[2]) : 0;
+                  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                  return (
+                    <>
+                      <div className="h-3 bg-violet-100 rounded-full overflow-hidden">
+                        {total > 0
+                          ? <div className="h-full bg-violet-500 transition-all duration-700 rounded-full" style={{ width: `${pct}%` }} />
+                          : <div className="h-full bg-violet-400 animate-pulse rounded-full w-2/5" />
+                        }
+                      </div>
+                      {total > 0 && (
+                        <p className="text-xs text-violet-500 font-bold text-right">{done}/{total} colecciones · {pct}%</p>
+                      )}
+                    </>
+                  );
+                })()}
+                <div className="flex gap-4 text-xs font-bold text-violet-700">
+                  <span>+{(copyProgress?.docsCopied ?? 0).toLocaleString()} copiados</span>
+                  <span>{(copyProgress?.docsDeleted ?? 0).toLocaleString()} borrados en destino</span>
+                </div>
+                <p className="text-[10px] text-slate-400 text-center">No cerres esta ventana</p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-xs text-violet-900 font-medium space-y-2">
+                  <p>Se <strong>borrarán todos los datos</strong> actuales de «{empresa?.name || empresaId}» y se copiarán desde origen con IDs nuevos.</p>
+                  <p>«{copySourceEmpresa?.name || copySourceId}» (origen) <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-600 mb-2">
+                    Escribí <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-violet-700">{empresaId}</code> para confirmar:
+                  </p>
+                  <input
+                    value={copyConfirmInput}
+                    onChange={(e) => setCopyConfirmInput(e.target.value)}
+                    placeholder={empresaId}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    autoFocus
+                  />
+                </div>
+              </>
+            )}
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setCopyModalOpen(false)} disabled={copyRunning} className="px-4 py-2 text-xs font-bold text-slate-500">Cancelar</button>
-              <button
-                type="button"
-                onClick={handleCopyEmpresaData}
-                disabled={copyRunning || copyConfirmInput.trim() !== empresaId || copySourceId === empresaId}
-                className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-black hover:bg-violet-700 disabled:opacity-40"
-              >
-                {copyRunning ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
-                Confirmar copia
-              </button>
+              {!copyRunning && (
+                <button
+                  type="button"
+                  onClick={handleCopyEmpresaData}
+                  disabled={copyConfirmInput.trim() !== empresaId || copySourceId === empresaId}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-black hover:bg-violet-700 disabled:opacity-40"
+                >
+                  <Copy size={13} /> Confirmar copia
+                </button>
+              )}
             </div>
           </div>
         </div>
