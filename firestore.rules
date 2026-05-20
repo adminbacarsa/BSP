@@ -113,10 +113,18 @@ service cloud.firestore {
       return data.get('empresaId', '');
     }
 
+    // Bacarsa: docs sin empresaId o con empresaId=bacarsa (aunque migracionCompleta esté en true).
+    function bacarsaTenantDocMatches(data) {
+      return userEmpresaId() == 'bacarsa' && (
+        docEmpresaId(data) == '' || docEmpresaId(data) == 'bacarsa'
+      );
+    }
+
     function tenantMatches(data) {
       return isSuperAdmin() || systemUserHasAllEmpresas() || (
         userEmpresaId() != '' && (
           docEmpresaId(data) == userEmpresaId() ||
+          bacarsaTenantDocMatches(data) ||
           (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
         )
       );
@@ -129,21 +137,21 @@ service cloud.firestore {
     }
 
     function tenantAdminRead() {
-      return isAdmin() && (isSuperAdmin() || tenantMatches(resource.data));
+      return isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
     function tenantAdminCreate() {
-      return isAdmin() && (isSuperAdmin() || tenantMatches(request.resource.data));
+      return isSuperAdmin() || (isAdmin() && tenantMatches(request.resource.data));
     }
 
     function tenantAdminUpdate() {
-      return isAdmin() && (isSuperAdmin() || (
+      return isSuperAdmin() || (isAdmin() && (
         tenantMatches(resource.data) && tenantMatches(request.resource.data)
       ));
     }
 
     function tenantAdminDelete() {
-      return isAdmin() && (isSuperAdmin() || tenantMatches(resource.data));
+      return isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
     function feriadoReadable(data) {
@@ -159,7 +167,7 @@ service cloud.firestore {
     }
 
     match /turnos/{shiftId} {
-      allow read: if isAdmin() || request.auth != null;
+      allow read: if isSuperAdmin() || isAdmin() || request.auth != null;
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -200,6 +208,20 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    match /contracts/{contractId} {
+      allow read: if tenantAdminRead() || isAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
+    match /quotes/{quoteId} {
+      allow read: if tenantAdminRead() || isAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
     match /contratos_servicio/{contractId} {
       allow read: if tenantAdminRead();
       allow create: if tenantAdminCreate();
@@ -215,7 +237,7 @@ service cloud.firestore {
     }
 
     match /servicios_sla/{slaId} {
-      allow read: if tenantAdminRead() || request.auth != null;
+      allow read: if isSuperAdmin() || tenantAdminRead() || request.auth != null;
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
