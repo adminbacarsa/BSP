@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { resolveBackupCaller } from './backup-auth.util';
 import {
   runEmpresaMigrate,
@@ -67,7 +68,7 @@ export async function executeEmpresaMigrateJob(jobId: string): Promise<void> {
     tx.update(jobRef, {
       status: 'running',
       phase: 'Iniciando migración…',
-      startedAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt: FieldValue.serverTimestamp(),
     });
     return true;
   });
@@ -95,7 +96,7 @@ export async function executeEmpresaMigrateJob(jobId: string): Promise<void> {
         docsDeleted: result.docsDeleted,
         durationMs: result.durationMs,
         collections: result.collections,
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       return;
     }

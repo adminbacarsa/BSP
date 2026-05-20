@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.assertMigrateEmpresaRequestAllowed = assertMigrateEmpresaRequestAllowed;
 exports.executeEmpresaMigrateJob = executeEmpresaMigrateJob;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const backup_auth_util_1 = require("./backup-auth.util");
 const empresa_migrate_service_1 = require("./empresa-migrate.service");
 async function assertMigrateEmpresaRequestAllowed(authUid, tokenRoleRaw, payload) {
@@ -52,7 +53,7 @@ async function executeEmpresaMigrateJob(jobId) {
         tx.update(jobRef, {
             status: 'running',
             phase: 'Iniciando migración…',
-            startedAt: admin.firestore.FieldValue.serverTimestamp(),
+            startedAt: firestore_1.FieldValue.serverTimestamp(),
         });
         return true;
     });
@@ -78,7 +79,7 @@ async function executeEmpresaMigrateJob(jobId) {
                 docsDeleted: result.docsDeleted,
                 durationMs: result.durationMs,
                 collections: result.collections,
-                completedAt: admin.firestore.FieldValue.serverTimestamp(),
+                completedAt: firestore_1.FieldValue.serverTimestamp(),
             }, { merge: true });
             return;
         }

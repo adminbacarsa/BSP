@@ -11,6 +11,7 @@ import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
+import { stampEmpresaId } from '@/lib/multiempresa';
 
 type Shift = {
   id: string;
@@ -1091,7 +1092,7 @@ export default function EmployeeDashboard() {
         setAbsenceFileUrl(fileUrl);
         setAbsenceFileName(fileName);
       }
-      await addDoc(collection(db, 'ausencias'), {
+      await addDoc(collection(db, 'ausencias'), stampEmpresaId({
         employeeId: user.uid,
         employeeName: displayName || user.email || 'Empleado',
         type: absenceType,
@@ -1113,7 +1114,7 @@ export default function EmployeeDashboard() {
         objectiveName: linkedObjectiveName,
         positionName: linkedPositionName,
         clientId: linkedClientId,
-      });
+      }, String(empProfile?.empresaId || 'bacarsa').trim()));
       const toastMsg = absenceCase === 'CORTO_PLAZO'
         ? 'Aviso urgente enviado — Operaciones fue notificado'
         : absenceCase === 'ANTICIPADA'

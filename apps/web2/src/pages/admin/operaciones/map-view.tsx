@@ -8,6 +8,8 @@ import { Toaster, toast } from 'sonner';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, onSnapshot, query, where, orderBy, limit, Timestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { stampEmpresaId, updateDocForEmpresa } from '@/lib/multiempresa';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -64,11 +66,22 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
 };
 
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !shift) return null;
     const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
     const isAlone = colleagues.length === 0;
-    const handleLog = async () => { await addDoc(collection(db, 'novedades'), { type: 'BAJA_CUBIERTA', shiftId: shift.id, details: 'Retiro anticipado. Puesto cubierto por dotación.' }); await updateDoc(doc(db, 'turnos', shift.id), { checkOutTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }); toast.success("Baja registrada. Puesto cubierto."); onClose(); };
-    const handleProtocol = async () => { await updateDoc(doc(db, 'turnos', shift.id), { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }); const newRef = await addDoc(collection(db, 'turnos'), { ...shift, id: undefined, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false }); const newShift = { ...shift, id: newRef.id, isUnassigned: true }; onVacancyCreated(newShift); };
+    const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+    const handleLog = async () => {
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', shiftId: shift.id, details: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
+        await updateDocForEmpresa('turnos', shift.id, { checkOutTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
+        toast.success("Baja registrada. Puesto cubierto."); onClose();
+    };
+    const handleProtocol = async () => {
+        await updateDocForEmpresa('turnos', shift.id, { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }, empresaId, migracionCompleta);
+        const newRef = await addDoc(collection(db, 'turnos'), stampEmpresaId({ clientId: shift.clientId, clientName: shift.clientName, objectiveId: shift.objectiveId, objectiveName: shift.objectiveName, positionName: shift.positionName, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false, origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
+        onVacancyCreated({ ...shift, id: newRef.id, isUnassigned: true });
+    };
     return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
 };
 
@@ -111,6 +124,8 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
 };
 
 const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const tenantId = (s?: any) => String(s?.empresaId || absenceShift?.empresaId || empresaId || '').trim();
     const [loading, setLoading] = useState<string | null>(null);
     const [localWa, setLocalWa] = useState<{ isOpen: boolean; ctx: any }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     if (!isOpen || !absenceShift) return null;
@@ -179,7 +194,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETENTION');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -194,7 +209,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'EARLY_START');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`Turno de ${s.employeeName} adelantado`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -212,11 +227,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
-            batch.set(newRef, { employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() });
+            batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), { userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETEN');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             toast.success(`${empName} convocado como retén`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -231,7 +246,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'FRANCO');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -282,6 +297,8 @@ const WorkedDayOffModal = (props: any) => <WorkedDayOffModalPro {...props} />;
 const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 
 export default function TacticalMapView() {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const logic = useOperacionesMonitor();
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
@@ -318,7 +335,7 @@ export default function TacticalMapView() {
                 if (vacShift) {
                     if (vacShift.isVirtual || !novedad.shiftId) {
                         const newRef = doc(collection(db, 'turnos'));
-                        await setDoc(newRef, { clientId: vacShift.clientId, clientName: vacShift.clientName, objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName, positionName: vacShift.positionName, employeeId: 'VACANTE', employeeName: 'VACANTE', startTime: Timestamp.fromDate(vacShift.shiftDateObj), endTime: Timestamp.fromDate(vacShift.endDateObj), status: 'UNCOVERED_REPORTED', isReported: true, origin: 'SLA_VIRTUAL', createdAt: serverTimestamp() });
+                        await setDoc(newRef, stampEmpresaId({ clientId: vacShift.clientId, clientName: vacShift.clientName, objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName, positionName: vacShift.positionName, employeeId: 'VACANTE', employeeName: 'VACANTE', startTime: Timestamp.fromDate(vacShift.shiftDateObj), endTime: Timestamp.fromDate(vacShift.endDateObj), status: 'UNCOVERED_REPORTED', isReported: true, origin: 'SLA_VIRTUAL', createdAt: serverTimestamp() }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else { setCoverageData({ isOpen: true, shift: vacShift }); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
@@ -341,7 +358,13 @@ export default function TacticalMapView() {
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [showHelp, setShowHelp] = useState(false);
 
-    const handleMarkAbsent = async (shift: any) => { try { await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true }); setAttendanceData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: shift}); } catch (e) { toast.error("Error al marcar ausencia"); } };
+    const handleMarkAbsent = async (shift: any) => {
+        try {
+            await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true }, empresaId, migracionCompleta);
+            setAttendanceData({isOpen:false, shift:null});
+            setCoverageData({isOpen:true, shift: shift});
+        } catch (e) { toast.error("Error al marcar ausencia"); }
+    };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
     const handleReportPlanning = async (shift: any) => { toast.info("Reportando..."); };
 

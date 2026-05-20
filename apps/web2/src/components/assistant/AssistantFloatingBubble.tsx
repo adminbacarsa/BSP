@@ -180,7 +180,7 @@ const deployCtx: ClientDeployContext = getClientDeployContext();
 
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
-  const { user, loading, canReadModule } = useAuth();
+  const { user, loading, canReadModule, isSuperAdmin } = useAuth();
   const { empresaId: empresaCtxId, empresa } = useEmpresa();
   const brandColor = empresa?.primaryColor || '#6366f1';
   const [open, setOpen] = useState(false);
@@ -321,7 +321,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
   if (loading || !user || hideGloboRoute(pathname || '') || !portalRoot) return null;
   const pathBase = (pathname || '').split('?')[0];
   const isEmployeePortal = pathBase.startsWith('/empleado');
-  if (!isEmployeePortal && !canReadModule('ASSISTANT')) return null;
+  if (!isEmployeePortal && !isSuperAdmin && !canReadModule('ASSISTANT')) return null;
   if (empresa !== null && empresa.assistantEnabled === false) {
     return null;
   }

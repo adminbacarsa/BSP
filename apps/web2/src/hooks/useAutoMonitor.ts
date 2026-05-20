@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
+import { stampEmpresaId } from '@/lib/multiempresa';
 
 export interface AutoMonitorProps {
   isActive: boolean;
@@ -19,7 +20,7 @@ const sendBrowserNotif = (title: string, body: string) => {
 };
 
 const createNovedad = (type: string, title: string, description: string, shiftData: any, empresaId: string) =>
-  addDoc(collection(db, 'novedades'), {
+  addDoc(collection(db, 'novedades'), stampEmpresaId({
     type,
     status: 'pending',
     title,
@@ -27,10 +28,9 @@ const createNovedad = (type: string, title: string, description: string, shiftDa
     shiftId: shiftData.id || null,
     clientId: shiftData.clientId || null,
     objectiveId: shiftData.objectiveId || null,
-    empresaId: shiftData.empresaId || empresaId,
     createdAt: serverTimestamp(),
     reportedBy: 'SISTEMA_AUTO',
-  }).catch(() => {});
+  }, String(shiftData.empresaId || empresaId || '').trim())).catch(() => {});
 
 export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperatorId, processedData }: AutoMonitorProps) => {
   const mountTime = useRef(Date.now());

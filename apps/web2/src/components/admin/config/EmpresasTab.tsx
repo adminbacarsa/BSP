@@ -5,8 +5,19 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 import { db, functions, auth } from '@/lib/firebase';
+import { FirebaseError } from 'firebase/app';
 import { doc as fsDoc, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+
+function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
+  const code = err instanceof FirebaseError ? err.code : '';
+  if (code === 'permission-denied') {
+    return isSuperAdmin
+      ? 'Permiso denegado en Firestore. Cerrá sesión y volvé a entrar, o ejecutá sync de claims (Config → Usuarios).'
+      : 'Solo SuperAdmin puede crear o modificar empresas. Pedí acceso a un SuperAdmin.';
+  }
+  return err instanceof Error ? err.message : 'Error al guardar';
+}
 
 export default function EmpresasTab() {
   const { isSuperAdmin } = useAuth();
@@ -40,8 +51,8 @@ export default function EmpresasTab() {
         direccion: editForm.direccion.trim(),
       });
       toast.success('Empresa actualizada');
-    } catch {
-      toast.error('Error al guardar');
+    } catch (err) {
+      toast.error(empresaWriteErrorMessage(err, isSuperAdmin));
     } finally {
       setGuardandoEdit(false);
     }
@@ -144,15 +155,30 @@ export default function EmpresasTab() {
   const [copyProgress, setCopyProgress] = useState<{ phase: string; docsCopied: number; docsDeleted: number } | null>(null);
 
   const sourceOptions = empresas.filter((e) => e.id !== empresaId && e.active !== false);
+  const copySourceEmpresa = empresas.find((e) => e.id === copySourceId);
 
+  // Mantener origen válido al cambiar empresa destino (evita origen === destino tras switch en topbar)
   React.useEffect(() => {
-    if (!copySourceId && sourceOptions.length > 0) {
-      setCopySourceId(sourceOptions[0].id);
+    if (sourceOptions.length === 0) {
+      if (copySourceId) setCopySourceId('');
+      return;
     }
-  }, [empresaId, empresas, sourceOptions.length, copySourceId]);
+    const origenValido =
+      copySourceId &&
+      copySourceId !== empresaId &&
+      sourceOptions.some((e) => e.id === copySourceId);
+    if (!origenValido) {
+      const preferBacarsa = sourceOptions.find((e) => e.id.toLowerCase() === 'bacarsa');
+      setCopySourceId(preferBacarsa?.id ?? sourceOptions[0].id);
+    }
+  }, [empresaId, sourceOptions, copySourceId]);
 
   const handleCopyEmpresaData = async () => {
     if (!empresaId || !copySourceId) return;
+    if (copySourceId.toLowerCase() === empresaId.toLowerCase()) {
+      toast.error('Elegí una empresa origen distinta al destino.');
+      return;
+    }
     if (copyConfirmInput.trim() !== empresaId) {
       toast.error(`Escribí el ID destino: ${empresaId}`);
       return;
@@ -205,8 +231,8 @@ export default function EmpresasTab() {
       toast.success(`Empresa "${form.name}" creada (ID: ${id})`);
       setForm({ name: '', cuit: '', direccion: '', plan: 'standard' });
       setShowNueva(false);
-    } catch {
-      toast.error('Error al crear empresa');
+    } catch (err) {
+      toast.error(empresaWriteErrorMessage(err, isSuperAdmin));
     } finally {
       setGuardando(false);
     }
@@ -360,7 +386,11 @@ export default function EmpresasTab() {
             <Building2 size={18} className="text-indigo-600" />
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Datos de empresa</h3>
           </div>
-          <p className="text-xs text-slate-500 font-medium mb-5">Editá el nombre y los datos de la empresa activa.</p>
+          <p className="text-xs text-slate-500 font-medium mb-5">
+            {isSuperAdmin
+              ? 'Editá el nombre y los datos de la empresa activa.'
+              : 'Solo lectura: los cambios de empresa las hace un SuperAdmin.'}
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div className="md:col-span-2">
               <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Nombre *</label>
@@ -391,13 +421,15 @@ export default function EmpresasTab() {
             </div>
           </div>
           <div className="flex justify-end">
-            <button
-              onClick={handleGuardarActual}
-              disabled={guardandoEdit}
-              className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
-            >
-              {guardandoEdit ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar cambios
-            </button>
+            {isSuperAdmin && (
+              <button
+                onClick={handleGuardarActual}
+                disabled={guardandoEdit}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+              >
+                {guardandoEdit ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar cambios
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -434,15 +466,17 @@ export default function EmpresasTab() {
                 />
               ))}
             </div>
-            <button
-              onClick={handleGuardarColor}
-              disabled={guardandoColor}
-              className="ml-auto flex items-center gap-1.5 px-4 py-2 text-white rounded-xl text-xs font-black disabled:opacity-60 transition-colors"
-              style={{ backgroundColor: colorForm }}
-            >
-              {guardandoColor ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Guardar
-            </button>
+            {isSuperAdmin && (
+              <button
+                onClick={handleGuardarColor}
+                disabled={guardandoColor}
+                className="ml-auto flex items-center gap-1.5 px-4 py-2 text-white rounded-xl text-xs font-black disabled:opacity-60 transition-colors"
+                style={{ backgroundColor: colorForm }}
+              >
+                {guardandoColor ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Guardar
+              </button>
+            )}
           </div>
 
           {/* Preview */}
@@ -484,10 +518,10 @@ export default function EmpresasTab() {
             </div>
             <button
               onClick={handleToggleAsistente}
-              disabled={guardandoAsistente}
+              disabled={guardandoAsistente || !isSuperAdmin}
               className={`relative inline-flex h-7 w-13 items-center rounded-full transition-colors focus:outline-none disabled:opacity-60 ${asistentActivo ? 'bg-indigo-600' : 'bg-slate-300'}`}
               style={{ width: '3.25rem' }}
-              title={asistentActivo ? 'Desactivar asistente' : 'Activar asistente'}
+              title={!isSuperAdmin ? 'Solo SuperAdmin' : asistentActivo ? 'Desactivar asistente' : 'Activar asistente'}
             >
               {guardandoAsistente
                 ? <Loader2 size={12} className="absolute left-1/2 -translate-x-1/2 animate-spin text-white" />
@@ -623,7 +657,7 @@ export default function EmpresasTab() {
               <div>
                 <p className="text-sm font-black text-slate-800">Copiar datos entre empresas</p>
                 <p className="text-xs text-slate-500">
-                  {empresas.find((e) => e.id === copySourceId)?.name || copySourceId} → {empresa?.name || empresaId}
+                  {copySourceEmpresa?.name || copySourceId} → {empresa?.name || empresaId}
                 </p>
               </div>
               <button type="button" onClick={() => !copyRunning && setCopyModalOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">
@@ -632,7 +666,7 @@ export default function EmpresasTab() {
             </div>
             <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-xs text-violet-900 font-medium space-y-2">
               <p>Se <strong>borrarán todos los datos</strong> actuales de «{empresa?.name || empresaId}» y se copiarán desde origen con IDs nuevos.</p>
-              <p>Bacarsa / origen <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
+              <p>«{copySourceEmpresa?.name || copySourceId}» (origen) <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
             </div>
             <div>
               <p className="text-xs text-slate-600 mb-2">
@@ -651,7 +685,7 @@ export default function EmpresasTab() {
               <button
                 type="button"
                 onClick={handleCopyEmpresaData}
-                disabled={copyRunning || copyConfirmInput.trim() !== empresaId}
+                disabled={copyRunning || copyConfirmInput.trim() !== empresaId || copySourceId === empresaId}
                 className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-black hover:bg-violet-700 disabled:opacity-40"
               >
                 {copyRunning ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}

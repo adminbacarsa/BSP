@@ -58,6 +58,39 @@ export class SchedulingService {
       });
   }
 
+  private async resolveEmpresaIdForShift(
+    shiftData: Partial<IShift> & { clientId?: string; empresaId?: string },
+    template?: Partial<IShift>,
+  ): Promise<string | undefined> {
+    const direct = String(shiftData.empresaId ?? template?.empresaId ?? '').trim();
+    if (direct) return direct;
+    const db = this.getDb();
+    const employeeId = shiftData.employeeId || template?.employeeId;
+    if (employeeId && employeeId !== 'VACANTE') {
+      const emp = await db.collection('empleados').doc(employeeId).get();
+      const empId = String(emp.data()?.empresaId ?? '').trim();
+      if (empId) return empId;
+    }
+    const clientId = String(shiftData.clientId ?? (template as any)?.clientId ?? '').trim();
+    if (clientId) {
+      const client = await db.collection('clients').doc(clientId).get();
+      const cid = String(client.data()?.empresaId ?? '').trim();
+      if (cid) return cid;
+    }
+    if (shiftData.objectiveId || template?.objectiveId) {
+      const objectiveId = shiftData.objectiveId || template?.objectiveId;
+      const clientsSnap = await db.collection('clients').limit(200).get();
+      for (const doc of clientsSnap.docs) {
+        const objs = doc.data()?.objetivos as Array<{ id?: string }> | undefined;
+        if (objs?.some(o => o.id === objectiveId)) {
+          const cid = String(doc.data()?.empresaId ?? '').trim();
+          if (cid) return cid;
+        }
+      }
+    }
+    return undefined;
+  }
+
   // --- CREAR TURNO INDIVIDUAL ---
   async assignShift(shiftData: Partial<IShift> & { authorizeOvertime?: boolean }, userAuth: admin.auth.DecodedIdToken): Promise<IShift> {
     const dbInstance = this.getDb();
@@ -101,6 +134,7 @@ export class SchedulingService {
     }
 
     // 3. TRANSACCIÓN FINAL
+    const resolvedEmpresaId = await this.resolveEmpresaIdForShift(shiftData);
     try {
       await dbInstance.runTransaction(async (transaction) => {
         if (employeeId !== 'VACANTE') {
@@ -133,8 +167,9 @@ export class SchedulingService {
           schedulerId: userAuth.uid,
           updatedAt: admin.firestore.Timestamp.now(),
           role: (shiftData as any).role || 'Vigilador',
-          isOvertime 
-        };
+          isOvertime,
+          ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
+        } as IShift;
 
         transaction.set(newShiftRef, finalShift);
       });
@@ -258,6 +293,10 @@ export class SchedulingService {
 
         existingShifts.forEach(doc => { batch.delete(doc.ref); opCount++; });
 
+        const templateEmpresaId = sourceShifts.length
+          ? await this.resolveEmpresaIdForShift({}, sourceShifts[0])
+          : undefined;
+
         for (const template of sourceShifts) {
             const tStart = this.convertToDate(template.startTime);
             const tEnd = this.convertToDate(template.endTime);
@@ -280,8 +319,9 @@ export class SchedulingService {
                 endTime: admin.firestore.Timestamp.fromDate(newEnd),
                 status: 'Assigned',
                 schedulerId: schedulerId,
-                updatedAt: admin.firestore.Timestamp.now()
-            };
+                updatedAt: admin.firestore.Timestamp.now(),
+                ...(templateEmpresaId ? { empresaId: templateEmpresaId } : {}),
+            } as IShift;
             
             batch.set(newShiftRef, newShift);
             opCount++;

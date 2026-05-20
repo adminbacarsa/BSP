@@ -5,6 +5,7 @@ export interface ResolvedAssistantUser {
     empresaId: string;
     readableModuleKeys: string[];
     canUseAssistant: boolean;
+    isSuperAdmin: boolean;
     summaryLabel: string;
 }
 export declare function resolveAssistantUser(uid: string): Promise<ResolvedAssistantUser | null>;

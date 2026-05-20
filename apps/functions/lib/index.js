@@ -4,6 +4,7 @@ exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processE
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const backup_service_1 = require("./backup/backup.service");
 const assistantEmpresaScope_1 = require("./assistant/assistantEmpresaScope");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
@@ -37,18 +38,25 @@ async function getService(service) {
 const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manager', 'Manager', 'Operator', 'Supervisor'];
 const ALLOWED_ROLES = ['admin', 'employee'];
 exports.createUser = functions.https.onCall(async (data, context) => {
-    const callerAuth = context.auth;
-    if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
-        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado. Rol insuficiente.');
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado. Solo administradores pueden crear usuarios.');
     }
     try {
         const authService = await getService(auth_service_1.AuthService);
-        const { email, password, name, role: receivedRole, clientId, dni, fileNumber, address } = data;
+        const { email, password, name, role: receivedRole, clientId, dni, fileNumber, address, empresaId: rawEmpresaId } = data;
+        const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
+        if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
+            throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+        }
         if (!ALLOWED_ROLES.includes(receivedRole)) {
             throw new functions.https.HttpsError('invalid-argument', 'Rol inválido.');
         }
         const validRole = receivedRole;
-        const newEmployee = await authService.createEmployeeProfile(email, password, validRole, name, { clientId: clientId || '', dni, fileNumber, address });
+        const newEmployee = await authService.createEmployeeProfile(email, password, validRole, name, { clientId: clientId || '', dni, fileNumber, address, empresaId: targetEmpresaId });
         return { success: true, uid: newEmployee.uid };
     }
     catch (error) {
@@ -455,7 +463,7 @@ exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
-const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'Manager', 'Scheduler'];
+const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 async function optimizePlanningGeminiHandler(data, context) {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
@@ -463,6 +471,15 @@ async function optimizePlanningGeminiHandler(data, context) {
     const role = context.auth.token.role || '';
     if (!ALLOWED_PLANNING_AI_ROLES.includes(role)) {
         throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
+    }
+    const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
+    const profile = await resolveAssistantUser(context.auth.uid);
+    if (!profile) {
+        throw new functions.https.HttpsError('permission-denied', 'Usuario no reconocido.');
+    }
+    const claimedEmp = String(data?.empresaId ?? data?.context?.empresaId ?? '').trim();
+    if (!empresaAllowed(claimedEmp || undefined, profile)) {
+        throw new functions.https.HttpsError('permission-denied', 'Empresa no permitida para este usuario.');
     }
     const ctx = data?.context;
     if (!ctx || typeof ctx !== 'object') {
@@ -482,9 +499,17 @@ exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
     ? functions.https.onCall(optimizePlanningGeminiHandler)
     : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(optimizePlanningGeminiHandler);
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
-    if (!context.auth)
+    if (!context.auth?.uid)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
-    const { email, password, firstName, lastName, role, empresaId } = data;
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
+    }
+    const { email, password, firstName, lastName, role, empresaId: rawEmpresaId } = data;
+    const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
+    if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
+        throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+    }
     const roleNorm = (0, backup_auth_util_1.normalizeBackupRole)(role);
     try {
         const userRecord = await admin.auth().createUser({
@@ -499,7 +524,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
             lastName,
             email,
             role: roleNorm,
-            empresaId: empresaId ?? 'bacarsa',
+            empresaId: targetEmpresaId,
             status: 'ACTIVE',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -1042,7 +1067,7 @@ exports.autoCompletarTurnos = functions
             .where('startTime', '>=', windowStart)
             .where('startTime', '<=', windowEnd)
             .get();
-        const relieveDocs = relieveSnap.docs.filter(d => d.id !== docSnap.id);
+        const relieveDocs = relieveSnap.docs.filter(d => d.id !== docSnap.id && sameTenantShift(shift, d.data()));
         const relievePresent = relieveDocs.find(d => {
             const s = d.data().status || '';
             return s === 'PRESENT' || s === 'COMPLETED';
@@ -1092,6 +1117,7 @@ exports.autoCompletarTurnos = functions
                     objectiveId: shift.objectiveId,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     employeeName: shift.employeeName || '',
                     reliefEmployeeName: relievePending.data().employeeName || '',
                     positionName: shift.positionName || '',
@@ -1131,6 +1157,18 @@ exports.autoCompletarTurnos = functions
 });
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
 const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
+function shiftEmpresaId(shift) {
+    return String(shift.empresaId ?? '').trim();
+}
+function sameTenantShift(a, b) {
+    const ae = shiftEmpresaId(a);
+    const be = shiftEmpresaId(b);
+    if (ae && be)
+        return ae === be;
+    if (ae && !be)
+        return false;
+    return true;
+}
 async function getEmployeeTokens(db, employeeId) {
     if (!employeeId || employeeId === 'VACANTE')
         return [];
@@ -1235,6 +1273,7 @@ exports.detectarAusencias = functions
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
                     status: 'APPROVED',
                     createdAt: now,
@@ -1255,6 +1294,7 @@ exports.detectarAusencias = functions
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
                     description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
                     createdAt: now,
@@ -1322,6 +1362,7 @@ exports.gestionarVacantes = functions
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
                     description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
                     minutesUntilStart: Math.round(minutesUntil),
@@ -1358,6 +1399,7 @@ exports.gestionarVacantes = functions
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
                     description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
                     minutesUntilStart: Math.round(minutesUntil),
@@ -1394,6 +1436,7 @@ exports.gestionarVacantes = functions
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
                     description: `Vacante devuelta a Planificación: ${shift.objectiveName || ''} (${shift.positionName || ''}) inicia en ${Math.round(minutesUntil)} min. Asignar empleado urgente.`,
                     minutesUntilStart: Math.round(minutesUntil),
@@ -1542,7 +1585,7 @@ exports.migrateEmpresaData = functions
             resumeColIndex: 0,
             idMaps: null,
             error: null,
-            queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+            queuedAt: firestore_1.FieldValue.serverTimestamp(),
         });
         return { jobId, queued: true };
     }

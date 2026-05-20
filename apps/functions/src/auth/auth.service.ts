@@ -17,7 +17,7 @@ export class AuthService {
     role: IEmployee['role'],
     name: string,
     // 👇 Nuevo argumento: Datos extendidos del perfil
-    profileData: { clientId: string, dni: string, fileNumber: string, address: string }
+    profileData: { clientId: string, dni: string, fileNumber: string, address: string, empresaId?: string }
   ): Promise<IEmployee> {
     
     const authInstance = this.getAuth();
@@ -60,7 +60,8 @@ export class AuthService {
       clientId: profileData.clientId,
       dni: profileData.dni,
       fileNumber: profileData.fileNumber,
-      address: profileData.address
+      address: profileData.address,
+      ...(profileData.empresaId ? { empresaId: profileData.empresaId } : {}),
     };
 
     const dbInstance = this.getDb();

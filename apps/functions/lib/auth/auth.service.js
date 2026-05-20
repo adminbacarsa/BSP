@@ -49,7 +49,8 @@ let AuthService = class AuthService {
             clientId: profileData.clientId,
             dni: profileData.dni,
             fileNumber: profileData.fileNumber,
-            address: profileData.address
+            address: profileData.address,
+            ...(profileData.empresaId ? { empresaId: profileData.empresaId } : {}),
         };
         const dbInstance = this.getDb();
         try {

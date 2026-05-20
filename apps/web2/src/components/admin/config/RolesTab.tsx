@@ -3,29 +3,45 @@ import { Plus, Edit3, Trash2, Save, Shield, Check, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { SYSTEM_MODULES, PERMISSION_ACTIONS } from '@/config/modules';
+import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 
-interface IRole { id: string; name: string; permissions: Record<string, string[]>; }
+interface IRole { id: string; name: string; permissions: Record<string, string[]>; empresaId?: string; }
 
 export default function RolesTab() {
+    const { isSuperAdmin } = useAuth();
+    const { empresaId } = useEmpresa();
     const [roles, setRoles] = useState<IRole[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [roleName, setRoleName] = useState('');
     const [editId, setEditId] = useState<string | null>(null);
     const [matrix, setMatrix] = useState<Record<string, string[]>>({});
+    const [roleEmpresaId, setRoleEmpresaId] = useState('');
 
-    useEffect(() => { loadRoles(); }, []);
+    useEffect(() => { loadRoles(); }, [empresaId, isSuperAdmin]);
 
     const loadRoles = async () => {
         const snap = await getDocs(collection(db, 'roles'));
-        setRoles(snap.docs.map(d => ({ id: d.id, ...d.data() })) as IRole[]);
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() })) as IRole[];
+        const filtered = isSuperAdmin
+          ? all
+          : all.filter(r => !r.empresaId || String(r.empresaId).trim() === String(empresaId).trim());
+        setRoles(filtered);
     };
 
+    const canEditRole = (role: IRole) => isSuperAdmin || (!!role.empresaId && role.empresaId === empresaId);
+
     const handleOpenCreate = () => {
-        setEditId(null); setRoleName(''); setMatrix({}); setIsModalOpen(true);
+        setEditId(null); setRoleName(''); setMatrix({});
+        setRoleEmpresaId(isSuperAdmin ? '' : empresaId);
+        setIsModalOpen(true);
     };
 
     const handleOpenEdit = (role: IRole) => {
-        setEditId(role.id); setRoleName(role.name); setMatrix(role.permissions || {}); setIsModalOpen(true);
+        if (!canEditRole(role)) return alert('Rol global: solo lectura');
+        setEditId(role.id); setRoleName(role.name); setMatrix(role.permissions || {});
+        setRoleEmpresaId(role.empresaId || '');
+        setIsModalOpen(true);
     };
 
     const togglePermission = (moduleKey: string, actionKey: string) => {
@@ -46,7 +62,10 @@ export default function RolesTab() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!roleName.trim()) return alert("Nombre requerido");
-        const roleData = { name: roleName, permissions: matrix };
+        const roleData: Record<string, unknown> = { name: roleName, permissions: matrix };
+        const emp = String(roleEmpresaId || '').trim();
+        if (emp) roleData.empresaId = emp;
+        else if (!isSuperAdmin) roleData.empresaId = empresaId;
         try {
             if (editId) await updateDoc(doc(db, 'roles', editId), roleData);
             else await setDoc(doc(db, 'roles', roleName.toUpperCase().replace(/\s+/g, '_')), roleData);
@@ -55,6 +74,8 @@ export default function RolesTab() {
     };
 
     const handleDelete = async (id: string) => {
+        const role = roles.find(r => r.id === id);
+        if (role && !canEditRole(role)) return alert('No podés borrar roles globales');
         if (confirm("¿Borrar rol?")) { await deleteDoc(doc(db, 'roles', id)); loadRoles(); }
     };
 
@@ -71,11 +92,15 @@ export default function RolesTab() {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h3 className="font-black text-xl text-slate-800 dark:text-white uppercase">{role.name}</h3>
+                                {role.empresaId && <p className="text-[10px] text-indigo-500 font-bold mt-1">Tenant: {role.empresaId}</p>}
+                                {!role.empresaId && <p className="text-[10px] text-slate-400 font-bold mt-1">Global</p>}
                             </div>
+                            {canEditRole(role) && (
                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 right-4 bg-white dark:bg-slate-800 p-1 rounded-lg shadow-sm border dark:border-slate-600">
                                 <button onClick={()=>handleOpenEdit(role)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-indigo-500"><Edit3 size={16}/></button>
                                 <button onClick={()=>handleDelete(role.id)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-rose-500"><Trash2 size={16}/></button>
                             </div>
+                            )}
                         </div>
                         <div className="space-y-2">
                             {Object.entries(role.permissions || {}).map(([modKey, actions]) => {
@@ -107,6 +132,12 @@ export default function RolesTab() {
                                     value={roleName}
                                     onChange={e => setRoleName(e.target.value)}
                                 />
+                                {isSuperAdmin && (
+                                  <div className="mt-4">
+                                    <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa (vacío = global)</label>
+                                    <input type="text" value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} placeholder="bacarsa, prueba_sa…" className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm" />
+                                  </div>
+                                )}
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-400"><X/></button>
                         </div>
@@ -119,19 +150,16 @@ export default function RolesTab() {
                                         {PERMISSION_ACTIONS.map(act => <th key={act.key} className="p-4 text-center font-black text-slate-500 uppercase text-xs w-24">{act.label}</th>)}
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y dark:divide-slate-700">
+                                <tbody>
                                     {SYSTEM_MODULES.map(mod => (
-                                        <tr key={mod.key} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                                            <td className="p-4 font-bold dark:text-white">{mod.label}</td>
+                                        <tr key={mod.key} className="border-t dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                                            <td className="p-4 font-bold text-slate-700 dark:text-slate-300">{mod.label}</td>
                                             {PERMISSION_ACTIONS.map(act => {
-                                                const isActive = matrix[mod.key]?.includes(act.key);
+                                                const active = (matrix[mod.key] || []).includes(act.key);
                                                 return (
                                                     <td key={act.key} className="p-4 text-center">
-                                                        <button
-                                                            onClick={() => togglePermission(mod.key, act.key)}
-                                                            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border-2 mx-auto ${isActive ? 'bg-indigo-600 border-indigo-600 text-white shadow-md scale-110' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-300 hover:border-indigo-300'}`}
-                                                        >
-                                                            {isActive && <Check size={16} strokeWidth={4}/>}
+                                                        <button type="button" onClick={() => togglePermission(mod.key, act.key)} className={`w-8 h-8 rounded-lg flex items-center justify-center mx-auto transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-300'}`}>
+                                                            {active && <Check size={16}/>}
                                                         </button>
                                                     </td>
                                                 );
@@ -141,11 +169,10 @@ export default function RolesTab() {
                                 </tbody>
                             </table>
                         </div>
-                        <div className="mt-6 flex justify-end gap-3 pt-4 border-t dark:border-slate-700">
-                            <button onClick={() => setIsModalOpen(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl">Cancelar</button>
-                            <button onClick={handleSave} className="px-8 py-3 bg-indigo-600 text-white font-black rounded-xl hover:bg-indigo-700 shadow-xl flex items-center gap-2 uppercase text-xs">
-                                <Save size={18}/> Guardar Rol
-                            </button>
+
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button onClick={() => setIsModalOpen(false)} className="px-6 py-3 font-bold text-slate-500">Cancelar</button>
+                            <button onClick={handleSave} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black flex items-center gap-2 hover:bg-indigo-700 shadow-lg"><Save size={18}/> GUARDAR ROL</button>
                         </div>
                     </div>
                 </div>

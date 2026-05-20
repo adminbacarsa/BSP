@@ -3,7 +3,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { belongsToEmpresa, belongsToEmpresaView, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 // --- CONSTANTES Y HELPERS ---
 // Non-work codes: días libres / licencias. Cualquier otro código se considera operativo.
@@ -197,7 +197,12 @@ export const useReportes = (forcedClientId?: string | null) => {
                 setClientMap(clis);
 
                 const holidays: any = {};
-                h.docs.forEach(d => { if(d.data().date) holidays[d.data().date] = true; });
+                h.docs.forEach(d => {
+                    const data = d.data();
+                    const emp = String(data.empresaId ?? '').trim();
+                    if (emp && emp !== empresaId) return;
+                    if (data.date) holidays[data.date] = true;
+                });
                 setHolidaysData(holidays);
 
             } catch (e) { console.error("Error cargando catálogos:", e); }
@@ -238,20 +243,26 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             // Consulta SIN indices complejos (filtrado en memoria si es necesario, o básico por fecha)
-            const q = query(
-                collection(db, 'turnos'),
-                where('startTime', '>=', Timestamp.fromDate(startDate)),
-                where('startTime', '<=', Timestamp.fromDate(endDate))
-            );
+            const q = scopeEmpresa
+                ? query(
+                    collection(db, 'turnos'),
+                    where('empresaId', '==', empresaId),
+                    where('startTime', '>=', Timestamp.fromDate(startDate)),
+                    where('startTime', '<=', Timestamp.fromDate(endDate)),
+                  )
+                : query(
+                    collection(db, 'turnos'),
+                    where('startTime', '>=', Timestamp.fromDate(startDate)),
+                    where('startTime', '<=', Timestamp.fromDate(endDate)),
+                  );
 
             const shiftsSnap = await getDocs(q);
             
-            // FILTRADO DEFENSIVO: Eliminar basura antes de procesar
             const rawShifts = shiftsSnap.docs
                 .map(doc => ({ id: doc.id, ...doc.data() }))
                 .filter((d: any) => {
                     if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
-                    if (scopeEmpresa && d.empresaId && d.empresaId !== empresaId) return false;
+                    if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
                     return true;
                 });

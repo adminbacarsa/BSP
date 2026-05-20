@@ -85,6 +85,7 @@ interface ObjetivoInfo {
   address?: string;
   clientName?: string;
   clientId?: string;
+  empresaId?: string;
 }
 
 interface ClienteConObjetivos {
@@ -964,7 +965,11 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
     // 2. Colección empleados (persona conocida pero no autorizada para este objetivo)
     setBuscando(true); resetBusqueda();
     try {
-      const snap = await getDocs(collection(db, 'empleados'));
+      const tenantEmpresaId = String(objetivo.empresaId ?? '').trim();
+      const empCol = tenantEmpresaId
+        ? query(collection(db, 'empleados'), where('empresaId', '==', tenantEmpresaId))
+        : collection(db, 'empleados');
+      const snap = await getDocs(empCol);
       const q = txt.toLowerCase(); let found: PersonaEncontrada | null = null;
       for (const d of snap.docs) {
         const data = d.data();
@@ -997,7 +1002,11 @@ function AccesoRapidoPanel({ onSave, onClose, objectiveId, turno, objetivo, entr
     if (enLista) { setEncontrado(enLista); setSinResultados(false); return; }
     setBuscando(true); resetBusqueda();
     try {
-      const snap = await getDocs(collection(db, 'empleados'));
+      const tenantEmpresaId = String(objetivo.empresaId ?? '').trim();
+      const empCol = tenantEmpresaId
+        ? query(collection(db, 'empleados'), where('empresaId', '==', tenantEmpresaId))
+        : collection(db, 'empleados');
+      const snap = await getDocs(empCol);
       let found: PersonaEncontrada | null = null;
       for (const d of snap.docs) {
         const emp = d.data();
@@ -1671,7 +1680,14 @@ export default function ObjetivoPortal() {
     const lista: ClienteConObjetivos[] = [];
     for (const d of snap.docs) {
       const data = d.data();
-      const obs: ObjetivoInfo[] = (data.objetivos || []).map((o: any) => ({ id: o.id, name: o.name || o.nombre || '', address: o.address || o.direccion || '', clientName: data.name || data.nombre || '', clientId: d.id })).filter((o: ObjetivoInfo) => o.id && o.name);
+      const obs: ObjetivoInfo[] = (data.objetivos || []).map((o: any) => ({
+        id: o.id,
+        name: o.name || o.nombre || '',
+        address: o.address || o.direccion || '',
+        clientName: data.name || data.nombre || '',
+        clientId: d.id,
+        empresaId: data.empresaId || undefined,
+      })).filter((o: ObjetivoInfo) => o.id && o.name);
       if (obs.length > 0) lista.push({ id: d.id, name: data.name || data.nombre || d.id, objetivos: obs });
     }
     lista.sort((a, b) => a.name.localeCompare(b.name)); setClientes(lista);
@@ -1694,10 +1710,10 @@ export default function ObjetivoPortal() {
       for (const clientDoc of snap.docs) {
         const data = clientDoc.data();
         const found = (data.objetivos || []).find((o: any) => o.id === t.objectiveId);
-        if (found) { setObjetivo({ id: t.objectiveId!, name: found.name || t.objectiveName || 'Objetivo', address: found.address || found.direccion || '', clientName: data.name || data.nombre || t.clientName || '', clientId: clientDoc.id }); return; }
+        if (found) { setObjetivo({ id: t.objectiveId!, name: found.name || t.objectiveName || 'Objetivo', address: found.address || found.direccion || '', clientName: data.name || data.nombre || t.clientName || '', clientId: clientDoc.id, empresaId: data.empresaId || undefined }); return; }
       }
     } catch { /* ignorar */ }
-    setObjetivo({ id: t.objectiveId!, name: t.objectiveName || 'Objetivo', address: '', clientName: t.clientName || '', clientId: t.clientId || '' });
+    setObjetivo({ id: t.objectiveId!, name: t.objectiveName || 'Objetivo', address: '', clientName: t.clientName || '', clientId: t.clientId || '', empresaId: undefined });
   };
 
   const handleLogout = () => { signOut(auth); setObjetivo(null); setTurno(null); setIsAdmin(false); };

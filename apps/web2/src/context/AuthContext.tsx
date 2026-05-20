@@ -7,13 +7,21 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useRouter } from 'next/router';
 
-function roleDocId(role: string) {
-  return role.trim().toUpperCase().replace(/\s+/g, '_');
-}
+import { isSuperAdminRole, normalizeRoleId as roleDocId } from '@/lib/roles';
 
 function isSuperAdminRoleId(role: unknown): boolean {
-  const r = roleDocId(String(role ?? ''));
-  return r === 'SUPERADMIN' || r === 'SUPER_ADMIN' || r === 'SP';
+  return isSuperAdminRole(role);
+}
+
+const SUPERADMIN_MODULE_KEYS = [
+  'DASHBOARD', 'OPERATIONS', 'PLANNING', 'PLANNING_AI', 'RRHH', 'CLIENTS',
+  'SERVICES', 'REPORTS', 'ANALYSIS', 'ASSISTANT', 'CONFIG',
+] as const;
+
+function fullSuperAdminPermissions(): Record<string, string[]> {
+  const perms: Record<string, string[]> = {};
+  SUPERADMIN_MODULE_KEYS.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
+  return perms;
 }
 
 interface AuthContextType {
@@ -51,6 +59,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [claimRole, setClaimRole] = useState<string | null>(null);
   const [assignedClientId, setAssignedClientId] = useState<string | null>(null);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   const [empresaId, setEmpresaId] = useState<string>('bacarsa');
@@ -65,21 +74,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(u);
       if (u) {
         try {
+          const token = await u.getIdTokenResult(true);
+          const tokenRole = String(token.claims.role ?? '').trim() || null;
+          setClaimRole(tokenRole);
+
           const snap = await getDoc(doc(db, 'system_users', u.uid));
           if (snap.exists()) {
             const role = snap.data().role || null;
             setUserRole(role);
             setAssignedClientId(snap.data().assignedClientId || null);
-            // Superadmin no tiene empresa fija — no defaultear a 'bacarsa'
-            const isSuper = isSuperAdminRoleId(role);
+            const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
             setEmpresaId(isSuper
               ? (snap.data().empresaId || '')
               : (snap.data().empresaId || 'bacarsa'));
-            if (role) {
+            if (isSuper) {
+              setRolePermissions(fullSuperAdminPermissions());
+            } else if (role) {
               const roleSnap = await getDoc(doc(db, 'roles', roleDocId(role)));
               if (roleSnap.exists()) {
-                const perms = (roleSnap.data().permissions || {}) as Record<string, string[]>;
-                setRolePermissions(perms);
+                const roleData = roleSnap.data();
+                const roleEmp = String(roleData?.empresaId ?? '').trim();
+                const userEmp = String(snap.data().empresaId || 'bacarsa').trim();
+                if (roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
+                  setRolePermissions({});
+                } else {
+                  setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
+                }
               } else {
                 setRolePermissions({});
               }
@@ -87,33 +107,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               setRolePermissions({});
             }
             try {
-              const token = await u.getIdTokenResult();
-              const tokenRole = String(token.claims.role ?? '');
-              if (roleDocId(role || '') !== roleDocId(tokenRole)) {
+              if (roleDocId(role || '') !== roleDocId(tokenRole || '')) {
                 const syncFn = httpsCallable(functions, 'syncSystemUserClaims');
                 await syncFn({});
-                await u.getIdToken(true);
+                const refreshed = await u.getIdTokenResult(true);
+                const syncedRole = String(refreshed.claims.role ?? '').trim() || null;
+                setClaimRole(syncedRole);
+                if (isSuperAdminRoleId(role) || isSuperAdminRoleId(syncedRole)) {
+                  setRolePermissions(fullSuperAdminPermissions());
+                }
               }
             } catch {
               /* sync opcional */
             }
           } else {
-            const token = await u.getIdTokenResult(true);
-            const claimRole = (token.claims.role as string) || null;
-            setUserRole(claimRole);
+            setUserRole(tokenRole);
             setAssignedClientId(null);
-            if (isSuperAdminRoleId(claimRole)) {
-              setEmpresaId('bacarsa');
-            }
-            if (claimRole) {
-              const roleSnap = await getDoc(doc(db, 'roles', roleDocId(claimRole)));
+            const isSuper = isSuperAdminRoleId(tokenRole);
+            setEmpresaId(isSuper ? '' : 'bacarsa');
+            if (isSuper) {
+              setRolePermissions(fullSuperAdminPermissions());
+            } else if (tokenRole) {
+              const roleSnap = await getDoc(doc(db, 'roles', roleDocId(tokenRole)));
               if (roleSnap.exists()) {
-                setRolePermissions((roleSnap.data().permissions || {}) as Record<string, string[]>);
-              } else if (isSuperAdminRoleId(claimRole)) {
-                const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
-                const perms: Record<string, string[]> = {};
-                modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
-                setRolePermissions(perms);
+                const roleData = roleSnap.data();
+                const roleEmp = String(roleData?.empresaId ?? '').trim();
+                const userEmp = 'bacarsa';
+                if (roleEmp && userEmp && roleEmp.toLowerCase() !== userEmp.toLowerCase()) {
+                  setRolePermissions({});
+                } else {
+                  setRolePermissions((roleData?.permissions || {}) as Record<string, string[]>);
+                }
               } else {
                 setRolePermissions({});
               }
@@ -126,14 +150,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setRolePermissions({});
           try {
             const token = await u.getIdTokenResult(true);
-            const claimRole = (token.claims.role as string) || null;
-            if (claimRole) setUserRole(claimRole);
-            if (isSuperAdminRoleId(claimRole)) {
-              const modules = ['DASHBOARD','OPERATIONS','PLANNING','PLANNING_AI','RRHH','CLIENTS','SERVICES','REPORTS','ANALYSIS','ASSISTANT','CONFIG'];
-              const perms: Record<string, string[]> = {};
-              modules.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
-              setRolePermissions(perms);
-              setEmpresaId('bacarsa');
+            const fallbackClaim = String(token.claims.role ?? '').trim() || null;
+            setClaimRole(fallbackClaim);
+            if (fallbackClaim) setUserRole(fallbackClaim);
+            if (isSuperAdminRoleId(fallbackClaim)) {
+              setRolePermissions(fullSuperAdminPermissions());
+              setEmpresaId('');
             }
           } catch {
             /* ignore */
@@ -141,6 +163,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
       } else {
         setUserRole(null);
+        setClaimRole(null);
         setAssignedClientId(null);
         setRolePermissions({});
         setEmpresaId('bacarsa');
@@ -157,7 +180,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const isAdmin = !assignedClientId;
 
-  const isSuperAdmin = useMemo(() => isSuperAdminRoleId(userRole), [userRole]);
+  const isSuperAdmin = useMemo(
+    () => isSuperAdminRoleId(userRole) || isSuperAdminRoleId(claimRole),
+    [userRole, claimRole]
+  );
 
   const canReadModule = useCallback(
     (moduleKey: string) => {

@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
   allocateCloneDocId,
   deleteDocsWhereEmpresaId,
@@ -62,13 +63,22 @@ function sanitizeForFirestore(obj: unknown): unknown {
   return out;
 }
 
-function allocatePlanificacionEstadoId(oldId: string, idMaps: IdMaps): string {
-  const idx = oldId.indexOf('_');
-  if (idx <= 0) return oldId;
-  const oldObjId = oldId.slice(0, idx);
-  const suffix = oldId.slice(idx);
-  const mapped = idMaps.objetivos?.get(oldObjId) ?? oldObjId;
-  return `${mapped}${suffix}`;
+function allocatePlanificacionEstadoId(oldId: string, idMaps: IdMaps, targetEmpresaId: string): string {
+  const parts = String(oldId ?? '').split('_');
+  if (parts.length < 3) return oldId;
+  const month = parseInt(parts[parts.length - 1], 10);
+  const year = parseInt(parts[parts.length - 2], 10);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || year < 2000) return oldId;
+  let objectiveId: string;
+  if (parts.length === 3) {
+    objectiveId = parts[0];
+  } else if (parts.length === 4) {
+    objectiveId = parts[1];
+  } else {
+    objectiveId = parts.slice(1, -2).join('_');
+  }
+  const mapped = idMaps.objetivos?.get(objectiveId) ?? objectiveId;
+  return `${targetEmpresaId}_${mapped}_${year}_${month}`;
 }
 
 async function readSourceDocs(
@@ -124,7 +134,7 @@ async function writeMigratedCollection(
     clean = sanitizeForFirestore(remapCloneDocumentFields(colName, clean, idMaps, db)) as Record<string, unknown>;
 
     const writeId = colName === 'planificacion_estados'
-      ? allocatePlanificacionEstadoId(String(_id), idMaps)
+      ? allocatePlanificacionEstadoId(String(_id), idMaps, targetEmpresaId)
       : allocateCloneDocId(db, colName, String(_id), idMaps);
 
     bulkWriter.set(db.collection(colName).doc(writeId), clean);
@@ -185,7 +195,7 @@ export async function runEmpresaMigrate(
       docsCopied: 0,
       docsDeleted: 0,
       totalCollections: collections.length,
-      startedAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt: FieldValue.serverTimestamp(),
     });
   }
 
@@ -227,7 +237,7 @@ export async function runEmpresaMigrate(
       module: 'SISTEMA',
       actorName: 'Admin',
       details: `Migración ${source} → ${target} — ${copiedCounter.count} docs copiados, ${docsDeleted} eliminados en destino`,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: FieldValue.serverTimestamp(),
       empresaId: target,
     });
 

@@ -52,7 +52,8 @@ async function main() {
   console.log('[seed-lab] Emuladores listos. Siembra admin + guardia.\n');
   run('seed-admin.js');
   run('seed-empleado.js');
-  console.log('\n[seed-lab] OK\n');
+  run('seed-empresa-prueba.js');
+  console.log('\n[seed-lab] OK (bacarsa + prueba_sa)\n');
 }
 
 main().catch((e) => {

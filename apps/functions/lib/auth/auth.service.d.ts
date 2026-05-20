@@ -7,5 +7,6 @@ export declare class AuthService {
         dni: string;
         fileNumber: string;
         address: string;
+        empresaId?: string;
     }): Promise<IEmployee>;
 }

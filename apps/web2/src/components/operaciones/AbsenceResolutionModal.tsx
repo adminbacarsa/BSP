@@ -4,6 +4,8 @@ import { X, UserX, Clock, UserCheck, UserPlus, AlertTriangle, Search, CheckCircl
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, Timestamp, updateDoc, doc, addDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { stampEmpresaId } from '@/lib/multiempresa';
 
 const cleanPayload = (data: any) => {
     const cleaned = { ...data };
@@ -29,6 +31,7 @@ const EmployeeCard = ({ data, actionLabel, onAction, colorClass, type }: any) =>
 };
 
 export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, onResolve }: any) {
+    const { empresaId } = useEmpresa();
     const [phase, setPhase] = useState('DIAGNOSIS');
     const [method, setMethod] = useState<any>(null);
     const [isUnassigned, setIsUnassigned] = useState(false);
@@ -59,7 +62,7 @@ export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, 
         if (absenceShift.id.startsWith('SLA_GAP')) {
             const startTs = absenceShift.shiftDateObj ? Timestamp.fromDate(absenceShift.shiftDateObj) : Timestamp.now();
             const endTs = absenceShift.endDateObj ? Timestamp.fromDate(absenceShift.endDateObj) : Timestamp.now();
-            const cleanData = cleanPayload({ ...absenceShift, startTime: startTs, endTime: endTs, status: 'PENDING', employeeId: 'VACANTE', employeeName: 'VACANTE', createdAt: serverTimestamp() });
+            const cleanData = stampEmpresaId(cleanPayload({ ...absenceShift, startTime: startTs, endTime: endTs, status: 'PENDING', employeeId: 'VACANTE', employeeName: 'VACANTE', createdAt: serverTimestamp() }), String(absenceShift.empresaId || empresaId || '').trim());
             const newDoc = await addDoc(collection(db, 'turnos'), cleanData);
             return newDoc.id;
         }

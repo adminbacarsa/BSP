@@ -145,6 +145,9 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
 };
 
 const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const tenantId = (s?: any) => String(s?.empresaId || absenceShift?.empresaId || empresaId || '').trim();
     const [loading, setLoading] = useState<string | null>(null);
     const [localWa, setLocalWa] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
 
@@ -217,7 +220,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETENTION');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -232,7 +235,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'EARLY_START');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`Turno de ${s.employeeName} adelantado`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -248,11 +251,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
-            batch.set(newRef, { employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() });
+            batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), { userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETEN');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             toast.success(`${empName} convocado como retén`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -267,7 +270,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'FRANCO');
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -602,7 +605,7 @@ export default function OperacionesPage() {
                     // Materializar si virtual y abrir cobertura
                     if (vacShift.isVirtual || !novedad.shiftId) {
                         const newRef = doc(collection(db, 'turnos'));
-                        await setDoc(newRef, {
+                        await setDoc(newRef, stampEmpresaId({
                             clientId: vacShift.clientId, clientName: vacShift.clientName,
                             objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName,
                             positionName: vacShift.positionName,
@@ -611,7 +614,7 @@ export default function OperacionesPage() {
                             endTime: Timestamp.fromDate(vacShift.endDateObj),
                             status: 'UNCOVERED_REPORTED', isReported: true,
                             origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
-                        });
+                        }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else {
                         setCoverageData({ isOpen: true, shift: vacShift });
@@ -964,7 +967,7 @@ export default function OperacionesPage() {
                 batch.update(doc(db, 'turnos', shift.id), { plannedNovedad: 'AVISO' });
             }
             await batch.commit();
-            await addDoc(collection(db, 'novedades'), {
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'AVISO_AUSENCIA_ANTICIPADA',
                 title: 'Aviso anticipado de ausencia',
                 status: 'pending',
@@ -978,7 +981,7 @@ export default function OperacionesPage() {
                 description: `${shift.employeeName} avisó que no se presentará al turno en ${shift.objectiveName} (${shift.positionName}) — ${formatTimeRange(shift.shiftDateObj, shift.endDateObj)}.`,
                 createdAt: serverTimestamp(),
                 reportedBy: 'OPERACIONES',
-            });
+            }, String(shift.empresaId || empresaId || '').trim()));
             toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a Planificación.`);
         } catch (e: any) {
             toast.error('Error al registrar novedad: ' + (e?.message || e?.code || String(e)));
@@ -991,7 +994,7 @@ export default function OperacionesPage() {
                 // Vacante virtual: no existe en Firestore, crear documento real
                 const newRef = doc(collection(db, 'turnos'));
                 targetId = newRef.id;
-                const newShiftData: any = {
+                const newShiftData: any = stampEmpresaId({
                     clientId: shift.clientId, clientName: shift.clientName,
                     objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
                     positionName: shift.positionName,
@@ -1001,12 +1004,12 @@ export default function OperacionesPage() {
                     status: 'UNCOVERED_REPORTED', isReported: true,
                     comments: 'Vacante de Contrato Reportada',
                     createdAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
-                };
+                }, String(shift.empresaId || empresaId || '').trim());
                 await setDoc(newRef, newShiftData);
             } else {
                 await updateDoc(doc(db, 'turnos', targetId), { status: 'UNCOVERED_REPORTED', isReported: true });
             }
-            await addDoc(collection(db, 'novedades'), {
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'VACANTE_NO_CUBIERTA', title: 'Vacante Sin Cubrir',
                 status: 'pending',
                 clientId: shift.clientId, objectiveId: shift.objectiveId, shiftId: targetId,
@@ -1014,7 +1017,7 @@ export default function OperacionesPage() {
                 positionName: shift.positionName || '',
                 description: `Sin cubrir: ${shift.positionName || '—'} en ${shift.objectiveName}${shift.shiftDateObj ? ' · ' + formatTimeRange(shift.shiftDateObj, shift.endDateObj) : ''}`,
                 createdAt: serverTimestamp(), reportedBy: 'OPERACIONES'
-            });
+            }, String(shift.empresaId || empresaId || '').trim()));
             toast.success('Reporte enviado correctamente');
         } catch (e: any) {
             console.error('[operaciones] handleReportPlanning error:', e);

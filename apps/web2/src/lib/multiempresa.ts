@@ -1,13 +1,13 @@
 /**
  * Utilidades para soporte multiempresa.
- * La migración agrega el campo `empresaId` a todos los documentos
- * existentes y marca la empresa como migrada en su propio documento.
+ * Migración legacy planificacion_estados: `node scripts/migrate-planificacion-estados-tenant.js [--empresa bacarsa] [--stamp-turnos bacarsa]`
+ * Segunda empresa lab: `node scripts/seed-empresa-prueba.js` (tras seed-lab).
  */
 import {
   collection, getDocs, writeBatch, doc, setDoc, getDoc, deleteDoc, updateDoc,
   query, where, Query, CollectionReference, DocumentReference,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 
 /** Colecciones que participan en el aislamiento por empresa */
 const COLECCIONES = [
@@ -129,6 +129,7 @@ export async function guardarEmpresa(
   empresaId: string,
   datos: Record<string, unknown>
 ): Promise<void> {
+  await auth.currentUser?.getIdToken(true);
   await setDoc(
     doc(db, 'empresas', empresaId),
     { ...datos, updatedAt: new Date().toISOString() },
@@ -249,6 +250,46 @@ export function isTenantWriteOwner(
   return tenantEmpresaIdsMatch(docEmp, id);
 }
 
+/** Misma regla que borrado/edición: evita listar clientes de otra empresa en CRM. */
+export function canManageClientInTenant(
+  data: { empresaId?: unknown },
+  empresaId: string,
+  migracionCompleta: boolean,
+): boolean {
+  return isTenantWriteOwner(data, empresaId, migracionCompleta);
+}
+
+export function buildTenantBlockedMessage(
+  docEmp: string,
+  empresaId: string,
+  action: 'editar' | 'eliminar' | 'guardar' = 'guardar',
+  clientId?: string,
+): string {
+  const docLabel = docEmp || 'sin empresa';
+  const idHint = clientId ? ` (ID: ${clientId})` : '';
+  const verb =
+    action === 'eliminar' ? 'eliminar' : action === 'editar' ? 'editar' : 'guardar cambios en';
+  const base =
+    `Este cliente pertenece a «${docLabel}». No se puede ${verb} desde «${empresaId}»${idHint}. `;
+  if (docLabel.toLowerCase() === 'bacarsa' && empresaId.toLowerCase() !== 'bacarsa') {
+    return (
+      base +
+      'Es el registro original de Bacarsa, no la copia de tu empresa. ' +
+      'Usá Configuración → Empresas → «Copiar datos» (IDs nuevos) o cambiá el selector superior a Bacarsa para editar ese cliente.'
+    );
+  }
+  return base + 'Seleccioná la empresa correcta en el selector superior.';
+}
+
+/** @deprecated Usar buildTenantBlockedMessage */
+export function buildClientDeleteBlockedMessage(
+  docEmp: string,
+  empresaId: string,
+  clientId?: string,
+): string {
+  return buildTenantBlockedMessage(docEmp, empresaId, 'eliminar', clientId);
+}
+
 /** Error cuando una operación CRUD apunta a un documento de otra empresa. */
 export class TenantIsolationError extends Error {
   constructor(message: string) {
@@ -278,9 +319,19 @@ export async function assertDocBelongsToEmpresa(
   const data = snap.data() as Record<string, unknown>;
   if (!isTenantWriteOwner(data, empresaId, migracionCompleta)) {
     const docEmp = String(data.empresaId ?? '').trim() || 'sin empresa';
-    throw new TenantIsolationError(
-      `Operación bloqueada: el registro pertenece a «${docEmp}», no a «${empresaId}».`,
-    );
+    const msg =
+      colName === 'clients' || colName === 'servicios_sla'
+        ? buildTenantBlockedMessage(
+            docEmp,
+            empresaId,
+            colName === 'servicios_sla' ? 'editar' : 'guardar',
+            colName === 'clients' ? docId : undefined,
+          ) +
+          (colName === 'servicios_sla'
+            ? ' Si el cliente es de tu empresa, usá «Corregir etiquetas» en el detalle del CRM.'
+            : '')
+        : `Operación bloqueada: el registro pertenece a «${docEmp}», no a «${empresaId}».`;
+    throw new TenantIsolationError(msg);
   }
   return data;
 }
@@ -371,6 +422,62 @@ async function deleteDocsInBatches(refs: { ref: DocumentReference }[]): Promise<
  * Elimina un cliente de la empresa activa y sus turnos/SLA del mismo tenant.
  * Si hay turnos/SLA de otra empresa con el mismo clientId (ID compartido legacy), no los borra.
  */
+/**
+ * Re-etiqueta turnos y SLA del mismo clientId que aún tienen otra empresaId
+ * (p. ej. copia incompleta: cliente prueba_sa, SLA siguen en bacarsa).
+ */
+export async function retagClientRelatedDocsToEmpresa(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+): Promise<{ servicios_sla: number; turnos: number }> {
+  const cid = String(clientId ?? '').trim();
+  const id = String(empresaId ?? '').trim();
+  if (!cid || !id) throw new Error('Cliente y empresa son obligatorios.');
+
+  const clientSnap = await getDoc(doc(db, 'clients', cid));
+  if (!clientSnap.exists()) throw new Error('Cliente no encontrado');
+  if (!isTenantWriteOwner(clientSnap.data(), id, migracionCompleta)) {
+    throw new TenantIsolationError(
+      buildTenantBlockedMessage(
+        String(clientSnap.data()?.empresaId ?? '').trim() || 'sin empresa',
+        id,
+        'guardar',
+        cid,
+      ),
+    );
+  }
+
+  const counts = { servicios_sla: 0, turnos: 0 };
+  for (const col of ['servicios_sla', 'turnos'] as const) {
+    const snap = await getDocs(query(collection(db, col), where('clientId', '==', cid)));
+    const refs = snap.docs.filter((d) => !isTenantWriteOwner(d.data(), id, migracionCompleta));
+    for (let i = 0; i < refs.length; i += 490) {
+      const batch = writeBatch(db);
+      refs.slice(i, i + 490).forEach((d) => batch.update(d.ref, { empresaId: id }));
+      await batch.commit();
+      counts[col] += Math.min(490, refs.length - i);
+    }
+  }
+  return counts;
+}
+
+export async function countClientRelatedDocsOtherTenant(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+): Promise<{ servicios_sla: number; turnos: number }> {
+  const cid = String(clientId ?? '').trim();
+  const id = String(empresaId ?? '').trim();
+  const out = { servicios_sla: 0, turnos: 0 };
+  if (!cid || !id) return out;
+  for (const col of ['servicios_sla', 'turnos'] as const) {
+    const snap = await getDocs(query(collection(db, col), where('clientId', '==', cid)));
+    out[col] = snap.docs.filter((d) => !isTenantWriteOwner(d.data(), id, migracionCompleta)).length;
+  }
+  return out;
+}
+
 export async function deleteClientForEmpresa(
   clientId: string,
   empresaId: string,
@@ -390,10 +497,7 @@ export async function deleteClientForEmpresa(
   if (!isTenantWriteOwner(clientData, empresaId, migracionCompleta)) {
     const docEmp = String(clientData.empresaId ?? '').trim() || 'sin empresa';
     throw new TenantIsolationError(
-      `Este cliente pertenece a «${docEmp}». No se puede eliminar desde «${empresaId}». ` +
-        (docEmp.toLowerCase() === 'bacarsa' && empresaId.toLowerCase() !== 'bacarsa'
-          ? 'Es un documento compartido de Bacarsa: no borres desde acá. Tras importación cross-tenant (Full), los clientes de Prueba sa tienen IDs nuevos.'
-          : 'Seleccioná la empresa correcta en el selector superior.'),
+      buildClientDeleteBlockedMessage(docEmp, empresaId, clientId),
     );
   }
 
@@ -485,3 +589,68 @@ export function empresaScopedQuery(
 }
 
 export const SUPERADMIN_EMPRESA_STORAGE_KEY = 'cosp_superadmin_empresa_id';
+
+/** ID Firestore: `${empresaId}_${objectiveId}_${year}_${month}` (legacy sin empresaId: `${objectiveId}_${year}_${month}`).
+ *  Migración: al publicar de nuevo se crea doc con prefijo tenant; lecturas usan fetchPlanificacionEstadoDoc (fallback legacy). */
+export function buildPlanificacionEstadoDocId(
+  empresaId: string,
+  objectiveId: string,
+  year: number,
+  month: number,
+): string {
+  const e = String(empresaId ?? '').trim();
+  const o = String(objectiveId ?? '').trim();
+  if (e) return `${e}_${o}_${year}_${month}`;
+  return `${o}_${year}_${month}`;
+}
+
+/** Clave interna para mapas UI (sin tenant): `${objectiveId}_${year}_${month}`. */
+export function planificacionPublishLookupKey(objectiveId: string, year: number, month: number): string {
+  return `${String(objectiveId ?? '').trim()}_${year}_${month}`;
+}
+
+export function parsePlanificacionEstadoDocId(docId: string): {
+  empresaId?: string;
+  objectiveId: string;
+  year: number;
+  month: number;
+} | null {
+  const parts = String(docId ?? '').split('_');
+  if (parts.length < 3) return null;
+  const month = parseInt(parts[parts.length - 1], 10);
+  const year = parseInt(parts[parts.length - 2], 10);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || year < 2000) return null;
+  if (parts.length === 3) {
+    return { objectiveId: parts[0], year, month };
+  }
+  if (parts.length === 4) {
+    return { empresaId: parts[0], objectiveId: parts[1], year, month };
+  }
+  return {
+    empresaId: parts[0],
+    objectiveId: parts.slice(1, -2).join('_'),
+    year,
+    month,
+  };
+}
+
+/** Resuelve doc id tenant-aware; prueba formato nuevo y legacy `${objectiveId}_${year}_${month}`. */
+export async function fetchPlanificacionEstadoDoc(
+  empresaId: string,
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<{ id: string; data: Record<string, unknown> } | null> {
+  const primaryId = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
+  const primary = await getDoc(doc(db, 'planificacion_estados', primaryId));
+  if (primary.exists()) {
+    return { id: primary.id, data: primary.data() as Record<string, unknown> };
+  }
+  const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
+  if (legacyId === primaryId) return null;
+  const legacy = await getDoc(doc(db, 'planificacion_estados', legacyId));
+  if (legacy.exists()) {
+    return { id: legacy.id, data: legacy.data() as Record<string, unknown> };
+  }
+  return null;
+}

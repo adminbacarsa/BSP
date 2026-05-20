@@ -49,6 +49,20 @@ async function run() {
   await db.collection('roles').doc('SUPERADMIN').set({ name: 'Superadmin', permissions: perms }, { merge: true });
   console.log(`✓ roles/SUPERADMIN`);
 
+  const adminEmpresaPerms = { ...perms };
+  await db.collection('roles').doc('ADMIN_EMPRESA').set({
+    name: 'Admin Empresa', permissions: adminEmpresaPerms, empresaId: 'bacarsa',
+  }, { merge: true });
+  console.log(`✓ roles/ADMIN_EMPRESA (bacarsa)`);
+
+  await db.collection('feriados').add({
+    date: '2026-05-25',
+    name: 'Feriado Lab Bacarsa',
+    type: 'Optativo',
+    empresaId: 'bacarsa',
+  });
+  console.log(`✓ feriado tenant bacarsa`);
+
   // empresa base
   await db.collection('empresas').doc('bacarsa').set({
     name: 'Bacarsa', migracionCompleta: true,

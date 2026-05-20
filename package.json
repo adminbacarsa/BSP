@@ -35,6 +35,7 @@
     "emulators": "node scripts/run-emulators.js",
     "emulators:light": "node scripts/run-emulators.js --without-functions",
     "seed": "node scripts/seed-lab.js",
+    "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1",
     "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart"
   },

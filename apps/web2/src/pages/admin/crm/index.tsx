@@ -24,7 +24,22 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa, belongsToEmpresaView, deleteClientForEmpresa, assertDocBelongsToEmpresa, queryAndDeleteForEmpresa, updateDocForEmpresa, TenantIsolationError, isTenantWriteOwner } from '@/lib/multiempresa';
+import {
+  shouldScopeQueriesToEmpresa,
+  empresaScopedQuery,
+  filterRowsByEmpresa,
+  belongsToEmpresaView,
+  deleteClientForEmpresa,
+  assertDocBelongsToEmpresa,
+  queryAndDeleteForEmpresa,
+  updateDocForEmpresa,
+  TenantIsolationError,
+  canManageClientInTenant,
+  isTenantWriteOwner,
+  buildTenantBlockedMessage,
+  retagClientRelatedDocsToEmpresa,
+  countClientRelatedDocsOtherTenant,
+} from '@/lib/multiempresa';
 import {
   AlertCircle,
   BarChart3,
@@ -195,6 +210,8 @@ export default function CRMPage() {
   const [clientServices, setClientServices] = useState<any[]>([]);
   const [clientContracts, setClientContracts] = useState<any[]>([]);
   const [clientQuotes, setClientQuotes] = useState<any[]>([]);
+  const [foreignRelatedCounts, setForeignRelatedCounts] = useState({ servicios_sla: 0, turnos: 0 });
+  const [retaggingRelated, setRetaggingRelated] = useState(false);
 
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingClientData, setLoadingClientData] = useState(false);
@@ -371,7 +388,60 @@ export default function CRMPage() {
   };
 
   const canDeleteClient = (c: { empresaId?: unknown; id?: string }) =>
-    isTenantWriteOwner(c, empresaId, migracionCompleta);
+    canManageClientInTenant(c, empresaId, migracionCompleta);
+
+  const assertClientWritable = async (
+    clientId: string,
+    label?: string,
+    action: 'guardar' | 'eliminar' = 'guardar',
+  ) => {
+    const snap = await getDoc(doc(db, 'clients', clientId));
+    if (!snap.exists()) throw new Error('Cliente no encontrado');
+    const data = snap.data();
+    if (!canManageClientInTenant(data, empresaId, migracionCompleta)) {
+      const docEmp = String(data.empresaId ?? '').trim() || 'sin empresa';
+      throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, clientId));
+    }
+    if (label && data.name && String(data.name) !== label) {
+      console.warn('[CRM] nombre desactualizado al validar', { clientId, label, dbName: data.name });
+    }
+    return { id: snap.id, ...data };
+  };
+
+  const openClientDetail = async (c: { id: string; name?: string }) => {
+    try {
+      const fresh = await assertClientWritable(c.id, c.name);
+      setSelectedClient(fresh);
+      setView('detail');
+      await loadClientFullData(c.id);
+      loadPortalUserForClient(c.id);
+    } catch (e: unknown) {
+      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'No se puede abrir este cliente'));
+    }
+  };
+
+  const selectedClientWritable = useMemo(
+    () => (selectedClient ? canManageClientInTenant(selectedClient, empresaId, migracionCompleta) : false),
+    [selectedClient, empresaId, migracionCompleta],
+  );
+
+  useEffect(() => {
+    if (view !== 'detail' || !selectedClient?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const fresh = await assertClientWritable(selectedClient.id, selectedClient.name);
+        if (!cancelled) setSelectedClient(fresh);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        toast.error(e instanceof TenantIsolationError ? e.message : 'Cliente no editable en esta empresa');
+        setView('list');
+        setSelectedClient(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selectedClient?.id, empresaId, migracionCompleta]);
 
   const clientDeleteToast = (
     name: string,
@@ -400,7 +470,7 @@ export default function CRMPage() {
       }
       const data = snap.docs
         .map((x) => ({ id: x.id, ...x.data() }))
-        .filter((c) => belongsToEmpresaView(c, empresaId, migracionCompleta));
+        .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta));
       setClients(data);
     } catch (e) {
       console.error(e);
@@ -429,6 +499,8 @@ export default function CRMPage() {
       );
       setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
       setClientQuotes(quo.docs.map((x) => ({ id: x.id, ...x.data() })));
+      const foreign = await countClientRelatedDocsOtherTenant(id, empresaId, migracionCompleta);
+      setForeignRelatedCounts(foreign);
     } catch (e) {
       console.error(e);
       toast.error('Error al cargar datos del cliente');
@@ -600,19 +672,45 @@ export default function CRMPage() {
     if (!selectedClient?.id) return;
     if (!infoForm?.name) return;
     try {
+      await assertClientWritable(selectedClient.id, selectedClient.name);
       await updateDocForEmpresa('clients', selectedClient.id, infoForm, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, ...infoForm });
       setIsEditingInfo(false);
       toast.success('Actualizado');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      toast.error(e?.message || 'Error al guardar');
+      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al guardar'));
+    }
+  };
+
+  const handleRetagRelatedDocs = async () => {
+    if (!selectedClient?.id || !isSuperAdmin) return;
+    const n = foreignRelatedCounts.servicios_sla + foreignRelatedCounts.turnos;
+    if (n === 0) return;
+    if (
+      !confirm(
+        `¿Re-etiquetar ${foreignRelatedCounts.servicios_sla} SLA y ${foreignRelatedCounts.turnos} turnos de «${selectedClient.name}» con empresaId «${empresaId}»?\n\nNo modifica el cliente en Bacarsa; solo registros con el mismo clientId que aún digan otra empresa.`,
+      )
+    ) {
+      return;
+    }
+    setRetaggingRelated(true);
+    try {
+      await assertClientWritable(selectedClient.id, selectedClient.name);
+      const r = await retagClientRelatedDocsToEmpresa(selectedClient.id, empresaId, migracionCompleta);
+      toast.success(`Etiquetas corregidas: ${r.servicios_sla} SLA, ${r.turnos} turnos`);
+      await loadClientFullData(selectedClient.id);
+    } catch (e: unknown) {
+      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al corregir etiquetas'));
+    } finally {
+      setRetaggingRelated(false);
     }
   };
 
   const handleSaveService = async () => {
     if (!editingServiceId || !selectedClient?.id) return;
     try {
+      await assertClientWritable(selectedClient.id, selectedClient.name);
       await updateDocForEmpresa('servicios_sla', editingServiceId, tempService, empresaId, migracionCompleta);
       setEditingServiceId(null);
       await loadClientFullData(selectedClient.id);
@@ -723,7 +821,7 @@ export default function CRMPage() {
     if (!noteText) return;
     const note = { date: new Date().toISOString(), note: noteText, user: currentUserName };
     try {
-      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
+      await assertClientWritable(selectedClient.id, selectedClient.name);
       await updateDocForEmpresa('clients', selectedClient.id, { historial: arrayUnion(note) }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, historial: [...(selectedClient.historial || []), note] });
       setHistoryNote('');
@@ -779,7 +877,7 @@ export default function CRMPage() {
     else objetivos.push({ id: String(Date.now()), ...payload });
 
     try {
-      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
+      await assertClientWritable(selectedClient.id, selectedClient.name);
       await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, objetivos });
       resetObjectiveForm();
@@ -796,7 +894,7 @@ export default function CRMPage() {
     const objectiveToDelete = (selectedClient.objetivos || [])[idx];
     const objetivos = (selectedClient.objetivos || []).filter((_: any, i: number) => i !== idx);
     try {
-      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
+      await assertClientWritable(selectedClient.id, selectedClient.name);
       let deletedShifts = 0;
       if (objectiveToDelete?.id) {
         const turnosQ = query(collection(db, 'turnos'), where('objectiveId', '==', objectiveToDelete.id));
@@ -1151,7 +1249,12 @@ export default function CRMPage() {
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-black text-sm text-slate-800 dark:text-white truncate">{c.name}</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">{c.taxId || 'S/C'}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">
+                      {c.taxId || 'S/C'}
+                      {isSuperAdmin && c.empresaId ? (
+                        <span className="ml-2 text-indigo-500">· {String(c.empresaId)}</span>
+                      ) : null}
+                    </p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -1231,6 +1334,7 @@ export default function CRMPage() {
                         const empresaLabel = empresa?.name || empresaId;
                         if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                         try {
+                          await assertClientWritable(c.id, c.name, 'eliminar');
                           const result = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
                           toast.success(clientDeleteToast(c.name, result));
                           fetchClients();
@@ -1245,7 +1349,7 @@ export default function CRMPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { setSelectedClient(c); loadClientFullData(c.id); loadPortalUserForClient(c.id); setView('detail'); close(); }}
+                    onClick={() => { void openClientDetail(c); close(); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase hover:bg-indigo-700 transition-colors shadow-sm"
                   >
                     <ExternalLink size={13}/> Ver Detalle
@@ -1270,6 +1374,32 @@ export default function CRMPage() {
                 </button>
               }
             />
+            {!selectedClientWritable && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-900">
+                Este cliente pertenece a otra empresa (p. ej. Bacarsa). No podés editarlo desde «{empresa?.name || empresaId}».
+                Volvé al listado o cambiá el selector superior.
+              </div>
+            )}
+            {selectedClientWritable &&
+              (foreignRelatedCounts.servicios_sla > 0 || foreignRelatedCounts.turnos > 0) && (
+              <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs font-bold text-violet-900 space-y-2">
+                <p>
+                  Hay datos vinculados a este cliente que siguen etiquetados como otra empresa (
+                  {foreignRelatedCounts.servicios_sla} SLA, {foreignRelatedCounts.turnos} turnos).
+                  Por eso al guardar un SLA puede aparecer «pertenece a bacarsa».
+                </p>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    disabled={retaggingRelated}
+                    onClick={() => void handleRetagRelatedDocs()}
+                    className="px-4 py-2 rounded-xl bg-violet-600 text-white text-[10px] font-black uppercase hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {retaggingRelated ? 'Corrigiendo…' : `Corregir etiquetas a «${empresaId}»`}
+                  </button>
+                )}
+              </div>
+            )}
           <div className="flex flex-col lg:flex-row gap-8">
             <div className="w-full lg:w-1/4 space-y-6">
               <div className="bg-white p-8 rounded-[2.5rem] border text-center shadow-sm sticky top-6">
@@ -1284,6 +1414,7 @@ export default function CRMPage() {
                       const empresaLabel = empresa?.name || empresaId;
                       if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                       try {
+                        await assertClientWritable(selectedClient.id, selectedClient.name, 'eliminar');
                         const result = await deleteClientForEmpresa(
                           selectedClient.id,
                           empresaId,
@@ -1507,8 +1638,9 @@ export default function CRMPage() {
                         <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Datos del cliente</p>
                       </div>
                       <button
-                        onClick={() => { setInfoForm(selectedClient); setIsEditingInfo(!isEditingInfo); }}
-                        className={`font-black text-[10px] uppercase px-4 py-2 rounded-xl transition-colors ${isEditingInfo ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'border border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}
+                        disabled={!selectedClientWritable}
+                        onClick={() => { if (!selectedClientWritable) return; setInfoForm(selectedClient); setIsEditingInfo(!isEditingInfo); }}
+                        className={`font-black text-[10px] uppercase px-4 py-2 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isEditingInfo ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'border border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}
                       >
                         {isEditingInfo ? 'Cancelar' : 'Editar'}
                       </button>

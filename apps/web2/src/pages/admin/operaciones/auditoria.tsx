@@ -4,6 +4,8 @@ import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { Activity, TestTube, Shield, MapPin, CheckCircle, Database, PlayCircle, Settings, UserCheck, UserX, Clock, AlertTriangle, Siren, X, Briefcase, UserPlus, Calendar, ChevronDown, ChevronUp, MessageCircle, Phone, Navigation, ArrowRight, ArrowLeftRight, Users, ToggleLeft, ToggleRight } from 'lucide-react';
 import { doc, setDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { stampEmpresaId } from '@/lib/multiempresa';
 import { openWhatsApp as waOpen, waMensaje } from '@/lib/whatsapp';
 import { toast } from 'sonner';
 
@@ -350,26 +352,23 @@ const AdvancedResolutionModal = ({ isOpen, onClose, type, data, onConfirm, logic
 };
 
 const DataSeeder = ({ objectiveId, clientName, objName }: any) => {
+    const { empresaId } = useEmpresa();
     const handleSeed = async () => {
         if (!objectiveId) return toast.error("Seleccione objetivo");
         try {
+            const tenant = String(empresaId || 'bacarsa').trim();
             const today = new Date();
             const startPrev = new Date(today); startPrev.setHours(23,0,0,0); startPrev.setDate(today.getDate()-1);
             const endPrev = new Date(today); endPrev.setHours(7,0,0,0);
             const startM = new Date(today); startM.setHours(7,0,0,0);
             const endM = new Date(today); endM.setHours(15,0,0,0);
+            const base = { clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test' };
             
-            // 1. SALIENTES (Para probar Relevo/Retención)
-            await setDoc(doc(collection(db, 'turnos')), { employeeName: 'SALIENTE 1 (JUAN)', employeeId: 'OUT_1', clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startPrev), endTime: Timestamp.fromDate(endPrev), isPresent: true, status: 'COMPLETED' });
-            await setDoc(doc(collection(db, 'turnos')), { employeeName: 'SALIENTE 2 (PEDRO)', employeeId: 'OUT_2', clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startPrev), endTime: Timestamp.fromDate(endPrev), isPresent: true, status: 'COMPLETED' });
-
-            // 2. BAJA (Guardia Activo)
-            await setDoc(doc(collection(db, 'turnos')), { employeeName: 'GUARDIA ACTIVO', employeeId: 'TEST_CURR', clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: true, status: 'PRESENT', phone: '5493511112222' });
-            // 3. COMPAÑERO (Para probar contexto Acompañado)
-            await setDoc(doc(collection(db, 'turnos')), { employeeName: 'COMPAÑERO 1', employeeId: 'TEST_BUDDY', clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test', positionName: 'Puesto Secundario', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: true, status: 'PRESENT' });
-            
-            // 4. AUSENCIA (Pendiente)
-            await setDoc(doc(collection(db, 'turnos')), { employeeName: 'GUARDIA FALTADOR', employeeId: 'TEST_ABS', clientId: 'TEST', clientName: clientName || 'Test', objectiveId: objectiveId, objectiveName: objName || 'Test', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: false, status: 'PENDING' });
+            await setDoc(doc(collection(db, 'turnos')), stampEmpresaId({ ...base, employeeName: 'SALIENTE 1 (JUAN)', employeeId: 'OUT_1', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startPrev), endTime: Timestamp.fromDate(endPrev), isPresent: true, status: 'COMPLETED' }, tenant));
+            await setDoc(doc(collection(db, 'turnos')), stampEmpresaId({ ...base, employeeName: 'SALIENTE 2 (PEDRO)', employeeId: 'OUT_2', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startPrev), endTime: Timestamp.fromDate(endPrev), isPresent: true, status: 'COMPLETED' }, tenant));
+            await setDoc(doc(collection(db, 'turnos')), stampEmpresaId({ ...base, employeeName: 'GUARDIA ACTIVO', employeeId: 'TEST_CURR', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: true, status: 'PRESENT', phone: '5493511112222' }, tenant));
+            await setDoc(doc(collection(db, 'turnos')), stampEmpresaId({ ...base, employeeName: 'COMPAÑERO 1', employeeId: 'TEST_BUDDY', positionName: 'Puesto Secundario', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: true, status: 'PRESENT' }, tenant));
+            await setDoc(doc(collection(db, 'turnos')), stampEmpresaId({ ...base, employeeName: 'GUARDIA FALTADOR', employeeId: 'TEST_ABS', positionName: 'Puesto Principal', startTime: Timestamp.fromDate(startM), endTime: Timestamp.fromDate(endM), isPresent: false, status: 'PENDING' }, tenant));
             
             toast.success("Datos Sembrados: 2 Salientes, 1 Activo, 1 Compañero, 1 Ausente.");
         } catch (e:any) { toast.error("Error: " + e.message); }

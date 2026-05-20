@@ -31,6 +31,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const assistantLiquidacionAggregate_1 = require("./assistantLiquidacionAggregate");
 const assistantSlaHours_1 = require("./assistantSlaHours");
+const planificacionEstadoKeys_1 = require("./planificacionEstadoKeys");
 const AR_DAY_OFFSET = '-03:00';
 exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
 function norm(s) {
@@ -238,7 +239,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objective
         throw new Error(`error_consulta_turnos_operaciones: ${msg.slice(0, 240)}`);
     }
     const pre = [];
-    const pubDocKeys = new Set();
+    const pubLookupKeys = new Map();
     for (const docSnap of qsnap.docs) {
         const shift = docSnap.data();
         const st = readFirestoreTs(shift, 'startTime');
@@ -275,7 +276,15 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objective
             continue;
         const needsPubCheck = !isOp && !isAlreadyProcessed;
         if (needsPubCheck) {
-            pubDocKeys.add(`${oid}_${ymCordoba(shiftDateObj)}`);
+            const { year, month, ym } = (0, planificacionEstadoKeys_1.ymCordobaParts)(shiftDateObj);
+            const lookupKey = (0, planificacionEstadoKeys_1.planificacionEstadoLookupKey)(oid, ym);
+            if (!pubLookupKeys.has(lookupKey)) {
+                const ids = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empresaId, oid, year, month);
+                pubLookupKeys.set(lookupKey, {
+                    primaryId: ids[0],
+                    legacyId: ids.length > 1 ? ids[1] : null,
+                });
+            }
         }
         const isAbsent = !!shift.isAbsent;
         const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
@@ -301,15 +310,28 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(db, empresaId, objective
         });
     }
     const pubMap = new Map();
-    const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
+    const docIdToLookup = new Map();
+    const refs = [];
+    for (const [lookupKey, { primaryId, legacyId }] of pubLookupKeys) {
+        refs.push(db.collection('planificacion_estados').doc(primaryId));
+        docIdToLookup.set(primaryId, lookupKey);
+        if (legacyId) {
+            refs.push(db.collection('planificacion_estados').doc(legacyId));
+            docIdToLookup.set(legacyId, lookupKey);
+        }
+    }
     const snaps = await firestoreGetAllRefs(db, refs);
     for (let j = 0; j < snaps.length; j++) {
-        pubMap.set(refs[j].id, snaps[j].exists);
+        if (!snaps[j].exists)
+            continue;
+        const lk = docIdToLookup.get(refs[j].id);
+        if (lk)
+            pubMap.set(lk, true);
     }
     const rows = [];
     for (const c of pre) {
         if (c.needsPubCheck) {
-            const k = `${c.oid}_${ymCordoba(c.shiftDateObj)}`;
+            const k = (0, planificacionEstadoKeys_1.planificacionEstadoLookupKey)(c.oid, (0, planificacionEstadoKeys_1.ymCordobaParts)(c.shiftDateObj).ym);
             if (!pubMap.get(k))
                 continue;
         }

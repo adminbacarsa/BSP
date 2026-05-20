@@ -10,6 +10,11 @@ import {
 import { aggregateLiquidacionEmpresaPeriodo } from './assistantLiquidacionAggregate';
 import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
 import type { AssistantPersona } from './resolveAssistantUser';
+import {
+  planificacionEstadoLookupDocIds,
+  planificacionEstadoLookupKey,
+  ymCordobaParts,
+} from './planificacionEstadoKeys';
 
 /** Zona operativa alineada al planificador web (Argentina). */
 const AR_DAY_OFFSET = '-03:00';
@@ -282,7 +287,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
   };
 
   const pre: PreCand[] = [];
-  const pubDocKeys = new Set<string>();
+  const pubLookupKeys = new Map<string, { primaryId: string; legacyId: string | null }>();
 
   for (const docSnap of qsnap.docs) {
     const shift = docSnap.data() as Record<string, unknown>;
@@ -320,7 +325,15 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
 
     const needsPubCheck = !isOp && !isAlreadyProcessed;
     if (needsPubCheck) {
-      pubDocKeys.add(`${oid}_${ymCordoba(shiftDateObj)}`);
+      const { year, month, ym } = ymCordobaParts(shiftDateObj);
+      const lookupKey = planificacionEstadoLookupKey(oid, ym);
+      if (!pubLookupKeys.has(lookupKey)) {
+        const ids = planificacionEstadoLookupDocIds(empresaId, oid, year, month);
+        pubLookupKeys.set(lookupKey, {
+          primaryId: ids[0],
+          legacyId: ids.length > 1 ? ids[1] : null,
+        });
+      }
     }
 
     const isAbsent = !!shift.isAbsent;
@@ -350,16 +363,27 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
   }
 
   const pubMap = new Map<string, boolean>();
-  const refs = Array.from(pubDocKeys).map((k) => db.collection('planificacion_estados').doc(k));
+  const docIdToLookup = new Map<string, string>();
+  const refs: FirebaseFirestore.DocumentReference[] = [];
+  for (const [lookupKey, { primaryId, legacyId }] of pubLookupKeys) {
+    refs.push(db.collection('planificacion_estados').doc(primaryId));
+    docIdToLookup.set(primaryId, lookupKey);
+    if (legacyId) {
+      refs.push(db.collection('planificacion_estados').doc(legacyId));
+      docIdToLookup.set(legacyId, lookupKey);
+    }
+  }
   const snaps = await firestoreGetAllRefs(db, refs);
   for (let j = 0; j < snaps.length; j++) {
-    pubMap.set(refs[j].id, snaps[j].exists);
+    if (!snaps[j].exists) continue;
+    const lk = docIdToLookup.get(refs[j].id);
+    if (lk) pubMap.set(lk, true);
   }
 
   const rows: OperacionesDiaRowSorted[] = [];
   for (const c of pre) {
     if (c.needsPubCheck) {
-      const k = `${c.oid}_${ymCordoba(c.shiftDateObj)}`;
+      const k = planificacionEstadoLookupKey(c.oid, ymCordobaParts(c.shiftDateObj).ym);
       if (!pubMap.get(k)) continue;
     }
     rows.push({

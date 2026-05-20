@@ -6,6 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { isSuperAdminRole, superAdminRoleLabel } from '@/lib/roles';
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
@@ -40,7 +41,7 @@ export default function UsersTab() {
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
             // SuperAdmin ve todos; el resto ve los de su empresa + los superadmins (siempre visibles en todas)
-            const isSA = (u: any) => ['SUPERADMIN','SUPER_ADMIN','SP'].includes((u.role || '').toUpperCase());
+            const isSA = (u: any) => isSuperAdminRole(u.role);
             const filtered = isSuperAdmin
                 ? allUsers
                 : allUsers.filter(u => isSA(u) || (u.empresaId || 'bacarsa') === myEmpresaId);
@@ -201,15 +202,19 @@ export default function UsersTab() {
                                     </div>
                                 </td>
                                 <td className="p-5">
-                                    <span className="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-lg text-xs font-bold uppercase">
-                                        {rolesList.find(r => r.id === u.role)?.name || u.role}
+                                    <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${
+                                      isSuperAdminRole(u.role)
+                                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
+                                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                    }`}>
+                                        {isSuperAdminRole(u.role) ? '⭐ SuperAdmin' : (rolesList.find(r => r.id === u.role)?.name || u.role)}
                                     </span>
                                     {u.supervisorPin && (
                                         <span className="ml-1 text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-black border border-indigo-100">🔒 PIN</span>
                                     )}
                                 </td>
                                 <td className="p-5">
-                                    {['SUPERADMIN','SUPER_ADMIN','SP'].includes((u.role||'').toUpperCase()) ? (
+                                    {isSuperAdminRole(u.role) ? (
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold">
                                             <Shield size={12}/> Todas
                                         </span>

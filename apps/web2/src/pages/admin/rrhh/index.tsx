@@ -420,7 +420,7 @@ export default function EmployeesPage() {
     const data = await absenceService.getAll({ empresaId, scopeEmpresa });
     setAbsences(data);
   };
-  const loadHolidays = async () => { const data = await holidayService.getAll(); setHolidays(data); };
+  const loadHolidays = async () => { const data = await holidayService.getForEmpresa(empresaId); setHolidays(data); };
   const loadAgreements = async () => { const data = await agreementService.getAll(); setAgreements(data.map(a => ({...a, categories: Array.isArray(a.categories) ? a.categories : [], paysDoubleOnFranco: !!a.paysDoubleOnFranco} as ExtendedAgreement))); };
   const loadClientsAndObjectives = async () => {
     try {
@@ -869,9 +869,9 @@ export default function EmployeesPage() {
   };
   const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
   const openEditFromDetail = () => { if (!selectedEmp) return; setForm(selectedEmp); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
-  const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
+  const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm, empresaId); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
   const handleDeleteHoliday = async (id: string) => { await holidayService.delete(id); await registrarAuditoria('DELETE_HOLIDAY', `Feriado ID: ${id}`); loadHolidays(); };
-  const handleSyncHolidays = async () => { setIsSyncing(true); try { await holidayService.syncWithGovApi(syncYear); addToast(`Sync OK`, 'success'); loadHolidays(); } catch (e) { addToast('Error', 'error'); } finally { setIsSyncing(false); } };
+  const handleSyncHolidays = async () => { setIsSyncing(true); try { await holidayService.syncWithGovApi(syncYear, empresaId); addToast(`Sync OK`, 'success'); loadHolidays(); } catch (e) { addToast('Error', 'error'); } finally { setIsSyncing(false); } };
   const handleAddCategory = () => { if (newCategory.trim()) { setAgreementForm({ ...agreementForm, categories: [...agreementForm.categories, newCategory.trim()] }); setNewCategory(''); }};
   const removeCategory = (idx: number) => { const newCats = [...agreementForm.categories]; newCats.splice(idx, 1); setAgreementForm({ ...agreementForm, categories: newCats }); };
   const handleSaveAgreement = async () => { if (!agreementForm.name) return; if (isEditingAgreement && agreementForm.id) { await agreementService.update(agreementForm.id, agreementForm); } else { await agreementService.add(agreementForm); } setAgreementForm(initialAgreement); setIsEditingAgreement(false); loadAgreements(); };

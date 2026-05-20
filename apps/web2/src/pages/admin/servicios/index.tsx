@@ -21,20 +21,7 @@ import {
   deleteDocsByIdsForEmpresa, deleteSlaForEmpresa, TenantIsolationError,
 } from '@/lib/multiempresa';
 
-function toYyyyMmDd(value: unknown): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return value.trim().slice(0, 10);
-  if (value instanceof Timestamp) {
-    const d = value.toDate();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-  if (typeof value === 'object' && value !== null && 'seconds' in (value as Record<string, unknown>)) {
-    const o = value as { seconds: number; nanoseconds?: number };
-    const d = new Timestamp(o.seconds, o.nanoseconds ?? 0).toDate();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-  return String(value).trim().slice(0, 10);
-}
+import { toYyyyMmDd } from '@/lib/firestoreDates';
 
 function parseYmdToLocalDate(ymd: string): Date | null {
   const core = (ymd || '').trim().slice(0, 10);

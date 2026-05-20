@@ -34,11 +34,11 @@ function getTitleByPath(pathname: string): string | null {
 // ─── TOPBAR ──────────────────────────────────────────────────────────────────
 function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: boolean; onToggleSidebar: () => void }) {
   const router = useRouter();
-  const { user, assignedClientId, isSuperAdmin } = useAuth();
+  const { user, assignedClientId, isSuperAdmin, userRole: authUserRole } = useAuth();
   const { empresa, empresas, switchEmpresa, empresaId } = useEmpresa();
   const pageHeader = usePageHeader();
   const [isOnline, setIsOnline] = useState(true);
-  const [userRole, setUserRole] = useState('');
+  const [claimRole, setClaimRole] = useState('');
   const [showEmpresaDrop, setShowEmpresaDrop] = useState(false);
 
   useEffect(() => {
@@ -52,15 +52,15 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
   }, []);
 
   useEffect(() => {
-    if (!user) { setUserRole(''); return; }
+    if (!user) { setClaimRole(''); return; }
     user.getIdTokenResult()
-      .then(res => { const r = (res?.claims?.role ?? res?.claims?.type ?? '') as string; setUserRole(r || ''); })
-      .catch(() => setUserRole(''));
+      .then(res => { const r = (res?.claims?.role ?? res?.claims?.type ?? '') as string; setClaimRole(r || ''); })
+      .catch(() => setClaimRole(''));
   }, [user]);
 
   const title = pageHeader.title ?? getTitleByPath(router.pathname) ?? 'Panel de Control';
   const operatorName = user?.displayName || user?.email?.split('@')[0] || 'Usuario';
-  const roleLabel = userRole || 'Operador';
+  const roleLabel = isSuperAdmin ? 'SuperAdmin' : (authUserRole || claimRole || 'Operador');
 
   const isEmulator = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -88,6 +88,14 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       <span className="font-black uppercase tracking-tight shrink-0 text-sm" style={{ color: 'var(--topbar-text)' }}>
         {title}
       </span>
+      {isSuperAdmin && (
+        <span
+          className="text-[10px] font-black uppercase tracking-wide text-amber-900 bg-amber-200 border border-amber-400 px-2 py-0.5 rounded-full"
+          title="Acceso a todas las empresas. Los datos de cada tenant siguen aislados: no editás registros de Bacarsa desde otra empresa."
+        >
+          SuperAdmin · multi-empresa
+        </span>
+      )}
       {assignedClientId && (
         <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
           Vista restringida

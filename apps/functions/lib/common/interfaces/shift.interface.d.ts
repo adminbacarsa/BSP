@@ -14,4 +14,5 @@ export interface IShift {
     updatedAt: admin.firestore.Timestamp;
     role?: string;
     isOvertime?: boolean;
+    empresaId?: string;
 }

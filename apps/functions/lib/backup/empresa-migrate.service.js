@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deserializeIdMaps = exports.serializeIdMaps = void 0;
 exports.runEmpresaMigrate = runEmpresaMigrate;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const restore_service_1 = require("./restore.service");
 Object.defineProperty(exports, "serializeIdMaps", { enumerable: true, get: function () { return restore_service_1.serializeIdMaps; } });
 Object.defineProperty(exports, "deserializeIdMaps", { enumerable: true, get: function () { return restore_service_1.deserializeIdMaps; } });
@@ -40,14 +41,26 @@ function sanitizeForFirestore(obj) {
     }
     return out;
 }
-function allocatePlanificacionEstadoId(oldId, idMaps) {
-    const idx = oldId.indexOf('_');
-    if (idx <= 0)
+function allocatePlanificacionEstadoId(oldId, idMaps, targetEmpresaId) {
+    const parts = String(oldId ?? '').split('_');
+    if (parts.length < 3)
         return oldId;
-    const oldObjId = oldId.slice(0, idx);
-    const suffix = oldId.slice(idx);
-    const mapped = idMaps.objetivos?.get(oldObjId) ?? oldObjId;
-    return `${mapped}${suffix}`;
+    const month = parseInt(parts[parts.length - 1], 10);
+    const year = parseInt(parts[parts.length - 2], 10);
+    if (!Number.isFinite(month) || !Number.isFinite(year) || year < 2000)
+        return oldId;
+    let objectiveId;
+    if (parts.length === 3) {
+        objectiveId = parts[0];
+    }
+    else if (parts.length === 4) {
+        objectiveId = parts[1];
+    }
+    else {
+        objectiveId = parts.slice(1, -2).join('_');
+    }
+    const mapped = idMaps.objetivos?.get(objectiveId) ?? objectiveId;
+    return `${targetEmpresaId}_${mapped}_${year}_${month}`;
 }
 async function readSourceDocs(db, colName, sourceEmpresaId) {
     const out = [];
@@ -88,7 +101,7 @@ async function writeMigratedCollection(db, colName, docs, targetEmpresaId, idMap
         clean.empresaId = targetEmpresaId;
         clean = sanitizeForFirestore((0, restore_service_1.remapCloneDocumentFields)(colName, clean, idMaps, db));
         const writeId = colName === 'planificacion_estados'
-            ? allocatePlanificacionEstadoId(String(_id), idMaps)
+            ? allocatePlanificacionEstadoId(String(_id), idMaps, targetEmpresaId)
             : (0, restore_service_1.allocateCloneDocId)(db, colName, String(_id), idMaps);
         bulkWriter.set(db.collection(colName).doc(writeId), clean);
         copiedCounter.count += 1;
@@ -136,7 +149,7 @@ async function runEmpresaMigrate(sourceEmpresaId, targetEmpresaId, jobId, partia
             docsCopied: 0,
             docsDeleted: 0,
             totalCollections: collections.length,
-            startedAt: admin.firestore.FieldValue.serverTimestamp(),
+            startedAt: firestore_1.FieldValue.serverTimestamp(),
         });
     }
     for (let ci = startCol; ci < endCol; ci++) {
@@ -159,7 +172,7 @@ async function runEmpresaMigrate(sourceEmpresaId, targetEmpresaId, jobId, partia
             module: 'SISTEMA',
             actorName: 'Admin',
             details: `Migración ${source} → ${target} — ${copiedCounter.count} docs copiados, ${docsDeleted} eliminados en destino`,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            timestamp: firestore_1.FieldValue.serverTimestamp(),
             empresaId: target,
         });
         await setJob({

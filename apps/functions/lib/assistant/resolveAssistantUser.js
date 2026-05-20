@@ -3,20 +3,28 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveAssistantUser = resolveAssistantUser;
 exports.empresaAllowed = empresaAllowed;
 const admin = require("firebase-admin");
+const role_util_1 = require("../common/role.util");
 const cospKnowledge_1 = require("./cospKnowledge");
-function normalizeRoleId(role) {
-    return role.trim().toUpperCase().replace(/\s+/g, '_');
-}
 function roleHasAssistantRead(perms) {
     const a = perms.ASSISTANT;
     return Array.isArray(a) && a.includes('read');
 }
+async function authClaimRole(uid) {
+    try {
+        const u = await admin.auth().getUser(uid);
+        return String((u.customClaims ?? {}).role ?? '').trim();
+    }
+    catch {
+        return '';
+    }
+}
 async function resolveAssistantUser(uid) {
     const db = admin.firestore();
+    const claimRole = await authClaimRole(uid);
     const sys = await db.collection('system_users').doc(uid).get();
     if (sys.exists) {
         const role = String(sys.data()?.role || '');
-        const isSuper = normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
+        const isSuper = (0, role_util_1.isSuperAdminRole)(role) || (0, role_util_1.isSuperAdminRole)(claimRole);
         let empresaId = String(sys.data()?.empresaId ?? '').trim() || (!isSuper ? 'bacarsa' : '');
         let readableModuleKeys;
         let canUseAssistant = isSuper;
@@ -24,24 +32,32 @@ async function resolveAssistantUser(uid) {
             readableModuleKeys = [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS];
         }
         else {
-            const roleSnap = await db.collection('roles').doc(normalizeRoleId(role)).get();
+            const roleSnap = await db.collection('roles').doc((0, role_util_1.normalizeRoleId)(role)).get();
             const perms = (roleSnap.data()?.permissions ?? {});
-            canUseAssistant = roleHasAssistantRead(perms);
-            readableModuleKeys = cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.filter((k) => {
-                const a = perms[k];
-                return Array.isArray(a) && a.includes('read');
-            });
-            if (!roleSnap.exists || readableModuleKeys.length === 0) {
-                readableModuleKeys =
-                    cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.length > 0 ? ['DASHBOARD'] : readableModuleKeys;
+            const roleEmp = String(roleSnap.data()?.empresaId ?? '').trim();
+            if (roleEmp && empresaId && roleEmp.toLowerCase() !== empresaId.toLowerCase()) {
+                readableModuleKeys = ['DASHBOARD'];
+                canUseAssistant = false;
+            }
+            else {
+                canUseAssistant = roleHasAssistantRead(perms);
+                readableModuleKeys = cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.filter((k) => {
+                    const a = perms[k];
+                    return Array.isArray(a) && a.includes('read');
+                });
+                if (!roleSnap.exists || readableModuleKeys.length === 0) {
+                    readableModuleKeys =
+                        cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.length > 0 ? ['DASHBOARD'] : readableModuleKeys;
+                }
             }
         }
         return {
             persona: 'SYSTEM',
-            roleName: role || null,
+            roleName: role || claimRole || null,
             empresaId,
             readableModuleKeys,
             canUseAssistant,
+            isSuperAdmin: isSuper,
             summaryLabel: role ? `Usuario sistema (${role})` : 'Usuario sistema',
         };
     }
@@ -54,6 +70,7 @@ async function resolveAssistantUser(uid) {
             empresaId: String(d.clientId ?? d.clienteId ?? d.empresaId ?? ''),
             readableModuleKeys: ['CLIENT_PORTAL'],
             canUseAssistant: true,
+            isSuperAdmin: false,
             summaryLabel: 'Portal cliente',
         };
     }
@@ -66,6 +83,7 @@ async function resolveAssistantUser(uid) {
             empresaId: String(d.empresaId ?? ''),
             readableModuleKeys: ['EMPLOYEE_PORTAL'],
             canUseAssistant: true,
+            isSuperAdmin: false,
             summaryLabel: 'Colaborador (portal empleado)',
         };
     }
@@ -81,7 +99,7 @@ async function tryResolveAssistantFromEmulatorAuth(uid) {
         const u = await admin.auth().getUser(uid);
         const claims = (u.customClaims ?? {});
         const role = String(claims.role ?? '').trim();
-        const isSuper = normalizeRoleId(role) === 'SUPERADMIN' || normalizeRoleId(role) === 'SUPER_ADMIN';
+        const isSuper = (0, role_util_1.isSuperAdminRole)(role);
         if (isSuper) {
             const empresaId = String(claims.empresaId ?? '').trim() || 'bacarsa';
             return {
@@ -90,6 +108,7 @@ async function tryResolveAssistantFromEmulatorAuth(uid) {
                 empresaId,
                 readableModuleKeys: [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS],
                 canUseAssistant: true,
+                isSuperAdmin: true,
                 summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
             };
         }
@@ -102,6 +121,8 @@ async function tryResolveAssistantFromEmulatorAuth(uid) {
 function empresaAllowed(claimedEmpresaId, profile) {
     const c = String(claimedEmpresaId ?? '').trim();
     if (profile.persona === 'CLIENT')
+        return true;
+    if (profile.isSuperAdmin)
         return true;
     const serverEmp = profile.empresaId.trim();
     if (!serverEmp)

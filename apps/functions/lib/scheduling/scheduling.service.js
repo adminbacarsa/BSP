@@ -58,6 +58,39 @@ let SchedulingService = class SchedulingService {
             return false;
         });
     }
+    async resolveEmpresaIdForShift(shiftData, template) {
+        const direct = String(shiftData.empresaId ?? template?.empresaId ?? '').trim();
+        if (direct)
+            return direct;
+        const db = this.getDb();
+        const employeeId = shiftData.employeeId || template?.employeeId;
+        if (employeeId && employeeId !== 'VACANTE') {
+            const emp = await db.collection('empleados').doc(employeeId).get();
+            const empId = String(emp.data()?.empresaId ?? '').trim();
+            if (empId)
+                return empId;
+        }
+        const clientId = String(shiftData.clientId ?? template?.clientId ?? '').trim();
+        if (clientId) {
+            const client = await db.collection('clients').doc(clientId).get();
+            const cid = String(client.data()?.empresaId ?? '').trim();
+            if (cid)
+                return cid;
+        }
+        if (shiftData.objectiveId || template?.objectiveId) {
+            const objectiveId = shiftData.objectiveId || template?.objectiveId;
+            const clientsSnap = await db.collection('clients').limit(200).get();
+            for (const doc of clientsSnap.docs) {
+                const objs = doc.data()?.objetivos;
+                if (objs?.some(o => o.id === objectiveId)) {
+                    const cid = String(doc.data()?.empresaId ?? '').trim();
+                    if (cid)
+                        return cid;
+                }
+            }
+        }
+        return undefined;
+    }
     async assignShift(shiftData, userAuth) {
         const dbInstance = this.getDb();
         const newShiftRef = dbInstance.collection(SHIFTS_COLLECTION).doc();
@@ -95,6 +128,7 @@ let SchedulingService = class SchedulingService {
                 }
             }
         }
+        const resolvedEmpresaId = await this.resolveEmpresaIdForShift(shiftData);
         try {
             await dbInstance.runTransaction(async (transaction) => {
                 if (employeeId !== 'VACANTE') {
@@ -126,7 +160,8 @@ let SchedulingService = class SchedulingService {
                     schedulerId: userAuth.uid,
                     updatedAt: admin.firestore.Timestamp.now(),
                     role: shiftData.role || 'Vigilador',
-                    isOvertime
+                    isOvertime,
+                    ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
                 };
                 transaction.set(newShiftRef, finalShift);
             });
@@ -229,6 +264,9 @@ let SchedulingService = class SchedulingService {
                 continue;
             }
             existingShifts.forEach(doc => { batch.delete(doc.ref); opCount++; });
+            const templateEmpresaId = sourceShifts.length
+                ? await this.resolveEmpresaIdForShift({}, sourceShifts[0])
+                : undefined;
             for (const template of sourceShifts) {
                 const tStart = this.convertToDate(template.startTime);
                 const tEnd = this.convertToDate(template.endTime);
@@ -248,7 +286,8 @@ let SchedulingService = class SchedulingService {
                     endTime: admin.firestore.Timestamp.fromDate(newEnd),
                     status: 'Assigned',
                     schedulerId: schedulerId,
-                    updatedAt: admin.firestore.Timestamp.now()
+                    updatedAt: admin.firestore.Timestamp.now(),
+                    ...(templateEmpresaId ? { empresaId: templateEmpresaId } : {}),
                 };
                 batch.set(newShiftRef, newShift);
                 opCount++;

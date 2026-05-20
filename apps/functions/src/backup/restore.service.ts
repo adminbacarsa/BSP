@@ -134,6 +134,46 @@ function setMappedForeignField(
   else target[key] = mapped;
 }
 
+function registerObjectiveNameAlias(idMaps: IdMaps, name: unknown, newId: string): void {
+  const nameKey = String(name ?? '').trim().toLowerCase();
+  if (!nameKey) return;
+  if (!idMaps.objetivos_by_name) idMaps.objetivos_by_name = new Map();
+  idMaps.objetivos_by_name.set(nameKey, newId);
+}
+
+function remapObjectiveIdWithNameFallback(
+  target: Record<string, unknown>,
+  key: string,
+  idMaps: IdMaps,
+  objectiveName?: unknown,
+): void {
+  const oldOid = String(target[key] ?? '').trim();
+  setMappedForeignField(target, key, idMaps, 'objetivos', target[key]);
+  const newOid = String(target[key] ?? '').trim();
+  if (!oldOid || newOid !== oldOid) return;
+  const byLabel = String(objectiveName ?? oldOid).trim().toLowerCase();
+  const mappedByName = byLabel ? idMaps.objetivos_by_name?.get(byLabel) : undefined;
+  if (mappedByName) target[key] = mappedByName;
+}
+
+function normalizeSlaDateField(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === 'string') return value.trim().slice(0, 10);
+  if (value instanceof admin.firestore.Timestamp) {
+    const d = value.toDate();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const o = value as { _seconds?: number; seconds?: number; _nanoseconds?: number; nanoseconds?: number };
+    const sec = o._seconds ?? o.seconds;
+    if (typeof sec === 'number') {
+      const d = new admin.firestore.Timestamp(sec, o._nanoseconds ?? o.nanoseconds ?? 0).toDate();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return value;
+}
+
 export function remapCloneDocumentFields(
   colName: string,
   data: Record<string, unknown>,
@@ -144,8 +184,11 @@ export function remapCloneDocumentFields(
 
   if (colName === 'turnos') {
     setMappedForeignField(clean, 'employeeId', idMaps, 'empleados', clean.employeeId);
-    setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+    remapObjectiveIdWithNameFallback(clean, 'objectiveId', idMaps, clean.objectiveName);
     setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
+  }
+  if (colName === 'empleados') {
+    remapObjectiveIdWithNameFallback(clean, 'preferredObjectiveId', idMaps);
   }
   if (colName === 'ausencias' || colName === 'novedades') {
     setMappedForeignField(clean, 'employeeId', idMaps, 'empleados', clean.employeeId);
@@ -153,11 +196,13 @@ export function remapCloneDocumentFields(
   }
   if (colName === 'servicios_sla' || colName === 'contratos_servicio') {
     setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
-    setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+    remapObjectiveIdWithNameFallback(clean, 'objectiveId', idMaps, clean.objectiveName);
+    clean.startDate = normalizeSlaDateField(clean.startDate);
+    clean.endDate = normalizeSlaDateField(clean.endDate);
   }
   if (colName === 'planificacion_estados') {
-    setMappedForeignField(clean, 'objetivoId', idMaps, 'objetivos', clean.objetivoId);
-    setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+    remapObjectiveIdWithNameFallback(clean, 'objetivoId', idMaps);
+    remapObjectiveIdWithNameFallback(clean, 'objectiveId', idMaps);
   }
   if (colName === 'clients' && Array.isArray(clean.objetivos)) {
     clean.objetivos = (clean.objetivos as unknown[]).map((row) => {
@@ -168,6 +213,7 @@ export function remapCloneDocumentFields(
         const mapped = allocateCloneDocId(db, 'objetivos', oldOid, idMaps);
         o.id = mapped;
         o.objectiveId = mapped;
+        registerObjectiveNameAlias(idMaps, o.name, mapped);
       }
       return o;
     });

@@ -43,14 +43,14 @@ export interface PlannerContext {
   autoCycles?: unknown[];
 }
 
-const optimizePlanningGeminiCallable = httpsCallable<{ context: PlannerContext }, GeminiRespuesta>(
+const optimizePlanningGeminiCallable = httpsCallable<{ context: PlannerContext; empresaId?: string }, GeminiRespuesta>(
   functions,
   'optimizePlanningGemini',
 );
 
-export async function optimizarConGemini(context: PlannerContext): Promise<GeminiRespuesta> {
+export async function optimizarConGemini(context: PlannerContext, empresaId?: string): Promise<GeminiRespuesta> {
   try {
-    const res = await optimizePlanningGeminiCallable({ context });
+    const res = await optimizePlanningGeminiCallable({ context, empresaId });
     return res.data as GeminiRespuesta;
   } catch (e: unknown) {
     if (e instanceof FirebaseError) {

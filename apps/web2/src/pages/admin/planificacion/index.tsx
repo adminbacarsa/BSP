@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -19,7 +19,22 @@ import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import {
+    belongsToEmpresaView,
+    shouldScopeQueriesToEmpresa,
+    stampEmpresaId,
+    buildPlanificacionEstadoDocId,
+    planificacionPublishLookupKey,
+    fetchPlanificacionEstadoDoc,
+} from '@/lib/multiempresa';
+import { toYyyyMmDd } from '@/lib/firestoreDates';
+import {
+    filterSlasForPlanningTenant,
+    formatSlaRangeHint,
+    objectiveMatchKeys,
+    pickSlaForPlanningMonth,
+    slaMatchesObjective,
+} from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
@@ -285,6 +300,7 @@ export default function PlanificacionPage() {
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
     const [activePosition, setActivePosition] = useState<string | null>(null);
     const [hasActiveSLA, setHasActiveSLA] = useState<boolean>(true);
+    const [slaPlanningHint, setSlaPlanningHint] = useState('');
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -1000,7 +1016,10 @@ export default function PlanificacionPage() {
         
         if (!obj) return { status: 'DELETED', msg: '⚠️ OBJETIVO ELIMINADO / NO EXISTE', icon: <Ghost size={20}/> };
         if (obj.status === 'INACTIVE' || obj.active === false) return { status: 'INACTIVE', msg: '⛔ SERVICIO SUSPENDIDO / INACTIVO', icon: <PowerOff size={20}/> };
-        if (!hasActiveSLA) return { status: 'DELETED', msg: '⛔ SIN SERVICIO ACTIVO PARA ESTE MES — No se puede planificar', icon: <Database size={20}/> };
+        if (!hasActiveSLA) {
+            const hint = slaPlanningHint ? ` (${slaPlanningHint})` : '';
+            return { status: 'DELETED', msg: `⛔ SIN SERVICIO ACTIVO PARA ESTE MES — No se puede planificar${hint}`, icon: <Database size={20}/> };
+        }
         
         if (obj.endDate) {
             const [y, m, d] = obj.endDate.includes('-') ? obj.endDate.split('-').map(Number) : [0,0,0];
@@ -1012,7 +1031,7 @@ export default function PlanificacionPage() {
             }
         }
         return { status: 'ACTIVE', msg: 'OK', icon: <CheckCircle size={20}/> };
-    }, [selectedClient, selectedObjective, clients, currentDate, hasActiveSLA]);
+    }, [selectedClient, selectedObjective, clients, currentDate, hasActiveSLA, slaPlanningHint]);
 
     const isServiceLocked = activeServiceStatus.status !== 'ACTIVE' && activeServiceStatus.status !== 'IDLE';
 
@@ -1305,39 +1324,52 @@ export default function PlanificacionPage() {
         onAuthStateChanged(auth, (user) => { if (user) { setOperatorEmail(user.email || ''); setOperatorName(user.displayName || user.email || "Usuario"); } else { setOperatorName("No Logueado"); } });
     }, []);
 
+    const tenantClientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
+
     // 🛑 V8.60 - SELECCIÓN DE SERVICIO POR FECHA: usa la versión de servicios_sla vigente para el mes visualizado
     useEffect(() => {
-        if (!selectedClient || !selectedObjective) { setPositionStructure([]); setHasActiveSLA(true); setSlaVendidas(0); return; }
+        if (!selectedClient || !selectedObjective) {
+            setPositionStructure([]);
+            setHasActiveSLA(true);
+            setSlaVendidas(0);
+            setSlaPlanningHint('');
+            return;
+        }
         const fetchSLA = async () => {
             try {
                 const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
                 const snap = await getDocs(q);
-                const allDocs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+                const clientRow = clients.find((c) => c.id === selectedClient);
+                const objKeys = objectiveMatchKeys(selectedObjective, clientRow?.objetivos);
+                const allDocs = filterSlasForPlanningTenant(
+                    snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+                    empresaId,
+                    scopeEmpresa,
+                    tenantClientIds,
+                );
 
-                // Filtrar por objetivo (por id o por nombre)
-                let matching = allDocs.filter(d => d.objectiveId === selectedObjective);
-                if (matching.length === 0) {
-                    const objName = getObjectiveName(selectedObjective);
-                    matching = allDocs.filter(d => d.objectiveId === objName || d.objectiveName === objName);
-                }
+                const matching = allDocs.filter((d) => slaMatchesObjective(d, objKeys, slaIdToObjId));
 
-                // Seleccionar la versión vigente para el mes visualizado
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
-                const viewMonthStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-01`;
-                // Último día del mes visualizado (para comparar con endDate)
-                const viewMonthEndStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(new Date(viewYear, viewMonth + 1, 0).getDate()).padStart(2, '0')}`;
-                let srv = matching.find(d => d.startDate && d.endDate && d.startDate <= viewMonthEndStr && d.endDate >= viewMonthStr);
-                // Si no hay servicio que cubra el mes actual → bloquear edición (sin fallback)
-                const hasExactMatch = !!srv;
-                if (!srv && matching.length > 0) {
-                    // Cargamos la estructura más reciente solo para mostrar los tipos de turno, pero SIN habilitar edición
-                    srv = [...matching].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))[0];
+                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
+                const srvForStructure = srv ?? fallback;
+
+                if (!hasExactMatch) {
+                    if (matching.length > 0) {
+                        setSlaPlanningHint(`contratos del objetivo: ${formatSlaRangeHint(matching)}`);
+                    } else if (allDocs.length > 0) {
+                        setSlaPlanningHint(`${allDocs.length} contrato(s) del cliente no vinculan a este objetivo — revisá Servicios`);
+                    } else {
+                        setSlaPlanningHint('sin contratos en Servicios para este cliente');
+                    }
+                } else {
+                    setSlaPlanningHint('');
                 }
 
                 const structure: any[] = [];
-                if (srv?.positions) {
-                    const positionsIterable = Array.isArray(srv.positions) ? srv.positions : Object.values(srv.positions);
+                if (srvForStructure?.positions) {
+                    const positionsIterable = Array.isArray(srvForStructure.positions) ? srvForStructure.positions : Object.values(srvForStructure.positions);
                     positionsIterable.forEach((pos: any) => {
                         if (pos && (pos.allowedShiftTypes?.length > 0 || pos.shifts?.length > 0)) {
                             const rawQty = pos.quantity || pos.qty || pos.pax || pos.cant || pos.cantidad || pos.cant_guardias || pos.dotacion || pos.guardias || pos.plazas || pos.cupo || pos.staff || pos.personal || pos.recursos || 1;
@@ -1348,9 +1380,9 @@ export default function PlanificacionPage() {
                                 shifts: pos.allowedShiftTypes || pos.shifts,
                                 qty: !isNaN(parsedQty) && parsedQty > 0 ? parsedQty : 1,
                                 activeDays: pos.activeDays || ['L','M','X','J','V','S','D'],
-                                coverageType: pos.coverageType || srv.coverageType || '24hs',
-                                _serviceId: srv.id,
-                                _serviceRange: `${srv.startDate || '?'} → ${srv.endDate || '?'}`,
+                                coverageType: pos.coverageType || srvForStructure.coverageType || '24hs',
+                                _serviceId: srvForStructure.id,
+                                _serviceRange: `${toYyyyMmDd(srvForStructure.startDate) || '?'} → ${toYyyyMmDd(srvForStructure.endDate) || '?'}`,
                             });
                         }
                     });
@@ -1364,23 +1396,27 @@ export default function PlanificacionPage() {
                     setHasActiveSLA(hasExactMatch);
                 }
                 setPositionStructure(structure);
-                setSlaVendidas(hasExactMatch ? (srv?.totalMonthlyHours || 0) : 0);
+                setSlaVendidas(hasExactMatch ? (srvForStructure?.totalMonthlyHours || 0) : 0);
             } catch (e) {
                 console.error("CRONO SLA ERROR:", e);
                 setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
                 setHasActiveSLA(false);
                 setSlaVendidas(0);
+                setSlaPlanningHint('error al cargar contratos');
             }
         };
         fetchSLA();
-    }, [selectedClient, selectedObjective, currentDate]);
+    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId]);
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
-        getDocs(collection(db, 'servicios_sla')).then(snap => {
+        const slaMapQ = scopeEmpresa
+            ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+            : collection(db, 'servicios_sla');
+        getDocs(slaMapQ).then(snap => {
             const m: Record<string, string> = {};
             snap.docs.forEach(d => {
-                if (scopeEmpresa && String(d.data().empresaId || '') !== empresaId) return;
+                if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
                 if (d.data().objectiveId) m[d.id] = d.data().objectiveId;
             });
             setSlaIdToObjId(m);
@@ -1402,10 +1438,14 @@ export default function PlanificacionPage() {
             setEmployees(map(snap));
         }, (e) => console.error('[plan] empleados error:', e));
 
-        const unsubS = onSnapshot(collection(db, 'turnos'), snap => {
+        const turnosQ = scopeEmpresa
+            ? query(collection(db, 'turnos'), where('empresaId', '==', empresaId))
+            : collection(db, 'turnos');
+        const unsubS = onSnapshot(turnosQ, snap => {
             const map: any = {};
             snap.docs.forEach(d => {
                 const data = d.data();
+                if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
                 if (data.startTime?.seconds) {
                     const dateKey = getDateKey(data.startTime);
                     const key = `${data.employeeId}_${dateKey}`;
@@ -1428,6 +1468,7 @@ export default function PlanificacionPage() {
             query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(80)),
             (snap) => {
                 const rows = snap.docs
+                    .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                     .map((d) => {
                         const data: any = d.data();
                         const ts =
@@ -1495,10 +1536,14 @@ export default function PlanificacionPage() {
             () => setNotifLogs([])
         );
 
-        const unsubA = onSnapshot(collection(db, 'ausencias'), snap => {
+        const ausenciasQ = scopeEmpresa
+            ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId))
+            : collection(db, 'ausencias');
+        const unsubA = onSnapshot(ausenciasQ, snap => {
             const map: any = {};
             snap.docs.forEach(d => {
                 const data = d.data();
+                if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
                 if (!data.employeeId) return;
                 const toDay = (val: any) => {
                     if (!val) return null;
@@ -1532,6 +1577,7 @@ export default function PlanificacionPage() {
         const qNovedades = query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40));
         const unsubN = onSnapshot(qNovedades, (snap) => {
             const alerts = snap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .filter(d => !d.data().viewed)  // safety net: excluir ya vistas
                 .filter(d => !d.data().priority || d.data().priority === 'high')
                 .map(d => ({ id: d.id, source: 'NOVEDAD', ...d.data(), msg: d.data().description }));
@@ -1546,17 +1592,24 @@ export default function PlanificacionPage() {
     // Cargar estado de publicación cuando cambia objetivo o mes
     useEffect(() => {
         if (!selectedObjective) return;
-        const key = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
-        getDoc(doc(db, 'planificacion_estados', key))
-            .then(snap => {
-                if (snap.exists()) {
-                    const data = snap.data();
-                    setPublishStatusMap(prev => ({ ...prev, [key]: { publishedAt: data.publishedAt, publishedBy: data.publishedBy } }));
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+        fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
+            .then(row => {
+                if (row) {
+                    setPublishStatusMap(prev => ({
+                        ...prev,
+                        [lookupKey]: {
+                            publishedAt: row.data.publishedAt,
+                            publishedBy: String(row.data.publishedBy ?? ''),
+                        },
+                    }));
                 } else {
-                    setPublishStatusMap(prev => ({ ...prev, [key]: null }));
+                    setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
                 }
             }).catch(() => {});
-    }, [selectedObjective, currentDate]);
+    }, [selectedObjective, currentDate, empresaId]);
 
     // ============================================================================
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
@@ -1782,8 +1835,10 @@ export default function PlanificacionPage() {
             const batch = writeBatch(db);
             const auth = getAuth();
             const realActorName = activeActorName || 'Sistema';
-            const publishKey = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
-            const isPublished = !!publishStatusMap[publishKey];
+            const pubYear = currentDate.getFullYear();
+            const pubMonth = currentDate.getMonth() + 1;
+            const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
+            const isPublished = !!publishStatusMap[publishLookupKey];
             const logData: any[] = [];
             const snapshotData: Record<string, any> = {};
 
@@ -1850,7 +1905,7 @@ export default function PlanificacionPage() {
                         // FIX DE SEGURIDAD: Evitar undefined en positionName
                         const safePositionName = change.positionName || 'General';
 
-                        batch.set(doc(collection(db, 'turnos')), {
+                        batch.set(doc(collection(db, 'turnos')), stampEmpresaId({
                             employeeId: empId,
                             clientId: selectedClient,
                             objectiveId: selectedObjective,
@@ -1871,18 +1926,18 @@ export default function PlanificacionPage() {
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
                             draft: correctionMode ? false : !isPublished,
-                        });
+                        }, empresaId));
 
                         logData.push({ empId, date: dateStr, action: correctionMode ? 'CORRECCION_SUPERADMIN' : actionType });
                         if (isPublished || correctionMode) {
-                            batch.set(doc(collection(db, 'audit_logs')), {
+                            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
                                 action: correctionMode ? 'CORRECCION_SUPERADMIN' : actionType,
                                 module: 'PLANIFICADOR',
                                 details: correctionMode ? `[CORRECCIÓN] ${actionDetail}` : actionDetail,
                                 timestamp: serverTimestamp(),
                                 actorName: realActorName,
                                 actorUid: auth.currentUser?.uid,
-                            });
+                            }, empresaId));
                         }
                     }
                 }
@@ -1891,12 +1946,12 @@ export default function PlanificacionPage() {
                 await batch.commit();
                 // Guardar ausencias pendientes (novedades RRHH)
                 for (const novedad of Object.values(pendingNovedades)) {
-                    await addDoc(collection(db, 'ausencias'), { ...novedad, createdAt: serverTimestamp() });
+                    await addDoc(collection(db, 'ausencias'), stampEmpresaId({ ...novedad, createdAt: serverTimestamp() }, empresaId));
                 }
                 setPendingChanges({});
                 setPendingNovedades({});
                 if (isPublished) {
-                    setNeedsRepublishMap(prev => ({ ...prev, [publishKey]: true }));
+                    setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
                 toast.success("Guardado exitoso");
             } catch(e) {
@@ -1919,21 +1974,25 @@ export default function PlanificacionPage() {
 
     const handlePublish = async () => {
         if (!selectedObjective) return;
-        const publishKey = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
-        const isAlreadyPublished = !!publishStatusMap[publishKey];
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+        const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
+        const isAlreadyPublished = !!publishStatusMap[publishLookupKey];
         const verb = isAlreadyPublished ? 'ya fue publicado. ¿Volver a notificar todos los cambios desde la última publicación?' : '¿Publicar cronograma? Se notificará a todos los empleados del objetivo.';
         if (!confirm(verb)) return;
         setIsPublishing(true);
         try {
             const auth = getAuth();
             const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth() + 1;
-            // 1. Registrar publicación
-            await setDoc(doc(db, 'planificacion_estados', publishKey), {
+            // 1. Registrar publicación (doc id con tenant)
+            await setDoc(doc(db, 'planificacion_estados', publishDocId), {
                 objetivoId: selectedObjective,
+                objectiveId: selectedObjective,
                 año: year,
                 mes: month,
+                year,
+                month,
                 publishedAt: serverTimestamp(),
                 publishedBy: actorName,
                 empresaId: empresaId || null,
@@ -1952,17 +2011,17 @@ export default function PlanificacionPage() {
             draftsSnap.docs.forEach(d => batch.update(d.ref, { draft: false }));
             await batch.commit();
             // 3. Registrar en audit_logs
-            await addDoc(collection(db, 'audit_logs'), {
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                 action: 'PUBLICACION_CRONOGRAMA',
                 module: 'PLANIFICADOR',
                 details: `Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s) · ${month}/${year}`,
                 timestamp: serverTimestamp(),
                 actorName,
                 actorUid: getAuth().currentUser?.uid || null,
-            });
+            }, empresaId));
             // 4. Actualizar estado local
-            setPublishStatusMap(prev => ({ ...prev, [publishKey]: { publishedAt: new Date(), publishedBy: actorName } }));
-            setNeedsRepublishMap(prev => ({ ...prev, [publishKey]: false }));
+            setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: { publishedAt: new Date(), publishedBy: actorName } }));
+            setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
             toast.success(`Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s)`);
         } catch (e) {
             console.error(e);
@@ -2481,6 +2540,7 @@ export default function PlanificacionPage() {
         const absences: Record<string, Map<string, string>> = {};
         absSnap.docs.forEach(d => {
             const data = d.data() as any;
+            if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
             const empId = data.employeeId;
             if (!empId) return;
             if (!isActiveAbsence(data)) return;
@@ -3002,17 +3062,18 @@ export default function PlanificacionPage() {
         try {
             const q = query(collection(db, 'servicios_sla'), where('clientId', '==', selectedClient));
             const snap = await getDocs(q);
-            const allDocs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-            let matching = allDocs.filter(d => d.objectiveId === selectedObjective);
-            if (matching.length === 0) {
-                const objName = getObjectiveName(selectedObjective);
-                matching = allDocs.filter(d => d.objectiveId === objName || d.objectiveName === objName);
-            }
+            const clientRow = clients.find((c) => c.id === selectedClient);
+            const objKeys = objectiveMatchKeys(selectedObjective, clientRow?.objetivos);
+            const allDocs = filterSlasForPlanningTenant(
+                snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+                empresaId,
+                scopeEmpresa,
+                tenantClientIds,
+            );
+            const matching = allDocs.filter((d) => slaMatchesObjective(d, objKeys, slaIdToObjId));
             const y = currentDate.getFullYear(), m = currentDate.getMonth();
-            const viewStart = `${y}-${String(m+1).padStart(2,'0')}-01`;
-            const viewEnd   = `${y}-${String(m+1).padStart(2,'0')}-${String(new Date(y, m+1, 0).getDate()).padStart(2,'0')}`;
-            const srv = matching.find(d => d.startDate && d.endDate && d.startDate <= viewEnd && d.endDate >= viewStart)
-                ?? [...matching].sort((a,b) => (b.startDate||'').localeCompare(a.startDate||''))[0];
+            const { vigente, fallback } = pickSlaForPlanningMonth(matching, y, m);
+            const srv = vigente ?? fallback;
             if (!srv) { toast.error('No se encontró ningún servicios_sla para este objetivo'); return; }
             const { id, ...rest } = srv;
             setSlaDebug({ id, data: rest });
@@ -3802,9 +3863,13 @@ export default function PlanificacionPage() {
                             )}
 
                             {selectedObjective && (() => {
-                                const publishKey = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
-                                const published = publishStatusMap[publishKey];
-                                const needsRepublish = !!needsRepublishMap[publishKey];
+                                const publishLookupKey = planificacionPublishLookupKey(
+                                    selectedObjective,
+                                    currentDate.getFullYear(),
+                                    currentDate.getMonth() + 1,
+                                );
+                                const published = publishStatusMap[publishLookupKey];
+                                const needsRepublish = !!needsRepublishMap[publishLookupKey];
                                 return (
                                     <div className="flex items-center gap-2 no-print">
                                         {published ? (
@@ -4530,7 +4595,11 @@ export default function PlanificacionPage() {
 
                                 // Vista previa: celda con turno asignado, sin cambios pendientes y sin modo edición activo
                                 const hasPendingForCell = !!pending && !pending.isDeleted;
-                                const previewPublishKey = `${selectedObjective}_${currentDate.getFullYear()}_${currentDate.getMonth() + 1}`;
+                                const previewPublishKey = planificacionPublishLookupKey(
+                                    selectedObjective,
+                                    currentDate.getFullYear(),
+                                    currentDate.getMonth() + 1,
+                                );
                                 const previewIsPublished = !!publishStatusMap[previewPublishKey];
                                 // Puede editar si: no está publicado, o está en modo corrección (superadmin)
                                 const canEdit = !previewIsPublished || correctionMode;

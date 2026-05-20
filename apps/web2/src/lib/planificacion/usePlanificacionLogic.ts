@@ -3,7 +3,14 @@ import { db } from '@/lib/firebase';
 import { collection, onSnapshot, query, where, getDocs, writeBatch, serverTimestamp, Timestamp, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { getDateKey } from './utils';
-export function usePlanificacionLogic(selectedClient: string, selectedObjective: string, operatorName: string) {
+import { stampEmpresaId } from '@/lib/multiempresa';
+
+export function usePlanificacionLogic(
+  selectedClient: string,
+  selectedObjective: string,
+  operatorName: string,
+  empresaId = 'bacarsa',
+) {
     const [employees, setEmployees] = useState<any[]>([]);
     const [shiftsMap, setShiftsMap] = useState<any>({});
     const [absencesMap, setAbsencesMap] = useState<any>({});
@@ -35,6 +42,7 @@ export function usePlanificacionLogic(selectedClient: string, selectedObjective:
     }, [selectedClient, selectedObjective]);
     const handleSaveAll = async () => {
         setIsProcessing(true); const batch = writeBatch(db);
+        const tenant = String(empresaId ?? '').trim() || 'bacarsa';
         try {
             for (const [key, change] of Object.entries(pendingChanges)) {
                 const [empId, dateStr] = key.split('_'); const existing = shiftsMap[key];
@@ -42,9 +50,9 @@ export function usePlanificacionLogic(selectedClient: string, selectedObjective:
                 else {
                     if(existing?.id) batch.delete(doc(db, 'turnos', existing.id));
                     const [y, m, d] = dateStr.split('-').map(Number);
-                    batch.set(doc(collection(db, 'turnos')), {
+                    batch.set(doc(collection(db, 'turnos')), stampEmpresaId({
                         employeeId: empId, clientId: selectedClient, objectiveId: selectedObjective, code: (change as any).code, startTime: Timestamp.fromDate(new Date(y, m-1, d, 7, 0)), endTime: Timestamp.fromDate(new Date(y, m-1, d, 15, 0)), positionName: (change as any).positionName || 'General', status: 'Assigned', createdAt: serverTimestamp(), actor: operatorName
-                    });
+                    }, tenant));
                 }
             }
             await batch.commit(); setPendingChanges({}); toast.success('Guardado');

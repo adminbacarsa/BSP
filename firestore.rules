@@ -25,6 +25,28 @@ service cloud.firestore {
       );
     }
 
+    function roleValueIsSuperAdmin(role) {
+      return role == 'SuperAdmin' ||
+        role == 'SUPERADMIN' ||
+        role == 'SUPER_ADMIN' ||
+        role == 'SP' ||
+        role == 'superadmin';
+    }
+
+    function systemUserIsSuperAdmin() {
+      return isSystemUserDoc() &&
+        roleValueIsSuperAdmin(
+          get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('role', '')
+        );
+    }
+
+    function isSuperAdmin() {
+      return request.auth != null && (
+        roleValueIsSuperAdmin(request.auth.token.role) ||
+        systemUserIsSuperAdmin()
+      );
+    }
+
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.role == 'admin' ||
@@ -32,6 +54,8 @@ service cloud.firestore {
         request.auth.token.role == 'ADMIN' ||
         request.auth.token.role == 'SuperAdmin' ||
         request.auth.token.role == 'SUPERADMIN' ||
+        request.auth.token.role == 'SUPER_ADMIN' ||
+        request.auth.token.role == 'SP' ||
         request.auth.token.role == 'Manager' ||
         request.auth.token.role == 'MANAGER' ||
         request.auth.token.role == 'Scheduler' ||
@@ -57,137 +81,264 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Acceso global para admins
-    match /{document=**} {
-      allow read, write: if isAdmin();
+    function empleadoAuthDocExists() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/empleados/$(request.auth.uid));
     }
 
-    // 1. Turnos — empleados pueden leer cualquier turno (la query filtra por employeeId)
+    function empleadoAuthDocEmpresaId() {
+      return empleadoAuthDocExists()
+        ? get(/databases/$(database)/documents/empleados/$(request.auth.uid)).data.empresaId
+        : '';
+    }
+
+    function userEmpresaId() {
+      return isSystemUserDoc()
+        ? get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('empresaId', '')
+        : '';
+    }
+
+    function bacarsaLegacyOpen() {
+      return userEmpresaId() == 'bacarsa' &&
+        exists(/databases/$(database)/documents/empresas/bacarsa) &&
+        get(/databases/$(database)/documents/empresas/bacarsa).data.get('migracionCompleta', false) != true;
+    }
+
+    function docEmpresaId(data) {
+      return data.get('empresaId', '');
+    }
+
+    function tenantMatches(data) {
+      return isSuperAdmin() || (
+        userEmpresaId() != '' && (
+          docEmpresaId(data) == userEmpresaId() ||
+          (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
+        )
+      );
+    }
+
+    function tenantAdminRead() {
+      return isAdmin() && (isSuperAdmin() || tenantMatches(resource.data));
+    }
+
+    function tenantAdminCreate() {
+      return isAdmin() && (isSuperAdmin() || tenantMatches(request.resource.data));
+    }
+
+    function tenantAdminUpdate() {
+      return isAdmin() && (isSuperAdmin() || (
+        tenantMatches(resource.data) && tenantMatches(request.resource.data)
+      ));
+    }
+
+    function tenantAdminDelete() {
+      return isAdmin() && (isSuperAdmin() || tenantMatches(resource.data));
+    }
+
+    function feriadoReadable(data) {
+      return isSuperAdmin() || docEmpresaId(data) == '' || tenantMatches(data);
+    }
+
+    function roleReadable(data) {
+      return isSuperAdmin() || docEmpresaId(data) == '' || docEmpresaId(data) == userEmpresaId();
+    }
+
+    function roleWritable(data) {
+      return isSuperAdmin() || (docEmpresaId(data) == userEmpresaId() && userEmpresaId() != '');
+    }
+
     match /turnos/{shiftId} {
       allow read: if isAdmin() || request.auth != null;
-      allow write: if isAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
 
-    // 2. Empleados
     match /empleados/{employeeId} {
-      allow read, write: if isAdmin();
-      // Empleados autenticados pueden leer su propio doc (por cualquier método de búsqueda)
-      allow read: if request.auth != null;
+      allow read: if isAdmin() || request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate() || request.auth != null;
+      allow delete: if tenantAdminDelete();
     }
 
-    // 3. Ausencias
     match /ausencias/{absenceId} {
-      allow read, write: if isAdmin();
-      allow read, create: if request.auth != null;
+      allow read: if tenantAdminRead() || request.auth != null;
+      allow create: if tenantAdminCreate() || request.auth != null;
+      allow update: if tenantAdminUpdate() || request.auth != null;
+      allow delete: if tenantAdminDelete();
     }
 
-    // 4. Objetivos — empleados necesitan leer para check-in y cronograma
     match /objetivos/{objectiveId} {
       allow read: if request.auth != null;
-      allow write: if isAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
 
     match /clientes/{clientId} {
-      allow read, write: if isAdmin();
-      // Empleados necesitan leer clientes para resolver nombres de objetivos
       allow read: if request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
+
     match /clients/{clientId} {
-      allow read, write: if isAdmin();
-      // Empleados necesitan leer clients para resolver nombres de objetivos
       allow read: if request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
+
     match /contratos_servicio/{contractId} {
-      allow read, write: if isAdmin();
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
+
     match /tipos_turno/{typeId} {
-      allow read, write: if isAdmin();
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
+
     match /servicios_sla/{slaId} {
-      allow read, write: if isAdmin();
+      allow read: if tenantAdminRead() || request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
 
-    // 5. Usuarios del Sistema
+    match /planificacion_estados/{docId} {
+      allow read: if tenantAdminRead() || request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
+    match /empresas/{empresaId} {
+      allow read: if isAdmin() || (
+        request.auth != null &&
+        empleadoAuthDocExists() &&
+        empleadoAuthDocEmpresaId() == empresaId
+      );
+      allow write: if isSuperAdmin();
+    }
+
+    match /roles/{roleId} {
+      allow read: if isAdmin() && (isSuperAdmin() || roleReadable(resource.data));
+      allow create: if isSuperAdmin() || (
+        isAdmin() && docEmpresaId(request.resource.data) == userEmpresaId() && userEmpresaId() != ''
+      );
+      allow update, delete: if isSuperAdmin() || (
+        isAdmin() && roleWritable(resource.data) && roleWritable(request.resource.data)
+      );
+    }
+
+    match /feriados/{holidayId} {
+      allow read: if request.auth != null && (isAdmin() ? feriadoReadable(resource.data) : true);
+      allow create: if isSuperAdmin() || (
+        isAdmin() && (
+          docEmpresaId(request.resource.data) == '' ||
+          docEmpresaId(request.resource.data) == userEmpresaId()
+        )
+      );
+      allow update, delete: if isSuperAdmin() || (
+        isAdmin() && feriadoReadable(resource.data) && (
+          docEmpresaId(request.resource.data) == '' ||
+          docEmpresaId(request.resource.data) == userEmpresaId()
+        )
+      );
+    }
+
     match /system_users/{userId} {
-      // Lectura propia: necesaria para firestore.get() en reglas de Storage (backup upload)
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isAdmin();
+      allow read: if isOwner(userId) || isSuperAdmin() || (
+        isAdmin() && tenantMatches(resource.data)
+      );
+      allow create, update, delete: if isSuperAdmin();
     }
 
-    // 6. Tokens de dispositivos
     match /device_tokens/{tokenId} {
       allow create, update, delete: if request.auth != null && request.resource.data.uid == request.auth.uid;
       allow read: if isAdmin();
     }
 
-    // 7. Notificaciones de usuario
-    // El get() cross-documento rompe las queries de colección en Firestore Rules.
-    // Solución: cualquier usuario autenticado puede leer/marcar sus notificaciones
-    // (la seguridad real está en la query: where('uid') o where('employeeId')).
     match /user_notifications/{notifId} {
       allow read, update: if request.auth != null;
-      allow create: if false;
+      allow create: if isAdmin();
       allow delete: if isAdmin();
     }
 
-    // 8. Solicitudes de intercambio — empleados pueden leer y crear las propias
     match /swap_requests/{requestId} {
-      allow read, write: if isAdmin();
-      allow read, create: if request.auth != null;
-      allow update: if request.auth != null && (
-        resource.data.requesterId == request.auth.uid ||
-        resource.data.targetId == request.auth.uid
+      allow read: if tenantAdminRead() || request.auth != null;
+      allow create: if tenantAdminCreate() || request.auth != null;
+      allow update: if tenantAdminUpdate() || (
+        request.auth != null && (
+          resource.data.requesterId == request.auth.uid ||
+          resource.data.targetId == request.auth.uid
+        )
       );
+      allow delete: if tenantAdminDelete();
     }
 
-    // 9. Novedades
     match /novedades/{novedadId} {
-      allow read, create: if request.auth != null;
-      allow update, delete: if isAdmin();
+      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
+      allow create: if request.auth != null && (isAdmin() ? tenantAdminCreate() : true);
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
     }
 
-    // 10. Bitácora
     match /audit_logs/{logId} {
-      allow read, create: if request.auth != null;
-      allow update, delete: if isAdmin();
+      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
+      allow create: if request.auth != null && (isAdmin() ? tenantAdminCreate() : true);
+      allow update, delete: if tenantAdminDelete();
     }
 
-    // 11. Credenciales públicas — lectura sin auth para verificación por QR
     match /credenciales_publicas/{credId} {
       allow read: if true;
       allow write: if request.auth != null;
     }
 
-    // 12. Libro de guardia — empleados leen/crean entradas de sus objetivos
     match /libro_guardia/{entryId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update, delete: if isAdmin();
     }
 
-    // 13. Personal autorizado por objetivo — admins y usuarios de portal cliente gestionan
     match /personal_autorizado/{docId} {
       allow read: if request.auth != null;
       allow create: if isAdmin() || isClientUser();
       allow update, delete: if isAdmin() || isClientUser();
     }
 
-    // 14. Usuarios del portal de clientes
     match /client_users/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if isAdmin();
+      allow write: if isSuperAdmin() || isAdmin();
     }
 
-    // 15. Visitas programadas — el cliente agenda sus visitas anticipadas
     match /visitas_programadas/{visitaId} {
       allow read: if request.auth != null;
       allow create, update, delete: if isAdmin() || isClientUser();
     }
 
-    // 16. Log del asistente IA (solo escritura desde Cloud Functions)
     match /assistant_interaction_logs/{logId} {
-      allow read: if isAdmin() || isSystemUserDoc();
+      allow read: if isSuperAdmin() || (isAdmin() && tenantAdminRead());
       allow create, update, delete: if false;
+    }
+
+    match /system_backups/{backupId} {
+      allow read: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
+      allow create: if isSuperAdmin() || (isAdmin() && tenantMatches(request.resource.data));
+      allow update, delete: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
+    }
+
+    match /planificaciones_historial/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /historial_operaciones/{docId} {
+      allow read, write: if isAdmin();
     }
   }
 }

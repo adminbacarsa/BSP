@@ -9,6 +9,7 @@ export declare class SchedulingService {
     constructor(overlapService: ShiftOverlapService, workloadService: WorkloadService);
     private convertToDate;
     private checkAbsenceConflict;
+    private resolveEmpresaIdForShift;
     assignShift(shiftData: Partial<IShift> & {
         authorizeOvertime?: boolean;
     }, userAuth: admin.auth.DecodedIdToken): Promise<IShift>;
