@@ -32,5 +32,7 @@ export declare const gestionarVacantes: functions.CloudFunction<unknown>;
 export declare const triggerBackup: functions.HttpsFunction & functions.Runnable<any>;
 export declare const restoreBackup: functions.HttpsFunction & functions.Runnable<any>;
 export declare const processRestoreJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
+export declare const migrateEmpresaData: functions.HttpsFunction & functions.Runnable<any>;
+export declare const processEmpresaMigrateJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledBackup: functions.CloudFunction<unknown>;

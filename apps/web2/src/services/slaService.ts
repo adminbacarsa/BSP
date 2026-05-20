@@ -1,7 +1,7 @@
 
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
-import { empresaScopedQuery, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import { empresaScopedQuery, filterSlaRowsByEmpresa, filterRowsByEmpresa, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 
 // Definición de Turno (variante)
 export interface ShiftVariant {
@@ -121,9 +121,22 @@ export const slaService = {
   },
 
   // 4. CRUD Básico
-  add: async (data: ServiceSLA) => addDoc(collection(db, 'servicios_sla'), data),
-  
-  update: (id: string, data: Partial<ServiceSLA>) => updateDoc(doc(db, 'servicios_sla', id), data),
-  
-  delete: (id: string) => deleteDoc(doc(db, 'servicios_sla', id)),
+  add: async (data: ServiceSLA, empresaId?: string) => addDoc(
+    collection(db, 'servicios_sla'),
+    stampEmpresaId(data as Record<string, unknown>, empresaId || ''),
+  ),
+
+  update: (id: string, data: Partial<ServiceSLA>, opts?: { empresaId: string; migracionCompleta: boolean }) => {
+    if (opts?.empresaId) {
+      return updateDocForEmpresa('servicios_sla', id, data as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
+    }
+    return updateDoc(doc(db, 'servicios_sla', id), data);
+  },
+
+  delete: (id: string, opts?: { empresaId: string; migracionCompleta: boolean }) => {
+    if (opts?.empresaId) {
+      return deleteDocForEmpresa('servicios_sla', id, opts.empresaId, opts.migracionCompleta);
+    }
+    return deleteDoc(doc(db, 'servicios_sla', id));
+  },
 };

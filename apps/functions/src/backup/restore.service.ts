@@ -87,10 +87,11 @@ const EMPRESA_SCOPED_COLLECTIONS = new Set([
 ]);
 
 /** Orden para clonar/importar: padres antes que hijos (remap de FKs). */
-const RESTORE_COLLECTION_ORDER = [
+export const RESTORE_COLLECTION_ORDER = [
   'clients', 'clientes', 'empleados', 'objetivos', 'tipos_turno',
   'servicios_sla', 'contratos_servicio', 'turnos', 'ausencias',
-  'novedades', 'swap_requests', 'user_notifications', 'empresas',
+  'novedades', 'swap_requests', 'user_notifications', 'planificacion_estados',
+  'empresas',
 ];
 
 type IdMaps = Record<string, Map<string, string>>;
@@ -100,7 +101,7 @@ function collectionSortIndex(name: string): number {
   return i >= 0 ? i : 999;
 }
 
-function allocateCloneDocId(
+export function allocateCloneDocId(
   db: FirebaseFirestore.Firestore,
   colName: string,
   oldId: string,
@@ -133,7 +134,7 @@ function setMappedForeignField(
   else target[key] = mapped;
 }
 
-function remapCloneDocumentFields(
+export function remapCloneDocumentFields(
   colName: string,
   data: Record<string, unknown>,
   idMaps: IdMaps,
@@ -154,6 +155,10 @@ function remapCloneDocumentFields(
     setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
     setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
   }
+  if (colName === 'planificacion_estados') {
+    setMappedForeignField(clean, 'objetivoId', idMaps, 'objetivos', clean.objetivoId);
+    setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+  }
   if (colName === 'clients' && Array.isArray(clean.objetivos)) {
     clean.objetivos = (clean.objetivos as unknown[]).map((row) => {
       if (!row || typeof row !== 'object') return row;
@@ -171,7 +176,7 @@ function remapCloneDocumentFields(
   return clean;
 }
 
-async function deleteDocsWhereEmpresaId(
+export async function deleteDocsWhereEmpresaId(
   db: FirebaseFirestore.Firestore,
   colName: string,
   empresaId: string,
@@ -334,6 +339,35 @@ function isPlatformBackup(payload: Record<string, unknown>): boolean {
   return !backupEmpresa && meta.scopeEmpresa !== true;
 }
 
+const DETECT_EMPRESA_COLS = ['clients', 'empleados', 'turnos', 'servicios_sla', 'ausencias', 'novedades'];
+
+function detectDominantEmpresaInPayload(payload: Record<string, unknown>): { empresaId: string; legacyCount: number } {
+  const counts = new Map<string, number>();
+  let legacyCount = 0;
+  for (const col of DETECT_EMPRESA_COLS) {
+    const rows = payload[col];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const emp = String((row as Record<string, unknown>).empresaId ?? '').trim();
+      if (!emp) {
+        legacyCount += 1;
+        continue;
+      }
+      counts.set(emp, (counts.get(emp) || 0) + 1);
+    }
+  }
+  let empresaId = '';
+  let max = 0;
+  counts.forEach((n, id) => {
+    if (n > max) {
+      max = n;
+      empresaId = id;
+    }
+  });
+  return { empresaId, legacyCount };
+}
+
 function assertBackupAllowedForRestore(
   payload: Record<string, unknown>,
   opts: RestoreOptions,
@@ -424,9 +458,28 @@ export async function runRestoreFromPayload(
   const t0 = Date.now();
   const db = admin.firestore();
 
-  assertBackupAllowedForRestore(payload, opts);
   const meta = (payload._meta ?? {}) as Record<string, unknown>;
   const backupEmpresa = String(meta.empresaId ?? '').trim();
+  const sessionEmpresa = String(opts.empresaId ?? '').trim();
+  const detected = detectDominantEmpresaInPayload(payload);
+  let inferredSource = backupEmpresa || detected.empresaId;
+  if (!inferredSource && detected.legacyCount > 0) {
+    inferredSource = 'bacarsa';
+  }
+
+  // Auto-detectar import cross-tenant (meta vacía/incorrecta o docs de otra empresa)
+  if (
+    opts.scopeEmpresa &&
+    sessionEmpresa &&
+    inferredSource &&
+    inferredSource.toLowerCase() !== sessionEmpresa.toLowerCase()
+  ) {
+    opts.tenantImport = true;
+    opts.sourceEmpresaId = opts.sourceEmpresaId || inferredSource;
+  }
+
+  assertBackupAllowedForRestore(payload, opts);
+
   const platformImport = isPlatformBackup(payload) && opts.scopeEmpresa === true && !!opts.empresaId;
   const sourceEmpresaId = String(opts.sourceEmpresaId ?? backupEmpresa).trim();
   const tenantImport =
@@ -436,6 +489,7 @@ export async function runRestoreFromPayload(
     !!sourceEmpresaId &&
     sourceEmpresaId.toLowerCase() !== opts.empresaId.toLowerCase();
   const retagEmpresaId = platformImport || tenantImport;
+  const effectiveMode: RestoreMode = tenantImport && mode === 'merge' ? 'full' : mode;
 
   const setJob = (data: object) => {
     if (!jobId) return Promise.resolve();
@@ -489,13 +543,13 @@ export async function runRestoreFromPayload(
     const [colName, docs] = filteredEntries[ci];
     await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored: restoredCounter.count, total });
 
-    docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, DELETE_BATCH_SIZE);
+    docsDeleted += await deleteCollectionForRestore(db, colName, effectiveMode, opts, DELETE_BATCH_SIZE);
 
     await writeCollectionWithBulkWriter(
       db,
       colName,
       docs,
-      mode,
+      effectiveMode,
       retagEmpresaId,
       opts,
       idMaps,
@@ -518,8 +572,8 @@ export async function runRestoreFromPayload(
       module: 'SISTEMA',
       actorName: 'Admin',
       details: tenantImport
-        ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
-        : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
+        ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${effectiveMode}) desde ${fileName} — ${docsRestored} docs`
+        : `Restauración ${effectiveMode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
     });
@@ -533,7 +587,7 @@ export async function runRestoreFromPayload(
   }
 
   return {
-    mode,
+    mode: effectiveMode,
     fileName,
     collections: filteredEntries.map(([c]) => c),
     docsRestored,

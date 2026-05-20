@@ -54,21 +54,61 @@ const fmtDate = (val: any) => {
   } catch { return '—'; }
 };
 
+const SCOPED_DETECT_COLS = ['clients', 'empleados', 'turnos', 'servicios_sla', 'ausencias', 'novedades'];
+
+/** Infiera empresa origen desde el contenido del JSON (meta a veces viene mal o vacía). */
+function detectDominantEmpresaInPayload(backup: Record<string, unknown>): { empresaId: string; legacyCount: number } {
+  const counts = new Map<string, number>();
+  let legacyCount = 0;
+  for (const col of SCOPED_DETECT_COLS) {
+    const rows = backup[col];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const emp = String((row as Record<string, unknown>).empresaId ?? '').trim();
+      if (!emp) {
+        legacyCount += 1;
+        continue;
+      }
+      counts.set(emp, (counts.get(emp) || 0) + 1);
+    }
+  }
+  let empresaId = '';
+  let max = 0;
+  counts.forEach((n, id) => {
+    if (n > max) {
+      max = n;
+      empresaId = id;
+    }
+  });
+  return { empresaId, legacyCount };
+}
+
 function resolveBackupImportKind(
   meta: Record<string, unknown>,
   empresaId: string,
   scopeEmpresa: boolean,
+  backup?: Record<string, unknown>,
 ) {
-  const backupEmpresa = String(meta.empresaId ?? '').trim();
   if (!scopeEmpresa || !empresaId) {
     return { platformImport: false, tenantImport: false, sourceEmpresaId: '' };
   }
-  if (!backupEmpresa && meta.scopeEmpresa !== true) {
+  const backupEmpresaMeta = String(meta.empresaId ?? '').trim();
+  const detected = backup ? detectDominantEmpresaInPayload(backup) : { empresaId: '', legacyCount: 0 };
+
+  let sourceEmpresaId = backupEmpresaMeta || detected.empresaId;
+  if (!sourceEmpresaId && detected.legacyCount > 0) {
+    sourceEmpresaId = 'bacarsa';
+  }
+
+  if (sourceEmpresaId && sourceEmpresaId.toLowerCase() !== empresaId.toLowerCase()) {
+    return { platformImport: false, tenantImport: true, sourceEmpresaId };
+  }
+
+  if (!backupEmpresaMeta && meta.scopeEmpresa !== true && (detected.legacyCount > 0 || !detected.empresaId)) {
     return { platformImport: true, tenantImport: false, sourceEmpresaId: '' };
   }
-  if (backupEmpresa && backupEmpresa.toLowerCase() !== empresaId.toLowerCase()) {
-    return { platformImport: false, tenantImport: true, sourceEmpresaId: backupEmpresa };
-  }
+
   return { platformImport: false, tenantImport: false, sourceEmpresaId: '' };
 }
 
@@ -183,7 +223,7 @@ export default function BackupTab() {
 
   const validateBackupJsonForEmpresa = (backup: Record<string, unknown>) => {
     const meta = (backup._meta ?? {}) as Record<string, unknown>;
-    const importKind = resolveBackupImportKind(meta, empresaId, scopeEmpresa);
+    const importKind = resolveBackupImportKind(meta, empresaId, scopeEmpresa, backup);
     if (importKind.tenantImport && !isSuperAdmin) {
       throw new Error(`El archivo pertenece a otra empresa (${importKind.sourceEmpresaId}). Solo superadmin puede importarlo a ${empresaId}.`);
     }
@@ -590,7 +630,9 @@ export default function BackupTab() {
               {restoreModal.tenantImport && scopeEmpresa ? (
                 <>
                   <ShieldAlert size={14} className="inline mr-1.5" />
-                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos con IDs nuevos. Usá <b>solo Full</b> (Merge duplica datos). <b>No se importan usuarios del panel</b> (system_users): el SuperAdmin es global y accede a todas las empresas con el selector superior; creá usuarios admin para {empresa?.name || empresaId} manualmente si hace falta.
+                  <span className="uppercase text-[11px] tracking-wide">Importación cross-tenant</span>
+                  <br />
+                  Importación desde otra empresa (<b>{empresas.find(e => e.id === restoreModal.sourceEmpresaId)?.name || restoreModal.sourceEmpresaId}</b> → <b>{empresa?.name || empresaId}</b>): se copiarán empleados, clientes, turnos y demás datos con <b>IDs nuevos</b> y <code>empresaId</code> de destino. Usá <b>solo Full</b> (Merge duplica datos). <b>No se importan usuarios del panel</b> (system_users): el SuperAdmin es global y accede a todas las empresas con el selector superior; creá usuarios admin para {empresa?.name || empresaId} manualmente si hace falta.
                 </>
               ) : restoreModal.platformImport && scopeEmpresa ? (
                 <>

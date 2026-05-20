@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
+import { db, functions, auth } from '@/lib/firebase';
+import { doc as fsDoc, onSnapshot } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 
 export default function EmpresasTab() {
   const { isSuperAdmin } = useAuth();
@@ -132,6 +135,64 @@ export default function EmpresasTab() {
   // Migración
   const [progreso, setProgreso] = useState<ProgresoMigracion | null>(null);
   const [migrando, setMigrando] = useState(false);
+
+  // Copiar datos entre empresas (superadmin)
+  const [copySourceId, setCopySourceId] = useState('');
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [copyConfirmInput, setCopyConfirmInput] = useState('');
+  const [copyRunning, setCopyRunning] = useState(false);
+  const [copyProgress, setCopyProgress] = useState<{ phase: string; docsCopied: number; docsDeleted: number } | null>(null);
+
+  const sourceOptions = empresas.filter((e) => e.id !== empresaId && e.active !== false);
+
+  React.useEffect(() => {
+    if (!copySourceId && sourceOptions.length > 0) {
+      setCopySourceId(sourceOptions[0].id);
+    }
+  }, [empresaId, empresas, sourceOptions.length, copySourceId]);
+
+  const handleCopyEmpresaData = async () => {
+    if (!empresaId || !copySourceId) return;
+    if (copyConfirmInput.trim() !== empresaId) {
+      toast.error(`Escribí el ID destino: ${empresaId}`);
+      return;
+    }
+    setCopyRunning(true);
+    setCopyProgress({ phase: 'Encolando…', docsCopied: 0, docsDeleted: 0 });
+    const jobId = `migrate_${Date.now()}`;
+    const jobRef = fsDoc(db, 'empresa_migrate_jobs', jobId);
+    let unsub: (() => void) | null = null;
+    try {
+      await auth.currentUser?.getIdToken(true);
+      const donePromise = new Promise<void>((resolve, reject) => {
+        unsub = onSnapshot(jobRef, (snap) => {
+          const d = snap.data();
+          if (!d) return;
+          setCopyProgress({
+            phase: String(d.phase ?? ''),
+            docsCopied: Number(d.docsCopied ?? 0),
+            docsDeleted: Number(d.docsDeleted ?? 0),
+          });
+          if (d.status === 'done') resolve();
+          if (d.status === 'error') reject(new Error(String(d.error ?? 'Error en migración')));
+        });
+      });
+
+      const fn = httpsCallable(functions, 'migrateEmpresaData', { timeout: 120000 });
+      await fn({ sourceEmpresaId: copySourceId, targetEmpresaId: empresaId, jobId });
+
+      await donePromise;
+      toast.success(`Datos copiados a ${empresa?.name || empresaId}`);
+      setCopyModalOpen(false);
+      setCopyConfirmInput('');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Error al copiar datos');
+    } finally {
+      unsub?.();
+      setCopyRunning(false);
+      setCopyProgress(null);
+    }
+  };
 
   // ── Crear nueva empresa ─────────────────────────────────────────────────────
   const handleCrearEmpresa = async () => {
@@ -490,6 +551,57 @@ export default function EmpresasTab() {
         </button>
       </div>
 
+      {/* ── Copiar datos desde otra empresa (superadmin) ── */}
+      {isSuperAdmin && empresaId && sourceOptions.length > 0 && (
+        <div className="bg-violet-50 border border-violet-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <Copy size={18} className="text-violet-600" />
+            <h3 className="text-sm font-black text-violet-900 uppercase tracking-wide">
+              Copiar datos a «{empresa?.name || empresaId}»
+            </h3>
+          </div>
+          <p className="text-xs text-violet-800 font-medium mb-4 leading-relaxed">
+            Copia empleados, clientes, turnos, SLA y demás datos desde otra empresa hacia la <strong>empresa activa</strong>.
+            Borra primero todo lo que ya exista en destino y crea documentos con <strong>IDs nuevos</strong> y{' '}
+            <code className="bg-violet-100 px-1 rounded font-mono">empresaId: {empresaId}</code>.
+            <strong> No modifica la empresa origen</strong> (ej. Bacarsa queda intacta).
+          </p>
+          <div className="flex flex-wrap items-end gap-3 mb-4">
+            <div className="min-w-[200px]">
+              <label className="block text-[10px] font-black text-violet-700 uppercase mb-1">Copiar desde</label>
+              <select
+                value={copySourceId}
+                onChange={(e) => setCopySourceId(e.target.value)}
+                className="w-full px-3 py-2 border border-violet-200 rounded-xl text-sm font-bold bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
+              >
+                {sourceOptions.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name || e.id}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setCopyConfirmInput(''); setCopyModalOpen(true); }}
+              disabled={copyRunning || !copySourceId}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-black bg-violet-600 hover:bg-violet-700 text-white shadow-sm disabled:opacity-50 transition-colors"
+            >
+              {copyRunning ? <Loader2 size={15} className="animate-spin" /> : <Copy size={15} />}
+              {copyRunning ? 'Copiando…' : 'Copiar datos'}
+            </button>
+          </div>
+          {copyProgress && (
+            <div className="p-3 rounded-xl border border-violet-200 bg-white text-xs font-bold text-violet-800">
+              {copyProgress.phase}
+              {(copyProgress.docsCopied > 0 || copyProgress.docsDeleted > 0) && (
+                <span className="ml-2 text-violet-500">
+                  (+{copyProgress.docsCopied.toLocaleString()} copiados · {copyProgress.docsDeleted.toLocaleString()} borrados en destino)
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Asignar usuarios a empresa (info) ── */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
         <p className="text-xs font-black text-blue-700 uppercase tracking-wide mb-1">¿Cómo asignar usuarios a una empresa?</p>
@@ -499,6 +611,56 @@ export default function EmpresasTab() {
           El <strong>SuperAdmin</strong> puede ver y cambiar entre todas las empresas desde el selector en el topbar.
         </p>
       </div>
+
+      {/* ── Modal copiar datos ── */}
+      {copyModalOpen && (
+        <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                <Copy size={20} className="text-violet-600" />
+              </div>
+              <div>
+                <p className="text-sm font-black text-slate-800">Copiar datos entre empresas</p>
+                <p className="text-xs text-slate-500">
+                  {empresas.find((e) => e.id === copySourceId)?.name || copySourceId} → {empresa?.name || empresaId}
+                </p>
+              </div>
+              <button type="button" onClick={() => !copyRunning && setCopyModalOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-xs text-violet-900 font-medium space-y-2">
+              <p>Se <strong>borrarán todos los datos</strong> actuales de «{empresa?.name || empresaId}» y se copiarán desde origen con IDs nuevos.</p>
+              <p>Bacarsa / origen <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-600 mb-2">
+                Escribí <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-violet-700">{empresaId}</code> para confirmar:
+              </p>
+              <input
+                value={copyConfirmInput}
+                onChange={(e) => setCopyConfirmInput(e.target.value)}
+                placeholder={empresaId}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={() => setCopyModalOpen(false)} disabled={copyRunning} className="px-4 py-2 text-xs font-bold text-slate-500">Cancelar</button>
+              <button
+                type="button"
+                onClick={handleCopyEmpresaData}
+                disabled={copyRunning || copyConfirmInput.trim() !== empresaId}
+                className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-black hover:bg-violet-700 disabled:opacity-40"
+              >
+                {copyRunning ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
+                Confirmar copia
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Modal eliminación ── */}
       {deleteStep !== 'idle' && deleteTarget && (

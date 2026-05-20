@@ -16,7 +16,7 @@ export interface Empresa {
   plan?: string;
   active?: boolean;
   primaryColor?: string;
-  assistantEnabled?: boolean;
+  migracionCompleta?: boolean;
 }
 
 interface EmpresaContextType {

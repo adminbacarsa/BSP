@@ -1,9 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.RESTORE_COLLECTION_ORDER = void 0;
 exports.serializeIdMaps = serializeIdMaps;
 exports.deserializeIdMaps = deserializeIdMaps;
 exports.downloadBackupPayloadFromStorage = downloadBackupPayloadFromStorage;
 exports.deleteBackupStorageFile = deleteBackupStorageFile;
+exports.allocateCloneDocId = allocateCloneDocId;
+exports.remapCloneDocumentFields = remapCloneDocumentFields;
+exports.deleteDocsWhereEmpresaId = deleteDocsWhereEmpresaId;
 exports.runRestoreFromPayload = runRestoreFromPayload;
 exports.runRestore = runRestore;
 exports.runRestoreFromStorage = runRestoreFromStorage;
@@ -53,13 +57,14 @@ const EMPRESA_SCOPED_COLLECTIONS = new Set([
     'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
     'objetivos', 'audit_logs', 'user_notifications', 'system_users',
 ]);
-const RESTORE_COLLECTION_ORDER = [
+exports.RESTORE_COLLECTION_ORDER = [
     'clients', 'clientes', 'empleados', 'objetivos', 'tipos_turno',
     'servicios_sla', 'contratos_servicio', 'turnos', 'ausencias',
-    'novedades', 'swap_requests', 'user_notifications', 'empresas',
+    'novedades', 'swap_requests', 'user_notifications', 'planificacion_estados',
+    'empresas',
 ];
 function collectionSortIndex(name) {
-    const i = RESTORE_COLLECTION_ORDER.indexOf(name);
+    const i = exports.RESTORE_COLLECTION_ORDER.indexOf(name);
     return i >= 0 ? i : 999;
 }
 function allocateCloneDocId(db, colName, oldId, idMaps) {
@@ -99,6 +104,10 @@ function remapCloneDocumentFields(colName, data, idMaps, db) {
     }
     if (colName === 'servicios_sla' || colName === 'contratos_servicio') {
         setMappedForeignField(clean, 'clientId', idMaps, 'clients', clean.clientId);
+        setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
+    }
+    if (colName === 'planificacion_estados') {
+        setMappedForeignField(clean, 'objetivoId', idMaps, 'objetivos', clean.objetivoId);
         setMappedForeignField(clean, 'objectiveId', idMaps, 'objetivos', clean.objectiveId);
     }
     if (colName === 'clients' && Array.isArray(clean.objetivos)) {
@@ -256,6 +265,35 @@ function isPlatformBackup(payload) {
     const backupEmpresa = String(meta.empresaId ?? '').trim();
     return !backupEmpresa && meta.scopeEmpresa !== true;
 }
+const DETECT_EMPRESA_COLS = ['clients', 'empleados', 'turnos', 'servicios_sla', 'ausencias', 'novedades'];
+function detectDominantEmpresaInPayload(payload) {
+    const counts = new Map();
+    let legacyCount = 0;
+    for (const col of DETECT_EMPRESA_COLS) {
+        const rows = payload[col];
+        if (!Array.isArray(rows))
+            continue;
+        for (const row of rows) {
+            if (!row || typeof row !== 'object')
+                continue;
+            const emp = String(row.empresaId ?? '').trim();
+            if (!emp) {
+                legacyCount += 1;
+                continue;
+            }
+            counts.set(emp, (counts.get(emp) || 0) + 1);
+        }
+    }
+    let empresaId = '';
+    let max = 0;
+    counts.forEach((n, id) => {
+        if (n > max) {
+            max = n;
+            empresaId = id;
+        }
+    });
+    return { empresaId, legacyCount };
+}
 function assertBackupAllowedForRestore(payload, opts) {
     const meta = (payload._meta ?? {});
     const backupEmpresa = String(meta.empresaId ?? '').trim();
@@ -321,9 +359,22 @@ async function deleteCollectionForRestore(db, colName, mode, opts, batchSize) {
 async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, partial = {}) {
     const t0 = Date.now();
     const db = admin.firestore();
-    assertBackupAllowedForRestore(payload, opts);
     const meta = (payload._meta ?? {});
     const backupEmpresa = String(meta.empresaId ?? '').trim();
+    const sessionEmpresa = String(opts.empresaId ?? '').trim();
+    const detected = detectDominantEmpresaInPayload(payload);
+    let inferredSource = backupEmpresa || detected.empresaId;
+    if (!inferredSource && detected.legacyCount > 0) {
+        inferredSource = 'bacarsa';
+    }
+    if (opts.scopeEmpresa &&
+        sessionEmpresa &&
+        inferredSource &&
+        inferredSource.toLowerCase() !== sessionEmpresa.toLowerCase()) {
+        opts.tenantImport = true;
+        opts.sourceEmpresaId = opts.sourceEmpresaId || inferredSource;
+    }
+    assertBackupAllowedForRestore(payload, opts);
     const platformImport = isPlatformBackup(payload) && opts.scopeEmpresa === true && !!opts.empresaId;
     const sourceEmpresaId = String(opts.sourceEmpresaId ?? backupEmpresa).trim();
     const tenantImport = opts.tenantImport === true &&
@@ -332,6 +383,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
         !!sourceEmpresaId &&
         sourceEmpresaId.toLowerCase() !== opts.empresaId.toLowerCase();
     const retagEmpresaId = platformImport || tenantImport;
+    const effectiveMode = tenantImport && mode === 'merge' ? 'full' : mode;
     const setJob = (data) => {
         if (!jobId)
             return Promise.resolve();
@@ -365,8 +417,8 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
         for (let ci = startCol; ci < endCol; ci++) {
             const [colName, docs] = filteredEntries[ci];
             await setJob({ phase: `Restaurando ${colName} (${ci + 1}/${filteredEntries.length})…`, docsRestored: restoredCounter.count, total });
-            docsDeleted += await deleteCollectionForRestore(db, colName, mode, opts, DELETE_BATCH_SIZE);
-            await writeCollectionWithBulkWriter(db, colName, docs, mode, retagEmpresaId, opts, idMaps, ci, filteredEntries.length, total, setJob, restoredCounter);
+            docsDeleted += await deleteCollectionForRestore(db, colName, effectiveMode, opts, DELETE_BATCH_SIZE);
+            await writeCollectionWithBulkWriter(db, colName, docs, effectiveMode, retagEmpresaId, opts, idMaps, ci, filteredEntries.length, total, setJob, restoredCounter);
         }
         docsRestored = restoredCounter.count;
         const isComplete = endCol >= filteredEntries.length;
@@ -377,8 +429,8 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
                 module: 'SISTEMA',
                 actorName: 'Admin',
                 details: tenantImport
-                    ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${mode}) desde ${fileName} — ${docsRestored} docs`
-                    : `Restauración ${mode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
+                    ? `Importación cross-tenant ${sourceEmpresaId} → ${opts.empresaId} (${effectiveMode}) desde ${fileName} — ${docsRestored} docs`
+                    : `Restauración ${effectiveMode === 'full' ? 'completa' : 'parcial (merge)'} desde ${fileName} — ${docsRestored} docs`,
                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
                 ...(opts.empresaId ? { empresaId: opts.empresaId } : {}),
             });
@@ -392,7 +444,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
             });
         }
         return {
-            mode,
+            mode: effectiveMode,
             fileName,
             collections: filteredEntries.map(([c]) => c),
             docsRestored,

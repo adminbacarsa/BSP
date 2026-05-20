@@ -24,6 +24,7 @@ import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
+import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa } from '@/lib/multiempresa';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 
@@ -45,12 +46,16 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 
 // --- MODALES (LÓGICA OPERATIVA) ---
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !incomingShift) return null;
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
     const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
     const handleConfirm = async (prevShiftId: string | null) => {
         try {
+            await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
+            if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
             if (prevShiftId) {
@@ -65,24 +70,26 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
 };
 
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !shift) return null;
     const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
     const isAlone = colleagues.length === 0;
     const handleLog = async () => {
         try {
-            const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', shift.id), { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' });
-            await batch.commit();
-            await addDoc(collection(db, 'novedades'), { type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' });
+            await updateDocForEmpresa('turnos', shift.id, { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
+            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
             toast.success("Baja registrada. Puesto cubierto.");
             onClose();
         } catch (e: any) { toast.error('Error al registrar baja: ' + (e?.message || e?.code || String(e))); }
     };
     const handleProtocol = async () => {
         try {
-            await updateDoc(doc(db, 'turnos', shift.id), { status: 'INTERRUPTED', realEndTime: serverTimestamp() });
+            await updateDocForEmpresa('turnos', shift.id, { status: 'INTERRUPTED', realEndTime: serverTimestamp() }, empresaId, migracionCompleta);
             const endTs = shift.endDateObj ? Timestamp.fromDate(shift.endDateObj instanceof Date ? shift.endDateObj : new Date(shift.endDateObj)) : null;
-            const vacancyPayload: any = {
+            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+            const vacancyPayload: any = stampEmpresaId({
                 clientId: shift.clientId, clientName: shift.clientName,
                 objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
                 positionName: shift.positionName,
@@ -90,7 +97,7 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                 startTime: serverTimestamp(),
                 status: 'UNCOVERED_REPORTED', isUnassigned: true, isPresent: false, isReported: true,
                 origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp(),
-            };
+            }, shiftEmpresaId);
             if (endTs) vacancyPayload.endTime = endTs;
             const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
             onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
@@ -489,7 +496,8 @@ const useElapsedTime = (startTime: Date | null) => {
 export default function OperacionesPage() {
     const router = useRouter();
     const { assignedClientId } = useAuth();
-    const { empresaId } = useEmpresa();
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const logic = useOperacionesMonitor(assignedClientId);
     const session = useOperatorSession();
     const elapsed = useElapsedTime(session.activeSession?.startTime || null);
@@ -905,10 +913,11 @@ export default function OperacionesPage() {
             const dayEnd    = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
 
             // 1. Marcar el turno como ausente
-            await updateDoc(doc(db, 'turnos', shift.id), { status: 'ABSENT', isAbsent: true });
+            await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true }, empresaId, migracionCompleta);
+            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
 
             // 2. Crear registro en colección ausencias (para RRHH)
-            await addDoc(collection(db, 'ausencias'), {
+            await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                 employeeId:   shift.employeeId,
                 employeeName: shift.employeeName,
                 clientId:     shift.clientId   || null,
@@ -921,10 +930,10 @@ export default function OperacionesPage() {
                 createdAt:    serverTimestamp(),
                 origin:       'OPERACIONES',
                 shiftId:      shift.id,
-            });
+            }, shiftEmpresaId));
 
             // 3. Notificar a RRHH y Planificación vía novedades
-            await addDoc(collection(db, 'novedades'), {
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type:         'AUSENCIA_OPERATIVA',
                 title:        'Ausencia registrada desde Operaciones',
                 status:       'pending',
@@ -936,7 +945,7 @@ export default function OperacionesPage() {
                 description:  `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${new Date(shiftDate).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})})`,
                 createdAt:    serverTimestamp(),
                 reportedBy:   'OPERACIONES',
-            });
+            }, shiftEmpresaId));
 
             setAttendanceData({isOpen:false, shift:null});
             setCoverageData({isOpen:true, shift: shift});

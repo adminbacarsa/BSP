@@ -1,7 +1,7 @@
 
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
-import { empresaScopedQuery } from '@/lib/multiempresa';
+import { empresaScopedQuery, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 
 export interface Absence {
   id?: string;
@@ -53,12 +53,22 @@ export const absenceService = {
     return scope ? rows.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')) : rows;
   },
 
-  add: async (data: Absence) => addDoc(collection(db, 'ausencias'), {
+  add: async (data: Absence, empresaId?: string) => addDoc(collection(db, 'ausencias'), stampEmpresaId({
       ...data,
-      createdAt: new Date().toISOString()
-  }),
+      createdAt: new Date().toISOString(),
+  }, empresaId || '')),
 
-  update: async (id: string, data: Partial<Absence>) => updateDoc(doc(db, 'ausencias', id), data),
-  
-  delete: (id: string) => deleteDoc(doc(db, 'ausencias', id))
+  update: async (id: string, data: Partial<Absence>, opts?: { empresaId: string; migracionCompleta: boolean }) => {
+    if (opts?.empresaId) {
+      return updateDocForEmpresa('ausencias', id, data as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
+    }
+    return updateDoc(doc(db, 'ausencias', id), data);
+  },
+
+  delete: (id: string, opts?: { empresaId: string; migracionCompleta: boolean }) => {
+    if (opts?.empresaId) {
+      return deleteDocForEmpresa('ausencias', id, opts.empresaId, opts.migracionCompleta);
+    }
+    return deleteDoc(doc(db, 'ausencias', id));
+  },
 };

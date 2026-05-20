@@ -16,7 +16,10 @@ import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSche
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { filterSlaRowsByEmpresa, belongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import {
+  filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
+  deleteDocsByIdsForEmpresa, deleteSlaForEmpresa, TenantIsolationError,
+} from '@/lib/multiempresa';
 
 function toYyyyMmDd(value: unknown): string {
   if (value == null) return '';
@@ -664,17 +667,10 @@ export default function ServiciosSLAPage() {
           const msg = `⚠️ Cambio de fechas detectado.\n\nSe eliminarán:\n• ${turnosToDelete.length} turno(s)\n• ${ausToDelete.length} ausencia(s)\n• ${novToDelete.length} novedad(es)\n\ndel objetivo "${form.objectiveName}" fuera del nuevo rango.\n\n¿Confirmar?`;
           if (!confirm(msg)) return;
 
-          const deleteBatch = async (col: string, ids: string[]) => {
-            for (let i = 0; i < ids.length; i += 400) {
-              const b = writeBatch(db);
-              ids.slice(i, i + 400).forEach(id => b.delete(doc(db, col, id)));
-              await b.commit();
-            }
-          };
           await Promise.all([
-            deleteBatch('turnos', turnosToDelete),
-            deleteBatch('ausencias', ausToDelete),
-            deleteBatch('novedades', novToDelete),
+            deleteDocsByIdsForEmpresa('turnos', turnosToDelete, empresaId, migracionCompleta),
+            deleteDocsByIdsForEmpresa('ausencias', ausToDelete, empresaId, migracionCompleta),
+            deleteDocsByIdsForEmpresa('novedades', novToDelete, empresaId, migracionCompleta),
           ]);
           addToast(`${turnosToDelete.length} turno(s) eliminados del objetivo`, 'success');
         }
@@ -689,13 +685,13 @@ export default function ServiciosSLAPage() {
     try {
       if (isEditing && form.id) {
           savedSelfRef.current = true;
-          await slaService.update(form.id, dataToSave);
+          await slaService.update(form.id, dataToSave, { empresaId, migracionCompleta });
           // Actualización optimista: no esperar al snapshot
           setServices(prev => prev.map(s => s.id === form.id ? { ...dataToSave, id: form.id } : s));
           await registrarAuditoria('UPDATE_CONTRACT', `Editó contrato: ${form.clientName} - ${form.objectiveName}`);
       } else {
           delete dataToSave.id; // garantizar que no va id undefined al crear
-          const ref = await slaService.add(dataToSave);
+          const ref = await slaService.add(dataToSave, empresaId);
           // Actualización optimista: agregar inmediatamente con el nuevo id
           setServices(prev => [...prev, { ...dataToSave, id: ref.id }]);
           await registrarAuditoria('CREATE_CONTRACT', `Creó contrato: ${form.clientName} - ${form.objectiveName}`);
@@ -745,7 +741,7 @@ export default function ServiciosSLAPage() {
       where('startTime', '<=', rangeEnd)
     ));
     const shiftIds = turnosSnap.docs
-      .filter(d => !scopeEmpresa || belongsToEmpresa(d.data(), empresaId, true))
+      .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
       .map(d => d.id);
 
     // Buscar ausencias y novedades vinculadas (chunks de 30)
@@ -774,22 +770,18 @@ export default function ServiciosSLAPage() {
     ].join('\n');
     if (!confirm(msg)) return;
 
-    const deleteBatch = async (col: string, ids: string[]) => {
-      for (let i = 0; i < ids.length; i += 400) {
-        const b = writeBatch(db);
-        ids.slice(i, i + 400).forEach(docId => b.delete(doc(db, col, docId)));
-        await b.commit();
-      }
-    };
-
-    await Promise.all([
-      deleteBatch('turnos', shiftIds),
-      deleteBatch('ausencias', ausIds),
-      deleteBatch('novedades', novIds),
-    ]);
-    await slaService.delete(id);
-    await registrarAuditoria('DELETE_CONTRACT', `Eliminó contrato: ${srv.clientName} - ${srv.objectiveName} (${shiftIds.length} turnos)`);
-    addToast(`Servicio eliminado con ${shiftIds.length} turno(s)`, 'success');
+    try {
+      await Promise.all([
+        deleteDocsByIdsForEmpresa('turnos', shiftIds, empresaId, migracionCompleta),
+        deleteDocsByIdsForEmpresa('ausencias', ausIds, empresaId, migracionCompleta),
+        deleteDocsByIdsForEmpresa('novedades', novIds, empresaId, migracionCompleta),
+      ]);
+      await deleteSlaForEmpresa(id, empresaId, migracionCompleta);
+      await registrarAuditoria('DELETE_CONTRACT', `Eliminó contrato: ${srv.clientName} - ${srv.objectiveName} (${shiftIds.length} turnos)`);
+      addToast(`Servicio eliminado con ${shiftIds.length} turno(s)`, 'success');
+    } catch (e) {
+      addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar servicio', 'error');
+    }
   };
 
   const openNew = () => {

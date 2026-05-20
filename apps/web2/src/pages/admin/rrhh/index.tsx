@@ -12,7 +12,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, onSnapshot, limit } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
+import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView, deleteEmployeeForEmpresa, queryAndDeleteForEmpresa, stampEmpresaId, updateDocForEmpresa, TenantIsolationError } from '@/lib/multiempresa';
 import { useToast } from '@/context/ToastContext';
 import {
     Users, Search, Plus, Edit2, Trash2,
@@ -301,8 +301,51 @@ export default function EmployeesPage() {
 
   const getCycleDates = (refDate: Date, startDay: number = 26) => { const year = refDate.getFullYear(); const month = refDate.getMonth(); const start = new Date(year, month - 1, startDay); start.setHours(0,0,0,0); const end = new Date(year, month, startDay - 1); end.setHours(23,59,59,999); return { start, end }; };
 
-  const replicarAusenciaEnPlanificador = async (absenceId: string, data: Absence) => { try { const auth = getAuth(); const u = auth.currentUser; const q = query(collection(db, 'turnos'), where('absenceId', '==', absenceId)); const snapshot = await getDocs(q); const batch = writeBatch(db); snapshot.docs.forEach(d => batch.delete(d.ref)); const [sY, sM, sD] = data.startDate.split('-').map(Number); const [eY, eM, eD] = data.endDate.split('-').map(Number); const start = new Date(sY, sM - 1, sD); const end = new Date(eY, eM - 1, eD); const absenceCodeMap: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Injustificada': 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG' }; let code = absenceCodeMap[data.type] || 'AA'; for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) { const turnoRef = doc(collection(db, 'turnos')); batch.set(turnoRef, { employeeId: data.employeeId, employeeName: data.employeeName, startTime: Timestamp.fromDate(new Date(d.setHours(0, 0, 0, 0))), endTime: Timestamp.fromDate(new Date(d.setHours(23, 59, 59, 999))), type: 'NOVEDAD', code: code, status: 'Approved', objectiveName: `NOVEDAD - ${data.type}`, clientId: 'INTERNO', absenceId: absenceId, isFranco: false, comments: data.reason }); } await batch.commit(); } catch (e) { addToast('Error replicando', 'error'); } };
-  const eliminarReplicasPlanificador = async (absenceId: string) => { try { const q = query(collection(db, 'turnos'), where('absenceId', '==', absenceId)); const snapshot = await getDocs(q); const batch = writeBatch(db); snapshot.docs.forEach(d => batch.delete(d.ref)); await batch.commit(); } catch (e) {} };
+  const replicarAusenciaEnPlanificador = async (absenceId: string, data: Absence) => {
+    try {
+      const turnosQ = query(collection(db, 'turnos'), where('absenceId', '==', absenceId));
+      await queryAndDeleteForEmpresa('turnos', turnosQ, empresaId, migracionCompleta);
+      const [sY, sM, sD] = data.startDate.split('-').map(Number);
+      const [eY, eM, eD] = data.endDate.split('-').map(Number);
+      const start = new Date(sY, sM - 1, sD);
+      const end = new Date(eY, eM - 1, eD);
+      const absenceCodeMap: Record<string, string> = {
+        Vacaciones: 'V', Enfermedad: 'E', ART: 'A', Injustificada: 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG',
+      };
+      const code = absenceCodeMap[data.type] || 'AA';
+      const batch = writeBatch(db);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const turnoRef = doc(collection(db, 'turnos'));
+        batch.set(turnoRef, stampEmpresaId({
+          employeeId: data.employeeId,
+          employeeName: data.employeeName,
+          startTime: Timestamp.fromDate(new Date(new Date(d).setHours(0, 0, 0, 0))),
+          endTime: Timestamp.fromDate(new Date(new Date(d).setHours(23, 59, 59, 999))),
+          type: 'NOVEDAD',
+          code,
+          status: 'Approved',
+          objectiveName: `NOVEDAD - ${data.type}`,
+          clientId: 'INTERNO',
+          absenceId,
+          isFranco: false,
+          comments: data.reason,
+        }, empresaId));
+      }
+      await batch.commit();
+    } catch (e) {
+      const msg = e instanceof TenantIsolationError ? e.message : 'Error replicando';
+      addToast(msg, 'error');
+    }
+  };
+
+  const eliminarReplicasPlanificador = async (absenceId: string) => {
+    try {
+      const turnosQ = query(collection(db, 'turnos'), where('absenceId', '==', absenceId));
+      await queryAndDeleteForEmpresa('turnos', turnosQ, empresaId, migracionCompleta);
+    } catch {
+      /* noop */
+    }
+  };
 
   useEffect(() => { loadData(); loadClientsAndObjectives(); loadAbsences(); loadHolidays(); loadAgreements(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -631,7 +674,7 @@ export default function EmployeesPage() {
 
       try { 
           if (isEditing && form.id) { 
-              await updateDoc(doc(db, 'empleados', form.id), dataToSave);
+              await updateDocForEmpresa('empleados', form.id, dataToSave, empresaId, migracionCompleta);
               await registrarAuditoria('UPDATE_EMPLOYEE', `Modificó legajo: ${form.fileNumber} - ${form.lastName}`); 
           } else {
               if (form.dni && employees.some(e => e.id !== form.id && e.dni === form.dni))
@@ -768,17 +811,28 @@ export default function EmployeesPage() {
       addToast('Coordenadas guardadas manualmente', 'success');
   };
   
-  const handleDelete = async (id: string) => { const emp = employees.find(e => e.id === id); if(confirm('?')) { await deleteDoc(doc(db, 'empleados', id)); await registrarAuditoria('DELETE_EMPLOYEE', `Eliminó legajo: ${emp?.fileNumber} - ${emp?.lastName}`); loadData(); setSelectedEmp(null); } };
+  const handleDelete = async (id: string) => {
+    const emp = employees.find(e => e.id === id);
+    if (!confirm(`¿Eliminar legajo ${emp?.fileNumber || id}?`)) return;
+    try {
+      await deleteEmployeeForEmpresa(id, empresaId, migracionCompleta);
+      await registrarAuditoria('DELETE_EMPLOYEE', `Eliminó legajo: ${emp?.fileNumber} - ${emp?.lastName}`);
+      loadData();
+      setSelectedEmp(null);
+    } catch (e) {
+      addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar', 'error');
+    }
+  };
 
   const handleDarDeBaja = async () => {
     if (!selectedEmp?.id) return;
     try {
-      await updateDoc(doc(db, 'empleados', selectedEmp.id), {
+      await updateDocForEmpresa('empleados', selectedEmp.id, {
         status: 'inactivo',
         motivoBaja: bajaForm.motivo,
         fechaBaja: bajaForm.fecha,
         observacionBaja: bajaForm.observacion || '',
-      });
+      }, empresaId, migracionCompleta);
       await registrarAuditoria('BAJA_EMPLEADO', `Baja: ${selectedEmp.lastName}, ${selectedEmp.firstName} | Motivo: ${bajaForm.motivo} | Fecha: ${bajaForm.fecha}`);
       addToast(`${selectedEmp.lastName} dado de baja (${bajaForm.motivo})`, 'success');
       setShowBajaModal(false);
@@ -790,14 +844,29 @@ export default function EmployeesPage() {
   const handleReactivar = async (emp: any) => {
     if (!emp?.id || !confirm(`¿Reactivar a ${emp.lastName}, ${emp.firstName}?`)) return;
     try {
-      await updateDoc(doc(db, 'empleados', emp.id), { status: 'activo', motivoBaja: null, fechaBaja: null, observacionBaja: null });
+      await updateDocForEmpresa('empleados', emp.id, { status: 'activo', motivoBaja: null, fechaBaja: null, observacionBaja: null }, empresaId, migracionCompleta);
       await registrarAuditoria('REACTIVACION_EMPLEADO', `Reactivó: ${emp.lastName}, ${emp.firstName}`);
       addToast(`${emp.lastName} reactivado`, 'success');
       loadData();
       setSelectedEmp(null);
     } catch (e) { addToast('Error al reactivar', 'error'); }
   };
-  const handleDeleteAll = async () => { if(!confirm('BORRAR TODO?')) return; setIsDeletingAll(true); try { for (const emp of employees) { if (emp.id) await deleteDoc(doc(db, 'empleados', emp.id)); } await registrarAuditoria('DELETE_ALL', `Eliminación masiva`); addToast(`Eliminados.`, 'success'); loadData(); } catch (e) { console.error(e); } finally { setIsDeletingAll(false); } };
+  const handleDeleteAll = async () => {
+    if (!confirm('BORRAR TODO?')) return;
+    setIsDeletingAll(true);
+    try {
+      for (const emp of employees) {
+        if (emp.id) await deleteEmployeeForEmpresa(emp.id, empresaId, migracionCompleta);
+      }
+      await registrarAuditoria('DELETE_ALL', 'Eliminación masiva');
+      addToast('Eliminados.', 'success');
+      loadData();
+    } catch (e) {
+      addToast(e instanceof TenantIsolationError ? e.message : 'Error en eliminación masiva', 'error');
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
   const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
   const openEditFromDetail = () => { if (!selectedEmp) return; setForm(selectedEmp); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
   const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
@@ -809,8 +878,8 @@ export default function EmployeesPage() {
   const handleEditAgreement = (a: Agreement) => { setAgreementForm(a as ExtendedAgreement); setIsEditingAgreement(true); };
   const handleDeleteAgreement = async (id: string) => { if(confirm('?')) { await agreementService.delete(id); loadAgreements(); } };
   const handleOpenAbsenceModal = (absence?: Absence) => { if (absence) { setAbsenceForm(absence); setIsEditingAbsence(true); } else { setAbsenceForm(initialAbsenceForm); setIsEditingAbsence(false); } setEmpSearch(''); setEmpDropOpen(false); setShowAbsenceModal(true); };
-  const handleSaveAbsence = async () => { if (!absenceForm.employeeId) return addToast('Seleccione un empleado', 'error'); if (absenceForm.status === 'Rechazada' && !absenceForm.rejectionReason?.trim()) return addToast('Ingrese el motivo de rechazo', 'error'); const emp = employees.find(x => x.id === absenceForm.employeeId); const auth = getAuth(); const u = auth.currentUser; const nombreReal = u?.displayName || u?.email || "Usuario Desconocido"; const dataToSave = { ...absenceForm, employeeName: emp ? `${emp.lastName} ${emp.firstName}` : (absenceForm.employeeName || 'Desconocido'), comments: `${absenceForm.comments || ''} (Cargado por: ${nombreReal})`, createdBy: nombreReal, createdAt: new Date().toISOString() }; let savedId = ''; if (isEditingAbsence && absenceForm.id) { await absenceService.update(absenceForm.id, dataToSave); savedId = absenceForm.id; await registrarAuditoria('UPDATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Actualizado', 'success'); } else { const docRef = await absenceService.add(dataToSave); savedId = docRef.id; await registrarAuditoria('CREATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Registrado', 'success'); } if (dataToSave.status === 'Autorizada') {
-      await addDoc(collection(db, 'novedades'), {
+  const handleSaveAbsence = async () => { if (!absenceForm.employeeId) return addToast('Seleccione un empleado', 'error'); if (absenceForm.status === 'Rechazada' && !absenceForm.rejectionReason?.trim()) return addToast('Ingrese el motivo de rechazo', 'error'); const emp = employees.find(x => x.id === absenceForm.employeeId); const auth = getAuth(); const u = auth.currentUser; const nombreReal = u?.displayName || u?.email || "Usuario Desconocido"; const dataToSave = { ...absenceForm, employeeName: emp ? `${emp.lastName} ${emp.firstName}` : (absenceForm.employeeName || 'Desconocido'), comments: `${absenceForm.comments || ''} (Cargado por: ${nombreReal})`, createdBy: nombreReal, createdAt: new Date().toISOString() }; let savedId = ''; if (isEditingAbsence && absenceForm.id) { await absenceService.update(absenceForm.id, dataToSave, { empresaId, migracionCompleta }); savedId = absenceForm.id; await registrarAuditoria('UPDATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Actualizado', 'success'); } else { const docRef = await absenceService.add(dataToSave, empresaId); savedId = docRef.id; await registrarAuditoria('CREATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Registrado', 'success'); } if (dataToSave.status === 'Autorizada') {
+      await addDoc(collection(db, 'novedades'), stampEmpresaId({
         source: 'AUSENCIA',
         type: dataToSave.type,
         status: 'pending',
@@ -822,10 +891,20 @@ export default function EmployeesPage() {
         description: `${dataToSave.type} de ${dataToSave.employeeName} — ${dataToSave.startDate} al ${dataToSave.endDate}`,
         reportedBy: nombreReal,
         createdAt: serverTimestamp(),
-      });
+      }, empresaId));
     }
     setShowAbsenceModal(false); loadAbsences(); };
-  const handleDeleteAbsence = async (id: string) => { if(confirm('¿Eliminar?')) { await absenceService.delete(id); await eliminarReplicasPlanificador(id); await registrarAuditoria('DELETE_ABSENCE', `Eliminó novedad`); loadAbsences(); } };
+  const handleDeleteAbsence = async (id: string) => {
+    if (!confirm('¿Eliminar?')) return;
+    try {
+      await absenceService.delete(id, { empresaId, migracionCompleta });
+      await eliminarReplicasPlanificador(id);
+      await registrarAuditoria('DELETE_ABSENCE', 'Eliminó novedad');
+      loadAbsences();
+    } catch (e) {
+      addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar', 'error');
+    }
+  };
   const getAbsenceEmployeeName = (a: Absence) => { if (a.employeeName) return a.employeeName; const emp = employees.find(e => e.id === a.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : 'Desconocido'; };
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setFileName(file.name); const reader = new FileReader(); reader.onload = (evt) => { if (evt.target?.result) { setCsvContent(evt.target.result as string); } }; reader.readAsText(file, 'ISO-8859-1'); };
   

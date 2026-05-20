@@ -24,7 +24,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa, belongsToEmpresaView, deleteClientForEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, empresaScopedQuery, filterRowsByEmpresa, belongsToEmpresaView, deleteClientForEmpresa, assertDocBelongsToEmpresa, queryAndDeleteForEmpresa, updateDocForEmpresa, TenantIsolationError, isTenantWriteOwner } from '@/lib/multiempresa';
 import {
   AlertCircle,
   BarChart3,
@@ -267,6 +267,9 @@ export default function CRMPage() {
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    setSelectedClient(null);
+    setView('list');
+    setClients([]);
     onAuthStateChanged(getAuth(), async (u) => {
       setCurrentUserName(u?.displayName || u?.email || 'Operador');
       if (u) {
@@ -367,19 +370,41 @@ export default function CRMPage() {
     }
   };
 
+  const canDeleteClient = (c: { empresaId?: unknown; id?: string }) =>
+    isTenantWriteOwner(c, empresaId, migracionCompleta);
+
+  const clientDeleteToast = (
+    name: string,
+    r: { deletedTurnos: number; deletedSla: number; foreignTurnosLeft: number; foreignSlaLeft: number },
+  ) => {
+    let msg = `"${name}" eliminado (${r.deletedTurnos} turnos, ${r.deletedSla} SLA)`;
+    if (r.foreignTurnosLeft > 0 || r.foreignSlaLeft > 0) {
+      msg += `. Quedaron ${r.foreignTurnosLeft} turno(s) y ${r.foreignSlaLeft} SLA de otra empresa (ID compartido; Bacarsa no se tocó).`;
+    }
+    return msg;
+  };
+
   const fetchClients = async () => {
     setLoadingClients(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-      const snap = scopeEmpresa
-        ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')))
-        : await getDocs(query(collection(db, 'clients'), orderBy('name')));
+      let snap;
+      try {
+        snap = scopeEmpresa
+          ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')))
+          : await getDocs(query(collection(db, 'clients'), orderBy('name')));
+      } catch {
+        snap = scopeEmpresa
+          ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)))
+          : await getDocs(collection(db, 'clients'));
+      }
       const data = snap.docs
         .map((x) => ({ id: x.id, ...x.data() }))
         .filter((c) => belongsToEmpresaView(c, empresaId, migracionCompleta));
       setClients(data);
     } catch (e) {
       console.error(e);
+      setClients([]);
       toast.error('Error al cargar clientes');
     } finally {
       setLoadingClients(false);
@@ -575,20 +600,20 @@ export default function CRMPage() {
     if (!selectedClient?.id) return;
     if (!infoForm?.name) return;
     try {
-      await updateDoc(doc(db, 'clients', selectedClient.id), infoForm);
+      await updateDocForEmpresa('clients', selectedClient.id, infoForm, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, ...infoForm });
       setIsEditingInfo(false);
       toast.success('Actualizado');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error('Error al guardar');
+      toast.error(e?.message || 'Error al guardar');
     }
   };
 
   const handleSaveService = async () => {
     if (!editingServiceId || !selectedClient?.id) return;
     try {
-      await updateDoc(doc(db, 'servicios_sla', editingServiceId), tempService);
+      await updateDocForEmpresa('servicios_sla', editingServiceId, tempService, empresaId, migracionCompleta);
       setEditingServiceId(null);
       await loadClientFullData(selectedClient.id);
       toast.success('SLA Actualizado');
@@ -617,7 +642,7 @@ export default function CRMPage() {
     if (idx === null) updated.push(payload);
     else updated[idx] = payload;
     try {
-      await updateDoc(doc(db, 'servicios_sla', serviceId), { positions: updated });
+      await updateDocForEmpresa('servicios_sla', serviceId, { positions: updated }, empresaId, migracionCompleta);
       await loadClientFullData(selectedClient.id);
       setEditingPositionIdx(null);
       setAddingPositionToService(null);
@@ -635,7 +660,7 @@ export default function CRMPage() {
     if (!window.confirm('¿Eliminar este puesto?')) return;
     const updated = positions.filter((_, i) => i !== idx);
     try {
-      await updateDoc(doc(db, 'servicios_sla', serviceId), { positions: updated });
+      await updateDocForEmpresa('servicios_sla', serviceId, { positions: updated }, empresaId, migracionCompleta);
       await loadClientFullData(selectedClient.id);
       toast.success('Puesto eliminado');
     } catch (e) {
@@ -698,7 +723,8 @@ export default function CRMPage() {
     if (!noteText) return;
     const note = { date: new Date().toISOString(), note: noteText, user: currentUserName };
     try {
-      await updateDoc(doc(db, 'clients', selectedClient.id), { historial: arrayUnion(note) });
+      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
+      await updateDocForEmpresa('clients', selectedClient.id, { historial: arrayUnion(note) }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, historial: [...(selectedClient.historial || []), note] });
       setHistoryNote('');
       toast.success('Nota guardada');
@@ -753,13 +779,14 @@ export default function CRMPage() {
     else objetivos.push({ id: String(Date.now()), ...payload });
 
     try {
-      await updateDoc(doc(db, 'clients', selectedClient.id), { objetivos });
+      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
+      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, objetivos });
       resetObjectiveForm();
       toast.success('Objetivo guardado');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error('Error al guardar objetivo');
+      toast.error(e?.message || 'Error al guardar objetivo');
     }
   };
 
@@ -769,23 +796,26 @@ export default function CRMPage() {
     const objectiveToDelete = (selectedClient.objetivos || [])[idx];
     const objetivos = (selectedClient.objetivos || []).filter((_: any, i: number) => i !== idx);
     try {
+      await assertDocBelongsToEmpresa('clients', selectedClient.id, empresaId, migracionCompleta);
       let deletedShifts = 0;
       if (objectiveToDelete?.id) {
-        const shiftsSnap = await getDocs(query(collection(db, 'turnos'), where('objectiveId', '==', objectiveToDelete.id)));
-        deletedShifts = shiftsSnap.size;
-        for (let i = 0; i < shiftsSnap.docs.length; i += 400) {
-          const batch = writeBatch(db);
-          shiftsSnap.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
-          await batch.commit();
+        const turnosQ = query(collection(db, 'turnos'), where('objectiveId', '==', objectiveToDelete.id));
+        const turnosSnap = await getDocs(turnosQ);
+        const foreign = turnosSnap.docs.filter((d) =>
+          !isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
+        );
+        deletedShifts = await queryAndDeleteForEmpresa('turnos', turnosQ, empresaId, migracionCompleta);
+        if (foreign.length > 0) {
+          toast.message(`${foreign.length} turno(s) de otra empresa siguen con ese objetivo (ID compartido).`);
         }
       }
-      await updateDoc(doc(db, 'clients', selectedClient.id), { objetivos });
+      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, objetivos });
       if (editingObjectiveIndex === idx) resetObjectiveForm();
       toast.success(`Objetivo eliminado${deletedShifts > 0 ? ` (${deletedShifts} turnos eliminados)` : ''}`);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error('Error al eliminar objetivo');
+      toast.error(e?.message || 'Error al eliminar objetivo');
     }
   };
 
@@ -809,12 +839,12 @@ export default function CRMPage() {
       const restoredId = found.data().objectiveId;
       const objetivos = [...(selectedClient.objetivos || [])];
       objetivos[idx] = { ...objetivos[idx], id: restoredId };
-      await updateDoc(doc(db, 'clients', selectedClient.id), { objetivos });
+      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
       setSelectedClient({ ...selectedClient, objetivos });
       toast.success(`ID restaurado: ${restoredId}`);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error('Error al restaurar ID');
+      toast.error(e?.message || 'Error al restaurar ID');
     }
   };
 
@@ -1195,18 +1225,18 @@ export default function CRMPage() {
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                  {isSuperAdmin && (
+                  {isSuperAdmin && canDeleteClient(c) && (
                     <button
                       onClick={async () => {
                         const empresaLabel = empresa?.name || empresaId;
                         if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                         try {
-                          const { deletedTurnos, deletedSla } = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
-                          toast.success(`"${c.name}" eliminado (${deletedTurnos} turnos, ${deletedSla} SLA)`);
+                          const result = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
+                          toast.success(clientDeleteToast(c.name, result));
                           fetchClients();
                           close();
                         } catch (e: unknown) {
-                          toast.error(e instanceof Error ? e.message : 'Error al eliminar el cliente');
+                          toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
@@ -1248,24 +1278,24 @@ export default function CRMPage() {
                 </div>
                 <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedClient.name}</h2>
                 <p className="text-[10px] font-black text-slate-300 uppercase mt-2">{selectedClient.taxId}</p>
-                {isSuperAdmin && (
+                {isSuperAdmin && canDeleteClient(selectedClient) && (
                   <button
                     onClick={async () => {
                       const empresaLabel = empresa?.name || empresaId;
                       if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
                       try {
-                        const { deletedTurnos, deletedSla } = await deleteClientForEmpresa(
+                        const result = await deleteClientForEmpresa(
                           selectedClient.id,
                           empresaId,
                           migracionCompleta,
                         );
-                        toast.success(`"${selectedClient.name}" eliminado (${deletedTurnos} turnos, ${deletedSla} SLA)`);
+                        toast.success(clientDeleteToast(selectedClient.name, result));
                         setSelectedClient(null);
                         setView('list');
                         fetchClients();
                       } catch (e: unknown) {
                         console.error(e);
-                        toast.error(e instanceof Error ? e.message : 'Error al eliminar el cliente');
+                        toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
                       }
                     }}
                     className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-500 hover:bg-rose-50 text-xs font-black uppercase transition-colors"

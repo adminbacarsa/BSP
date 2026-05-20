@@ -28,7 +28,11 @@ export interface RestoreOptions {
     tenantImport?: boolean;
     sourceEmpresaId?: string;
 }
+export declare const RESTORE_COLLECTION_ORDER: string[];
 type IdMaps = Record<string, Map<string, string>>;
+export declare function allocateCloneDocId(db: FirebaseFirestore.Firestore, colName: string, oldId: string, idMaps: IdMaps): string;
+export declare function remapCloneDocumentFields(colName: string, data: Record<string, unknown>, idMaps: IdMaps, db: FirebaseFirestore.Firestore): Record<string, unknown>;
+export declare function deleteDocsWhereEmpresaId(db: FirebaseFirestore.Firestore, colName: string, empresaId: string, batchSize: number): Promise<number>;
 export declare function runRestoreFromPayload(payload: Record<string, unknown>, fileName: string, mode: RestoreMode, jobId?: string, opts?: RestoreOptions, partial?: RestorePartialState): Promise<RestoreResult>;
 export declare function runRestore(driveFileId: string, mode: RestoreMode, jobId?: string, opts?: RestoreOptions, partial?: RestorePartialState): Promise<RestoreResult>;
 export declare function runRestoreFromStorage(storagePath: string, fileName: string, mode: RestoreMode, jobId?: string, opts?: RestoreOptions, partial?: RestorePartialState): Promise<RestoreResult>;

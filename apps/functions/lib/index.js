@@ -1,12 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const backup_service_1 = require("./backup/backup.service");
 const assistantEmpresaScope_1 = require("./assistant/assistantEmpresaScope");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
+const migrate_job_runner_1 = require("./backup/migrate-job.runner");
 const backup_auth_util_1 = require("./backup/backup-auth.util");
 const main_1 = require("./main");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
@@ -1519,6 +1520,62 @@ exports.processRestoreJob = functions
     }
     catch (e) {
         console.error('[processRestoreJob] failed', jobId, e);
+    }
+});
+exports.migrateEmpresaData = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(async (data, context) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
+    const payload = (data ?? {});
+    try {
+        const { jobId, sourceEmpresaId, targetEmpresaId } = await (0, migrate_job_runner_1.assertMigrateEmpresaRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
+        const db = admin.firestore();
+        await db.collection('empresa_migrate_jobs').doc(jobId).set({
+            status: 'queued',
+            phase: 'En cola…',
+            sourceEmpresaId,
+            targetEmpresaId,
+            requestedBy: context.auth.uid,
+            docsCopied: 0,
+            docsDeleted: 0,
+            resumeColIndex: 0,
+            idMaps: null,
+            error: null,
+            queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { jobId, queued: true };
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : 'Error al encolar migración';
+        if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
+            throw new functions.https.HttpsError('permission-denied', msg);
+        }
+        throw new functions.https.HttpsError('internal', msg);
+    }
+});
+exports.processEmpresaMigrateJob = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 540, memory: '4GB' })
+    .firestore.document('empresa_migrate_jobs/{jobId}')
+    .onWrite(async (change) => {
+    const after = change.after;
+    if (!after.exists)
+        return;
+    const status = String(after.data()?.status ?? '');
+    if (status !== 'queued')
+        return;
+    const beforeStatus = change.before.exists
+        ? String(change.before.data()?.status ?? '')
+        : '';
+    if (beforeStatus === 'queued')
+        return;
+    const jobId = after.id;
+    try {
+        await (0, migrate_job_runner_1.executeEmpresaMigrateJob)(jobId);
+    }
+    catch (e) {
+        console.error('[processEmpresaMigrateJob] failed', jobId, e);
     }
 });
 exports.onAusenciaCreatedFromPortal = functions

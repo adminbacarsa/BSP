@@ -6,6 +6,11 @@ import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
 import { assertRestoreRequestAllowed, executeRestoreJob, RestoreRequestPayload } from './backup/restore-job.runner';
 import {
+  assertMigrateEmpresaRequestAllowed,
+  executeEmpresaMigrateJob,
+  MigrateEmpresaRequestPayload,
+} from './backup/migrate-job.runner';
+import {
   assertBackupCallableAllowed,
   normalizeBackupRole,
   resolveBackupCaller,
@@ -1846,6 +1851,66 @@ export const processRestoreJob = functions
       await executeRestoreJob(jobId);
     } catch (e) {
       console.error('[processRestoreJob] failed', jobId, e);
+    }
+  });
+
+/** Copia todos los datos de una empresa a otra (superadmin). IDs nuevos + empresaId destino. */
+export const migrateEmpresaData = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 120, memory: '512MB' })
+  .https.onCall(async (data, context) => {
+    await assertBackupCallableAllowed(context);
+    const payload = (data ?? {}) as MigrateEmpresaRequestPayload;
+    try {
+      const { jobId, sourceEmpresaId, targetEmpresaId } = await assertMigrateEmpresaRequestAllowed(
+        context.auth!.uid,
+        context.auth!.token?.role,
+        payload,
+      );
+      const db = admin.firestore();
+      await db.collection('empresa_migrate_jobs').doc(jobId).set({
+        status: 'queued',
+        phase: 'En cola…',
+        sourceEmpresaId,
+        targetEmpresaId,
+        requestedBy: context.auth!.uid,
+        docsCopied: 0,
+        docsDeleted: 0,
+        resumeColIndex: 0,
+        idMaps: null,
+        error: null,
+        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { jobId, queued: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Error al encolar migración';
+      if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
+        throw new functions.https.HttpsError('permission-denied', msg);
+      }
+      throw new functions.https.HttpsError('internal', msg);
+    }
+  });
+
+/** Ejecuta empresa_migrate_jobs en background. */
+export const processEmpresaMigrateJob = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 540, memory: '4GB' })
+  .firestore.document('empresa_migrate_jobs/{jobId}')
+  .onWrite(async (change) => {
+    const after = change.after;
+    if (!after.exists) return;
+    const status = String(after.data()?.status ?? '');
+    if (status !== 'queued') return;
+    const beforeStatus = change.before.exists
+      ? String(change.before.data()?.status ?? '')
+      : '';
+    if (beforeStatus === 'queued') return;
+
+    const jobId = after.id;
+    try {
+      await executeEmpresaMigrateJob(jobId);
+    } catch (e) {
+      console.error('[processEmpresaMigrateJob] failed', jobId, e);
     }
   });
 
