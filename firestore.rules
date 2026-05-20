@@ -167,7 +167,7 @@ service cloud.firestore {
     }
 
     match /turnos/{shiftId} {
-      allow read: if isSuperAdmin() || isAdmin() || request.auth != null;
+      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
