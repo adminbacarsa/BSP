@@ -439,12 +439,12 @@ export async function retagClientRelatedDocsToEmpresa(
   const id = String(empresaId ?? '').trim();
   if (!cid || !id) throw new Error('Cliente y empresa son obligatorios.');
 
-  const clientSnap = await getDoc(doc(db, 'clients', cid));
-  if (!clientSnap.exists()) throw new Error('Cliente no encontrado');
-  if (!isTenantWriteOwner(clientSnap.data(), id, migracionCompleta)) {
+  const resolved = await resolveClientDocument(cid);
+  if (!resolved) throw new Error(`Cliente no encontrado (ID: ${cid})`);
+  if (!isTenantWriteOwner(resolved.data, id, migracionCompleta)) {
     throw new TenantIsolationError(
       buildTenantBlockedMessage(
-        String(clientSnap.data()?.empresaId ?? '').trim() || 'sin empresa',
+        String(resolved.data.empresaId ?? '').trim() || 'sin empresa',
         id,
         'guardar',
         cid,
@@ -482,6 +482,57 @@ export async function countClientRelatedDocsOtherTenant(
   return out;
 }
 
+export const CLIENT_DOC_COLLECTIONS = ['clients', 'clientes'] as const;
+export type ClientDocCollection = (typeof CLIENT_DOC_COLLECTIONS)[number];
+
+export type ResolvedClientDocument = {
+  collection: ClientDocCollection;
+  id: string;
+  data: Record<string, unknown>;
+};
+
+/** Busca el cliente en `clients` y, si no existe, en `clientes` (legacy NestJS). */
+export async function resolveClientDocument(clientId: string): Promise<ResolvedClientDocument | null> {
+  const id = String(clientId ?? '').trim();
+  if (!id) return null;
+  for (const col of CLIENT_DOC_COLLECTIONS) {
+    const snap = await getDoc(doc(db, col, id));
+    if (snap.exists()) {
+      return { collection: col, id: snap.id, data: snap.data() as Record<string, unknown> };
+    }
+  }
+  return null;
+}
+
+export function dedupeClientsById<T extends { id?: unknown }>(rows: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const row of rows) {
+    const id = String(row.id ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.set(id, row);
+  }
+  return [...seen.values()];
+}
+
+export async function assertClientWritableForEmpresa(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+  action: 'guardar' | 'eliminar' = 'guardar',
+): Promise<{ id: string; collection: ClientDocCollection; [key: string]: unknown }> {
+  const resolved = await resolveClientDocument(clientId);
+  if (!resolved) {
+    throw new Error(
+      `Cliente no encontrado (ID: ${clientId}). Refrescá el listado o verificá que el registro exista en Firestore.`,
+    );
+  }
+  if (!canManageClientInTenant(resolved.data, empresaId, migracionCompleta)) {
+    const docEmp = String(resolved.data.empresaId ?? '').trim() || 'sin empresa';
+    throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, clientId));
+  }
+  return { id: resolved.id, collection: resolved.collection, ...resolved.data };
+}
+
 export async function deleteClientForEmpresa(
   clientId: string,
   empresaId: string,
@@ -492,12 +543,13 @@ export async function deleteClientForEmpresa(
   foreignTurnosLeft: number;
   foreignSlaLeft: number;
 }> {
-  const clientRef = doc(db, 'clients', clientId);
-  const clientSnap = await getDoc(clientRef);
-  if (!clientSnap.exists()) {
-    throw new Error('Cliente no encontrado');
+  const resolved = await resolveClientDocument(clientId);
+  if (!resolved) {
+    throw new Error(
+      `Cliente no encontrado (ID: ${clientId}). Refrescá el listado o verificá que el registro exista en Firestore.`,
+    );
   }
-  const clientData = clientSnap.data();
+  const clientData = resolved.data;
   if (!isTenantWriteOwner(clientData, empresaId, migracionCompleta)) {
     const docEmp = String(clientData.empresaId ?? '').trim() || 'sin empresa';
     throw new TenantIsolationError(
@@ -526,7 +578,7 @@ export async function deleteClientForEmpresa(
   const deletedTurnos = await deleteDocsInBatches(turnosOwned.map((d) => ({ ref: d.ref })));
   const deletedSla = await deleteDocsInBatches(slaOwned.map((d) => ({ ref: d.ref })));
 
-  await deleteDoc(clientRef);
+  await deleteDoc(doc(db, resolved.collection, clientId));
   return {
     deletedTurnos,
     deletedSla,

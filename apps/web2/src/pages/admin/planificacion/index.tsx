@@ -23,6 +23,8 @@ import {
     belongsToEmpresaView,
     shouldScopeQueriesToEmpresa,
     empresaCollectionQuery,
+    filterRowsByEmpresa,
+    dedupeClientsById,
     stampEmpresaId,
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
@@ -32,7 +34,6 @@ import { toYyyyMmDd } from '@/lib/firestoreDates';
 import {
     filterSlasForPlanningTenant,
     formatSlaRangeHint,
-    isSlaContractActive,
     objectiveMatchKeys,
     pickSlaForPlanningMonth,
     slaMatchesObjective,
@@ -1354,8 +1355,8 @@ export default function PlanificacionPage() {
 
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
-                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                const srvForStructure = srv ?? fallback;
+                const { vigente: srv, hasExactMatch } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
+                const srvForStructure = srv;
 
                 if (!hasExactMatch) {
                     if (matching.length > 0) {
@@ -1394,8 +1395,7 @@ export default function PlanificacionPage() {
                     structure.push({ positionName: 'General', shifts: [{code:'M',hours:8},{code:'T',hours:8},{code:'N',hours:8}], qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' });
                     setHasActiveSLA(false);
                 } else {
-                    const hasActiveContract = matching.some((s) => isSlaContractActive(s.status));
-                    setHasActiveSLA(hasExactMatch || (hasActiveContract && !!srvForStructure));
+                    setHasActiveSLA(hasExactMatch);
                 }
                 setPositionStructure(structure);
                 setSlaVendidas(hasExactMatch ? (srvForStructure?.totalMonthlyHours || 0) : 0);
@@ -1425,7 +1425,8 @@ export default function PlanificacionPage() {
         const empleadosQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
 
         const unsubC = onSnapshot(clientsQ, snap => {
-            setClients(snap.docs.map(d => ({id: d.id, ...d.data()})));
+            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
         const unsubE = onSnapshot(empleadosQ, snap => {

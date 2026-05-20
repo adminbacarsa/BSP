@@ -26,10 +26,12 @@ import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
   shouldScopeQueriesToEmpresa,
-  empresaScopedQuery,
+  empresaCollectionQuery,
   filterRowsByEmpresa,
   belongsToEmpresaView,
+  slaBelongsToEmpresa,
   deleteClientForEmpresa,
+  assertClientWritableForEmpresa,
   assertDocBelongsToEmpresa,
   queryAndDeleteForEmpresa,
   updateDocForEmpresa,
@@ -39,6 +41,8 @@ import {
   buildTenantBlockedMessage,
   retagClientRelatedDocsToEmpresa,
   countClientRelatedDocsOtherTenant,
+  dedupeClientsById,
+  tenantEmpresaIdsMatch,
 } from '@/lib/multiempresa';
 import {
   AlertCircle,
@@ -395,17 +399,11 @@ export default function CRMPage() {
     label?: string,
     action: 'guardar' | 'eliminar' = 'guardar',
   ) => {
-    const snap = await getDoc(doc(db, 'clients', clientId));
-    if (!snap.exists()) throw new Error('Cliente no encontrado');
-    const data = snap.data();
-    if (!canManageClientInTenant(data, empresaId, migracionCompleta)) {
-      const docEmp = String(data.empresaId ?? '').trim() || 'sin empresa';
-      throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, clientId));
+    const fresh = await assertClientWritableForEmpresa(clientId, empresaId, migracionCompleta, action);
+    if (label && fresh.name && String(fresh.name) !== label) {
+      console.warn('[CRM] nombre desactualizado al validar', { clientId, label, dbName: fresh.name });
     }
-    if (label && data.name && String(data.name) !== label) {
-      console.warn('[CRM] nombre desactualizado al validar', { clientId, label, dbName: data.name });
-    }
-    return { id: snap.id, ...data };
+    return fresh;
   };
 
   const openClientDetail = async (c: { id: string; name?: string }) => {
@@ -468,9 +466,11 @@ export default function CRMPage() {
           ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)))
           : await getDocs(collection(db, 'clients'));
       }
-      const data = snap.docs
-        .map((x) => ({ id: x.id, ...x.data() }))
-        .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta));
+      const data = dedupeClientsById(
+        snap.docs
+          .map((x) => ({ id: x.id, ...x.data() }))
+          .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta)),
+      );
       setClients(data);
     } catch (e) {
       console.error(e);
@@ -525,18 +525,19 @@ export default function CRMPage() {
     setCalculatingMetrics(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+      const tenantClientIds = new Set(clients.map((c) => c.id));
       const [{ start, end }, sSla, sTurnos, sContracts, sEmployees] = await Promise.all([
         Promise.resolve(getRangeDates()),
-        getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-        getDocs(collection(db, 'turnos')),
+        getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+        getDocs(empresaCollectionQuery('turnos', empresaId, scopeEmpresa) as ReturnType<typeof query>),
         getDocs(collection(db, 'contracts')),
-        getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+        getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
 
       const validEmp: Record<string, boolean> = {};
       sEmployees.forEach((d) => {
         const e = d.data() as any;
-        if (scopeEmpresa && String(e.empresaId || '') !== empresaId) return;
+        if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
         const fileNumber = String(e.fileNumber || '').trim();
         const dni = String(e.dni || '').trim();
         const cuil = String(e.cuil || '').trim();
@@ -551,7 +552,10 @@ export default function CRMPage() {
 
       sSla.forEach((d) => {
         const s = d.data() as any;
-        if (!s.clientId) return;
+        const slaOk = scopeEmpresa
+          ? slaBelongsToEmpresa(s, empresaId, true, tenantClientIds)
+          : belongsToEmpresaView(s, empresaId, migracionCompleta);
+        if (!slaOk || !s.clientId) return;
         const cid = String(s.clientId).trim();
         const hrs = rangeMode === 'all' ? calculateMonthlySLA(s.positions, s.startDate, s.endDate) : calculateSLAForRange(s.positions, s.startDate, s.endDate, start, end);
         slaByClient[cid] = (slaByClient[cid] || 0) + (Number(hrs) || 0);
@@ -561,6 +565,11 @@ export default function CRMPage() {
         const c = d.data() as any;
         if (!c.clientId) return;
         const cid = String(c.clientId).trim();
+        if (scopeEmpresa) {
+          if (!tenantClientIds.has(cid)) return;
+          const docEmp = String(c.empresaId ?? '').trim();
+          if (docEmp && !tenantEmpresaIdsMatch(docEmp, empresaId)) return;
+        }
         const totalHours = Number(c.totalHours) || 0;
         if (rangeMode === 'all') {
           contractedByClient[cid] = (contractedByClient[cid] || 0) + totalHours;
@@ -577,7 +586,11 @@ export default function CRMPage() {
 
       sTurnos.forEach((d) => {
         const t = d.data() as any;
-        if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return;
+        if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
+        if (scopeEmpresa) {
+          const cid = String(t.clientId ?? '').trim();
+          if (!cid || !tenantClientIds.has(cid)) return;
+        }
         if (!t.clientId || !t.startTime || !t.endTime || typeof t.startTime.toDate !== 'function') return;
         if (!validEmp[t.employeeId]) return;
         if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;

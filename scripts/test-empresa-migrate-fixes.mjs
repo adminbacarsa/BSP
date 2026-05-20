@@ -25,9 +25,11 @@ function toYyyyMmDd(value) {
 }
 
 function slaCoversCalendarMonth(startDate, endDate, year, month) {
-  const start = toYyyyMmDd(startDate);
-  const end = toYyyyMmDd(endDate);
-  if (!start || !end) return false;
+  const startRaw = toYyyyMmDd(startDate);
+  const endRaw = toYyyyMmDd(endDate);
+  if (!startRaw && !endRaw) return false;
+  const start = startRaw || '1970-01-01';
+  const end = endRaw || '2099-12-31';
   const viewMonthStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const viewMonthEndStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(new Date(year, month + 1, 0).getDate()).padStart(2, '0')}`;
   return start <= viewMonthEndStr && end >= viewMonthStr;
@@ -59,6 +61,15 @@ test('comparación string legacy sigue funcionando', () => {
 });
 test('SLA vencido no cubre mes actual', () => {
   assert.equal(slaCoversCalendarMonth('2024-01-01', '2024-12-31', 2026, 4), false);
+});
+test('sin endDate abierto cubre junio 2026', () => {
+  assert.equal(slaCoversCalendarMonth('2026-06-01', '', 2026, 5), true);
+});
+test('solapa parcial mayo-junio cuenta para junio', () => {
+  assert.equal(slaCoversCalendarMonth('2026-05-15', '2026-06-10', 2026, 5), true);
+});
+test('termina en mayo no solapa junio', () => {
+  assert.equal(slaCoversCalendarMonth('2026-01-01', '2026-05-31', 2026, 5), false);
 });
 test('comparación cruda Timestamp vs string fallaba (regresión)', () => {
   const start = Timestamp.fromDate(new Date(2026, 0, 1));

@@ -90,12 +90,12 @@ export function pickSlaForPlanningMonth(
 ): { vigente: SlaPlanningRow | null; hasExactMatch: boolean; fallback: SlaPlanningRow | null } {
   const active = matching.filter((s) => isSlaContractActive(s.status));
   const pool = active.length > 0 ? active : matching;
-  const vigente = pool.find((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month)) ?? null;
-  const fallback =
-    pool.length > 0
-      ? [...pool].sort((a, b) => toYyyyMmDd(b.startDate).localeCompare(toYyyyMmDd(a.startDate)))[0]
+  const overlapping = pool.filter((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month));
+  const vigente =
+    overlapping.length > 0
+      ? [...overlapping].sort((a, b) => toYyyyMmDd(b.startDate).localeCompare(toYyyyMmDd(a.startDate)))[0]
       : null;
-  return { vigente, hasExactMatch: !!vigente, fallback };
+  return { vigente, hasExactMatch: !!vigente, fallback: vigente };
 }
 
 export function formatSlaRangeHint(rows: SlaPlanningRow[]): string {
