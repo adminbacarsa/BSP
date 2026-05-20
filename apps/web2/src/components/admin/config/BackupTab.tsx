@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db, functions, storage, auth } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp, writeBatch, doc as fsDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, Timestamp, doc as fsDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -155,6 +155,47 @@ const deserialize = (obj: any): any => {
   return obj;
 };
 
+// Convierte un valor JS al wire format de Firestore REST
+function toFsValue(v: unknown): Record<string, unknown> {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (v instanceof Timestamp) return { timestampValue: v.toDate().toISOString() };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFsValue) } };
+  if (typeof v === 'object') return { mapValue: { fields: toFsFields(v as Record<string, unknown>) } };
+  return { stringValue: String(v) };
+}
+
+function toFsFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(obj)) out[k] = toFsValue(val);
+  return out;
+}
+
+// Escribe docs directamente al emulador usando Authorization: Bearer owner
+// (bypasea security rules — solo válido en emulador)
+async function emulatorBatchWrite(
+  writes: Array<{ name: string; fields: Record<string, unknown> }>,
+) {
+  const url = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer owner',
+    },
+    body: JSON.stringify({
+      writes: writes.map(w => ({ update: { name: w.name, fields: w.fields } })),
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`emulatorBatchWrite HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+}
+
 export default function BackupTab() {
   const { isSuperAdmin } = useAuth();
   const { empresaId, empresa, empresas } = useEmpresa();
@@ -300,15 +341,46 @@ export default function BackupTab() {
         if (!Array.isArray(docs) || docs.length === 0) continue;
         for (let i = 0; i < docs.length; i += 400) {
           const chunk = docs.slice(i, i + 400);
-          const batch = writeBatch(db);
-          chunk.forEach((d: any) => {
+          const writes = chunk.flatMap((d: any) => {
             const { _id, ...data } = d;
-            if (!_id) return;
-            batch.set(fsDoc(db, colName, _id), deserialize(data));
+            if (!_id) return [];
+            return [{
+              name: `projects/${PROJECT_ID}/databases/(default)/documents/${colName}/${_id}`,
+              fields: toFsFields(deserialize(data)),
+            }];
           });
-          await batch.commit();
+          if (writes.length > 0) await emulatorBatchWrite(writes);
           written += chunk.length;
           setProgress({ done: written, total: totalDocs, phase: `Cargando ${colName}…` });
+        }
+      }
+
+      // Re-insertar al usuario actual en system_users si el backup no lo incluía
+      // (el backup tiene UIDs de prod; el usuario de test del emulador queda fuera)
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const uid = currentUser.uid;
+        const backupSysUsers: any[] = backup.system_users ?? [];
+        const alreadyInBackup = Array.isArray(backupSysUsers) && backupSysUsers.some((u: any) => u._id === uid);
+        if (!alreadyInBackup) {
+          setProgress({ done: written, total: totalDocs, phase: 'Restaurando sesión admin…' });
+          const tokenResult = await currentUser.getIdTokenResult(true);
+          const role = String(tokenResult.claims.role ?? 'SUPERADMIN').trim() || 'SUPERADMIN';
+          const email = currentUser.email || '';
+          await emulatorBatchWrite([{
+            name: `projects/${PROJECT_ID}/databases/(default)/documents/system_users/${uid}`,
+            fields: toFsFields({
+              uid,
+              email,
+              firstName: 'Admin',
+              lastName: 'Emulador',
+              role,
+              empresaId: 'bacarsa',
+              status: 'ACTIVE',
+              createdAt: new Date(),
+            }),
+          }]);
+          written += 1;
         }
       }
 
@@ -323,7 +395,7 @@ export default function BackupTab() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(version));
       setLoadedVersion(version);
 
-      setLastResult({ ok: true, msg: `Emulador actualizado — ${written.toLocaleString()} docs en ${cols.length} colecciones.` });
+      setLastResult({ ok: true, msg: `Emulador actualizado — ${written.toLocaleString()} docs en ${cols.length} colecciones. Recargá la página (F5) para restaurar la sesión.` });
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al cargar el archivo' });
     } finally {
