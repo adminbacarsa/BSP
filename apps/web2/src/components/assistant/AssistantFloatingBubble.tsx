@@ -257,9 +257,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } catch (e: any) {
       const code = String(e?.code ?? '').replace(/^functions\//, '');
       const rawMsg =
-        typeof e?.message === 'string'
+        typeof e?.message === 'string' && e.message.trim()
           ? e.message
-          : 'No se pudo conectar al asistente. Si estás local, necesitás Functions emulator con GEMINI_API_KEY configurada.';
+          : typeof e?.details === 'string' && e.details.trim()
+            ? e.details
+            : 'No se pudo conectar al asistente. Si estás local, necesitás Functions emulator con GEMINI_API_KEY configurada.';
       let human =
         code === 'not-found'
           ? 'La función no está disponible: en producción ejecutá firebase deploy del backend; en local, levantá el emulador de Functions compilado.'
@@ -272,10 +274,14 @@ export function AssistantFloatingBubble(): React.ReactNode {
         human =
           'La respuesta tardó demasiado (tiempo máximo superado). Volvé a intentar con una pregunta más corta o esperá unos segundos; si sigue igual, revisá que la función chatPlatformAssistant esté desplegada con suficiente timeout.';
       } else if (code === 'permission-denied') {
+        const serverDetail = rawMsg.trim();
+        const genericDenied = /^permission(-denied)?$/i.test(serverDetail);
         human =
-          rawMsg.includes('asistente virtual')
-            ? rawMsg
-            : 'No tenés permiso para usar el asistente. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.';
+          serverDetail && !genericDenied
+            ? serverDetail
+            : isSuperAdmin
+              ? 'El servidor rechazó el acceso al asistente. Cerrá sesión, volvé a entrar y recargá con Ctrl+F5. Si persiste, en Configuración → Usuarios sincronizá claims o verificá que system_users.role sea SUPERADMIN.'
+              : 'No tenés permiso para usar el asistente. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.';
       } else if (code === 'internal' || /^internal\b/i.test(rawMsg)) {
         human = 'Fallo interno en el servidor. Probá de nuevo en un momento; si se repite, avisá a soporte técnico.';
       } else if (code === 'unavailable') {
@@ -285,7 +291,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [busy, empresaCtxId, fullPath, input, msgs, pathname, user]);
+  }, [busy, empresaCtxId, fullPath, input, isSuperAdmin, msgs, pathname, user]);
 
   const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
       const d = dragRef.current;
@@ -322,7 +328,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const pathBase = (pathname || '').split('?')[0];
   const isEmployeePortal = pathBase.startsWith('/empleado');
   if (!isEmployeePortal && !isSuperAdmin && !canReadModule('ASSISTANT')) return null;
-  if (empresa !== null && empresa.assistantEnabled === false) {
+  if (!isSuperAdmin && empresa !== null && empresa.assistantEnabled === false) {
     return null;
   }
 

@@ -17,6 +17,8 @@ export interface AssistantChatPayload {
     clientToday?: string;
     clientDeploy?: ClientDeployPayload | null;
 }
-export declare function runPlatformAssistant(uid: string, payload: AssistantChatPayload): Promise<{
+export declare function runPlatformAssistant(uid: string, payload: AssistantChatPayload, opts?: {
+    tokenRole?: string;
+}): Promise<{
     reply: string;
 }>;

@@ -18,18 +18,20 @@ async function authClaimRole(uid) {
         return '';
     }
 }
-async function resolveAssistantUser(uid) {
+async function resolveAssistantUser(uid, opts) {
     const db = admin.firestore();
-    const claimRole = await authClaimRole(uid);
+    const tokenRole = String(opts?.tokenRole ?? '').trim();
+    const claimRole = tokenRole || (await authClaimRole(uid));
     const sys = await db.collection('system_users').doc(uid).get();
     if (sys.exists) {
         const role = String(sys.data()?.role || '');
-        const isSuper = (0, role_util_1.isSuperAdminRole)(role) || (0, role_util_1.isSuperAdminRole)(claimRole);
+        let isSuper = (0, role_util_1.isSuperAdminRole)(role) || (0, role_util_1.isSuperAdminRole)(claimRole);
         let empresaId = String(sys.data()?.empresaId ?? '').trim() || (!isSuper ? 'bacarsa' : '');
         let readableModuleKeys;
         let canUseAssistant = isSuper;
         if (isSuper || !role) {
             readableModuleKeys = [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS];
+            canUseAssistant = true;
         }
         else {
             const roleSnap = await db.collection('roles').doc((0, role_util_1.normalizeRoleId)(role)).get();
@@ -50,6 +52,11 @@ async function resolveAssistantUser(uid) {
                         cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS.length > 0 ? ['DASHBOARD'] : readableModuleKeys;
                 }
             }
+        }
+        if (!canUseAssistant && (0, role_util_1.isSuperAdminRole)(claimRole)) {
+            isSuper = true;
+            canUseAssistant = true;
+            readableModuleKeys = [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS];
         }
         return {
             persona: 'SYSTEM',
@@ -87,36 +94,33 @@ async function resolveAssistantUser(uid) {
             summaryLabel: 'Colaborador (portal empleado)',
         };
     }
-    const emulatorAuth = await tryResolveAssistantFromEmulatorAuth(uid);
-    if (emulatorAuth)
-        return emulatorAuth;
+    const authSuper = await tryResolveSuperAdminFromAuth(uid, claimRole);
+    if (authSuper)
+        return authSuper;
     return null;
 }
-async function tryResolveAssistantFromEmulatorAuth(uid) {
-    if (process.env.FUNCTIONS_EMULATOR !== 'true')
+async function tryResolveSuperAdminFromAuth(uid, claimRole) {
+    if (!(0, role_util_1.isSuperAdminRole)(claimRole))
         return null;
+    let empresaId = '';
     try {
         const u = await admin.auth().getUser(uid);
         const claims = (u.customClaims ?? {});
-        const role = String(claims.role ?? '').trim();
-        const isSuper = (0, role_util_1.isSuperAdminRole)(role);
-        if (isSuper) {
-            const empresaId = String(claims.empresaId ?? '').trim() || 'bacarsa';
-            return {
-                persona: 'SYSTEM',
-                roleName: role || 'SUPERADMIN',
-                empresaId,
-                readableModuleKeys: [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS],
-                canUseAssistant: true,
-                isSuperAdmin: true,
-                summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
-            };
-        }
+        empresaId = String(claims.empresaId ?? '').trim();
     }
     catch {
-        return null;
     }
-    return null;
+    return {
+        persona: 'SYSTEM',
+        roleName: claimRole || 'SUPERADMIN',
+        empresaId,
+        readableModuleKeys: [...cospKnowledge_1.KNOWN_ADMIN_MODULE_KEYS],
+        canUseAssistant: true,
+        isSuperAdmin: true,
+        summaryLabel: process.env.FUNCTIONS_EMULATOR === 'true'
+            ? 'Superadmin (emulador vía Auth; sin system_users en Firestore)'
+            : 'Superadmin (vía Auth claim)',
+    };
 }
 function empresaAllowed(claimedEmpresaId, profile) {
     const c = String(claimedEmpresaId ?? '').trim();

@@ -30,18 +30,28 @@ async function authClaimRole(uid: string): Promise<string> {
   }
 }
 
-export async function resolveAssistantUser(uid: string): Promise<ResolvedAssistantUser | null> {
+export type ResolveAssistantUserOptions = {
+  /** Rol del JWT ya verificado (p. ej. context.auth.token.role en callables). */
+  tokenRole?: string;
+};
+
+export async function resolveAssistantUser(
+  uid: string,
+  opts?: ResolveAssistantUserOptions,
+): Promise<ResolvedAssistantUser | null> {
   const db = admin.firestore();
-  const claimRole = await authClaimRole(uid);
+  const tokenRole = String(opts?.tokenRole ?? '').trim();
+  const claimRole = tokenRole || (await authClaimRole(uid));
   const sys = await db.collection('system_users').doc(uid).get();
   if (sys.exists) {
     const role = String(sys.data()?.role || '');
-    const isSuper = isSuperAdminRole(role) || isSuperAdminRole(claimRole);
+    let isSuper = isSuperAdminRole(role) || isSuperAdminRole(claimRole);
     let empresaId = String(sys.data()?.empresaId ?? '').trim() || (!isSuper ? 'bacarsa' : '');
     let readableModuleKeys: string[];
     let canUseAssistant = isSuper;
     if (isSuper || !role) {
       readableModuleKeys = [...KNOWN_ADMIN_MODULE_KEYS];
+      canUseAssistant = true;
     } else {
       const roleSnap = await db.collection('roles').doc(normalizeRoleId(role)).get();
       const perms = (roleSnap.data()?.permissions ?? {}) as Record<string, unknown>;
@@ -60,6 +70,11 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
             KNOWN_ADMIN_MODULE_KEYS.length > 0 ? ['DASHBOARD'] : readableModuleKeys;
         }
       }
+    }
+    if (!canUseAssistant && isSuperAdminRole(claimRole)) {
+      isSuper = true;
+      canUseAssistant = true;
+      readableModuleKeys = [...KNOWN_ADMIN_MODULE_KEYS];
     }
     return {
       persona: 'SYSTEM',
@@ -100,40 +115,40 @@ export async function resolveAssistantUser(uid: string): Promise<ResolvedAssista
     };
   }
 
-  const emulatorAuth = await tryResolveAssistantFromEmulatorAuth(uid);
-  if (emulatorAuth) return emulatorAuth;
+  const authSuper = await tryResolveSuperAdminFromAuth(uid, claimRole);
+  if (authSuper) return authSuper;
 
   return null;
 }
 
 /**
- * En el emulador de Functions, Auth y Firestore suelen estar alineados; si alguien levanta solo
- * Functions o Firestore quedó vacío, system_users puede faltar aunque el login (claims) sea válido.
- * Solo aplica con FUNCTIONS_EMULATOR=true (nunca en producción).
+ * Respaldo cuando falta system_users o el rol en Firestore no coincide con SUPERADMIN en Auth/JWT.
+ * Solo eleva a superadmin si el claim verificado es SUPERADMIN (seteado server-side).
  */
-async function tryResolveAssistantFromEmulatorAuth(uid: string): Promise<ResolvedAssistantUser | null> {
-  if (process.env.FUNCTIONS_EMULATOR !== 'true') return null;
+async function tryResolveSuperAdminFromAuth(
+  uid: string,
+  claimRole: string,
+): Promise<ResolvedAssistantUser | null> {
+  if (!isSuperAdminRole(claimRole)) return null;
+  let empresaId = '';
   try {
     const u = await admin.auth().getUser(uid);
     const claims = (u.customClaims ?? {}) as Record<string, unknown>;
-    const role = String(claims.role ?? '').trim();
-    const isSuper = isSuperAdminRole(role);
-    if (isSuper) {
-      const empresaId = String(claims.empresaId ?? '').trim() || 'bacarsa';
-      return {
-        persona: 'SYSTEM',
-        roleName: role || 'SUPERADMIN',
-        empresaId,
-        readableModuleKeys: [...KNOWN_ADMIN_MODULE_KEYS],
-        canUseAssistant: true,
-        isSuperAdmin: true,
-        summaryLabel: 'Superadmin (emulador vía Auth; sin system_users en Firestore)',
-      };
-    }
+    empresaId = String(claims.empresaId ?? '').trim();
   } catch {
-    return null;
+    /* ignore */
   }
-  return null;
+  return {
+    persona: 'SYSTEM',
+    roleName: claimRole || 'SUPERADMIN',
+    empresaId,
+    readableModuleKeys: [...KNOWN_ADMIN_MODULE_KEYS],
+    canUseAssistant: true,
+    isSuperAdmin: true,
+    summaryLabel: process.env.FUNCTIONS_EMULATOR === 'true'
+      ? 'Superadmin (emulador vía Auth; sin system_users en Firestore)'
+      : 'Superadmin (vía Auth claim)',
+  };
 }
 
 export function empresaAllowed(

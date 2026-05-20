@@ -22,6 +22,7 @@ import {
   looksLikeFalseEmptyTurnosReply,
 } from './assistantDeterministicRouter';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
+import { isSuperAdminRole } from '../common/role.util';
 import { resolveAssistantEmpresaScope } from './assistantEmpresaScope';
 
 const ASSISTANT_RESPONSE_STYLE = `
@@ -254,7 +255,11 @@ function buildSystemPrompt(
   ].join('\n');
 }
 
-export async function runPlatformAssistant(uid: string, payload: AssistantChatPayload): Promise<{ reply: string }> {
+export async function runPlatformAssistant(
+  uid: string,
+  payload: AssistantChatPayload,
+  opts?: { tokenRole?: string },
+): Promise<{ reply: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey?.trim()) {
     const emu = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -271,7 +276,7 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
     throw new functions.https.HttpsError('invalid-argument', 'Enviá al menos un mensaje de usuario al final.');
   }
 
-  const profile = await resolveAssistantUser(uid);
+  const profile = await resolveAssistantUser(uid, { tokenRole: opts?.tokenRole });
   if (!profile) {
     throw new functions.https.HttpsError(
       'permission-denied',
@@ -280,10 +285,15 @@ export async function runPlatformAssistant(uid: string, payload: AssistantChatPa
   }
 
   if (!profile.canUseAssistant) {
-    throw new functions.https.HttpsError(
-      'permission-denied',
-      'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.',
-    );
+    if (isSuperAdminRole(opts?.tokenRole) || profile.isSuperAdmin) {
+      profile.canUseAssistant = true;
+      profile.isSuperAdmin = true;
+    } else {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.',
+      );
+    }
   }
 
   const claimedEmpresa = typeof payload.empresaId === 'string' ? payload.empresaId : '';

@@ -420,7 +420,8 @@ async function chatPlatformAssistantHandler(data, context) {
     let errorCode = null;
     let errorMessage = null;
     try {
-        const result = await (0, runPlatformAssistant_1.runPlatformAssistant)(uid, data);
+        const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+        const result = await (0, runPlatformAssistant_1.runPlatformAssistant)(uid, data, { tokenRole });
         reply = result.reply;
         return result;
     }
@@ -473,7 +474,8 @@ async function optimizePlanningGeminiHandler(data, context) {
         throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
     }
     const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
-    const profile = await resolveAssistantUser(context.auth.uid);
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    const profile = await resolveAssistantUser(context.auth.uid, { tokenRole });
     if (!profile) {
         throw new functions.https.HttpsError('permission-denied', 'Usuario no reconocido.');
     }

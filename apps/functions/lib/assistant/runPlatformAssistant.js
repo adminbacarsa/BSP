@@ -9,6 +9,7 @@ const assistantDataTools_1 = require("./assistantDataTools");
 const assistantToolDeclarations_1 = require("./assistantToolDeclarations");
 const assistantDeterministicRouter_1 = require("./assistantDeterministicRouter");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");
+const role_util_1 = require("../common/role.util");
 const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const ASSISTANT_RESPONSE_STYLE = `
 Cómo responder (subir calidad sin inventar datos):
@@ -198,7 +199,7 @@ function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsE
         `Si falta información o el usuario necesita soporte urgente ante fallo técnico, sugerís contactar a operaciones/IT.`,
     ].join('\n');
 }
-async function runPlatformAssistant(uid, payload) {
+async function runPlatformAssistant(uid, payload, opts) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey?.trim()) {
         const emu = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -210,12 +211,18 @@ async function runPlatformAssistant(uid, payload) {
     if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
         throw new functions.https.HttpsError('invalid-argument', 'Enviá al menos un mensaje de usuario al final.');
     }
-    const profile = await (0, resolveAssistantUser_1.resolveAssistantUser)(uid);
+    const profile = await (0, resolveAssistantUser_1.resolveAssistantUser)(uid, { tokenRole: opts?.tokenRole });
     if (!profile) {
         throw new functions.https.HttpsError('permission-denied', 'Tu cuenta no está asociada a usuarios COSP conocidos para el asistente.');
     }
     if (!profile.canUseAssistant) {
-        throw new functions.https.HttpsError('permission-denied', 'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.');
+        if ((0, role_util_1.isSuperAdminRole)(opts?.tokenRole) || profile.isSuperAdmin) {
+            profile.canUseAssistant = true;
+            profile.isSuperAdmin = true;
+        }
+        else {
+            throw new functions.https.HttpsError('permission-denied', 'Tu rol no tiene permiso para usar el asistente virtual. Pedí acceso al módulo «Asistente IA» en Configuración → Roles.');
+        }
     }
     const claimedEmpresa = typeof payload.empresaId === 'string' ? payload.empresaId : '';
     if (!(0, resolveAssistantUser_1.empresaAllowed)(claimedEmpresa && claimedEmpresa.length > 0 ? claimedEmpresa : undefined, profile)) {
