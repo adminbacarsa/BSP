@@ -164,6 +164,7 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     sizeBytes,
     collections: exportedCollections,
     totalDocs,
+    driveBackupFolderId: folderId,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     status: 'ok',
     ...(empresaId ? { empresaId } : {}),
@@ -182,4 +183,27 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     status: 'ok',
     ...(empresaId ? { empresaId } : {}),
   };
+}
+
+/** Carpeta Drive: env de la función o último backup OK en Firestore (scheduled y manual comparten config). */
+export async function resolveDriveBackupFolderId(): Promise<string | null> {
+  const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const db = admin.firestore();
+    const snap = await db
+      .collection('system_backups')
+      .orderBy('createdAt', 'desc')
+      .limit(12)
+      .get();
+    for (const d of snap.docs) {
+      const meta = d.data();
+      if (meta.status !== 'ok') continue;
+      const folder = String(meta.driveBackupFolderId ?? meta.driveFolderId ?? '').trim();
+      if (folder) return folder;
+    }
+  } catch (e) {
+    console.warn('[resolveDriveBackupFolderId] fallback query failed', e);
+  }
+  return null;
 }

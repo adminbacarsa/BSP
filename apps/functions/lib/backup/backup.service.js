@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runBackup = runBackup;
+exports.resolveDriveBackupFolderId = resolveDriveBackupFolderId;
 const admin = require("firebase-admin");
 const stream_1 = require("stream");
 const EXCLUDE_COLLECTIONS = new Set([]);
@@ -126,6 +127,7 @@ async function runBackup(folderId, opts = {}) {
         sizeBytes,
         collections: exportedCollections,
         totalDocs,
+        driveBackupFolderId: folderId,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         status: 'ok',
         ...(empresaId ? { empresaId } : {}),
@@ -143,5 +145,30 @@ async function runBackup(folderId, opts = {}) {
         status: 'ok',
         ...(empresaId ? { empresaId } : {}),
     };
+}
+async function resolveDriveBackupFolderId() {
+    const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();
+    if (fromEnv)
+        return fromEnv;
+    try {
+        const db = admin.firestore();
+        const snap = await db
+            .collection('system_backups')
+            .orderBy('createdAt', 'desc')
+            .limit(12)
+            .get();
+        for (const d of snap.docs) {
+            const meta = d.data();
+            if (meta.status !== 'ok')
+                continue;
+            const folder = String(meta.driveBackupFolderId ?? meta.driveFolderId ?? '').trim();
+            if (folder)
+                return folder;
+        }
+    }
+    catch (e) {
+        console.warn('[resolveDriveBackupFolderId] fallback query failed', e);
+    }
+    return null;
 }
 //# sourceMappingURL=backup.service.js.map

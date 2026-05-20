@@ -2,7 +2,7 @@ import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { runBackup } from './backup/backup.service';
+import { runBackup, resolveDriveBackupFolderId } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
 import { assertRestoreRequestAllowed, executeRestoreJob, RestoreRequestPayload } from './backup/restore-job.runner';
@@ -1895,6 +1895,10 @@ export const restoreBackup = functions
         queuedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
+      void executeRestoreJob(jobId).catch((err) => {
+        console.error('[restoreBackup] executeRestoreJob failed', jobId, err);
+      });
+
       return { jobId, queued: true };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al encolar restauración';
@@ -2053,17 +2057,36 @@ export const onAusenciaCreatedFromPortal = functions
 
 // Backup automático diario a las 3:00 AM (America/Argentina/Buenos_Aires)
 export const scheduledBackup = functions
+  .region('us-central1')
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
   .pubsub.schedule('0 3 * * *')
   .timeZone('America/Argentina/Buenos_Aires')
   .onRun(async () => {
-    const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
-    if (!folderId) { console.warn('[scheduledBackup] DRIVE_BACKUP_FOLDER_ID no configurado'); return null; }
+    const db = admin.firestore();
+    const folderId = await resolveDriveBackupFolderId();
+    if (!folderId) {
+      const msg = 'DRIVE_BACKUP_FOLDER_ID no configurado (ni fallback en system_backups)';
+      console.error('[scheduledBackup]', msg);
+      await db.collection('system_backups').add({
+        status: 'error',
+        error: msg,
+        source: 'scheduledBackup',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return null;
+    }
     try {
       const result = await runBackup(folderId);
       console.log(`[scheduledBackup] OK: ${result.fileName} — ${result.totalDocs} docs`);
-    } catch (e) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error('[scheduledBackup] Error:', e);
+      await db.collection('system_backups').add({
+        status: 'error',
+        error: msg.slice(0, 500),
+        source: 'scheduledBackup',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     }
     return null;
   });

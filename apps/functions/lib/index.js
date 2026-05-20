@@ -1549,6 +1549,9 @@ exports.restoreBackup = functions
             error: null,
             queuedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        void (0, restore_job_runner_1.executeRestoreJob)(jobId).catch((err) => {
+            console.error('[restoreBackup] executeRestoreJob failed', jobId, err);
+        });
         return { jobId, queued: true };
     }
     catch (e) {
@@ -1691,13 +1694,22 @@ exports.onAusenciaCreatedFromPortal = functions
     return null;
 });
 exports.scheduledBackup = functions
+    .region('us-central1')
     .runWith({ timeoutSeconds: 540, memory: '512MB' })
     .pubsub.schedule('0 3 * * *')
     .timeZone('America/Argentina/Buenos_Aires')
     .onRun(async () => {
-    const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
+    const db = admin.firestore();
+    const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
     if (!folderId) {
-        console.warn('[scheduledBackup] DRIVE_BACKUP_FOLDER_ID no configurado');
+        const msg = 'DRIVE_BACKUP_FOLDER_ID no configurado (ni fallback en system_backups)';
+        console.error('[scheduledBackup]', msg);
+        await db.collection('system_backups').add({
+            status: 'error',
+            error: msg,
+            source: 'scheduledBackup',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
         return null;
     }
     try {
@@ -1705,7 +1717,14 @@ exports.scheduledBackup = functions
         console.log(`[scheduledBackup] OK: ${result.fileName} — ${result.totalDocs} docs`);
     }
     catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.error('[scheduledBackup] Error:', e);
+        await db.collection('system_backups').add({
+            status: 'error',
+            error: msg.slice(0, 500),
+            source: 'scheduledBackup',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
     }
     return null;
 });

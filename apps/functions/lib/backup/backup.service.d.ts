@@ -16,3 +16,4 @@ export interface BackupResult {
     empresaId?: string;
 }
 export declare function runBackup(folderId: string, opts?: BackupOptions): Promise<BackupResult>;
+export declare function resolveDriveBackupFolderId(): Promise<string | null>;
