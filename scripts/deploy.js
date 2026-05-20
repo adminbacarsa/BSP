@@ -1,50 +1,45 @@
 #!/usr/bin/env node
 /**
- * Deploy a producción: cambia env → build → firebase deploy hosting → restaura env → limpia .next
- * Uso: npm run deploy  (desde la raíz del repo)
+ * Deploy a producción sin tocar .env.local ni interrumpir el dev server.
+ * USE_EMULATOR=false se inyecta solo en el proceso de build — el emulador
+ * y el dev server en :3000 siguen corriendo sin cambios.
+ *
+ * Uso: npm run deploy              → solo hosting
+ *      npm run deploy --functions  → hosting + functions
+ *      npm run deploy --rules      → hosting + firestore:rules
+ *      npm run deploy --all        → hosting + functions + rules
  */
-const { execSync } = require('child_process');
-const fs = require('fs');
+const { spawnSync } = require('child_process');
 const path = require('path');
 
-const envFile = path.join(__dirname, '../apps/web2/.env.local');
-const nextDir = path.join(__dirname, '../apps/web2/.next');
+const ROOT = path.join(__dirname, '..');
+const args = process.argv.slice(2);
+const withFunctions = args.includes('--functions') || args.includes('--all');
+const withRules     = args.includes('--rules')     || args.includes('--all');
 
-function run(cmd) {
+function run(cmd, env = {}) {
   console.log(`\n▶ ${cmd}`);
-  execSync(cmd, { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+  const result = spawnSync(cmd, {
+    stdio: 'inherit',
+    cwd: ROOT,
+    shell: true,
+    env: { ...process.env, ...env },
+  });
+  if (result.status !== 0) {
+    console.error(`\n✗ Falló: ${cmd}`);
+    process.exit(result.status ?? 1);
+  }
 }
 
-function replaceInFile(file, from, to) {
-  const content = fs.readFileSync(file, 'utf8');
-  fs.writeFileSync(file, content.replace(from, to), 'utf8');
-}
+// Build con USE_EMULATOR=false inyectado solo en este proceso
+// .env.local NO se modifica — el dev server en :3000 sigue igual
+run('npm --prefix apps/web2 run build', { NEXT_PUBLIC_USE_EMULATOR: 'false' });
 
-let restored = false;
-function restoreEnv() {
-  if (restored) return;
-  restored = true;
-  try { replaceInFile(envFile, 'USE_EMULATOR=false', 'USE_EMULATOR=true'); } catch {}
-  console.log('✓ USE_EMULATOR restaurado a true');
-}
+// Deploy selectivo según flags
+const targets = ['hosting'];
+if (withFunctions) targets.push('functions');
+if (withRules)     targets.push('firestore:rules');
 
-process.on('exit', restoreEnv);
-process.on('SIGINT', () => { restoreEnv(); process.exit(1); });
-process.on('uncaughtException', (e) => { console.error(e); restoreEnv(); process.exit(1); });
+run(`firebase deploy --only ${targets.join(',')}`);
 
-try {
-  replaceInFile(envFile, 'USE_EMULATOR=true', 'USE_EMULATOR=false');
-  console.log('✓ USE_EMULATOR=false');
-
-  run('npm --prefix apps/web2 run build');
-  run('firebase deploy --only hosting');
-
-  restoreEnv();
-
-  // Limpiar .next para que el dev server no quede roto
-  fs.rmSync(nextDir, { recursive: true, force: true });
-  console.log('✓ .next limpiado — podés correr npm run dev normalmente');
-} catch (e) {
-  restoreEnv();
-  process.exit(1);
-}
+console.log('\n✅ Deploy OK — el dev server y los emuladores siguen corriendo sin cambios.');

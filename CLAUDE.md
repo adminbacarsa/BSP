@@ -310,17 +310,24 @@ git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
 Firebase Hosting → `https://comtroldata.web.app`
 Firebase project: `comtroldata`
 
-Comando completo desde `C:\APP\cronoapp`:
+**El dev server en :3000 y los emuladores NO se interrumpen durante el deploy.**
+`USE_EMULATOR=false` se inyecta solo para el proceso de build — `.env.local` no se toca.
+
 ```bash
-# 1. Deshabilitar emulador
-sed -i 's/USE_EMULATOR=true/USE_EMULATOR=false/' apps/web2/.env.local
-# 2. Build
-cd apps/web2 && npm run build
-# 3. Deploy
-cd ../.. && firebase deploy --only hosting
-# 4. Restaurar emulador
-sed -i 's/USE_EMULATOR=false/USE_EMULATOR=true/' apps/web2/.env.local
+# Solo hosting (más común)
+npm run deploy
+
+# Hosting + functions
+npm run deploy --functions
+
+# Hosting + rules
+npm run deploy --rules
+
+# Todo
+npm run deploy --all
 ```
+
+El script `scripts/deploy.js` maneja el build con la variable de entorno correcta y el deploy selectivo.
 
 ---
 
