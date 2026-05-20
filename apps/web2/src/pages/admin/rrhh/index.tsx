@@ -351,7 +351,9 @@ export default function EmployeesPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'ausencias'), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50)),
+      scopeEmpresa
+        ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50))
+        : query(collection(db, 'ausencias'), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50)),
       snap => {
         const docs = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))

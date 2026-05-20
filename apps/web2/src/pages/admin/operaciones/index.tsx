@@ -24,7 +24,7 @@ import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
-import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa } from '@/lib/multiempresa';
+import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 
@@ -536,8 +536,12 @@ export default function OperacionesPage() {
 
     useEffect(() => {
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));
+        const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, !!(empresa as any)?.migracionCompleta);
+        const novedadesQ = scopeEmpresa
+            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200))
+            : query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200));
         const unsub = onSnapshot(
-            query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200)),
+            novedadesQ,
             snap => {
                 const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 docs.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
@@ -545,7 +549,7 @@ export default function OperacionesPage() {
             }
         );
         return () => unsub();
-    }, []);
+    }, [empresaId, empresa]);
 
     useEffect(() => {
         const todayStr = new Date().toLocaleDateString('en-CA');
@@ -555,8 +559,12 @@ export default function OperacionesPage() {
             if (v.seconds) return new Date(v.seconds * 1000).toLocaleDateString('en-CA');
             return new Date(v).toLocaleDateString('en-CA');
         };
+        const scopeAus = shouldScopeQueriesToEmpresa(empresaId, !!(empresa as any)?.migracionCompleta);
+        const ausQ = scopeAus
+            ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('status', '==', 'Autorizada'))
+            : query(collection(db, 'ausencias'), where('status', '==', 'Autorizada'));
         const unsub = onSnapshot(
-            query(collection(db, 'ausencias'), where('status', '==', 'Autorizada')),
+            ausQ,
             snap => {
                 const docs = snap.docs
                     .map(d => ({ id: d.id, ...d.data() }))
@@ -570,7 +578,7 @@ export default function OperacionesPage() {
             }
         );
         return () => unsub();
-    }, []);
+    }, [empresaId, empresa]);
 
     const autoAbsentTriggeredRef = useRef(new Set<string>());
     useEffect(() => {

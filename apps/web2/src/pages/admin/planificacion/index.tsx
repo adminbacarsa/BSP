@@ -1568,7 +1568,9 @@ export default function PlanificacionPage() {
         }, (e) => console.error('[plan] ausencias error:', e));
 
         // novedades: equality + orderBy requires composite index (status ASC, createdAt DESC in firestore.indexes.json)
-        const qNovedades = query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40));
+        const qNovedades = scopeEmpresa
+            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40))
+            : query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40));
         const unsubN = onSnapshot(qNovedades, (snap) => {
             const alerts = snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
@@ -2526,11 +2528,10 @@ export default function PlanificacionPage() {
     ): Promise<Record<string, Map<string, string>>> => {
         const queryStart = new Date(monthStart);
         queryStart.setMonth(queryStart.getMonth() - 2);
-        const absSnap = await getDocs(query(
-            collection(db, 'ausencias'),
-            where('startDate', '>=', Timestamp.fromDate(queryStart)),
-            where('startDate', '<=', Timestamp.fromDate(monthEnd))
-        ));
+        const absSnap = await getDocs(scopeEmpresa
+            ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('startDate', '>=', Timestamp.fromDate(queryStart)), where('startDate', '<=', Timestamp.fromDate(monthEnd)))
+            : query(collection(db, 'ausencias'), where('startDate', '>=', Timestamp.fromDate(queryStart)), where('startDate', '<=', Timestamp.fromDate(monthEnd)))
+        );
         const absences: Record<string, Map<string, string>> = {};
         absSnap.docs.forEach(d => {
             const data = d.data() as any;

@@ -164,7 +164,9 @@ export default function ServiciosSLAPage() {
 
         const clientIds = new Set(clientRows.map((c) => c.id));
 
-        const q = query(collection(db, 'servicios_sla'));
+        const q = scopeEmpresa
+            ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+            : query(collection(db, 'servicios_sla'));
 
         unsub = onSnapshot(q, (snapshot) => {
             let adaptedData = snapshot.docs.map(doc => {
