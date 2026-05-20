@@ -594,7 +594,7 @@ export const chatPlatformAssistant =
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
 
-const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
+const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 
 async function optimizePlanningGeminiHandler(
   data: { context?: Record<string, unknown>; empresaId?: string },
@@ -603,8 +603,9 @@ async function optimizePlanningGeminiHandler(
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }
-  const role = (context.auth.token.role as string) || '';
-  if (!ALLOWED_PLANNING_AI_ROLES.includes(role)) {
+  const role = String(context.auth.token.role || '').trim();
+  const { isSuperAdminRole } = await import('./common/role.util');
+  if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
     throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
   }
   const { resolveAssistantUser, empresaAllowed } = await import('./assistant/resolveAssistantUser');
@@ -626,14 +627,22 @@ async function optimizePlanningGeminiHandler(
   } catch (e: any) {
     if (e instanceof functions.https.HttpsError) throw e;
     console.error('[optimizePlanningGemini]', e?.message, e?.stack);
-    throw new functions.https.HttpsError('internal', e?.message ?? 'Error Gemini planificación');
+    const detail = e?.message || e?.toString?.() || 'Error Gemini planificación';
+    throw new functions.https.HttpsError('internal', detail);
   }
 }
 
+const optimizePlanningGeminiRuntime = {
+  timeoutSeconds: 180,
+  memory: '512MB' as const,
+};
+
 export const optimizePlanningGemini =
   process.env.FUNCTIONS_EMULATOR === 'true'
-    ? functions.https.onCall(optimizePlanningGeminiHandler)
-    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(optimizePlanningGeminiHandler);
+    ? functions.runWith(optimizePlanningGeminiRuntime).https.onCall(optimizePlanningGeminiHandler)
+    : functions
+        .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
+        .https.onCall(optimizePlanningGeminiHandler);
 
 // --- FUNCIONES DE SISTEMA INYECTADAS POR SCRIPT ---
 
@@ -1835,24 +1844,24 @@ export const triggerBackup = functions
       empresaId = caller.profileEmpresa;
     }
 
-    let scopeEmpresa = false;
-    if (empresaId) {
-      const empSnap = await db.collection('empresas').doc(empresaId).get();
-      const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
-      scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-    }
+    const scopeEmpresa = !!empresaId;
 
     try {
       const result = await runBackup(folderId, { empresaId, scopeEmpresa });
       return result;
     } catch (e: any) {
-      await db.collection('system_backups').add({
+      const errDoc = {
         status: 'error',
         error: e?.message || 'Error desconocido',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-      });
+      };
+      if (scopeEmpresa && empresaId) {
+        await db.collection('system_backups').doc(`${empresaId}_latest`).set(errDoc);
+      } else {
+        await db.collection('system_backups').add(errDoc);
+      }
       throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
     }
   });

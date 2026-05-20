@@ -22,7 +22,10 @@ export interface BackupOptions {
 
 function docBelongsToEmpresa(data: Record<string, unknown>, empresaId: string, scopeEmpresa: boolean): boolean {
   if (!scopeEmpresa) return true;
-  return String(data.empresaId ?? '').trim() === String(empresaId ?? '').trim();
+  const docEmpId = String(data.empresaId ?? '').trim();
+  if (docEmpId === empresaId) return true;
+  if (empresaId === 'bacarsa' && docEmpId === '') return true;
+  return false;
 }
 
 export interface BackupResult {
@@ -156,8 +159,8 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   const driveFileId = driveRes.data.id!;
   const driveLink = driveRes.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
 
-  // Registrar en Firestore
-  const ref = await db.collection('system_backups').add({
+  // Registrar en Firestore — uno por empresa (fixed ID) o acumulativo si es plataforma
+  const backupDoc = {
     driveFileId,
     driveLink,
     fileName,
@@ -169,7 +172,14 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     status: 'ok',
     ...(empresaId ? { empresaId } : {}),
     ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-  });
+  };
+  let ref: admin.firestore.DocumentReference;
+  if (scopeEmpresa && empresaId) {
+    ref = db.collection('system_backups').doc(`${empresaId}_latest`);
+    await ref.set(backupDoc);
+  } else {
+    ref = await db.collection('system_backups').add(backupDoc);
+  }
 
   return {
     id: ref.id,

@@ -10,6 +10,54 @@ import { shouldScopeQueriesToEmpresa, filterRowsByEmpresa } from '@/lib/multiemp
 
 const STORAGE_KEY = 'emulator_loaded_backup';
 
+const EMPRESA_SCOPED_COLS = new Set([
+  'empleados', 'turnos', 'ausencias', 'objetivos', 'clientes', 'clients',
+  'novedades', 'audit_logs', 'planificacion_estados', 'servicios_sla',
+  'contratos_servicio', 'tipos_turno', 'user_notifications', 'system_backups',
+  'roles', 'feriados', 'planificaciones_historial', 'historial_operaciones',
+  'contracts', 'quotes', 'system_users',
+]);
+
+function docMatchesEmpresa(doc: any, empId: string): boolean {
+  const docEmpId = String(doc.empresaId ?? '').trim();
+  return docEmpId === empId || (empId === 'bacarsa' && docEmpId === '');
+}
+
+async function emulatorQueryAndDeleteByEmpresa(colName: string, empId: string): Promise<number> {
+  const url = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: colName }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'empresaId' },
+            op: 'EQUAL',
+            value: { stringValue: empId },
+          },
+        },
+        limit: 10000,
+      },
+    }),
+  });
+  if (!res.ok) return 0;
+  const rows: Array<{ document?: { name: string } }> = await res.json();
+  const names = rows.filter(r => r.document?.name).map(r => r.document!.name);
+  if (names.length === 0) return 0;
+  const batchUrl = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
+  for (let i = 0; i < names.length; i += 400) {
+    const chunk = names.slice(i, i + 400);
+    await fetch(batchUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ writes: chunk.map(name => ({ delete: name })) }),
+    });
+  }
+  return names.length;
+}
+
 interface LoadedVersion {
   fileName: string;
   loadedAt: string;   // ISO string
@@ -317,30 +365,55 @@ export default function BackupTab() {
     }
   };
 
+  const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
+
   // Carga un backup JSON local directo al emulador desde el browser
   const handleLoadLocalFile = async (file: File) => {
     setLastResult(null);
     setProgress({ done: 0, total: 0, phase: 'Leyendo archivo...' });
+    const isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
     try {
       const text = await file.text();
       const backup = JSON.parse(text);
       validateBackupJsonForEmpresa(backup as Record<string, unknown>);
 
       const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, any[]][];
-      const totalDocs = cols.reduce((acc, [, docs]) => acc + (docs?.length ?? 0), 0);
 
-      setProgress({ done: 0, total: totalDocs, phase: 'Limpiando emulador...' });
-
-      // Borrar todo el Firestore del emulador via REST
-      await fetch(`http://localhost:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
-        method: 'DELETE',
-      });
+      if (!isEmpresaMode) {
+        // Modo plataforma: borra todo y restaura todo
+        setProgress({ done: 0, total: 0, phase: 'Limpiando emulador (plataforma completa)...' });
+        await fetch(`http://localhost:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
+          method: 'DELETE',
+        });
+      } else {
+        setProgress({ done: 0, total: 0, phase: `Limpiando datos de ${empresaId}…` });
+      }
 
       let written = 0;
+      const totalDocs = cols.reduce((acc, [, docs]) => acc + (docs?.length ?? 0), 0);
+
       for (const [colName, docs] of cols) {
         if (!Array.isArray(docs) || docs.length === 0) continue;
-        for (let i = 0; i < docs.length; i += 400) {
-          const chunk = docs.slice(i, i + 400);
+
+        let filteredDocs = docs;
+
+        if (isEmpresaMode) {
+          if (colName === 'empresas') {
+            filteredDocs = docs.filter((d: any) => d._id === empresaId);
+          } else if (EMPRESA_SCOPED_COLS.has(colName)) {
+            filteredDocs = docs.filter((d: any) => docMatchesEmpresa(d, empresaId));
+            if (filteredDocs.length > 0) {
+              setProgress({ done: written, total: totalDocs, phase: `Limpiando ${colName} (${empresaId})…` });
+              await emulatorQueryAndDeleteByEmpresa(colName, empresaId);
+            }
+          } else {
+            continue; // skip colecciones no empresa-scoped
+          }
+          if (filteredDocs.length === 0) continue;
+        }
+
+        for (let i = 0; i < filteredDocs.length; i += 400) {
+          const chunk = filteredDocs.slice(i, i + 400);
           const writes = chunk.flatMap((d: any) => {
             const { _id, ...data } = d;
             if (!_id) return [];
@@ -356,7 +429,6 @@ export default function BackupTab() {
       }
 
       // Re-insertar al usuario actual en system_users si el backup no lo incluía
-      // (el backup tiene UIDs de prod; el usuario de test del emulador queda fuera)
       const currentUser = auth.currentUser;
       if (currentUser) {
         const uid = currentUser.uid;
@@ -370,21 +442,14 @@ export default function BackupTab() {
           await emulatorBatchWrite([{
             name: `projects/${PROJECT_ID}/databases/(default)/documents/system_users/${uid}`,
             fields: toFsFields({
-              uid,
-              email,
-              firstName: 'Admin',
-              lastName: 'Emulador',
-              role,
-              empresaId: 'bacarsa',
-              status: 'ACTIVE',
-              createdAt: new Date(),
+              uid, email, firstName: 'Admin', lastName: 'Emulador', role,
+              empresaId: empresaId || 'bacarsa', status: 'ACTIVE', createdAt: new Date(),
             }),
           }]);
           written += 1;
         }
       }
 
-      // Guardar versión activa en localStorage
       const version: LoadedVersion = {
         fileName: file.name,
         loadedAt: new Date().toISOString(),
@@ -395,7 +460,8 @@ export default function BackupTab() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(version));
       setLoadedVersion(version);
 
-      setLastResult({ ok: true, msg: `Emulador actualizado — ${written.toLocaleString()} docs en ${cols.length} colecciones. Recargá la página (F5) para restaurar la sesión.` });
+      const scope = isEmpresaMode ? ` (solo ${empresaId})` : ' (plataforma completa)';
+      setLastResult({ ok: true, msg: `Emulador actualizado${scope} — ${written.toLocaleString()} docs. Recargá la página (F5) para restaurar la sesión.` });
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al cargar el archivo' });
     } finally {
@@ -603,10 +669,27 @@ export default function BackupTab() {
             </div>
             <div className="flex-1">
               <h3 className="font-black text-sm text-amber-900">Actualizar datos del emulador</h3>
-              <p className="text-xs text-amber-700 mt-0.5 mb-4">
-                Descargá el backup desde Drive (botón <b>Drive</b> en la lista) y seleccionalo acá.
-                Los datos del emulador se reemplazarán completamente.
+              <p className="text-xs text-amber-700 mt-0.5 mb-3">
+                Descargá el backup desde Drive y seleccionalo acá. Elegí el alcance:
               </p>
+              <div className="flex gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setLocalRestoreMode('empresa')}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-black border transition-colors ${localRestoreMode === 'empresa' ? 'bg-amber-500 text-white border-amber-500' : 'border-amber-300 text-amber-700 hover:bg-amber-50'}`}
+                >
+                  Solo {empresaId || 'empresa actual'}
+                </button>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setLocalRestoreMode('full')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-black border transition-colors ${localRestoreMode === 'full' ? 'bg-rose-500 text-white border-rose-500' : 'border-rose-300 text-rose-700 hover:bg-rose-50'}`}
+                  >
+                    Plataforma completa
+                  </button>
+                )}
+              </div>
 
               {progress ? (
                 <div className="space-y-1.5">
