@@ -106,6 +106,21 @@ function functionsEnvHasGeminiKey() {
 }
 
 if (!skipFunctions) {
+  for (const name of ['.env', '.env.local']) {
+    const p = path.join(functionsDir, name);
+    if (!fs.existsSync(p)) continue;
+    try {
+      const text = fs.readFileSync(p, 'utf8');
+      const m = text.match(/^\s*GEMINI_API_KEY\s*=\s*(\S+)/m);
+      if (m && m[1] && m[1] !== 'your-key-here') {
+        env.GEMINI_API_KEY = m[1].trim();
+        logErr('[emulators] GEMINI_API_KEY inyectada en env del proceso Functions');
+        break;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   if (!functionsEnvHasGeminiKey()) {
     logErr(
       '[emulators] AVISO: sin GEMINI_API_KEY en apps/functions/.env — el asistente COSP y optimizePlanningGemini no responderán.',

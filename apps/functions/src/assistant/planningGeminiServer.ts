@@ -77,7 +77,13 @@ R10. TOPE DE HORAS FACTURABLES POR PUESTO Y DÍA (crítico):
 
 R2. SLA_VENDIDAS: es referencia mensual de contrato. NO la uses para justificar pasarte del tope diario R10 en un puesto. Preferí equidad y legalidad antes que inflar un día.
 
-R3. TOPES CCT POR CICLO: 200h por ciclo CCT (26 del mes anterior → 25 del mes actual para el tramo "current"; 26→fin del mes en "next"). Respetá priorHoursCiclo + horas del mes según el día de la corrección.
+R3. TOPES CCT POR CICLO: 200h por ciclo CCT (26 del mes anterior → 25 del mes actual para el tramo "current"; 26→fin del mes en "next"). Objetivo operativo ~180–192h; NUNCA superar 200h salvo autorización explícita. Respetá priorHoursCiclo + horas del mes según el día de la corrección.
+
+R3b. ESQUEMA PREFERIDO: ciclo 6+2 con bandas M/T/N/F. No proponer D12/N12 salvo contingencia real (licencia/ausencia en banda T ese día). D12 y N12 deben ir en par el mismo día.
+
+R3c. RET (Retén): estado de guardia SOBRANTE en el objetivo. 0 h planificadas/liquidables. Solo asignar RET a empleados idle/sobrantes; un día laborable sin turno asignado → F, no RET. Podés promover RET→facturable para cubrir déficit (P2) respetando R3 y R10.
+
+R3d. TURNOS CUSTOM (EN, RO, etc.): cobertura obligatoria de una persona en los días activos del puesto. NO recortar ni bloquear por R3 si superan 200h cuando es el único titular del puesto custom. No convertir a M/T/N ni mover a otro puesto. Sí respetar R4 descansos y R6 ausencias.
 
 R4. DESCANSOS: 12h entre fin de turno e inicio del siguiente (8h solo si el turno previo fue ≤6h).
 

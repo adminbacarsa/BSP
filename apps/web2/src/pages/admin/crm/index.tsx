@@ -468,7 +468,7 @@ export default function CRMPage() {
       }
       const data = dedupeClientsById(
         snap.docs
-          .map((x) => ({ id: x.id, ...x.data() }))
+          .map((x) => ({ ...x.data(), id: x.id }))
           .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta)),
       );
       setClients(data);

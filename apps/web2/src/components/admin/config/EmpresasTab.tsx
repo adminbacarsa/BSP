@@ -6,7 +6,6 @@ import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, elimi
 import { toast } from 'sonner';
 import { db, functions, auth } from '@/lib/firebase';
 import { FirebaseError } from 'firebase/app';
-import { doc as fsDoc, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 
 function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
@@ -184,37 +183,43 @@ export default function EmpresasTab() {
       return;
     }
     setCopyRunning(true);
-    setCopyProgress({ phase: 'Encolando…', docsCopied: 0, docsDeleted: 0 });
+    setCopyProgress({ phase: 'Iniciando…', docsCopied: 0, docsDeleted: 0 });
     const jobId = `migrate_${Date.now()}`;
-    const jobRef = fsDoc(db, 'empresa_migrate_jobs', jobId);
-    let unsub: (() => void) | null = null;
     try {
       await auth.currentUser?.getIdToken(true);
-      const donePromise = new Promise<void>((resolve, reject) => {
-        unsub = onSnapshot(jobRef, (snap) => {
-          const d = snap.data();
-          if (!d) return;
-          setCopyProgress({
-            phase: String(d.phase ?? ''),
-            docsCopied: Number(d.docsCopied ?? 0),
-            docsDeleted: Number(d.docsDeleted ?? 0),
-          });
-          if (d.status === 'done') resolve();
-          if (d.status === 'error') reject(new Error(String(d.error ?? 'Error en migración')));
+      const fn = httpsCallable(functions, 'migrateEmpresaData', { timeout: 110000 });
+
+      let startColIndex = 0;
+      let idMaps: Record<string, Record<string, string>> | null = null;
+      let docsCopied = 0;
+      let docsDeleted = 0;
+      let totalCollections = 0;
+
+      for (let guard = 0; guard < 40; guard++) {
+        const res = await fn({ sourceEmpresaId: copySourceId, targetEmpresaId: empresaId, jobId, startColIndex, idMaps, docsCopied, docsDeleted }) as { data: any };
+        const d = res.data;
+        docsCopied = Number(d.docsCopied ?? docsCopied);
+        docsDeleted = Number(d.docsDeleted ?? docsDeleted);
+        totalCollections = Number(d.totalCollections ?? totalCollections);
+        idMaps = d.idMaps ?? idMaps;
+        const next = Number(d.nextColIndex ?? startColIndex + 1);
+        setCopyProgress({
+          phase: d.isComplete
+            ? 'Completado'
+            : `Copiando (${next}/${totalCollections || '?'})…`,
+          docsCopied,
+          docsDeleted,
         });
-      });
+        if (d.isComplete) break;
+        startColIndex = next;
+      }
 
-      const fn = httpsCallable(functions, 'migrateEmpresaData', { timeout: 120000 });
-      await fn({ sourceEmpresaId: copySourceId, targetEmpresaId: empresaId, jobId });
-
-      await donePromise;
       toast.success(`Datos copiados a ${empresa?.name || empresaId}`);
       setCopyModalOpen(false);
       setCopyConfirmInput('');
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Error al copiar datos');
     } finally {
-      unsub?.();
       setCopyRunning(false);
       setCopyProgress(null);
     }

@@ -46,6 +46,7 @@ const CCT_CYCLES_8H = [
     { cL: 6, cF: 1 },  // 86 % — máxima intensidad
 ] as const;
 const SH_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12 };
+const STANDARD_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
 const SH_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 const SH_END: Record<string, string>   = { M: '14:00', T: '22:00', N: '06:00', D12: '19:00', N12: '07:00' };
 
@@ -117,6 +118,15 @@ function isoWeekKey(d: Date): string {
 
 function posAllWeek(pos: V2PositionDef): boolean {
     return ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every(l => positionIsActiveOn(pos, l));
+}
+
+/** Puesto custom (EN, RO, etc.): una persona cubre todos los días activos; puede superar 200h. */
+function isCustomCoverPosition(pos: V2PositionDef): boolean {
+    const cov = String(pos.coverageType || '').toLowerCase();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return false;
+    const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
+    if (working.length === 0) return false;
+    return working.every(s => !STANDARD_BANDS.has(String(s.code ?? '').toUpperCase()));
 }
 
 // ─── Estado de runtime por empleado ──────────────────────────────────────────
@@ -426,6 +436,18 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
             .map(e => e.id)
     );
 
+    /** EN/RO y similares: cobertura obligatoria de dotación mínima; no recortar por tope 200h. */
+    const customCoverEmps = new Set<string>(
+        ctx.employees
+            .filter(emp => {
+                const pn = empAssignedTo[emp.id];
+                if (!pn) return false;
+                const p = ctx.positions.find(x => x.positionName === pn);
+                return !!p && isCustomCoverPosition(p);
+            })
+            .map(e => e.id)
+    );
+
     const cycleWorkDays: Record<string, Set<string>> = {};
     ctx.employees.forEach(emp => {
         const set = new Set<string>();
@@ -449,25 +471,39 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
 
     // ── PASO 3b: Alinear días de ciclo al tope CCT por tramo ───────────────
     //
-    // T1 (días 1–cutoff): tope = floor((200 - priorHours) / hrsPerDay)
-    // T2 (cutoff+1–fin):  tope = floor(200 / hrsPerDay)  [ciclo nuevo, arranca en 0]
+    // Solo puestos 24/7 con ciclo M/T/N (6+2). EN/RO/custom: cubren todos los días
+    // activos del puesto aunque superen 200h (cobertura obligatoria, una persona).
+
+    const hrsPerDayForEmp = (empId: string): number => {
+        const band = empBand[empId];
+        const code = (band ?? '').toUpperCase();
+        return _hint[code] ?? SH_HRS[code] ?? 8;
+    };
+
+    /** Quita días de trabajo repartidos (no solo al final del tramo) para evitar huecos agrupados. */
+    const trimWorkDaysToCap = (wdSet: Set<string>, sortedDays: string[], maxDays: number) => {
+        if (sortedDays.length <= maxDays) return;
+        const toRemove = sortedDays.length - maxDays;
+        for (let i = 0; i < toRemove; i++) {
+            const idx = Math.floor((i + 1) * sortedDays.length / (toRemove + 1));
+            wdSet.delete(sortedDays[Math.min(idx, sortedDays.length - 1)]);
+        }
+    };
 
     ctx.employees.forEach(emp => {
-        if (limitedEmps.has(emp.id)) return;
-        if (ctx.authorizedOver200Ids?.has(emp.id)) return; // bypass cap for authorized employees
-        const band = empBand[emp.id];
-        const code = (band ?? '').toUpperCase();
-        const hrsPerDay = _hint[code] ?? SH_HRS[code] ?? 8;
+        if (customCoverEmps.has(emp.id)) return;
+        if (ctx.authorizedOver200Ids?.has(emp.id)) return;
+        const hrsPerDay = hrsPerDayForEmp(emp.id);
         if (hrsPerDay <= 0) return;
         const wdSet = cycleWorkDays[emp.id];
         if (!wdSet || wdSet.size === 0) return;
         const prior = Math.max(0, ctx.empMonthlyInitial[emp.id] ?? 0);
         const wdT1 = [...wdSet].filter(d => parseInt(d.split('-')[2]) <= cutoff).sort();
         const capT1 = Math.floor(Math.max(0, HARD_MAX_HOURS - prior) / hrsPerDay);
-        if (wdT1.length > capT1) wdT1.slice(capT1).forEach(d => wdSet.delete(d));
+        trimWorkDaysToCap(wdSet, wdT1, capT1);
         const wdT2 = [...wdSet].filter(d => parseInt(d.split('-')[2]) > cutoff).sort();
         const capT2 = Math.floor(HARD_MAX_HOURS / hrsPerDay);
-        if (wdT2.length > capT2) wdT2.slice(capT2).forEach(d => wdSet.delete(d));
+        trimWorkDaysToCap(wdSet, wdT2, capT2);
     });
 
     if (_DBG) {
@@ -617,6 +653,24 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
     const capBlockedMap = new Map<string, CapOverflowSlot[]>();
     const capBlockedSeen = new Set<string>();
 
+    /** Horas facturables acumuladas en el tramo CCT activo (1→cutoff vs 26→fin). */
+    const cctTrancheUsed = (empId: string, inCur: boolean) => {
+        const st = rt[empId];
+        if (limitedEmps.has(empId)) return st.cycleCurrentUsed + st.cycleNextUsed;
+        return inCur ? st.cycleCurrentUsed : st.cycleNextUsed;
+    };
+
+    /** Tope 200h/ciclo — excepto custom cover (EN/RO) y autorizados explícitos. */
+    const exceedsCctCap = (empId: string, inCur: boolean, addHrs: number): boolean => {
+        if (ctx.authorizedOver200Ids?.has(empId)) return false;
+        if (customCoverEmps.has(empId)) return false;
+        return cctTrancheUsed(empId, inCur) + addHrs > HARD_MAX_HOURS + 1e-6;
+    };
+
+    /** Preferir empleados con menos horas en el tramo CCT activo. */
+    const sortByFewerHours = (empIds: string[], inCur: boolean) =>
+        [...empIds].sort((a, b) => cctTrancheUsed(a, inCur) - cctTrancheUsed(b, inCur));
+
     const writeAssign = (
         empId: string, dateStr: string, posName: string,
         code: string, name: string, hrs: number, start: string,
@@ -688,24 +742,15 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 coveredByBand[String(sh.code ?? '').toUpperCase()] = 0;
             });
 
-            // ── Modo extensión M/N (12 h, mismo código) ──────────────────────
-            // Cuando el grupo T está 100 % en franco ese día, M extiende a
-            // 12 h (06:00-18:00) y N a 12 h (18:00-06:00) — manteniendo el
-            // CÓDIGO M/N para no romper los controles de descanso del verificador:
-            //   M-ext termina 18:00 → siguiente M arranca 06:00 → 12 h exactos ✓
-            //   N-ext termina 06:00 → siguiente N arranca 22:00 → 16 h ✓
-            // Si el tope 48 h/semana impide el turno de 12 h se trabaja 8 h normal.
+            // ── Modo extensión D12/N12 (contingencia) ───────────────────────
+            // Solo si hay licencia/ausencia en banda T ese día — NO cuando T está de franco por 6+2.
             let extensionMode = false;
             if (dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'T') &&
                 dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'M') &&
                 dayBands.some(sh => String(sh.code ?? '').toUpperCase() === 'N')) {
-                const tInCycle = group.filter(eid =>
-                    !rt[eid].assignedDays.has(dateStr) &&
-                    !ctx.absences[eid]?.has(dateStr) &&
-                    cycleWorkDays[eid]?.has(dateStr) &&
-                    empBand[eid] === 'T'
-                ).length;
-                extensionMode = tInCycle === 0;
+                extensionMode = group.some(eid =>
+                    empBand[eid] === 'T' && ctx.absences[eid]?.has(dateStr),
+                );
             }
             // Rastreo de asignaciones extendidas a D12/N12 en esta posición/día
             const extD12Assigns: V2Assignment[] = [];
@@ -734,31 +779,25 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 const extStart = extCode !== sCode ? (SH_START[extCode] ?? sStart) : sStart;
                 const extEnd   = extCode !== sCode ? (SH_END[extCode]   ?? sEnd)   : sEnd;
 
-                const regular = group.filter(eid => {
+                const regular = sortByFewerHours(group.filter(eid => {
                     if (rt[eid].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[eid]?.has(dateStr)) return false;
                     if (!cycleWorkDays[eid]?.has(dateStr)) return false;
                     return empBand[eid] === sCode;
-                });
+                }), inCurrent);
 
                 for (const empId of regular) {
                     if (coveredByBand[sCode] >= qty) break;
-                    const st = rt[empId];
-                    const used = limitedEmps.has(empId)
-                        ? st.cycleCurrentUsed + st.cycleNextUsed
-                        : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
 
                     if (extCode !== sCode) {
-                        // Modo extensión: intentar 12 h; caída a 8 h si el cap lo impide
-                        const auth200 = ctx.authorizedOver200Ids?.has(empId) ?? false;
-                        const canDo12 = (auth200 || used + extHrs <= HARD_MAX_HOURS)
+                        const canDo12 = !exceedsCctCap(empId, inCurrent, extHrs)
                             && passesRest(empId, dateStr, extCode, extStart, extHrs)
                             && passesWeekCap(empId, dateStr, extHrs);
-                        const canDo8  = (auth200 || used + baseHrs <= HARD_MAX_HOURS)
+                        const canDo8  = !exceedsCctCap(empId, inCurrent, baseHrs)
                             && passesRest(empId, dateStr, sCode, sStart, baseHrs)
                             && passesWeekCap(empId, dateStr, baseHrs);
                         if (!canDo12 && !canDo8) {
-                            if (!auth200 && used + baseHrs > HARD_MAX_HOURS) {
+                            if (exceedsCctCap(empId, inCurrent, baseHrs)) {
                                 const sk = `${empId}||${dateStr}||${sCode}`;
                                 if (!capBlockedSeen.has(sk)) {
                                     capBlockedSeen.add(sk);
@@ -781,9 +820,7 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         }
                         coveredByBand[sCode]++;
                     } else {
-                        // Normal 8 h
-                        const auth200 = ctx.authorizedOver200Ids?.has(empId) ?? false;
-                        if (!auth200 && used + baseHrs > HARD_MAX_HOURS) {
+                        if (exceedsCctCap(empId, inCurrent, baseHrs)) {
                             const sk = `${empId}||${dateStr}||${sCode}`;
                             if (!capBlockedSeen.has(sk) && passesRest(empId, dateStr, sCode, sStart, baseHrs)) {
                                 capBlockedSeen.add(sk);
@@ -816,21 +853,16 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 const sEnd = sh.endTime || SH_END[sCode] || undefined;
                 const sName = sh.name || sCode;
 
-                const flex = group.filter(eid => {
+                const flex = sortByFewerHours(group.filter(eid => {
                     if (!flexSet.has(eid)) return false;
                     if (rt[eid].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[eid]?.has(dateStr)) return false;
                     return cycleWorkDays[eid]?.has(dateStr);
-                });
+                }), inCurrent);
 
                 for (const empId of flex) {
                     if (coveredByBand[sCode] >= qty) break;
-                    const st = rt[empId];
-                    const used = limitedEmps.has(empId)
-                        ? st.cycleCurrentUsed + st.cycleNextUsed
-                        : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    const auth200flex = ctx.authorizedOver200Ids?.has(empId) ?? false;
-                    if (!auth200flex && used + sHrs > HARD_MAX_HOURS) continue;
+                    if (exceedsCctCap(empId, inCurrent, sHrs)) continue;
                     if (!passesRest(empId, dateStr, sCode, sStart, sHrs)) continue;
                     if (!passesWeekCap(empId, dateStr, sHrs)) continue;
                     writeAssign(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrent, sEnd);
@@ -952,10 +984,9 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
 
     // ── Días sobrantes: rescate de cobertura + F o RET ────────────────────
     //
-    // - FLEX en día de trabajo con slots sin cubrir → intenta cubrir antes de asignar RET
-    // - Día de ciclo-trabajo sin turno → RET (stand-by)
-    // - Día de ciclo-franco, o empleado sin puesto → F
-    // - Excepción 6+1: tras noche, el único franco da ~32h < 35h mínimo CCT → forzar F extra
+    // - FLEX en día de trabajo con slots sin cubrir → intenta cubrir antes de RET
+    // - RET solo empleados SOBRANTES (sin puesto / idle) → disponibles otro objetivo
+    // - Día laborable del ciclo sin turno asignado → F (no RET)
 
     for (const emp of ctx.employees) {
         const st = rt[emp.id];
@@ -990,11 +1021,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                         const sHrs = shiftHrs(sh, _hint);
                         const sStart = sh.startTime || SH_START[gap.code] || '07:00';
                         const sEnd = sh.endTime || SH_END[gap.code] || undefined;
-                        const used = limitedEmps.has(emp.id)
-                            ? st.cycleCurrentUsed + st.cycleNextUsed
-                            : (inCurrent ? st.cycleCurrentUsed : st.cycleNextUsed);
                         const auth200gap = ctx.authorizedOver200Ids?.has(emp.id) ?? false;
-                        if (!auth200gap && used + sHrs > HARD_MAX_HOURS) continue;
+                        if (!auth200gap && exceedsCctCap(emp.id, inCurrent, sHrs)) continue;
                         if (!passesRest(emp.id, dateStr, gap.code, sStart, sHrs)) continue;
                         if (!passesWeekCap(emp.id, dateStr, sHrs)) continue;
                         writeAssign(emp.id, dateStr, gap.positionName, gap.code,
@@ -1009,19 +1037,17 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
-            const rawBand = limitedEmps.has(emp.id) && empBand[emp.id] ? empBand[emp.id]! : 'RET';
-            const bandHrs = isNonWork(rawBand) ? 0 : (SH_HRS[rawBand.toUpperCase()] ?? _hint[rawBand.toUpperCase()] ?? 8);
-            const bandStart = SH_START[rawBand.toUpperCase()] ?? '07:00';
-            const bandOk = bandHrs === 0
-                || (passesWeekCap(emp.id, dateStr, bandHrs)
-                    && passesRest(emp.id, dateStr, rawBand, bandStart, bandHrs));
-            // RET = 8h pasivas activables; solo válido si:
-            // (a) el cap ISO-semana permite 8h más, Y
-            // (b) el bloque F-a-F aún no llegó a 48h (después de 48h el día restante es F, no RET).
             const retCapOk = passesWeekCap(emp.id, dateStr, 8)
                 && blockHoursSinceLastFranco(emp.id, dateStr) < 48;
-            const bandCode = bandOk ? rawBand : (retCapOk ? 'RET' : 'F');
-            const fallback = isWorkDay ? (shortCyclePostNight ? 'F' : bandCode) : 'F';
+            const isIdleSurplus = empAssignedTo[emp.id] === null;
+            let fallback: string;
+            if (!isWorkDay || shortCyclePostNight) {
+                fallback = 'F';
+            } else if (isIdleSurplus && retCapOk) {
+                fallback = 'RET';
+            } else {
+                fallback = 'F';
+            }
             assignments.push({
                 empId: emp.id, dateStr, positionName: '',
                 code: fallback,
@@ -1037,7 +1063,8 @@ export function generateScheduleV3(ctx: V2EngineContext): V2GenerateResult {
     // ── Stats finales ──────────────────────────────────────────────────────
     for (const emp of ctx.employees) {
         const st = rt[emp.id];
-        if (st.cycleCurrentUsed > HARD_MAX_HOURS || st.cycleNextUsed > HARD_MAX_HOURS)
+        if (!customCoverEmps.has(emp.id)
+            && (st.cycleCurrentUsed > HARD_MAX_HOURS || st.cycleNextUsed > HARD_MAX_HOURS))
             stats.employeesOver200.push(emp.id);
         const weekCap = limitedEmps.has(emp.id)
             ? SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_LIMITED_POSITION

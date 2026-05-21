@@ -137,6 +137,8 @@ async function writeMigratedCollection(
       ? allocatePlanificacionEstadoId(String(_id), idMaps, targetEmpresaId)
       : allocateCloneDocId(db, colName, String(_id), idMaps);
 
+    if ('id' in clean) clean.id = writeId;
+
     bulkWriter.set(db.collection(colName).doc(writeId), clean);
     copiedCounter.count += 1;
 

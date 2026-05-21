@@ -6,9 +6,9 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const backup_service_1 = require("./backup/backup.service");
-const assistantEmpresaScope_1 = require("./assistant/assistantEmpresaScope");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
 const migrate_job_runner_1 = require("./backup/migrate-job.runner");
+const empresa_migrate_service_1 = require("./backup/empresa-migrate.service");
 const backup_auth_util_1 = require("./backup/backup-auth.util");
 const main_1 = require("./main");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
@@ -465,13 +465,14 @@ exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
-const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
+const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 async function optimizePlanningGeminiHandler(data, context) {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
     }
-    const role = context.auth.token.role || '';
-    if (!ALLOWED_PLANNING_AI_ROLES.includes(role)) {
+    const role = String(context.auth.token.role || '').trim();
+    const { isSuperAdminRole } = await Promise.resolve().then(() => require('./common/role.util'));
+    if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
         throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
     }
     const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
@@ -495,12 +496,19 @@ async function optimizePlanningGeminiHandler(data, context) {
         if (e instanceof functions.https.HttpsError)
             throw e;
         console.error('[optimizePlanningGemini]', e?.message, e?.stack);
-        throw new functions.https.HttpsError('internal', e?.message ?? 'Error Gemini planificación');
+        const detail = e?.message || e?.toString?.() || 'Error Gemini planificación';
+        throw new functions.https.HttpsError('internal', detail);
     }
 }
+const optimizePlanningGeminiRuntime = {
+    timeoutSeconds: 180,
+    memory: '512MB',
+};
 exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
-    ? functions.https.onCall(optimizePlanningGeminiHandler)
-    : functions.runWith({ secrets: ['GEMINI_API_KEY'] }).https.onCall(optimizePlanningGeminiHandler);
+    ? functions.runWith(optimizePlanningGeminiRuntime).https.onCall(optimizePlanningGeminiHandler)
+    : functions
+        .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
+        .https.onCall(optimizePlanningGeminiHandler);
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
@@ -1497,24 +1505,25 @@ exports.triggerBackup = functions
     else if (!empresaId) {
         empresaId = caller.profileEmpresa;
     }
-    let scopeEmpresa = false;
-    if (empresaId) {
-        const empSnap = await db.collection('empresas').doc(empresaId).get();
-        const migracionCompleta = empSnap.exists && empSnap.data()?.migracionCompleta === true;
-        scopeEmpresa = (0, assistantEmpresaScope_1.shouldScopeQueriesToEmpresa)(empresaId, migracionCompleta);
-    }
+    const scopeEmpresa = !!empresaId;
     try {
         const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa });
         return result;
     }
     catch (e) {
-        await db.collection('system_backups').add({
+        const errDoc = {
             status: 'error',
             error: e?.message || 'Error desconocido',
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             ...(empresaId ? { empresaId } : {}),
             ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-        });
+        };
+        if (scopeEmpresa && empresaId) {
+            await db.collection('system_backups').doc(`${empresaId}_latest`).set(errDoc);
+        }
+        else {
+            await db.collection('system_backups').add(errDoc);
+        }
         throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
     }
 });
@@ -1617,30 +1626,58 @@ exports.processRestoreJob = functions
 });
 exports.migrateEmpresaData = functions
     .region('us-central1')
-    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .runWith({ timeoutSeconds: 120, memory: '1GB' })
     .https.onCall(async (data, context) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
     const payload = (data ?? {});
     try {
         const { jobId, sourceEmpresaId, targetEmpresaId } = await (0, migrate_job_runner_1.assertMigrateEmpresaRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
         const db = admin.firestore();
-        await db.collection('empresa_migrate_jobs').doc(jobId).set({
-            status: 'queued',
-            phase: 'En cola…',
-            sourceEmpresaId,
-            targetEmpresaId,
-            requestedBy: context.auth.uid,
-            docsCopied: 0,
-            docsDeleted: 0,
-            resumeColIndex: 0,
-            idMaps: null,
-            error: null,
-            queuedAt: firestore_1.FieldValue.serverTimestamp(),
+        const startColIndex = Number(payload.startColIndex ?? 0);
+        const idMaps = (0, empresa_migrate_service_1.deserializeIdMaps)(payload.idMaps ?? null);
+        const docsCopied = Number(payload.docsCopied ?? 0);
+        const docsDeleted = Number(payload.docsDeleted ?? 0);
+        if (startColIndex === 0) {
+            await db.collection('empresa_migrate_jobs').doc(jobId).set({
+                status: 'running',
+                phase: 'Iniciando migración…',
+                sourceEmpresaId,
+                targetEmpresaId,
+                requestedBy: context.auth.uid,
+                docsCopied: 0,
+                docsDeleted: 0,
+                startedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        const result = await (0, empresa_migrate_service_1.runEmpresaMigrate)(sourceEmpresaId, targetEmpresaId, jobId, {
+            startColIndex,
+            collectionsPerRun: 1,
+            idMaps,
+            docsCopied,
+            docsDeleted,
         });
-        return { jobId, queued: true };
+        const idMapsSerialized = (0, empresa_migrate_service_1.serializeIdMaps)(result.idMaps ?? {});
+        if (result.isComplete) {
+            await db.collection('empresa_migrate_jobs').doc(jobId).set({
+                status: 'done',
+                phase: 'Completado',
+                docsCopied: result.docsCopied,
+                docsDeleted: result.docsDeleted,
+                completedAt: firestore_1.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        }
+        return {
+            jobId,
+            isComplete: result.isComplete,
+            nextColIndex: result.nextColIndex ?? 0,
+            idMaps: idMapsSerialized,
+            docsCopied: result.docsCopied,
+            docsDeleted: result.docsDeleted,
+            totalCollections: result.totalCollections ?? 0,
+        };
     }
     catch (e) {
-        const msg = e instanceof Error ? e.message : 'Error al encolar migración';
+        const msg = e instanceof Error ? e.message : 'Error en migración';
         if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
             throw new functions.https.HttpsError('permission-denied', msg);
         }

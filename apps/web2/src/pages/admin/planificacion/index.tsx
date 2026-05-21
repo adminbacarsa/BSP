@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -49,6 +49,11 @@ import { generateScheduleV3 } from '@/lib/planificacion/autoScheduleEngineV3';
 import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
+import {
+    buildPlannerContextFromAutoRun,
+    runPlanningAgentOptimizeStep,
+    shouldRunGeminiOptimizeStep,
+} from '@/lib/planificacion/planningAgentPipeline';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
 import {
     buildPlanningSnapshotFromGrid,
@@ -400,6 +405,9 @@ export default function PlanificacionPage() {
         ctx: import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext;
     } | null>(null);
     const [autoV2Fixing, setAutoV2Fixing] = useState(false);
+    const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
+    const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
+    const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
     const [autoWizardStep, setAutoWizardStep] = useState<'idle'|'detecting'|'verified'|'done'>('idle');
     // Empleados bloqueados por cap 200h en la última generación
     const [capOverflowEmps, setCapOverflowEmps] = useState<{ empId: string; nombre: string }[]>([]);
@@ -603,8 +611,7 @@ export default function PlanificacionPage() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
 
-    // Días RET por empleado → horas de stand-by (8h/día) para mostrar en la columna de dotación.
-    // No se usan para el tope CCT (solo para display/payroll de referencia).
+    // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
         const result: Record<string, number> = {};
         displayedEmployees.forEach((emp: any) => {
@@ -2676,11 +2683,81 @@ export default function PlanificacionPage() {
             autoV2ReportRef.current = null;
             setAutoV2Report(null);
             setAutoV2GenStats(null);
+            setAutoV2GeminiSummary(null);
             return;
         }
-        runFullGeneration(['4+2','5+1','6+1','6+2']);
+        runFullGeneration(['6+2']);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showAutoV2Modal]);
+
+    /** Paso 4 del agente: ajuste fino Gemini sobre cronograma ya generado + fixer. */
+    const runAutoV2PlanningAgentGemini = async (
+        finalAssignments: import('@/lib/planificacion/autoScheduleEngineV2').V2Assignment[],
+        coverage: import('@/lib/planificacion/coverageVerification').CoverageVerificationReport,
+        verifyCtx: import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext,
+        stats: import('@/lib/planificacion/autoScheduleEngineV2').V2GenerateStats,
+        newChanges: Record<string, any>,
+        force = false,
+    ) => {
+        if (!selectedObjective || (!autoV2RunGemini && !force)) {
+            return { assignments: finalAssignments, changes: newChanges, coverage };
+        }
+        if (!force && !shouldRunGeminiOptimizeStep(coverage)) {
+            return { assignments: finalAssignments, changes: newChanges, coverage };
+        }
+        setAutoV2GeminiLoading(true);
+        try {
+            await bumpAutoV2Progress(92, 'Ajuste fino IA (Gemini)…');
+            const y = currentDate.getFullYear();
+            const m = currentDate.getMonth();
+            const mes = `${y}-${String(m + 1).padStart(2, '0')}`;
+            const cutoff = autoV2ReportRef.current?.metrics?.cctCutoffDay ?? 25;
+            const prevM = m === 0 ? 12 : m;
+            const prevY = m === 0 ? y - 1 : y;
+            const diasBloqueados = daysInMonth.map((d) => getDateKey(d)).filter((ds) => isDateLocked(ds));
+            const plannerContext = buildPlannerContextFromAutoRun({
+                mes,
+                objetivo: getObjectiveName(selectedObjective),
+                objectiveId: selectedObjective,
+                slaVendidas,
+                ctx: verifyCtx,
+                assignments: finalAssignments,
+                stats,
+                diasBloqueados,
+                cicloCCT: {
+                    cortePrev: `${prevY}-${String(prevM).padStart(2, '0')}-26`,
+                    corteActual: `${y}-${String(m + 1).padStart(2, '0')}-${String(cutoff).padStart(2, '0')}`,
+                    descripcion: `Ciclo CCT: 26/${prevM} → ${cutoff}/${m + 1}; control 200h por ciclo`,
+                },
+            });
+            const result = await runPlanningAgentOptimizeStep({
+                plannerContext,
+                empresaId: empresaId || undefined,
+                baseChanges: newChanges,
+                objectiveId: selectedObjective,
+                assignments: finalAssignments,
+                isDateLocked,
+            });
+            setAutoV2GeminiSummary(result.gemini.resumen || null);
+            let assignments = result.assignments;
+            let changes = result.changes;
+            if (result.gemini.correcciones?.length) {
+                toast.info(`Ajuste fino IA: ${result.applied} corrección(es).`, { duration: 6000 });
+            } else if (result.blocked) {
+                toast.warning(result.gemini.razonBloqueo || 'IA: no puede cerrar el cronograma con la dotación actual.', { duration: 8000 });
+            } else {
+                toast.success('IA: cronograma sin cambios adicionales.', { duration: 4000 });
+            }
+            const coverageAfter = verifyScheduleCoverage(verifyCtx, assignments, stats);
+            return { assignments, changes, coverage: coverageAfter };
+        } catch (e: any) {
+            console.error('[planningAgentGemini]', e);
+            toast.error(e?.message || 'Error en ajuste fino IA');
+            return { assignments: finalAssignments, changes: newChanges, coverage };
+        } finally {
+            setAutoV2GeminiLoading(false);
+        }
+    };
 
     /**
      * Genera asignaciones y las vuelca a pendingChanges (motor COSP).
@@ -2943,6 +3020,20 @@ export default function PlanificacionPage() {
                 prevIssues = newIssues;
             }
 
+            setAutoV2Coverage(coverage);
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
+            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
+
+            const geminiOut = await runAutoV2PlanningAgentGemini(
+                finalAssignments,
+                coverage,
+                verifyCtx,
+                gen.stats,
+                newChanges,
+            );
+            finalAssignments = geminiOut.assignments;
+            coverage = geminiOut.coverage;
+            setPendingChanges({ ...geminiOut.changes });
             setAutoV2Coverage(coverage);
             setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
             setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
@@ -3305,13 +3396,12 @@ export default function PlanificacionPage() {
                                             const monthHours = empMonthlyHours[emp.id] || 0;
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
                                             const retDays = empRetDays[emp.id] || 0;
-                                            const retRefHours = retDays * 8;
                                             const displayHours = hoursMode === 'cct' ? cctHours : monthHours;
                                             const hoursColor = displayHours >= 200 ? 'text-red-600 font-black'
                                                 : displayHours >= 185 ? 'text-orange-500 font-bold'
                                                 : displayHours >= 160 ? 'text-amber-500'
                                                 : displayHours > 0   ? 'text-slate-500 dark:text-slate-300'
-                                                : retRefHours > 0    ? 'text-amber-800 font-bold'
+                                                : retDays > 0          ? 'text-amber-800 font-bold'
                                                 : 'text-slate-400 dark:text-slate-500';
                                             return (
                                                 <div className="flex items-center justify-between w-full">
@@ -3319,15 +3409,15 @@ export default function PlanificacionPage() {
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                         {isGuest && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
-                                                        {/* Horas mensuales planificadas (facturables) + RET de referencia */}
+                                                        {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
                                                         <span
                                                             title={hoursMode === 'cct'
-                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.${retRefHours > 0 ? `\n${retDays} días RET (${retRefHours}h stand-by de referencia, no facturados al cliente).` : ''}`
-                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retRefHours > 0 ? `\n${retDays} días RET (${retRefHours}h stand-by de referencia, no facturados al cliente).` : ''}`}
+                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
+                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
                                                             {Math.round(displayHours)}h
-                                                            {retRefHours > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET × 8h = ${retRefHours}h stand-by`}>+{retRefHours}★</span>}
+                                                            {retDays > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET (0 h planificadas)`}>+{retDays}RET</span>}
                                                             {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
                                                         </span>
                                                         {/* Distancia al objetivo — solo si hay coordenadas */}
@@ -3571,14 +3661,26 @@ export default function PlanificacionPage() {
                                         });
                                         const missingHours = dailyTarget * posQty - hoursForPos;
                                         if (missingHours > 0.5) {
-                                            const has12h = (codeCounts['D12'] || 0) + (codeCounts['N12'] || 0) > 0;
-                                            const has8h = (codeCounts['M'] || 0) + (codeCounts['T'] || 0) + (codeCounts['N'] || 0) > 0;
-                                            const shiftHrs = (has12h && !has8h) ? 12 : 8;
-                                            const missCount = Math.max(1, Math.round(missingHours / shiftHrs));
-                                            const bands = shiftHrs === 12 ? ['D12', 'N12'] : ['M', 'T', 'N'];
-                                            let worstBand = bands[0];
+                                            const dayShifts = (Array.isArray(pos?.shifts) ? pos.shifts : [])
+                                                .filter((s: any) => {
+                                                    const c = String(s.code || '').toUpperCase();
+                                                    if (!c || OBJECTIVE_NON_BILLABLE_CODES.has(c)) return false;
+                                                    if (Array.isArray(s.days) && s.days.length > 0 && !s.days.includes(dayLetter)) return false;
+                                                    return true;
+                                                });
+                                            const stdBands = ['M', 'T', 'N', 'D12', 'N12'];
+                                            const posBands = dayShifts.length > 0
+                                                ? dayShifts.map((s: any) => String(s.code || '').toUpperCase())
+                                                : stdBands;
+                                            const has12h = posBands.some(b => b === 'D12' || b === 'N12')
+                                                && (codeCounts['D12'] || 0) + (codeCounts['N12'] || 0) > 0;
+                                            const defaultH = posBands.length === 1
+                                                ? (Number(dayShifts[0]?.hours) || 8)
+                                                : (has12h ? 12 : 8);
+                                            const missCount = Math.max(1, Math.round(missingHours / defaultH));
+                                            let worstBand = posBands[0];
                                             let worstCnt = Infinity;
-                                            for (const b of bands) {
+                                            for (const b of posBands) {
                                                 const cnt = codeCounts[b] ?? 0;
                                                 if (cnt < worstCnt) { worstCnt = cnt; worstBand = b; }
                                             }
@@ -4196,9 +4298,9 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                         {retCount > 0 && (
-                            <div className="text-center px-3" title={`Cantidad de celdas en RET (stand-by) en el mes. Potencial: ${retCount * 8}h activables como cobertura.`}>
+                            <div className="text-center px-3" title="Días RET: guardia sobrante en el objetivo (0 h planificadas/liquidables). Disponible para cubrir otro servicio.">
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Retenes</p>
-                                <p className="text-sm font-black text-amber-600 leading-tight">{retCount} <span className="text-[9px] text-amber-500 font-bold">({retCount * 8}h)</span></p>
+                                <p className="text-sm font-black text-amber-600 leading-tight">{retCount} <span className="text-[9px] text-amber-500 font-bold">días</span></p>
                             </div>
                         )}
                         {retBufferHours > 0 && (
@@ -5511,11 +5613,11 @@ export default function PlanificacionPage() {
                             <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3">
 
                                 {/* Progreso — detectando o generando */}
-                                {(autoWizardStep === 'detecting' || autoV2Loading || autoV2Generating) && (
+                                {(autoWizardStep === 'detecting' || autoV2Loading || autoV2Generating || autoV2GeminiLoading) && (
                                     <div className="rounded-xl bg-slate-900 px-4 py-4 text-white shadow-inner ring-1 ring-slate-700/80">
                                         <div className="flex justify-between items-center mb-2">
                                             <span className="text-[11px] font-black uppercase tracking-wide text-amber-300">
-                                                {autoV2Generating ? 'Generando cronograma…' : 'Analizando configuración…'}
+                                                {autoV2GeminiLoading ? 'Ajuste fino IA…' : autoV2Generating ? 'Generando cronograma…' : 'Analizando configuración…'}
                                             </span>
                                             <span className="text-[11px] font-mono font-bold text-slate-300">{Math.round(autoV2Progress?.pct ?? 0)}%</span>
                                         </div>
@@ -5603,6 +5705,39 @@ export default function PlanificacionPage() {
                                                 ? 'Cronograma listo. Revisá la grilla y guardá cuando estés listo.'
                                                 : 'Cronograma con avisos. Revisá la grilla antes de guardar.'}
                                         </p>
+                                        {autoV2GeminiSummary && (
+                                            <p className="text-[10px] text-indigo-700 font-bold bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5">
+                                                IA: {autoV2GeminiSummary}
+                                            </p>
+                                        )}
+                                        {autoV2LastRun && autoV2Coverage && (
+                                            <button type="button"
+                                                disabled={autoV2GeminiLoading || autoV2Generating}
+                                                onClick={async () => {
+                                                    if (!autoV2LastRun || !autoV2Coverage) return;
+                                                    const out = await runAutoV2PlanningAgentGemini(
+                                                        autoV2LastRun.assignments,
+                                                        autoV2Coverage,
+                                                        autoV2LastRun.ctx,
+                                                        autoV2LastRun.stats,
+                                                        { ...pendingChanges },
+                                                        true,
+                                                    );
+                                                    setPendingChanges({ ...out.changes });
+                                                    setAutoV2Coverage(out.coverage);
+                                                    setAutoV2LastRun({ ...autoV2LastRun, assignments: out.assignments });
+                                                    setAutoV2Suggestions(
+                                                        buildScheduleOptimizationSuggestions(
+                                                            autoV2LastRun.ctx,
+                                                            out.assignments,
+                                                            autoV2LastRun.stats,
+                                                        ),
+                                                    );
+                                                }}
+                                                className="w-full py-2 rounded-lg text-[11px] font-black text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                                {autoV2GeminiLoading ? 'IA trabajando…' : '↻ Re-ejecutar ajuste fino IA'}
+                                            </button>
+                                        )}
 
                                         {/* Autorización 200h */}
                                         {capOverflowEmps.length > 0 && (
@@ -5700,6 +5835,13 @@ export default function PlanificacionPage() {
                                                     <button type="button" onClick={() => setAutoOverwrite(p => !p)}
                                                         className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
                                                         <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini)</span>
+                                                    <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoV2RunGemini ? 'translate-x-4' : ''}`}/>
                                                     </button>
                                                 </div>
                                                 <button type="button"

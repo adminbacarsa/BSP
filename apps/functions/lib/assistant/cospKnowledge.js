@@ -58,6 +58,16 @@ Para ubicar quién tiene algo planificado en un día dado dentro de ese mes:
 5. Clic en **Publicar cronograma** en la barra de acciones de la grilla.
 
 Tras publicar, los turnos planificados quedan visibles según las reglas de la empresa (operaciones, portal empleado, etc.).
+
+**Automatizar cronograma (agente planificación COSP)**:
+
+1. Con **Cliente**, **Objetivo** y **SLA activo** para el mes.
+2. Botón **Automatizar** (wizard): primero **viabilidad** (dotación vs SLA + CCT 200h).
+3. Si es viable, **genera** el mes (motor determinístico V3) y **reprocesa** descansos/slots.
+4. Opcional (activado por defecto): **ajuste fino IA** (Gemini) — sólo correcciones puntuales, no reinventa el mes.
+5. Revisá verificación de cobertura, guardá pendientes y **publicá** cuando corresponda.
+
+Requiere emulador/producción con **Functions** y **GEMINI_API_KEY** para el paso IA.
 `.trim();
 const OPERATIONS_OPS = `
 Operaciones: monitor en tiempo cercano por objetivos/puestos; vacantes, ausencias tardías, fichadas. Usá filtros de fecha/período o barra lateral según apareza en esa versión cuando el usuario no vea algo.

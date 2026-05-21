@@ -1748,6 +1748,24 @@ function matchPlanificacionHowToIntent(t) {
         return true;
     return false;
 }
+function matchPlanningAutomateIntent(t) {
+    if (!/\b(automatizar|auto\s*generar|generar\s+(el\s+)?cronograma|ajuste\s+fino|optimizar\s+(el\s+)?cronograma|wizard\s+automatizar)\b/.test(t)) {
+        return false;
+    }
+    return /\b(planific|cronograma|grilla|mes|turnos|dotaci[oó]n)\b/.test(t);
+}
+function tryDeterministicPlanningAutomateReply(t) {
+    if (!matchPlanningAutomateIntent(t))
+        return null;
+    return ('**Automatizar planificación en COSP**\n\n' +
+        '1. **Planificación y Turnos** → elegí **Cliente** y **Objetivo** (SLA activo en el mes).\n\n' +
+        '2. Clic en **Automatizar** (barra de la grilla).\n\n' +
+        '3. El sistema calcula **viabilidad** (¿cierra dotación + CCT 200h + SLA vendidas?).\n\n' +
+        '4. Si es viable, **genera** el cronograma y **reprocesa** huecos/descansos automáticamente.\n\n' +
+        '5. Con **ajuste fino IA** activo (toggle en configuración del wizard), Gemini propone **correcciones puntuales** — no reemplaza todo el mes.\n\n' +
+        '6. Revisá el modal de **verificación de cobertura**, la grilla y **guardá**; luego **publicá** el cronograma.\n\n' +
+        'En laboratorio: `npm run emulators` (con Functions) y `GEMINI_API_KEY` en `apps/functions/.env`. Sin Functions no corre el paso IA.').slice(0, 7500);
+}
 function tryDeterministicPlanificacionHowToReply(t) {
     if (!matchPlanificacionHowToIntent(t))
         return null;
@@ -1988,6 +2006,9 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     catch (e) {
         console.warn('[assistant] tryDeterministicTurnosHoyReply', e);
     }
+    const planAutomate = tryDeterministicPlanningAutomateReply(t);
+    if (planAutomate)
+        return planAutomate;
     const planHowTo = tryDeterministicPlanificacionHowToReply(t);
     if (planHowTo?.trim())
         return planHowTo.trim();

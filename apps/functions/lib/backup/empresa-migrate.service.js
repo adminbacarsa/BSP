@@ -103,6 +103,8 @@ async function writeMigratedCollection(db, colName, docs, targetEmpresaId, idMap
         const writeId = colName === 'planificacion_estados'
             ? allocatePlanificacionEstadoId(String(_id), idMaps, targetEmpresaId)
             : (0, restore_service_1.allocateCloneDocId)(db, colName, String(_id), idMaps);
+        if ('id' in clean)
+            clean.id = writeId;
         bulkWriter.set(db.collection(colName).doc(writeId), clean);
         copiedCounter.count += 1;
         if (copiedCounter.count - lastReport >= 250) {

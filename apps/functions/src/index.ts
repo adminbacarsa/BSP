@@ -11,6 +11,7 @@ import {
   executeEmpresaMigrateJob,
   MigrateEmpresaRequestPayload,
 } from './backup/migrate-job.runner';
+import { runEmpresaMigrate, serializeIdMaps, deserializeIdMaps } from './backup/empresa-migrate.service';
 import {
   assertBackupCallableAllowed,
   normalizeBackupRole,
@@ -1974,10 +1975,15 @@ export const processRestoreJob = functions
 /** Copia todos los datos de una empresa a otra (superadmin). IDs nuevos + empresaId destino. */
 export const migrateEmpresaData = functions
   .region('us-central1')
-  .runWith({ timeoutSeconds: 120, memory: '512MB' })
+  .runWith({ timeoutSeconds: 120, memory: '1GB' })
   .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
-    const payload = (data ?? {}) as MigrateEmpresaRequestPayload;
+    const payload = (data ?? {}) as MigrateEmpresaRequestPayload & {
+      startColIndex?: number;
+      idMaps?: Record<string, Record<string, string>> | null;
+      docsCopied?: number;
+      docsDeleted?: number;
+    };
     try {
       const { jobId, sourceEmpresaId, targetEmpresaId } = await assertMigrateEmpresaRequestAllowed(
         context.auth!.uid,
@@ -1985,22 +1991,55 @@ export const migrateEmpresaData = functions
         payload,
       );
       const db = admin.firestore();
-      await db.collection('empresa_migrate_jobs').doc(jobId).set({
-        status: 'queued',
-        phase: 'En cola…',
-        sourceEmpresaId,
-        targetEmpresaId,
-        requestedBy: context.auth!.uid,
-        docsCopied: 0,
-        docsDeleted: 0,
-        resumeColIndex: 0,
-        idMaps: null,
-        error: null,
-        queuedAt: FieldValue.serverTimestamp(),
+      const startColIndex = Number(payload.startColIndex ?? 0);
+      const idMaps = deserializeIdMaps(payload.idMaps ?? null);
+      const docsCopied = Number(payload.docsCopied ?? 0);
+      const docsDeleted = Number(payload.docsDeleted ?? 0);
+
+      if (startColIndex === 0) {
+        await db.collection('empresa_migrate_jobs').doc(jobId).set({
+          status: 'running',
+          phase: 'Iniciando migración…',
+          sourceEmpresaId,
+          targetEmpresaId,
+          requestedBy: context.auth!.uid,
+          docsCopied: 0,
+          docsDeleted: 0,
+          startedAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      const result = await runEmpresaMigrate(sourceEmpresaId, targetEmpresaId, jobId, {
+        startColIndex,
+        collectionsPerRun: 1,
+        idMaps,
+        docsCopied,
+        docsDeleted,
       });
-      return { jobId, queued: true };
+
+      const idMapsSerialized = serializeIdMaps(result.idMaps ?? {});
+
+      if (result.isComplete) {
+        await db.collection('empresa_migrate_jobs').doc(jobId).set({
+          status: 'done',
+          phase: 'Completado',
+          docsCopied: result.docsCopied,
+          docsDeleted: result.docsDeleted,
+          completedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      return {
+        jobId,
+        isComplete: result.isComplete,
+        nextColIndex: result.nextColIndex ?? 0,
+        idMaps: idMapsSerialized,
+        docsCopied: result.docsCopied,
+        docsDeleted: result.docsDeleted,
+        totalCollections: result.totalCollections ?? 0,
+      };
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Error al encolar migración';
+      const msg = e instanceof Error ? e.message : 'Error en migración';
       if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
         throw new functions.https.HttpsError('permission-denied', msg);
       }

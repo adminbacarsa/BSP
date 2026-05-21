@@ -36,6 +36,11 @@
     "emulators:light": "node scripts/run-emulators.js --without-functions",
     "seed": "node scripts/seed-lab.js",
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
+    "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
+    "test:planning-agent-emulator": "node scripts/test-planning-agent-emulator.mjs",
+    "test:automate-planning-ui": "node scripts/test-automate-planning-ui.mjs",
+    "autoplan:real": "node scripts/run-autoplan-real.mjs",
+    "seed:planning-demo": "node scripts/seed-planning-demo.mjs",
     "lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1",
     "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart"
   },
