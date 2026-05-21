@@ -8,7 +8,7 @@ import {
     ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, Plus,
     Users, Clock, X, UserPlus, ArrowRight, Eye, EyeOff, 
     CheckCircle, Trash2, ShieldAlert, User, Briefcase, Layers,
-    Bell, CalendarX, Loader2, Stethoscope, MapPin, Lock, ShieldCheck, UserMinus,
+    Bell, Calendar, CalendarX, Loader2, Stethoscope, MapPin, Lock, ShieldCheck, UserMinus,
     Save, Undo, History, MousePointer2, AlertTriangle, Grip, LayoutGrid, MonitorPlay,
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
@@ -361,7 +361,7 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
-    /** Rotar turnos entre ciclos (M→T→N→M…). Si el puesto solo tiene 1 turno, no afecta. */
+    /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     const [autoRotateShifts, setAutoRotateShifts] = useState(false);
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
@@ -393,6 +393,8 @@ export default function PlanificacionPage() {
         totalRetHoursPotential?: number;
         uncoveredSlotsByDay?: Record<string, { positionName: string; code: string; missing: number }[]>;
         excessPositionEmployees?: { positionName: string; assigned: number; needed: number; excess: number }[];
+        slaDeficitRemaining?: number;
+        slaHoursClosed?: boolean;
     } | null>(null);
     const [showCapacityModal, setShowCapacityModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
@@ -1979,6 +1981,21 @@ export default function PlanificacionPage() {
         if (!selectedObjective) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
+        if (slaVendidas > 0) {
+            const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
+            const plannedRounded = Math.round(totalPlanned);
+            const slaRounded = Math.round(slaVendidas);
+            if (plannedRounded !== slaRounded) {
+                const delta = slaRounded - plannedRounded;
+                toast.error(
+                    delta > 0
+                        ? `No se puede publicar: ${plannedRounded}h planificadas ≠ ${slaRounded}h vendidas (SLA). Faltan ${delta}h.`
+                        : `No se puede publicar: ${plannedRounded}h planificadas superan ${slaRounded}h vendidas (SLA) en ${-delta}h.`,
+                    { duration: 9000 },
+                );
+                return;
+            }
+        }
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const isAlreadyPublished = !!publishStatusMap[publishLookupKey];
@@ -2955,6 +2972,8 @@ export default function PlanificacionPage() {
                 totalRetHoursPotential: gen.stats.totalRetHoursPotential,
                 uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
                 excessPositionEmployees: gen.stats.excessPositionEmployees,
+                slaDeficitRemaining: gen.stats.slaDeficitRemaining,
+                slaHoursClosed: gen.stats.slaHoursClosed,
             });
 
             await bumpAutoV2Progress(78, 'Verificando cobertura y reglas (descansos, licencias)…');
@@ -3087,6 +3106,15 @@ export default function PlanificacionPage() {
                     `El cronograma calculó ${Math.round(verifiedBillable)}h pero la grilla refleja ~${Math.round(gridBillableHours)}h. Revisá celdas mezcladas o guardá tras corregir.`,
                     { duration: 9000 },
                 );
+                setAutoWizardStep('done');
+            } else if (slaVendidas > 0 && gen.stats.slaHoursClosed === false && (gen.stats.slaDeficitRemaining ?? 0) > 0) {
+                toast.warning(
+                    `Faltan ${Math.round(gen.stats.slaDeficitRemaining ?? 0)}h para igualar el SLA (${slaVendidas}h vendidas). No podrás publicar hasta cerrar la diferencia.`,
+                    { duration: 10000 },
+                );
+                setAutoWizardStep('done');
+            } else if (slaVendidas > 0 && gen.stats.slaHoursClosed) {
+                toast.success(`Cronograma cerrado: ${Math.round(verifiedBillable)}h = ${slaVendidas}h vendidas.`, { duration: 5000 });
                 setAutoWizardStep('done');
             } else {
                 setAutoWizardStep('done');
@@ -4172,7 +4200,7 @@ export default function PlanificacionPage() {
                                         return (
                                             <button key={label} onClick={() => setBandFilter(b)}
                                                 className={`px-1.5 py-1 text-[9px] font-black uppercase border transition-colors first:rounded-l-lg last:rounded-r-lg ${active ? cls + ' shadow-inner' : 'border-transparent bg-slate-100 text-slate-400 hover:' + cls}`}
-                                                title={b ? `Ver solo banda ${b}` : 'Ver todas las bandas'}
+                                                title={b ? { M: 'Mañana', T: 'Tarde', N: 'Noche', D12: 'Diurno 12h', N12: 'Nocturno 12h', RET: 'Retén' }[b] ?? b : 'Ver todas las bandas'}
                                             >{label}</button>
                                         );
                                     })}
@@ -4192,8 +4220,12 @@ export default function PlanificacionPage() {
                     {isProcessing && <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={40}/></div>}
                     
                     {!selectedObjective ? (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-300 gap-4">
-                            <CalendarX size={64}/><p className="font-bold text-lg">Seleccione Cliente y Objetivo</p>
+                        <div className="flex flex-col items-center justify-center h-full gap-3 select-none">
+                            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+                                <Calendar size={32} className="text-slate-300" aria-hidden="true"/>
+                            </div>
+                            <p className="font-bold text-base text-slate-400">Seleccioná un cliente y objetivo</p>
+                            <p className="text-sm text-slate-300">La grilla de planificación aparecerá aquí</p>
                         </div>
                     ) : (
                         <>
@@ -4341,6 +4373,7 @@ export default function PlanificacionPage() {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const empCount = Object.values(sourceHours).filter((v: any) => v > 0).length;
+                    const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/francos/licencias.'
@@ -4356,7 +4389,12 @@ export default function PlanificacionPage() {
                                 {hsLabel}
                                 {hoursMode === 'cct' && <span className="text-[7px] text-indigo-500">CCT</span>}
                             </p>
-                            <p className="text-sm font-black text-indigo-600 leading-tight">{totalHrs.toFixed(0)}</p>
+                            <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p>
+                            {slaMismatch && slaVendidas > 0 && (
+                                <p className="text-[8px] font-black text-rose-500 leading-none mt-0.5">
+                                    {Math.round(slaVendidas - totalHrs) > 0 ? `−${Math.round(slaVendidas - totalHrs)}h SLA` : `+${Math.round(totalHrs - slaVendidas)}h SLA`}
+                                </p>
+                            )}
                         </div>
                         {displayedEmployees.length > 0 && (
                             <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado en el ciclo CCT actual.' : 'Promedio de horas por empleado en el mes calendario.'}>
@@ -4404,7 +4442,7 @@ export default function PlanificacionPage() {
                             </button>
                         )}
                         {slaVendidas > 0 && (
-                            <div className="text-center pl-3">
+                            <div className={`text-center pl-3 ${slaMismatch ? 'rounded-lg bg-rose-50 px-2 py-0.5' : ''}`}>
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Vendidas</p>
                                 <p className="text-sm font-black text-teal-600 leading-tight">{slaVendidas}</p>
                             </div>
@@ -5707,6 +5745,16 @@ export default function PlanificacionPage() {
                                             </button>
                                         </div>
                                         <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
+                                                Turnos rotativos por bloque CCT
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">6+2: MMMMMMFF→TTTTTTFF→NNNNNNFF… · 4+2: MMMMFF→…</span>
+                                            </span>
+                                            <button type="button" onClick={() => setAutoRotateShifts(p => !p)}
+                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoRotateShifts ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoRotateShifts ? 'translate-x-4' : ''}`}/>
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2">
                                             <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini)</span>
                                             <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
@@ -5770,6 +5818,18 @@ export default function PlanificacionPage() {
                                     <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 mb-1">
                                         <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">Esquema aplicado</p>
                                         <p className="text-sm font-black text-indigo-900">{autoCycles.join(' · ')} <span className="text-[10px] font-bold text-indigo-600">(auto)</span></p>
+                                    </div>
+                                )}
+
+                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && slaVendidas > 0 && (
+                                    <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
+                                        autoV2GenStats.slaHoursClosed
+                                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                            : 'border-rose-300 bg-rose-50 text-rose-800'
+                                    }`}>
+                                        {autoV2GenStats.slaHoursClosed
+                                            ? `✓ SLA cerrado: ${Math.round(autoV2GenStats.totalBillableHours)}h planificadas = ${slaVendidas}h vendidas`
+                                            : `✗ SLA abierto: faltan ${Math.round(autoV2GenStats.slaDeficitRemaining ?? 0)}h para publicar (${slaVendidas}h vendidas)`}
                                     </div>
                                 )}
 

@@ -1442,8 +1442,8 @@ export default function EmployeesPage() {
                             <button onClick={() => changeMonth(1)} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors"><ChevronRight size={12}/></button>
                           </div>
                           <div className="flex items-center gap-1">
-                            <button onClick={() => setShowInactive(v => !v)} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors ${showInactive ? 'bg-rose-100 text-rose-600' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
-                              <UserX size={10}/> {showInactive ? 'Bajas' : 'Bajas'}
+                            <button onClick={() => setShowInactive(v => !v)} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors ${showInactive ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
+                              <UserX size={10} aria-hidden="true"/> {showInactive ? 'Bajas' : 'Bajas'}
                             </button>
                             {(() => {
                               const n = employees.filter(e => { const isActive = e.status === 'activo' || e.status === 'active' || !e.status; return isActive && !e.lat && !e.lng; }).length;
@@ -1840,8 +1840,8 @@ export default function EmployeesPage() {
                               {/* ── ROW 1: KPI primarios ─────────────────────────── */}
                               <div className="grid grid-cols-3 gap-3">
                                 {/* Nómina total */}
-                                <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl shadow-lg shadow-indigo-500/25 p-4 text-white flex flex-col justify-between min-h-[90px]">
-                                  <Users size={16} className="opacity-60"/>
+                                <div className="bg-indigo-600 rounded-2xl p-4 text-white flex flex-col justify-between min-h-[90px]">
+                                  <Users size={16} className="opacity-50"/>
                                   <div>
                                     <p className="text-3xl font-black leading-none">{globalHRStats.total}</p>
                                     <p className="text-[9px] font-black uppercase opacity-70 mt-0.5">Nómina Total</p>
@@ -1893,7 +1893,7 @@ export default function EmployeesPage() {
                                     <span className="text-[9px] font-black uppercase text-slate-400">Prom. Antigüedad</span>
                                   </div>
                                   <div>
-                                    <p className="text-3xl font-black text-amber-600 leading-none">{globalHRStats.avgSeniority}<span className="text-lg"> a</span></p>
+                                    <p className="text-3xl font-black text-amber-600 leading-none">{globalHRStats.avgSeniority}<span className="text-lg"> años</span></p>
                                     <p className="text-[9px] text-slate-400 mt-0.5">{globalHRStats.senBuckets['5+']} con +5 años · {globalHRStats.senBuckets['<1']} nuevos</p>
                                   </div>
                                 </div>
@@ -1904,7 +1904,7 @@ export default function EmployeesPage() {
                                     <span className="text-[9px] font-black uppercase text-slate-400">Prom. Edad</span>
                                   </div>
                                   <div>
-                                    <p className="text-3xl font-black text-sky-600 leading-none">{globalHRStats.avgAge > 0 ? globalHRStats.avgAge : '—'}<span className="text-lg">{globalHRStats.avgAge > 0 ? ' a' : ''}</span></p>
+                                    <p className="text-3xl font-black text-sky-600 leading-none">{globalHRStats.avgAge > 0 ? globalHRStats.avgAge : '—'}<span className="text-lg">{globalHRStats.avgAge > 0 ? ' años' : ''}</span></p>
                                     <p className="text-[9px] text-slate-400 mt-0.5">{globalHRStats.ageCount > 0 ? `${globalHRStats.ageCount} con fecha de nac.` : 'Sin datos de edad'}</p>
                                   </div>
                                 </div>

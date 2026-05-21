@@ -344,6 +344,20 @@ export default function ReportsPage() {
                         <button onClick={() => window.print()} aria-label="Imprimir liquidación de horas" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
                 </div>
+                <div className="px-4 pt-3 pb-1 flex flex-wrap gap-x-4 gap-y-1 no-print" aria-label="Referencias de columnas">
+                    {[
+                        { color: 'bg-amber-400',  label: 'Diurnas' },
+                        { color: 'bg-violet-500', label: 'Nocturnas' },
+                        { color: 'bg-orange-400', label: 'Al 50%' },
+                        { color: 'bg-rose-500',   label: 'Al 100% (Feriado trabajado)' },
+                        { color: 'bg-emerald-500',label: 'Plus Feriado' },
+                    ].map(({ color, label }) => (
+                        <span key={label} className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
+                            <span className={`w-2.5 h-2.5 rounded-sm ${color} flex-shrink-0`} aria-hidden="true"/>
+                            {label}
+                        </span>
+                    ))}
+                </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px]">

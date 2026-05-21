@@ -512,6 +512,7 @@ export default function OperacionesPage() {
         processedData: logic.processedData,
     });
     const [isExternalMap, setIsExternalMap] = useState(false);
+    const [confirmEndSession, setConfirmEndSession] = useState(false);
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1092,7 +1093,7 @@ export default function OperacionesPage() {
                     <div className="px-3 pt-2 pb-2 border-b">
                         {/* Fila 1: título + controles */}
                         <div className="flex justify-between items-center mb-1.5">
-                            <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5"><Radio className="text-rose-600 animate-pulse" size={13}/> COSP V1.0</h2>
+                            <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5"><Radio className="text-rose-600 animate-pulse" size={13}/> Estado de Operaciones</h2>
                             <div className="flex items-center gap-1">
                                 <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'LISTA'}</button>
                                 {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
@@ -1117,21 +1118,31 @@ export default function OperacionesPage() {
                                     {elapsed && <span className="text-[9px] font-mono text-slate-500 bg-white px-1 py-0.5 rounded border">{elapsed}</span>}
                                     {!session.isMySession && <span className="text-[9px] text-indigo-600 font-bold bg-indigo-100 px-1 rounded">OTRO OP.</span>}
                                 </div>
-                                {session.isMySession && <button onClick={session.endSession} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900">FINALIZAR</button>}
+                                {session.isMySession && (
+                                    confirmEndSession ? (
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-[8px] text-rose-600 font-black">¿Confirmar?</span>
+                                            <button onClick={() => { session.endSession(); setConfirmEndSession(false); }} className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700">Sí</button>
+                                            <button onClick={() => setConfirmEndSession(false)} className="px-1.5 py-1 bg-slate-200 text-slate-700 text-[8px] font-black rounded-lg hover:bg-slate-300">No</button>
+                                        </div>
+                                    ) : (
+                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900">Finalizar Sesión</button>
+                                    )
+                                )}
                             </div>
                         )}
 
                         {/* KPIs compactos */}
                         <div className="grid grid-cols-6 gap-0.5 mb-1.5">
                             {[
-                                { label: 'PRES.', value: logic.stats.activos,   text: 'text-emerald-700', bg: 'bg-emerald-50' },
-                                { label: 'PLAN',  value: logic.stats.plan,       text: 'text-indigo-700',  bg: 'bg-indigo-50'  },
-                                { label: 'RET.',  value: logic.stats.retenidos,  text: 'text-amber-700',   bg: 'bg-amber-50'   },
-                                { label: 'VAC.',  value: logic.stats.vacantes,   text: 'text-rose-700',    bg: 'bg-rose-50'    },
-                                { label: 'AUS.',  value: logic.stats.ausentes,   text: 'text-rose-900',    bg: 'bg-rose-50'    },
-                                { label: 'TOTAL', value: logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes, text: 'text-slate-800', bg: 'bg-slate-100' },
+                                { label: 'PRES.', title: 'Presentes', value: logic.stats.activos,   text: 'text-emerald-700', bg: 'bg-emerald-50' },
+                                { label: 'PLAN',  title: 'Planificados', value: logic.stats.plan,       text: 'text-indigo-700',  bg: 'bg-indigo-50'  },
+                                { label: 'RET.',  title: 'Retenidos', value: logic.stats.retenidos,  text: 'text-amber-700',   bg: 'bg-amber-50'   },
+                                { label: 'VAC.',  title: 'Vacantes', value: logic.stats.vacantes,   text: 'text-rose-700',    bg: 'bg-rose-50'    },
+                                { label: 'AUS.',  title: 'Ausentes', value: logic.stats.ausentes,   text: 'text-rose-900',    bg: 'bg-rose-50'    },
+                                { label: 'TOTAL', title: 'Total de turnos', value: logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes, text: 'text-slate-800', bg: 'bg-slate-100' },
                             ].map(m => (
-                                <div key={m.label} className={`${m.bg} rounded px-1 py-1 text-center`}>
+                                <div key={m.label} title={m.title} className={`${m.bg} rounded px-1 py-1 text-center cursor-default`}>
                                     <div className={`text-sm font-black leading-none ${m.text}`}>{m.value}</div>
                                     <div className="text-[7px] font-black uppercase text-slate-400 mt-0.5 leading-none">{m.label}</div>
                                 </div>

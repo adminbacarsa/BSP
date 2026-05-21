@@ -14,6 +14,27 @@ function normalizeRoleKey(role: string): string {
   return role.toLowerCase().replace(/_/g, '').trim();
 }
 
+function DevBanner() {
+  const [showCreds, setShowCreds] = useState(false);
+  return (
+    <div className="w-full bg-amber-400 text-amber-950 text-xs font-bold py-2 px-3">
+      <div className="flex items-center justify-center gap-3">
+        <span>⚠ Modo emulador — datos locales</span>
+        <button type="button" onClick={() => setShowCreds(v => !v)}
+          aria-expanded={showCreds}
+          className="underline hover:text-amber-800 transition-colors">
+          {showCreds ? 'Ocultar credenciales' : 'Ver credenciales'}
+        </button>
+      </div>
+      {showCreds && (
+        <p className="text-center mt-1 font-mono text-[11px]">
+          admin@bacarsa.com.ar / admin1234 · guardia@bacarsa.com.ar / guardia1234
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
@@ -129,11 +150,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {USE_EMULATOR && (
-        <div className="w-full bg-amber-400 text-amber-950 text-center text-xs font-bold py-2 px-3">
-          Modo emulador — admin@bacarsa.com.ar / admin1234 · guardia@bacarsa.com.ar / guardia1234
-        </div>
-      )}
+      {USE_EMULATOR && <DevBanner />}
       <div className="flex flex-1 w-full min-h-0">
 
       {/* ── PANEL IZQUIERDO (branding) ──────────────────────────────── */}
@@ -162,9 +179,23 @@ export default function LoginPage() {
           <h1 className="text-white text-4xl font-black leading-tight tracking-tight mb-4">
             Control Operativo<br />de Seguridad<br />Privada
           </h1>
-          <p className="text-indigo-200 text-sm font-medium leading-relaxed max-w-xs">
+          <p className="text-indigo-200 text-sm font-medium leading-relaxed max-w-xs mb-6">
             Gestión de personal, planificación de turnos y monitoreo en tiempo real.
           </p>
+          <ul className="space-y-2">
+            {[
+              'Monitor de operaciones en tiempo real',
+              'Planificación de turnos y coberturas',
+              'RRHH: legajos, ausencias y licencias',
+              'CRM: clientes, objetivos y SLA',
+              'Liquidación y reportes de horas',
+            ].map(f => (
+              <li key={f} className="flex items-center gap-2 text-indigo-100 text-[13px] font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 flex-shrink-0" aria-hidden="true"/>
+                {f}
+              </li>
+            ))}
+          </ul>
         </div>
 
         {/* Footer */}

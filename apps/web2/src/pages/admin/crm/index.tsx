@@ -49,6 +49,8 @@ import {
   BarChart3,
   Building2,
   Calculator,
+  Calendar,
+  CheckCircle,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -1203,35 +1205,50 @@ export default function CRMPage() {
                   {calculatingMetrics && <Loader2 className="animate-spin ml-1" size={12} />}
                 </div>
                 <div className="flex items-center gap-2">
-                  <select className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
+                  <select aria-label="Período del resumen" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
                     <option value="month">Mes</option>
                     <option value="year">Año</option>
                     <option value="all">Todo</option>
                   </select>
                   {rangeMode !== 'all' && (
-                    <select className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeYear} onChange={(e) => setRangeYear(Number(e.target.value))}>
+                    <select aria-label="Año del período" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeYear} onChange={(e) => setRangeYear(Number(e.target.value))}>
                       {[rangeYear - 2, rangeYear - 1, rangeYear, rangeYear + 1].map((y) => <option key={y} value={y}>{y}</option>)}
                     </select>
                   )}
                   {rangeMode === 'month' && (
-                    <select className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMonth} onChange={(e) => setRangeMonth(Number(e.target.value))}>
+                    <select aria-label="Mes del período" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMonth} onChange={(e) => setRangeMonth(Number(e.target.value))}>
                       {MONTHS_ES.map((m, idx) => <option key={m} value={idx}>{m}</option>)}
                     </select>
                   )}
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-slate-100 dark:divide-slate-700">
-                <div className="p-5">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Solicitado (SLA)</p>
-                  <p className="text-3xl font-black text-indigo-600 leading-none">{globalMetrics.totalSold}<span className="text-base font-black text-indigo-300 ml-1">hs</span></p>
+                <div className="p-5 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-indigo-100 text-indigo-500">
+                    <ShieldCheck size={18} aria-hidden="true"/>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Solicitado (SLA)</p>
+                    <p className="text-3xl font-black text-indigo-600 leading-none">{globalMetrics.totalSold}<span className="text-base font-black text-indigo-300 ml-1">hs</span></p>
+                  </div>
                 </div>
-                <div className="p-5">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Planificado</p>
-                  <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalPlanned}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
+                <div className="p-5 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100 text-slate-500">
+                    <Calendar size={18} aria-hidden="true"/>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Planificado</p>
+                    <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalPlanned}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
+                  </div>
                 </div>
-                <div className="p-5">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Ejecutado</p>
-                  <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalExecuted}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
+                <div className="p-5 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100 text-emerald-500">
+                    <CheckCircle size={18} aria-hidden="true"/>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Ejecutado</p>
+                    <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalExecuted}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
+                  </div>
                 </div>
                 {(() => {
                   const br = globalMetrics.totalSold > 0 ? Math.round((globalMetrics.totalExecuted / globalMetrics.totalSold) * 100) : 0;
