@@ -44,17 +44,20 @@ const SectionLabel = ({ label }: { label: string }) => (
 
 // ─── KPI CARD ────────────────────────────────────────────────────────────────
 const KpiCard = ({ title, value, icon: Icon, color, subtext, sub2, alert, noData }: any) => (
-  <div className={`bg-white dark:bg-slate-800 px-4 py-3.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-3
+  <div
+    role="group"
+    aria-label={title}
+    className={`bg-white dark:bg-slate-800 px-4 py-3.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-3
     ${alert ? 'border-rose-300 ring-2 ring-rose-200 dark:ring-rose-800' : 'border-slate-100 dark:border-slate-700'}
     ${noData ? 'opacity-55' : ''}`}>
     <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '18' }}>
-      <Icon size={16} color={color} strokeWidth={2.5} />
+      <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
     </div>
     <div className="flex-1 min-w-0">
       <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-tight truncate">{title}</p>
-      <h3 className={`text-xl font-black leading-tight ${noData ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-white'}`}>
+      <p className={`text-xl font-black leading-tight ${noData ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-white'}`}>
         {noData ? '—' : value}
-      </h3>
+      </p>
       {subtext && <p className="text-[10px] text-slate-500 font-medium leading-tight truncate">{subtext}</p>}
     </div>
   </div>
@@ -438,9 +441,9 @@ function AdminDashboard() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
-              <LayoutDashboard size={30} className="text-indigo-600"/>
+              <LayoutDashboard size={30} className="text-indigo-600" aria-hidden="true"/>
               PANEL DE CONTROL
-              <span className="ml-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-400 self-center">
+              <span aria-hidden="true" className="ml-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-400 self-center">
                 {process.env.NEXT_PUBLIC_BUILD_HASH || 'dev'}
               </span>
             </h1>
@@ -448,8 +451,8 @@ function AdminDashboard() {
               <p className="text-slate-500 font-medium text-sm">
                 {today.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
               </p>
-              <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
-                <span className="relative flex h-2 w-2">
+              <span role="status" aria-label="Datos en tiempo real" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                <span className="relative flex h-2 w-2" aria-hidden="true">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"/>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"/>
                 </span>

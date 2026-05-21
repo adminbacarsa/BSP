@@ -81,16 +81,20 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       <div className="p-4 flex items-center gap-4 flex-wrap">
       <button
         onClick={onToggleSidebar}
+        aria-label={isSidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
+        aria-expanded={isSidebarOpen}
+        aria-controls="sidebar-nav"
         className="p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
         style={{ color: 'var(--topbar-text)' }}
       >
-        <Menu size={22} />
+        <Menu size={22} aria-hidden="true" />
       </button>
       <span className="font-black uppercase tracking-tight shrink-0 text-sm" style={{ color: 'var(--topbar-text)' }}>
         {title}
       </span>
       {canSwitchEmpresa && !isSuperAdmin && (
         <span
+          role="status"
           className="text-[10px] font-black uppercase tracking-wide text-indigo-900 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded-full"
           title="Usuario multi-empresa: podés cambiar el tenant activo desde el selector."
         >
@@ -99,6 +103,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       )}
       {isSuperAdmin && (
         <span
+          role="status"
           className="text-[10px] font-black uppercase tracking-wide text-amber-900 bg-amber-200 border border-amber-400 px-2 py-0.5 rounded-full"
           title="Acceso a todas las empresas. Los datos de cada tenant siguen aislados: no editás registros de Bacarsa desde otra empresa."
         >
@@ -156,8 +161,8 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
             {roleLabel}: <b style={{ opacity: 1 }}>{operatorName}</b>
           </span>
           {isOnline ? (
-            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-              <Activity size={11} /> ONLINE
+            <span role="status" aria-label="Sistema en línea" className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
+              <Activity size={11} aria-hidden="true" /> ONLINE
             </span>
           ) : (
             <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-300 animate-pulse" title="Sin conexión — los cambios se guardan localmente y se sincronizarán al volver la conexión.">
@@ -218,6 +223,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     <>
       {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
       <aside
+        id="sidebar-nav"
+        aria-label="Navegación principal"
         onMouseEnter={() => !compactSidebar && setIsHovered(true)}
         onMouseLeave={() => { setIsHovered(false); setIsPinned(false); }}
         className={`fixed top-0 left-0 z-40 h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden
