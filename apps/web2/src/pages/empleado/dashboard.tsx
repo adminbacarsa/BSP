@@ -147,6 +147,15 @@ const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => 
 
 export default function EmployeeDashboard() {
   const { addToast } = useToast();
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
   const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string; dni?: string; cuil?: string; category?: string; photoUrl?: string; empresaId?: string } | null>(null);
   const [empresaNombre, setEmpresaNombre] = useState<string>('');
   const [showCredencial, setShowCredencial] = useState(false);
@@ -1499,6 +1508,12 @@ export default function EmployeeDashboard() {
   return (
     <AuthGuard>
       <Head><title>Portal Empleado | CronoApp</title></Head>
+      {!isOnline && (
+        <div role="alert" aria-live="assertive" className="sticky top-0 z-50 flex items-center gap-2 bg-amber-50 border-b-2 border-amber-400 px-4 py-2.5 text-amber-800 text-xs font-medium">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" /></svg>
+          Sin conexión — los cambios se guardarán cuando se restaure la red
+        </div>
+      )}
       <div className="min-h-screen bg-slate-950 pb-28">
 
         {/* ===== OVERLAY: NOTIFICACIONES NO LEÍDAS ===== */}

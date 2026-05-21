@@ -9,7 +9,7 @@ import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User, getIdTok
 import {
   ShieldCheck, LogOut, Building2, ChevronRight, ChevronLeft,
   UserCheck, Car, Users, Trash2, Plus, Search, Upload, Download,
-  AlertCircle, Lock, Mail, Eye, EyeOff, Loader2, X, CheckCircle2,
+  AlertCircle, Lock, Mail, Phone, Eye, EyeOff, Loader2, X, CheckCircle2,
   ArrowRightCircle, ArrowLeftCircle, CalendarDays, Clock, Ban,
   UserPlus, Truck
 } from 'lucide-react';
@@ -338,9 +338,23 @@ function ObjetivosGrid({
         </div>
 
         {objetivos.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
-            <Building2 size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="font-bold text-sm">No hay objetivos asignados</p>
+          <div className="text-center py-16 px-4 max-w-sm mx-auto" role="status">
+            <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Building2 size={32} className="text-slate-300" aria-hidden="true"/>
+            </div>
+            <h2 className="font-black text-slate-800 text-base mb-2">No hay objetivos configurados aún</h2>
+            <p className="text-sm text-slate-500 font-medium mb-6 leading-relaxed">
+              Tu acceso está activo, pero todavía no se asignaron objetivos de seguridad a tu cuenta.
+            </p>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400 mb-3">Para solicitar la configuración, contactá a Grupo Bacar:</p>
+              <a href="tel:+543515000000" className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl transition-colors">
+                <Phone size={14} aria-hidden="true"/> Llamar a Grupo Bacar
+              </a>
+              <a href="mailto:operaciones@grupobacar.com.ar" className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-sm rounded-xl transition-colors">
+                <Mail size={14} aria-hidden="true"/> Enviar email
+              </a>
+            </div>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1212,7 +1226,9 @@ function AdminClientSelectorScreen({
           </div>
           <div>
             <p className="font-black text-slate-900 text-sm leading-tight">Portal de Clientes</p>
-            <p className="text-[11px] text-amber-600 font-black">MODO ADMINISTRADOR</p>
+            <span className="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+              <ShieldCheck size={10} aria-hidden="true"/> Modo admin
+            </span>
           </div>
         </div>
         <button onClick={onSignOut} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-700 text-xs font-bold transition-colors p-2">
@@ -1293,6 +1309,15 @@ async function resolveAuthUser(user: User): Promise<'client' | 'admin' | 'none'>
 export default function ClientePortal() {
   const [authState, setAuthState] = useState<'loading' | 'unauth' | 'checking' | 'sin_acceso' | 'ok' | 'admin_select'>('loading');
   const [authUser, setAuthUser] = useState<User | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
   const [clienteUser, setClienteUser] = useState<ClienteUser | null>(null);
   const [objetivos, setObjetivos] = useState<ObjetivoInfo[]>([]);
   const [selectedObjetivo, setSelectedObjetivo] = useState<ObjetivoInfo | null>(null);
@@ -1366,6 +1391,13 @@ export default function ClientePortal() {
     setAuthState('unauth');
   };
 
+  const offlineBanner = !isOnline ? (
+    <div role="alert" aria-live="assertive" className="sticky top-0 z-50 flex items-center gap-2 bg-amber-50 border-b-2 border-amber-400 px-4 py-2.5 text-amber-800 text-xs font-medium">
+      <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" /></svg>
+      Sin conexión — los cambios se guardarán cuando se restaure la red
+    </div>
+  ) : null;
+
   if (authState === 'loading' || authState === 'checking') {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -1378,6 +1410,7 @@ export default function ClientePortal() {
     return (
       <>
         <Head><title>Portal de Clientes — COSP</title></Head>
+        {offlineBanner}
         <LoginScreen onLogin={handleLogin} />
       </>
     );
@@ -1387,6 +1420,7 @@ export default function ClientePortal() {
     return (
       <>
         <Head><title>Sin acceso — COSP</title></Head>
+        {offlineBanner}
         <SinAccesoScreen onSignOut={handleSignOut} />
       </>
     );
@@ -1396,6 +1430,7 @@ export default function ClientePortal() {
     return (
       <>
         <Head><title>Portal de Clientes — Admin</title></Head>
+        {offlineBanner}
         <AdminClientSelectorScreen
           user={authUser}
           onSelect={(cu, obs) => {
@@ -1413,6 +1448,7 @@ export default function ClientePortal() {
     return (
       <>
         <Head><title>{selectedObjetivo.name} — Portal de Clientes</title></Head>
+        {offlineBanner}
         <GestionObjetivoScreen
           objetivo={selectedObjetivo}
           clienteUser={clienteUser}
@@ -1425,6 +1461,7 @@ export default function ClientePortal() {
   return (
     <>
       <Head><title>Portal de Clientes — COSP</title></Head>
+      {offlineBanner}
       <ObjetivosGrid
         clienteUser={clienteUser!}
         objetivos={objetivos}

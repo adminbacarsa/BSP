@@ -1542,6 +1542,15 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
   const [showNueva,  setShowNueva]  = useState(false);
   const [showAcceso, setShowAcceso] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
+  const [horaActual, setHoraActual] = useState(() =>
+    new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
+  );
+  useEffect(() => {
+    const id = setInterval(() => setHoraActual(
+      new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
+    ), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -1562,17 +1571,27 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
             <LogOut size={12} /> Salir
           </button>
         </div>
-        <h1 className="text-slate-800 font-black text-lg leading-tight">{objetivo.name}</h1>
-        {objetivo.clientName && <p className="text-slate-500 text-xs mt-0.5">{objetivo.clientName}</p>}
-        {objetivo.address && <p className="text-slate-400 text-[11px] mt-0.5 flex items-center gap-1"><MapPin size={10} />{objetivo.address}</p>}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-slate-800 font-black text-lg leading-tight">{objetivo.name}</h1>
+            {objetivo.clientName && <p className="text-slate-500 text-xs mt-0.5">{objetivo.clientName}</p>}
+            {objetivo.address && <p className="text-slate-400 text-[11px] mt-0.5 flex items-center gap-1"><MapPin size={10} />{objetivo.address}</p>}
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="text-xl font-black text-slate-800 tabular-nums leading-none" aria-live="polite">{horaActual}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 capitalize">
+              {new Date().toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+            </p>
+          </div>
+        </div>
         <div className="flex items-center gap-2 mt-2.5 flex-wrap">
           {turno ? (
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
               <CheckCircle2 size={11} /> Turno activo · {fmtTime(turno.startTime)}–{fmtTime(turno.endTime)}
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-bold">
-              <ShieldCheck size={11} strokeWidth={2} /> Modo admin
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold" title="Estás viendo el libro como supervisor — no sos el guardia del turno">
+              <ShieldCheck size={11} strokeWidth={2} /> Vista supervisión
             </span>
           )}
           {totalHoy > 0 && (
@@ -1607,12 +1626,14 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
       <div className="fixed bottom-6 inset-x-0 flex justify-center z-40 pointer-events-none">
         <div className="flex items-center gap-3 pointer-events-auto">
           <button onClick={() => setShowAcceso(true)}
+            aria-label="Registrar ingreso o egreso de persona autorizada"
             className="flex items-center gap-2 px-5 py-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-black text-sm shadow-lg shadow-slate-200/60 transition-all active:scale-95 hover:bg-slate-50">
-            <UserCheck size={17} className="text-indigo-500" /> Acceso
+            <UserCheck size={17} className="text-indigo-500" aria-hidden="true"/> Ingreso / Egreso
           </button>
           <button onClick={() => setShowNueva(true)}
+            aria-label="Agregar nueva novedad al libro de guardia"
             className="flex items-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg shadow-indigo-500/25 transition-all active:scale-95">
-            <Plus size={18} /> Nueva entrada
+            <Plus size={18} aria-hidden="true"/> Nueva novedad
           </button>
         </div>
       </div>
@@ -1636,6 +1657,15 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
 export default function ObjetivoPortal() {
   const [fireUser,    setFireUser]    = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
   const [empNombre,   setEmpNombre]   = useState('');
   const [isAdmin,     setIsAdmin]     = useState(false);
   const [turno,       setTurno]       = useState<TurnoActivo | null>(null);
@@ -1727,10 +1757,17 @@ export default function ObjetivoPortal() {
     </div>
   );
 
-  if (!fireUser) return <><Head><title>Libro de Guardia · COSP</title></Head><LoginScreen onLogin={u => setFireUser(u)} /></>;
-  if (isAdmin && !objetivo) return <><Head><title>Libro de Guardia · COSP</title></Head><SelectorObjetivo clientes={clientes} onSelect={obj => setObjetivo(obj)} onLogout={handleLogout} nombre={empNombre} /></>;
-  if (!isAdmin && !turno) return <><Head><title>Libro de Guardia · COSP</title></Head><SinTurno nombre={empNombre} onLogout={handleLogout} /></>;
+  const offlineBanner = !isOnline ? (
+    <div role="alert" aria-live="assertive" className="sticky top-0 z-50 flex items-center gap-2 bg-amber-50 border-b-2 border-amber-400 px-4 py-2.5 text-amber-800 text-xs font-medium">
+      <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" /></svg>
+      Sin conexión — los cambios se guardarán cuando se restaure la red
+    </div>
+  ) : null;
+
+  if (!fireUser) return <><Head><title>Libro de Guardia · COSP</title></Head>{offlineBanner}<LoginScreen onLogin={u => setFireUser(u)} /></>;
+  if (isAdmin && !objetivo) return <><Head><title>Libro de Guardia · COSP</title></Head>{offlineBanner}<SelectorObjetivo clientes={clientes} onSelect={obj => setObjetivo(obj)} onLogout={handleLogout} nombre={empNombre} /></>;
+  if (!isAdmin && !turno) return <><Head><title>Libro de Guardia · COSP</title></Head>{offlineBanner}<SinTurno nombre={empNombre} onLogout={handleLogout} /></>;
   if (!objetivo) return null;
 
-  return <><Head><title>{objetivo.name} · Libro de Guardia</title></Head><LibroGuardia objetivo={objetivo} turno={turno} entries={entries} totalHoy={totalHoy} empNombre={empNombre} isAdmin={isAdmin} onBack={isAdmin ? () => setObjetivo(null) : undefined} onLogout={handleLogout} /></>;
+  return <><Head><title>{objetivo.name} · Libro de Guardia</title></Head>{offlineBanner}<LibroGuardia objetivo={objetivo} turno={turno} entries={entries} totalHoy={totalHoy} empNombre={empNombre} isAdmin={isAdmin} onBack={isAdmin ? () => setObjetivo(null) : undefined} onLogout={handleLogout} /></>;
 }
