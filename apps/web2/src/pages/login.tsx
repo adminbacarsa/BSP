@@ -137,9 +137,9 @@ export default function LoginPage() {
       <div className="flex flex-1 w-full min-h-0">
 
       {/* ── PANEL IZQUIERDO (branding) ──────────────────────────────── */}
-      <div className="hidden lg:flex w-[45%] bg-indigo-600 flex-col justify-between p-12 relative overflow-hidden">
+      <aside className="hidden lg:flex w-[45%] bg-indigo-700 flex-col justify-between p-12 relative overflow-hidden">
         {/* Decoración de fondo */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
           <div className="absolute -top-24 -left-24 w-96 h-96 bg-white/5 rounded-full" />
           <div className="absolute bottom-0 right-0 w-80 h-80 bg-indigo-500/40 rounded-full translate-x-1/3 translate-y-1/3" />
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-500/20 rounded-full" />
@@ -148,41 +148,41 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-3">
           <div className="w-10 h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center">
-            <ShieldCheck size={22} className="text-white" />
+            <ShieldCheck size={22} className="text-white" aria-hidden="true" />
           </div>
           <div>
             <span className="text-white font-black text-lg tracking-tight">COSP V 1.0</span>
             <p className="text-indigo-200 text-[11px] font-medium">Seguridad Privada</p>
-            <p className="text-indigo-300 text-[10px] font-medium">Grupo Bacar</p>
+            <p className="text-indigo-200 text-[10px] font-medium">Grupo Bacar</p>
           </div>
         </div>
 
         {/* Tagline central */}
         <div className="relative z-10">
-          <h2 className="text-white text-4xl font-black leading-tight tracking-tight mb-4">
+          <h1 className="text-white text-4xl font-black leading-tight tracking-tight mb-4">
             Control Operativo<br />de Seguridad<br />Privada
-          </h2>
+          </h1>
           <p className="text-indigo-200 text-sm font-medium leading-relaxed max-w-xs">
             Gestión de personal, planificación de turnos y monitoreo en tiempo real.
           </p>
         </div>
 
         {/* Footer */}
-        <div className="relative z-10">
-          <p className="text-indigo-300 text-[11px] font-medium">
+        <footer className="relative z-10">
+          <p className="text-indigo-200 text-[11px] font-medium">
             © {new Date().getFullYear()} Grupo Bacar · Todos los derechos reservados
           </p>
-        </div>
-      </div>
+        </footer>
+      </aside>
 
       {/* ── PANEL DERECHO (formulario) ──────────────────────────────── */}
-      <div className="flex-1 flex items-center justify-center p-6">
+      <main className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
 
           {/* Logo mobile */}
           <div className="flex lg:hidden flex-col items-center mb-10">
             <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-3">
-              <ShieldCheck size={26} className="text-white" />
+              <ShieldCheck size={26} className="text-white" aria-hidden="true" />
             </div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight">COSP V 1.0</h1>
             <p className="text-[11px] text-slate-500 font-medium">Grupo Bacar</p>
@@ -206,7 +206,7 @@ export default function LoginPage() {
                 <div>
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
                   <div className="relative">
-                    <Mail className="absolute left-3.5 top-3 text-slate-400" size={16} />
+                    <Mail className="absolute left-3.5 top-3 text-slate-400" size={16} aria-hidden="true" />
                     <input
                       type="email"
                       value={email}
@@ -221,7 +221,7 @@ export default function LoginPage() {
                 <div>
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Contraseña</label>
                   <div className="relative">
-                    <Lock className="absolute left-3.5 top-3 text-slate-400" size={16} />
+                    <Lock className="absolute left-3.5 top-3 text-slate-400" size={16} aria-hidden="true" />
                     <input
                       type={showPass ? 'text' : 'password'}
                       value={password}
@@ -233,9 +233,11 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => setShowPass(p => !p)}
+                      aria-label={showPass ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      aria-pressed={showPass}
                       className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 transition-colors"
                     >
-                      {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showPass ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
@@ -290,7 +292,7 @@ export default function LoginPage() {
                     <div>
                       <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Email de tu cuenta</label>
                       <div className="relative">
-                        <Mail className="absolute left-3.5 top-3 text-slate-400" size={16} />
+                        <Mail className="absolute left-3.5 top-3 text-slate-400" size={16} aria-hidden="true" />
                         <input
                           type="email"
                           value={resetEmail}
@@ -331,7 +333,7 @@ export default function LoginPage() {
           )}
 
         </div>
-      </div>
+      </main>
       </div>
     </div>
   );
