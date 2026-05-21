@@ -1939,8 +1939,8 @@ export default function CRMPage() {
                                       <ExternalLink size={14} />
                                     </a>
                                   )}
-                                  <button onClick={(e) => { e.stopPropagation(); handleDeleteContract(c.id); }} className="p-1.5 hover:bg-rose-50 text-rose-400 hover:text-rose-600 rounded-lg transition-colors">
-                                    <Trash2 size={14} />
+                                  <button onClick={(e) => { e.stopPropagation(); handleDeleteContract(c.id); }} aria-label={`Eliminar contrato: ${c.name || 'sin nombre'}`} className="p-1.5 hover:bg-rose-50 text-rose-400 hover:text-rose-600 rounded-lg transition-colors">
+                                    <Trash2 size={14} aria-hidden="true" />
                                   </button>
                                   {isExpanded ? <ChevronUp size={16} className="text-indigo-400" /> : <ChevronDown size={16} className="text-slate-300" />}
                                 </div>

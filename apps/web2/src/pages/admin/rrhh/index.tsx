@@ -1494,6 +1494,10 @@ export default function EmployeesPage() {
                           const objective = allObjectives.find((o: any) => o.id === emp.preferredObjectiveId);
                           return (
                             <div key={emp.id} onClick={() => handleRowClick(emp)}
+                              role="button" tabIndex={0}
+                              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && handleRowClick(emp)}
+                              aria-label={`${emp.lastName}, ${emp.firstName}${!isActive ? ' — inactivo' : ''}`}
+                              aria-pressed={isSelected}
                               className={`px-3 py-2.5 cursor-pointer transition-all flex items-center gap-2.5 border-b border-slate-50 dark:border-slate-700/50 last:border-0
                                 ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/20' : isActive ? 'hover:bg-slate-50 dark:hover:bg-slate-700/30' : 'opacity-50 hover:opacity-80'}`}>
                               {/* Indicador de selección */}
@@ -1616,26 +1620,26 @@ export default function EmployeesPage() {
                                                     onClick={() => { setBajaForm({ motivo: 'Desvinculación', fecha: new Date().toISOString().split('T')[0], observacion: '' }); setShowBajaModal(true); }}
                                                     className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors text-xs font-black uppercase"
                                                 >
-                                                    <UserX size={15}/> Dar de baja
+                                                    <UserX size={15} aria-hidden="true"/> Dar de baja
                                                 </button>
                                             ) : (
                                                 <button
                                                     onClick={() => handleReactivar(selectedEmp)}
                                                     className="flex items-center gap-1.5 px-3 py-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors text-xs font-black uppercase"
                                                 >
-                                                    <UserCheck size={15}/> Reactivar
+                                                    <UserCheck size={15} aria-hidden="true"/> Reactivar
                                                 </button>
                                             )}
                                             {isSuperAdmin && (
                                                 <button
                                                     onClick={() => handleDelete(selectedEmp.id!)}
                                                     className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
-                                                    title="Eliminar permanente (solo SuperAdmin)"
+                                                    aria-label={`Eliminar permanente: ${selectedEmp.lastName}, ${selectedEmp.firstName}`}
                                                 >
-                                                    <Trash2 size={15}/>
+                                                    <Trash2 size={15} aria-hidden="true"/>
                                                 </button>
                                             )}
-                                            <button onClick={() => setSelectedEmp(null)} className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"><X size={17}/></button>
+                                            <button onClick={() => setSelectedEmp(null)} aria-label="Cerrar detalle del empleado" className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"><X size={17} aria-hidden="true"/></button>
                                         </div>
                                     </div>
                                 </div>

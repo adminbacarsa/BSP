@@ -148,32 +148,32 @@ export default function GeneralTab() {
                 
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                     {/* LIGHT */}
-                    <button onClick={() => handleApplyTheme('light')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'light' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:border-slate-300'}`}>
-                        <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm"><Sun size={20} className="text-slate-600"/></div>
+                    <button onClick={() => handleApplyTheme('light')} aria-pressed={theme === 'light'} aria-label="Tema Claro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'light' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm"><Sun size={20} className="text-slate-600" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600">Claro</span>
                     </button>
 
                     {/* DARK */}
-                    <button onClick={() => handleApplyTheme('dark')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'dark' ? 'border-indigo-500 bg-slate-900 text-white' : 'border-slate-100 hover:border-slate-300'}`}>
-                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center shadow-sm"><Moon size={20} className="text-white"/></div>
+                    <button onClick={() => handleApplyTheme('dark')} aria-pressed={theme === 'dark'} aria-label="Tema Oscuro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'dark' ? 'border-indigo-500 bg-slate-900 text-white' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center shadow-sm"><Moon size={20} className="text-white" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600 dark:text-slate-400">Oscuro</span>
                     </button>
 
                     {/* CONTRASTE */}
-                    <button onClick={() => handleApplyTheme('contrast')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'contrast' ? 'border-black bg-black text-yellow-400' : 'border-slate-100 hover:border-slate-300'}`}>
-                        <div className="w-10 h-10 rounded-full bg-black border border-white flex items-center justify-center shadow-sm"><Zap size={20} className="text-yellow-400"/></div>
+                    <button onClick={() => handleApplyTheme('contrast')} aria-pressed={theme === 'contrast'} aria-label="Tema Alto contraste" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'contrast' ? 'border-black bg-black text-yellow-400' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-black border border-white flex items-center justify-center shadow-sm"><Zap size={20} className="text-yellow-400" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600">Contraste</span>
                     </button>
 
                     {/* AZUL / NAVY */}
-                    <button onClick={() => handleApplyTheme('blue')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'blue' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-100 hover:border-slate-300'}`}>
-                        <div className="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center shadow-sm"><Hexagon size={20} className="text-blue-200"/></div>
+                    <button onClick={() => handleApplyTheme('blue')} aria-pressed={theme === 'blue'} aria-label="Tema Azul Pro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'blue' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center shadow-sm"><Hexagon size={20} className="text-blue-200" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600">Azul Pro</span>
                     </button>
 
                     {/* SISTEMA */}
-                    <button onClick={() => handleApplyTheme('system')} className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'system' ? 'border-slate-400 bg-slate-100 text-slate-800' : 'border-slate-100 hover:border-slate-300'}`}>
-                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shadow-sm"><Monitor size={20} className="text-slate-600"/></div>
+                    <button onClick={() => handleApplyTheme('system')} aria-pressed={theme === 'system'} aria-label="Tema Sistema (automático)" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'system' ? 'border-slate-400 bg-slate-100 text-slate-800' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shadow-sm"><Monitor size={20} className="text-slate-600" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600">Sistema</span>
                     </button>
                 </div>
@@ -190,9 +190,9 @@ export default function GeneralTab() {
                     <div className="flex items-center gap-2 text-slate-400 py-8"><Loader2 size={18} className="animate-spin"/> Cargando datos...</div>
                 ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                    <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Razón Social</label><input name="name" value={company.name} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-900 dark:text-white outline-none transition-all"/></div>
-                    <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">CUIT</label><input name="cuit" value={company.cuit} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-mono font-medium text-slate-900 dark:text-white outline-none transition-all"/></div>
-                    <div className="md:col-span-2"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Dirección</label><div className="relative"><FileText size={20} className="absolute left-4 top-4 text-slate-400"/><input name="address" value={company.address} onChange={handleChange} className="w-full pl-12 p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-medium text-slate-900 dark:text-white outline-none transition-all"/></div></div>
+                    <div><label htmlFor="cfg-razon-social" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Razón Social</label><input id="cfg-razon-social" name="name" value={company.name} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-900 dark:text-white outline-none transition-all"/></div>
+                    <div><label htmlFor="cfg-cuit" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">CUIT</label><input id="cfg-cuit" name="cuit" value={company.cuit} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-mono font-medium text-slate-900 dark:text-white outline-none transition-all"/></div>
+                    <div className="md:col-span-2"><label htmlFor="cfg-direccion" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Dirección</label><div className="relative"><FileText size={20} className="absolute left-4 top-4 text-slate-400" aria-hidden="true"/><input id="cfg-direccion" name="address" value={company.address} onChange={handleChange} className="w-full pl-12 p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-medium text-slate-900 dark:text-white outline-none transition-all"/></div></div>
                 </div>
                 )}
                 <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-end">

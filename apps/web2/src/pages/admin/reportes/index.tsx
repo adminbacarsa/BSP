@@ -171,8 +171,8 @@ export default function ReportsPage() {
                         className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white min-w-[160px]"
                     />
                     <div className="flex gap-2">
-                        <button onClick={() => downloadCSV(filtered, 'reporte_objetivos')} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16}/></button>
-                        <button onClick={() => window.print()} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16}/></button>
+                        <button onClick={() => downloadCSV(filtered, 'reporte_objetivos')} aria-label="Descargar CSV de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                        <button onClick={() => window.print()} aria-label="Imprimir reporte de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -340,8 +340,8 @@ export default function ReportsPage() {
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
                     <div className="flex gap-2">
-                        <button onClick={() => downloadCSV(employeeReport, 'reporte_empleados')} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16}/></button>
-                        <button onClick={() => window.print()} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16}/></button>
+                        <button onClick={() => downloadCSV(employeeReport, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                        <button onClick={() => window.print()} aria-label="Imprimir liquidación de horas" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -469,7 +469,7 @@ export default function ReportsPage() {
                         Cronograma: <span className="text-slate-700">{title}</span>
                         <span className="text-[10px] font-normal text-slate-400">({filtered.length} turnos)</span>
                     </h3>
-                    <button onClick={() => window.print()} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16}/></button>
+                    <button onClick={() => window.print()} aria-label="Imprimir cronograma" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -918,8 +918,8 @@ export default function ReportsPage() {
                         codigo: s.code || '-',
                         inicio: formatTime(s.startTime),
                         fin: formatTime(s.endTime),
-                    })), 'planificado')} className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500">
-                        <Download size={16}/>
+                    })), 'planificado')} aria-label="Descargar CSV de planificación" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500">
+                        <Download size={16} aria-hidden="true"/>
                     </button>
                 </div>
 
@@ -1029,12 +1029,12 @@ export default function ReportsPage() {
 
                 <ContentCard padding={false} className="p-4 flex flex-wrap gap-4 items-end no-print">
                     <div className="flex-1 min-w-[150px]">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Desde</label>
-                        <input type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
+                        <label htmlFor="rpt-date-desde" className="text-[10px] font-bold text-slate-400 uppercase">Desde</label>
+                        <input id="rpt-date-desde" type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
                     </div>
                     <div className="flex-1 min-w-[150px]">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Hasta</label>
-                        <input type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
+                        <label htmlFor="rpt-date-hasta" className="text-[10px] font-bold text-slate-400 uppercase">Hasta</label>
+                        <input id="rpt-date-hasta" type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
                     </div>
 
                     {activeTab === 'SHIFTS' && (<>
