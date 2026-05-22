@@ -51,7 +51,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos } from './demandDrivenSchedule';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -1332,14 +1332,21 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const assignedOffsets = new Map<string, number>();
 
             // Con trailing: offset deseado directo (sin dedup → mismo trailing = mismo offset)
+            // Demand-driven 24hs: stagger SLA pisa trailing (mes anterior suele estar desalineado).
+            const bandOff = bandBase % eCycleLen;
+            const staggerRotating = shiftCodes.length > 1;
+            const ddStagger = shouldUseDemandDrivenScheduling(ctx);
             group.filter(id => desiredByEmp.has(id)).forEach(empId => {
-                assignedOffsets.set(empId, desiredByEmp.get(empId)!);
+                const ddOff = ctx.demandDrivenStaggerByEmp?.[empId];
+                if (ddStagger && ddOff !== undefined && staggerRotating) {
+                    assignedOffsets.set(empId, (bandOff + ddOff) % eCycleLen);
+                } else {
+                    assignedOffsets.set(empId, desiredByEmp.get(empId)!);
+                }
             });
 
             // Sin trailing: escalonar offsets en puestos rotativos (M+T+N) para que
             // no descansen todos el mismo día — antes compartían bandOff y quedaban ~25% días sin cobertura.
-            const bandOff = bandBase % eCycleLen;
-            const staggerRotating = shiftCodes.length > 1;
             group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
                 const idxInGroup = group.indexOf(empId);
                 const staggerIdx = ctx.demandDrivenStaggerByEmp?.[empId];
@@ -1365,7 +1372,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Los empleados sin trailing ya recibieron el base de su banda (offset idéntico = correcto).
     // Los empleados con trailing pueden coincidir si trabajaron la misma racha el mes anterior;
     // en ese caso se desplazan hacia adelante para evitar que el motor los trate como un solo bloque.
-    {
+    if (!shouldUseDemandDrivenScheduling(ctx)) {
         Object.entries(positionGroups).forEach(([, empIds]) => {
             const hasTrail = (id: string) =>
                 ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
@@ -1458,6 +1465,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Con la corrección, T1 se recorta hasta su cuota real, T2 queda intacto.
     //   8h  → capT1 = floor((200 − prior) / 8)  — 6+2 ya da ≤25, sin recorte habitual.
     //   12h → capT1 = floor((200 − prior) / 12) — 4+2 da ~17 en T1 + ~3 en T2 = 20 días.
+    // Demand-driven 24hs: no recortar cycleWorkDays antes del fill SLA; el tope 200h
+    // se aplica al asignar (tryFillOneSlot). Recortar antes dejaba huecos irrecuperables.
+    if (!shouldUseDemandDrivenScheduling(ctx)) {
     ctx.employees.forEach(emp => {
         if (limitedEmpIds.has(emp.id)) return;
         const sc = (empPrimaryShift[emp.id] || '').toUpperCase();
@@ -1480,6 +1490,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             wdT2.slice(capT2).forEach(d => wdSet.delete(d));
         }
     });
+    }
 
     const assignments: V2Assignment[] = [];
     // Techo de horas facturables en la generación: el MÁXIMO entre vendidas y demanda
@@ -1735,8 +1746,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     const useDemandDriven = shouldUseDemandDrivenScheduling(ctx);
-    let dayDemandsFromFill: import('./objectiveCoverageDemand').ObjectiveDayDemand[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let dayDemandsFromFill: any[] = [];
     if (useDemandDriven) {
+        seedDemandDrivenCycleFrancos(ctx, cycleWorkDays, assignments, runtime);
         dayDemandsFromFill = fillScheduleFromDemand({
             ctx,
             positionGroups,
