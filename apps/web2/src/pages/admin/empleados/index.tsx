@@ -8,6 +8,8 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { useToast } from '@/context/ToastContext';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { filterRowsByEmpresa, belongsToEmpresaView, shouldScopeQueriesToEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 import {
   Users, Search, Plus, Edit2, Trash2, MapPin,
   FileBadge, UserCheck, UserX, Send, KeyRound,
@@ -17,6 +19,9 @@ import {
 
 export default function EmployeesPage() {
   const { addToast } = useToast();
+  const { empresaId, empresa } = useEmpresa();
+  const migracionCompleta = empresa?.migracionCompleta ?? false;
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const [view, setView] = useState<'list' | 'form'>('list');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filteredEmployees, setFilteredEmployees] = useState<Employee[]>([]);
@@ -39,7 +44,7 @@ export default function EmployeesPage() {
   };
   const [form, setForm] = useState<any>(initialForm);
 
-  useEffect(() => { loadData(); loadClientsAndObjectives(); }, []);
+  useEffect(() => { loadData(); loadClientsAndObjectives(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const term = searchTerm.toLowerCase();
@@ -61,19 +66,63 @@ export default function EmployeesPage() {
   }, [form.preferredClientId, allObjectives]);
 
   const loadData = async () => {
-    const data = await employeeService.getAll();
-    setEmployees(data);
+    try {
+      const snap = await getDocs(
+        scopeEmpresa
+          ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+          : collection(db, 'empleados'),
+      );
+      const data = snap.docs.map(d => {
+        const raw = d.data();
+        const fName = raw.firstName || raw.nombre || '';
+        const lName = raw.lastName || raw.apellido || '';
+        return {
+          id: d.id,
+          uid: raw.uid || '',
+          firstName: fName || 'Sin Nombre',
+          lastName: lName || '',
+          dni: raw.dni || raw.document || 'S/D',
+          cuil: raw.cuil || '',
+          startDate: raw.startDate || raw.fechaIngreso || '',
+          cycleStartDay: raw.cycleStartDay || 1,
+          fileNumber: raw.fileNumber || raw.legajo || 'S/N',
+          phone: raw.phone || raw.telefono || '',
+          email: raw.email || '',
+          category: raw.category || raw.cargo || 'Vigilador',
+          status: raw.status || raw.estado || 'active',
+          laborAgreement: raw.laborAgreement || raw.convenio || 'SUVICO',
+          preferredClientId: raw.preferredClientId || '',
+          preferredObjectiveId: raw.preferredObjectiveId || '',
+          portalInvite: raw.portalInvite || null,
+          empresaId: raw.empresaId || '',
+        } as Employee & { empresaId: string };
+      });
+      setEmployees(filterRowsByEmpresa(data, empresaId, scopeEmpresa, migracionCompleta) as Employee[]);
+    } catch (e) {
+      console.error('Error cargando empleados:', e);
+    }
   };
 
   const loadClientsAndObjectives = async () => {
     try {
-      const cSnap = await getDocs(collection(db, 'clients'));
-      setClients(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const cSnap = await getDocs(
+        scopeEmpresa
+          ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
+          : collection(db, 'clients'),
+      );
+      setClients(
+        cSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(c => belongsToEmpresaView(c as any, empresaId, migracionCompleta)),
+      );
       const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active')));
-      const oList = sSnap.docs.map(d => {
-        const data = d.data();
-        return { id: data.objectiveId, name: data.objectiveName, clientId: data.clientId };
-      });
+      const oList = filterRowsByEmpresa(
+        sSnap.docs.map(d => {
+          const data = d.data();
+          return { id: data.objectiveId, name: data.objectiveName, clientId: data.clientId, empresaId: data.empresaId || '' };
+        }),
+        empresaId, scopeEmpresa, migracionCompleta,
+      );
       setAllObjectives(Array.from(new Map(oList.map(item => [item.id, item])).values()));
     } catch (e) { console.error('Error cargando clientes/objetivos', e); }
   };
@@ -176,7 +225,7 @@ export default function EmployeesPage() {
         await auditService.log('EDICION_EMPLEADO', 'RRHH', { id: form.id, ...form });
         addToast('Legajo actualizado', 'success');
       } else {
-        const id = await employeeService.add({ ...form, createdAt: new Date().toISOString() });
+        const id = await employeeService.add(stampEmpresaId({ ...form, createdAt: new Date().toISOString() }, empresaId) as any);
         await auditService.log('ALTA_EMPLEADO', 'RRHH', { ...form, id });
         addToast('Legajo creado', 'success');
       }
