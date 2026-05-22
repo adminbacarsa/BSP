@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { TabBar } from '@/components/ui';
@@ -870,7 +871,7 @@ export default function EmployeesPage() {
     }
   };
   const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
-  const openEditFromDetail = () => { if (!selectedEmp) return; setForm(selectedEmp); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
+  const openEditFromDetail = () => { if (!selectedEmp) return; setForm({ ...initialForm, ...selectedEmp, id: selectedEmp.id }); setIsEditing(true); setView('form'); setSelectedEmp(null); setActiveFormTab('PERSONAL'); };
   const handleSaveHoliday = async () => { if(!holidayForm.name) return; await holidayService.add(holidayForm, empresaId); await registrarAuditoria('CREATE_HOLIDAY', `Feriado: ${holidayForm.name}`); setHolidayForm({ date: '', name: '', type: 'Nacional' }); loadHolidays(); };
   const handleDeleteHoliday = async (id: string) => { await holidayService.delete(id); await registrarAuditoria('DELETE_HOLIDAY', `Feriado ID: ${id}`); loadHolidays(); };
   const handleSyncHolidays = async () => { setIsSyncing(true); try { await holidayService.syncWithGovApi(syncYear, empresaId); addToast(`Sync OK`, 'success'); loadHolidays(); } catch (e) { addToast('Error', 'error'); } finally { setIsSyncing(false); } };
@@ -1406,16 +1407,25 @@ export default function EmployeesPage() {
                 </div>
 
                 {/* TAB BAR */}
-                <TabBar
-                    tabs={[
-                        { id: 'legajos',   label: 'Legajos',   icon: Users },
-                        { id: 'ausencias', label: 'Novedades', icon: AlertTriangle },
-                        { id: 'feriados',  label: 'Feriados',  icon: Calendar },
-                        { id: 'convenios', label: 'Convenios', icon: Book },
-                    ]}
-                    active={activeTab}
-                    onChange={id => { setActiveTab(id as any); setView('list'); }}
-                />
+                <div className="flex items-center gap-2">
+                    <TabBar
+                        tabs={[
+                            { id: 'legajos',   label: 'Legajos',   icon: Users },
+                            { id: 'ausencias', label: 'Novedades', icon: AlertTriangle },
+                            { id: 'feriados',  label: 'Feriados',  icon: Calendar },
+                            { id: 'convenios', label: 'Convenios', icon: Book },
+                        ]}
+                        active={activeTab}
+                        onChange={id => { setActiveTab(id as any); setView('list'); }}
+                    />
+                    <Link
+                        href="/admin/empleados"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase transition-all border"
+                        style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt3)' }}
+                    >
+                        <ShieldCheckIcon size={12}/> Empleados
+                    </Link>
+                </div>
             </header>
 
             {/* SECCIONES DEL DASHBOARD */}
