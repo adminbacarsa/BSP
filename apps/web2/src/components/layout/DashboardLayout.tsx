@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
@@ -17,18 +17,57 @@ import { applyCompanyTheme } from '@/lib/companyTheme';
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/dashboard'))       return 'Dashboard';
-  if (pathname.startsWith('/admin/operaciones'))     return 'Operaciones | COSP';
+  if (pathname.startsWith('/admin/operaciones'))     return 'Operaciones';
   if (pathname.startsWith('/admin/planificacion'))   return 'Planificador';
-  if (pathname.startsWith('/admin/crm'))             return 'CRM Clientes';
+  if (pathname.startsWith('/admin/crm'))             return 'CRM';
   if (pathname.startsWith('/admin/servicios'))       return 'Servicios';
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';
   if (pathname.startsWith('/admin/rrhh'))            return 'RRHH';
-  if (pathname.startsWith('/admin/guia'))            return 'Guía interactiva';
-  if (pathname.startsWith('/admin/configuracion'))   return 'Configuración';
+  if (pathname.startsWith('/admin/guia'))            return 'Guía';
+  if (pathname.startsWith('/admin/configuracion'))   return 'Config';
   if (pathname.startsWith('/admin/empleados'))       return 'Empleados';
   if (pathname.startsWith('/admin/cotizador'))       return 'Cotizador';
-  if (pathname.startsWith('/admin/analisis'))        return 'Análisis Operativo';
+  if (pathname.startsWith('/admin/analisis'))        return 'Análisis';
   return null;
+}
+
+// ─── BOTTOM NAV (mobile) ─────────────────────────────────────────────────────
+const BOTTOM_NAV = [
+  { href: '/admin/dashboard',      icon: LayoutDashboard, label: 'Inicio'   },
+  { href: '/admin/operaciones',    icon: Radio,           label: 'CC'       },
+  { href: '/admin/planificacion',  icon: Calendar,        label: 'Plan.'    },
+  { href: '/admin/empleados',      icon: Users,           label: 'Personal' },
+  { href: '/admin/configuracion',  icon: Settings,        label: 'Config'   },
+];
+
+function BottomNav() {
+  const router = useRouter();
+  const isActive = (href: string) => router.pathname.startsWith(href);
+  return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 flex items-stretch border-t lg:hidden safe-area-bottom"
+      style={{ backgroundColor: 'var(--topbar-bg)', borderColor: 'var(--sb-border)' }}
+      aria-label="Navegación mobile"
+    >
+      {BOTTOM_NAV.map(({ href, icon: Icon, label }) => (
+        <Link
+          key={href}
+          href={href}
+          prefetch={false}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-opacity active:opacity-60 min-h-[52px]"
+          style={{
+            color: isActive(href) ? 'var(--company-primary, #6366f1)' : 'var(--sb-muted)',
+          }}
+        >
+          <Icon size={20} strokeWidth={isActive(href) ? 2.5 : 1.8} />
+          <span className="text-[9px] font-black uppercase tracking-wide">{label}</span>
+          {isActive(href) && (
+            <span className="absolute bottom-0 w-8 h-0.5 rounded-full" style={{ backgroundColor: 'var(--company-primary, #6366f1)' }} />
+          )}
+        </Link>
+      ))}
+    </nav>
+  );
 }
 
 // ─── TOPBAR ──────────────────────────────────────────────────────────────────
@@ -59,148 +98,156 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       .catch(() => setClaimRole(''));
   }, [user]);
 
-  const title = pageHeader.title ?? getTitleByPath(router.pathname) ?? 'Panel de Control';
-  const operatorName = user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+  const title = pageHeader.title ?? getTitleByPath(router.pathname) ?? 'Panel';
+  const operatorName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'Usuario';
   const roleLabel = isSuperAdmin ? 'SuperAdmin' : (authUserRole || claimRole || 'Operador');
-
   const isEmulator = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
   return (
     <div
-      className="shadow-sm border-b flex flex-col sticky z-30"
+      className="shadow-sm border-b sticky z-30"
       style={{ backgroundColor: 'var(--topbar-bg)', borderColor: 'var(--topbar-border)', color: 'var(--topbar-text)', top: 0 }}
     >
-      {/* Banda de advertencia modo emulador */}
       {isEmulator && (
-        <div className="w-full bg-amber-400 text-amber-900 text-[11px] font-bold text-center py-0.5 tracking-wide">
-          ⚠ MODO EMULADOR LOCAL — los datos no son de producción
+        <div className="w-full bg-amber-400 text-amber-900 text-[10px] font-bold text-center py-0.5 tracking-wide">
+          ⚠ MODO EMULADOR LOCAL — datos de prueba
         </div>
       )}
-      {/* Window Controls Overlay: rellena el área del título nativo cuando WCO está activo */}
       <div style={{ height: 'env(titlebar-area-height, 0px)', WebkitAppRegion: 'drag' } as React.CSSProperties} />
-      <div className="p-4 flex items-center gap-4 flex-wrap">
-      <button
-        onClick={onToggleSidebar}
-        aria-label={isSidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
-        aria-expanded={isSidebarOpen}
-        aria-controls="sidebar-nav"
-        className="p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
-        style={{ color: 'var(--topbar-text)' }}
-      >
-        <Menu size={22} aria-hidden="true" />
-      </button>
-      <span className="font-black uppercase tracking-tight shrink-0 text-sm" style={{ color: 'var(--topbar-text)' }}>
-        {title}
-      </span>
-      {canSwitchEmpresa && !isSuperAdmin && (
-        <span
-          role="status"
-          className="text-[10px] font-black uppercase tracking-wide text-indigo-900 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded-full"
-          title="Usuario multi-empresa: podés cambiar el tenant activo desde el selector."
+
+      {/* Topbar row */}
+      <div className="h-14 px-3 flex items-center gap-2 overflow-hidden">
+        {/* Hamburger — solo en desktop (mobile usa bottom nav) */}
+        <button
+          onClick={onToggleSidebar}
+          aria-label={isSidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
+          aria-expanded={isSidebarOpen}
+          aria-controls="sidebar-nav"
+          className="hidden lg:flex p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
+          style={{ color: 'var(--topbar-text)' }}
         >
-          Multi-empresa
+          <Menu size={20} aria-hidden="true" />
+        </button>
+
+        {/* Título del módulo */}
+        <span className="font-black uppercase tracking-tight text-sm shrink-0" style={{ color: 'var(--topbar-text)' }}>
+          {title}
         </span>
-      )}
-      {isSuperAdmin && (
-        <span
-          role="status"
-          className="text-[10px] font-black uppercase tracking-wide text-amber-900 bg-amber-200 border border-amber-400 px-2 py-0.5 rounded-full"
-          title="Acceso a todas las empresas. Los datos de cada tenant siguen aislados: no editás registros de Bacarsa desde otra empresa."
-        >
-          SuperAdmin · multi-empresa
-        </span>
-      )}
-      {assignedClientId && (
-        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
-          Vista restringida
-        </span>
-      )}
-      {/* Selector de empresa — badge para todos, dropdown para superadmin */}
-      {empresa && (
-        <div className="relative">
-          <button
-            onClick={() => canSwitchEmpresa && setShowEmpresaDrop(d => !d)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-black border transition-colors ${
-              canSwitchEmpresa ? 'cursor-pointer' : 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
-            }`}
-            style={canSwitchEmpresa ? {
-              backgroundColor: 'var(--company-primary, #4f46e5)',
-              color: '#ffffff',
-              borderColor: 'var(--company-primary, #4338ca)',
-            } : undefined}
-            title={canSwitchEmpresa ? 'Cambiar empresa' : empresa.name}
-          >
-            <Building2 size={12} />
-            <span className="hidden sm:inline max-w-[120px] truncate">{empresa.name || empresa.id}</span>
-            {canSwitchEmpresa && <ChevronDown size={11} />}
-          </button>
-          {canSwitchEmpresa && showEmpresaDrop && (
-            <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl min-w-[200px] max-h-64 overflow-y-auto">
-              {empresas.length === 0 && (
-                <p className="px-4 py-3 text-xs text-slate-400">Sin empresas registradas</p>
-              )}
-              {empresas.filter(e => e.active !== false).map(e => (
-                <button
-                  key={e.id}
-                  onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}
-                  className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl last:rounded-b-xl border-b border-slate-100 last:border-0 ${
-                    e.id === empresaId ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'
-                  }`}
-                >
-                  {e.name || e.id}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-3 ml-auto min-w-0 flex-1 justify-end">
-        {pageHeader.right != null && <div className="flex items-center gap-2">{pageHeader.right}</div>}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs font-medium hidden sm:inline" style={{ color: 'var(--topbar-text)', opacity: 0.7 }}>
-            {roleLabel}: <b style={{ opacity: 1 }}>{operatorName}</b>
+
+        {/* Badges compactos */}
+        {isSuperAdmin && (
+          <span className="hidden sm:inline text-[9px] font-black uppercase text-amber-900 bg-amber-200 border border-amber-400 px-1.5 py-0.5 rounded-full shrink-0">
+            SA
           </span>
+        )}
+
+        {/* Selector de empresa */}
+        {empresa && (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => canSwitchEmpresa && setShowEmpresaDrop(d => !d)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border transition-colors max-w-[100px] sm:max-w-[140px]"
+              style={canSwitchEmpresa ? {
+                backgroundColor: 'var(--company-primary, #4f46e5)',
+                color: '#ffffff',
+                borderColor: 'var(--company-primary, #4338ca)',
+              } : { backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt2)' }}
+              title={empresa.name}
+            >
+              <Building2 size={11} className="shrink-0" />
+              <span className="truncate">{empresa.name || empresa.id}</span>
+              {canSwitchEmpresa && <ChevronDown size={10} className="shrink-0" />}
+            </button>
+            {canSwitchEmpresa && showEmpresaDrop && (
+              <div className="absolute left-0 top-full mt-1 z-50 border rounded-xl shadow-xl min-w-[180px] max-h-64 overflow-y-auto"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                {empresas.filter(e => e.active !== false).map(e => (
+                  <button
+                    key={e.id}
+                    onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}
+                    className="w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl last:rounded-b-xl border-b last:border-0"
+                    style={{
+                      backgroundColor: e.id === empresaId ? 'var(--company-primary, #6366f1)' : undefined,
+                      color: e.id === empresaId ? '#fff' : 'var(--txt)',
+                      borderColor: 'var(--border)',
+                    }}
+                  >
+                    {e.name || e.id}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Acciones derecha */}
+        <div className="flex items-center gap-2 ml-auto min-w-0 shrink-0">
+          {pageHeader.right != null && <div className="flex items-center gap-2">{pageHeader.right}</div>}
+
+          {/* Nombre usuario — solo sm+ */}
+          <span className="hidden sm:block text-xs font-medium truncate max-w-[120px]" style={{ color: 'var(--topbar-text)', opacity: 0.7 }}>
+            <b style={{ opacity: 1 }}>{operatorName}</b>
+          </span>
+
+          {/* Estado online */}
           {isOnline ? (
-            <span role="status" aria-label="Sistema en línea" className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-              <Activity size={11} aria-hidden="true" /> ONLINE
+            <span role="status" aria-label="Sistema en línea"
+              className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded-full border border-emerald-200 dark:border-emerald-800 shrink-0">
+              <Activity size={10} aria-hidden="true" />
+              <span className="hidden sm:inline">ONLINE</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-300 animate-pulse" title="Sin conexión — los cambios se guardan localmente y se sincronizarán al volver la conexión.">
-              <AlertCircle size={11} />
-              <span>OFFLINE</span>
-              <span className="hidden sm:inline font-medium opacity-80">· cambios pendientes de sync</span>
+            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-300 animate-pulse shrink-0">
+              <AlertCircle size={10} />
+              <span>OFF</span>
             </span>
           )}
         </div>
-      </div>
       </div>
     </div>
   );
 }
 
-// ─── INNER LAYOUT (dentro del PageHeaderProvider) ────────────────────────────
+// ─── INNER LAYOUT ─────────────────────────────────────────────────────────────
 function LayoutInner({ children }: { children: React.ReactNode }) {
-  const [isPinned, setIsPinned] = useState(false);   // usuario fija el sidebar abierto
-  const [isHovered, setIsHovered] = useState(false); // expansión temporal por hover
-  const [topbarVisible, setTopbarVisible] = useState(false); // topbar overlay en modo compacto
+  const [isPinned, setIsPinned]       = useState(false);
+  const [isHovered, setIsHovered]     = useState(false);
+  const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
   const { canReadModule } = useAuth();
   const { compactSidebar } = usePageHeader();
   const { empresa } = useEmpresa();
 
-  // Sidebar visible si está pinned O si el mouse está encima — salvo modo compacto (Planificador)
   const sidebarOpen = !compactSidebar && (isPinned || isHovered);
 
-  // Al navegar a otra ruta, colapsar el pin para volver a modo mini
   useEffect(() => {
     setIsPinned(false);
     setIsHovered(false);
   }, [router.pathname]);
 
-  // Inyecta variables CSS de color de empresa (indigo por default si no hay color configurado)
+  // Cerrar sidebar en mobile al hacer resize a desktop
+  useEffect(() => {
+    const handler = () => { if (window.innerWidth >= 1024) setIsPinned(false); };
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
   useEffect(() => {
     applyCompanyTheme(empresa?.primaryColor || '#6366f1');
   }, [empresa?.primaryColor]);
+
+  // Bloquear scroll del body cuando el sidebar mobile está abierto
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (isPinned && window.innerWidth < 1024) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isPinned]);
+
+  const closeSidebar = useCallback(() => { setIsPinned(false); setIsHovered(false); }, []);
 
   const handleLogout = async () => {
     try { await signOut(auth); window.location.href = '/login'; } catch (e) { console.error(e); }
@@ -208,7 +255,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
   const isActive = (path: string) => router.pathname.startsWith(path);
 
-  const linkBase = `flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all text-sm font-medium ${!sidebarOpen ? 'justify-center px-2' : ''}`;
+  const linkBase = `flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-medium ${!sidebarOpen ? 'justify-center' : ''}`;
 
   const getLinkStyle = (path: string, special = false): React.CSSProperties => {
     if (isActive(path)) return { backgroundColor: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' };
@@ -221,41 +268,57 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {/* ── SIDEBAR ─────────────────────────────────────────────────── */}
+      {/* ── BACKDROP MOBILE ───────────────────────────────────────────── */}
+      {isPinned && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── SIDEBAR ───────────────────────────────────────────────────── */}
       <aside
         id="sidebar-nav"
         aria-label="Navegación principal"
-        onMouseEnter={() => !compactSidebar && setIsHovered(true)}
-        onMouseLeave={() => { setIsHovered(false); setIsPinned(false); }}
+        onMouseEnter={() => !compactSidebar && window.innerWidth >= 1024 && setIsHovered(true)}
+        onMouseLeave={() => { setIsHovered(false); if (!isPinned) setIsPinned(false); }}
         className={`fixed top-0 left-0 z-40 h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden
-          ${sidebarOpen ? 'w-64' : 'w-16 lg:w-16'} ${!sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'}`}
+          ${sidebarOpen ? 'w-64' : 'w-16'}
+          ${!sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'}`}
         style={{ backgroundColor: 'var(--sb-bg)', borderColor: 'var(--sb-border)', color: 'var(--sb-text)' }}
       >
-        {/* WCO: empuja el logo a la misma altura que el topbar */}
         <div style={{ height: 'env(titlebar-area-height, 0px)', flexShrink: 0 }} />
-        {/* Logo */}
-        <div className={`flex items-center shrink-0 border-b overflow-hidden ${sidebarOpen ? 'p-5 justify-between' : 'p-4 justify-center'}`}
-          style={{ borderColor: 'var(--sb-border)' }}>
+
+        {/* Logo / Header del sidebar */}
+        <div
+          className={`flex items-center shrink-0 border-b overflow-hidden ${sidebarOpen ? 'p-4 justify-between' : 'p-3 justify-center'}`}
+          style={{ borderColor: 'var(--sb-border)' }}
+        >
           {sidebarOpen ? (
             <div className="flex flex-col min-w-0 animate-in fade-in duration-150">
-              <span className="text-lg font-black tracking-tighter whitespace-nowrap" style={{ color: 'var(--sb-logo)' }}>COSP V 1.0</span>
-              <span className="text-[11px] font-semibold whitespace-nowrap" style={{ color: 'var(--sb-logo-sub)' }}>Seguridad Privada</span>
-              <span className="text-[10px] truncate max-w-[14rem] opacity-60" style={{ color: 'var(--sb-logo-sub)' }}>{empresa?.name || empresa?.id || 'Grupo Bacar'}</span>
+              <span className="text-base font-black tracking-tighter whitespace-nowrap" style={{ color: 'var(--sb-logo)' }}>COSP V 1.0</span>
+              <span className="text-[10px] font-semibold whitespace-nowrap" style={{ color: 'var(--sb-logo-sub)' }}>Seguridad Privada</span>
             </div>
           ) : (
-            <ShieldCheck size={20} style={{ color: 'var(--sb-logo)' }} />
+            <ShieldCheck size={18} style={{ color: 'var(--sb-logo)' }} />
           )}
           {sidebarOpen && (
-            <button onClick={() => { setIsPinned(false); setIsHovered(false); }} className="lg:hidden opacity-60 hover:opacity-100 shrink-0"
-              style={{ color: 'var(--sb-text)' }}><X size={18}/></button>
+            <button
+              onClick={closeSidebar}
+              className="p-1.5 rounded-lg opacity-60 hover:opacity-100 shrink-0 transition-opacity"
+              style={{ color: 'var(--sb-text)' }}
+              aria-label="Cerrar menú"
+            >
+              <X size={16} />
+            </button>
           )}
         </div>
 
-        {/* Nav */}
-        <nav className="px-2 space-y-0.5 mt-3 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar pb-4">
-
+        {/* Navegación */}
+        <nav className="px-2 space-y-0.5 mt-2 flex-1 overflow-y-auto overflow-x-hidden pb-4">
           {sidebarOpen && (
-            <div className="px-3 py-2 text-[9px] font-black uppercase tracking-widest animate-in fade-in duration-150"
+            <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest animate-in fade-in"
               style={{ color: 'var(--sb-section)' }}>Operativa</div>
           )}
 
@@ -263,7 +326,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             <Link href="/admin/dashboard" prefetch={false} title="Dashboard"
               className={getLinkHoverClass('/admin/dashboard')}
               style={getLinkStyle('/admin/dashboard')}>
-              <LayoutDashboard size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Dashboard</span>}
+              <LayoutDashboard size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Dashboard</span>}
             </Link>
           )}
 
@@ -271,7 +335,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             <Link href="/admin/operaciones" prefetch={false} title="Centro Control"
               className={getLinkHoverClass('/admin/operaciones')}
               style={getLinkStyle('/admin/operaciones', true)}>
-              <Radio size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Centro Control</span>}
+              <Radio size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Centro Control</span>}
             </Link>
           )}
 
@@ -279,45 +344,52 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             <Link href="/admin/planificacion" prefetch={false} title="Planificador"
               className={getLinkHoverClass('/admin/planificacion')}
               style={getLinkStyle('/admin/planificacion')}>
-              <Calendar size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Planificador</span>}
+              <Calendar size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Planificador</span>}
             </Link>
           )}
 
-          {(canReadModule('CLIENTS') || canReadModule('SERVICES')) && (<>
-            {sidebarOpen && (
-              <div className="px-3 py-2 text-[9px] font-black uppercase tracking-widest mt-3 animate-in fade-in duration-150"
-                style={{ color: 'var(--sb-section)' }}>Gestión</div>
-            )}
-            {!sidebarOpen && <div className="h-3" />}
-            {canReadModule('CLIENTS') && (
-              <Link href="/admin/crm" prefetch={false} title="CRM Clientes"
-                className={getLinkHoverClass('/admin/crm')}
-                style={getLinkStyle('/admin/crm')}>
-                <Briefcase size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">CRM Clientes</span>}
-              </Link>
-            )}
-            {(canReadModule('SERVICES') || canReadModule('CLIENTS')) && (
-              <Link href="/admin/servicios" prefetch={false} title="Servicios"
-                className={getLinkHoverClass('/admin/servicios')}
-                style={getLinkStyle('/admin/servicios')}>
-                <ShieldCheck size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Servicios</span>}
-              </Link>
-            )}
-          </>)}
+          {(canReadModule('CLIENTS') || canReadModule('SERVICES')) && (
+            <>
+              {sidebarOpen && (
+                <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
+                  style={{ color: 'var(--sb-section)' }}>Gestión</div>
+              )}
+              {!sidebarOpen && <div className="h-2" />}
+              {canReadModule('CLIENTS') && (
+                <Link href="/admin/crm" prefetch={false} title="CRM Clientes"
+                  className={getLinkHoverClass('/admin/crm')}
+                  style={getLinkStyle('/admin/crm')}>
+                  <Briefcase size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">CRM Clientes</span>}
+                </Link>
+              )}
+              {(canReadModule('SERVICES') || canReadModule('CLIENTS')) && (
+                <Link href="/admin/servicios" prefetch={false} title="Servicios"
+                  className={getLinkHoverClass('/admin/servicios')}
+                  style={getLinkStyle('/admin/servicios')}>
+                  <ShieldCheck size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Servicios</span>}
+                </Link>
+              )}
+            </>
+          )}
 
           {canReadModule('REPORTS') && (
             <Link href="/admin/reportes" prefetch={false} title="Reportes"
               className={getLinkHoverClass('/admin/reportes')}
               style={getLinkStyle('/admin/reportes')}>
-              <BarChart3 size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Reportes</span>}
+              <BarChart3 size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Reportes</span>}
             </Link>
           )}
 
           {canReadModule('ANALYSIS') && (
-            <Link href="/admin/analisis" prefetch={false} title="Análisis Operativo"
+            <Link href="/admin/analisis" prefetch={false} title="Análisis"
               className={getLinkHoverClass('/admin/analisis')}
               style={getLinkStyle('/admin/analisis')}>
-              <TrendingUp size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Análisis</span>}
+              <TrendingUp size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Análisis</span>}
             </Link>
           )}
 
@@ -325,76 +397,81 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             <Link href="/admin/rrhh" prefetch={false} title="RRHH"
               className={getLinkHoverClass('/admin/rrhh')}
               style={getLinkStyle('/admin/rrhh')}>
-              <Users size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">RRHH</span>}
+              <Users size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">RRHH</span>}
             </Link>
           )}
 
-          {canReadModule('CONFIG') && (<>
-            {sidebarOpen && (
-              <div className="px-3 py-2 text-[9px] font-black uppercase tracking-widest mt-3 animate-in fade-in duration-150"
-                style={{ color: 'var(--sb-section)' }}>Sistema</div>
-            )}
-            {!sidebarOpen && <div className="h-3" />}
-            <Link href="/admin/configuracion" prefetch={false} title="Configuración"
-              className={getLinkHoverClass('/admin/configuracion')}
-              style={getLinkStyle('/admin/configuracion')}>
-              <Settings size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Configuración</span>}
-            </Link>
-            <Link href="/admin/guia" prefetch={false} title="Guía interactiva"
-              className={getLinkHoverClass('/admin/guia')}
-              style={getLinkStyle('/admin/guia')}>
-              <BookOpen size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Guía interactiva</span>}
-            </Link>
-          </>)}
+          {canReadModule('CONFIG') && (
+            <>
+              {sidebarOpen && (
+                <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
+                  style={{ color: 'var(--sb-section)' }}>Sistema</div>
+              )}
+              {!sidebarOpen && <div className="h-2" />}
+              <Link href="/admin/configuracion" prefetch={false} title="Configuración"
+                className={getLinkHoverClass('/admin/configuracion')}
+                style={getLinkStyle('/admin/configuracion')}>
+                <Settings size={18} className="shrink-0" />
+                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Configuración</span>}
+              </Link>
+              <Link href="/admin/guia" prefetch={false} title="Guía"
+                className={getLinkHoverClass('/admin/guia')}
+                style={getLinkStyle('/admin/guia')}>
+                <BookOpen size={18} className="shrink-0" />
+                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
+              </Link>
+            </>
+          )}
         </nav>
 
         {/* Logout */}
         <div className="p-2 border-t shrink-0" style={{ borderColor: 'var(--sb-border)' }}>
-          <button onClick={handleLogout}
-            className={`w-full flex items-center ${sidebarOpen ? 'gap-3 px-4' : 'justify-center'} py-2.5 rounded-xl transition-all font-medium text-sm hover:opacity-80`}
-            style={{ color: 'var(--sb-logout)' }} title="Cerrar Sesión">
-            <LogOut size={18} className="shrink-0"/> {sidebarOpen && <span className="animate-in fade-in duration-150 whitespace-nowrap">Salir</span>}
+          <button
+            onClick={handleLogout}
+            className={`w-full flex items-center ${sidebarOpen ? 'gap-3 px-3' : 'justify-center'} py-2.5 rounded-xl transition-all font-medium text-sm hover:opacity-80`}
+            style={{ color: 'var(--sb-logout)' }}
+            title="Cerrar Sesión"
+          >
+            <LogOut size={18} className="shrink-0" />
+            {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Salir</span>}
           </button>
         </div>
       </aside>
 
-      {/* ── CONTENIDO ───────────────────────────────────────────────── */}
+      {/* ── CONTENIDO PRINCIPAL ───────────────────────────────────────── */}
       {compactSidebar ? (
-        /* Modo planificador con cliente: topbar oculto, se revela al hacer hover en la franja superior */
         <div className="flex-1 lg:ml-16 h-screen overflow-hidden relative">
-          {/* Franja de trigger — siempre visible, captura el hover */}
-          <div
-            className="absolute top-0 left-0 right-0 h-2 z-50 cursor-n-resize"
-            onMouseEnter={() => setTopbarVisible(true)}
-          />
-          {/* Topbar overlay — desliza desde arriba */}
+          <div className="absolute top-0 left-0 right-0 h-2 z-50 cursor-n-resize"
+            onMouseEnter={() => setTopbarVisible(true)} />
           <div
             className={`absolute top-0 left-0 right-0 z-40 transition-transform duration-200 ease-out shadow-2xl ${topbarVisible ? 'translate-y-0' : '-translate-y-full'}`}
             onMouseLeave={() => setTopbarVisible(false)}
           >
             <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} />
           </div>
-          {/* Indicador visual en el borde superior */}
           <div className={`absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${topbarVisible ? 'opacity-0' : 'opacity-60'}`}>
-            <div className="w-12 h-1 rounded-b-full bg-slate-500/60 mt-0" />
+            <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
-          <main className="h-full overflow-hidden min-h-0">
-            {children}
-          </main>
+          <main className="h-full overflow-hidden min-h-0">{children}</main>
         </div>
       ) : (
-        <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16">
+        <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16 min-w-0">
           <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} />
-          <main className="p-4 lg:p-8">
+          {/* pb-20 en mobile para dejar espacio al bottom nav */}
+          <main className="p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 overflow-x-hidden">
             {children}
           </main>
         </div>
       )}
+
+      {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
+      <BottomNav />
     </>
   );
 }
 
-// ─── LAYOUT (shell con tema + provider) ──────────────────────────────────────
+// ─── LAYOUT SHELL ─────────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<AppTheme>('light');
 
@@ -406,8 +483,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, []);
 
   return (
-    <div className="min-h-screen transition-colors duration-200 flex" style={{ backgroundColor: 'var(--app-bg)' }}>
-      <Toaster position="top-right" richColors closeButton expand />
+    <div className="min-h-screen transition-colors duration-200 flex overflow-x-hidden" style={{ backgroundColor: 'var(--app-bg)' }}>
+      <Toaster position="top-center" richColors closeButton expand />
       <PageHeaderProvider>
         <LayoutInner>{children}</LayoutInner>
       </PageHeaderProvider>

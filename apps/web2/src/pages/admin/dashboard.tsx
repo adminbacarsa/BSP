@@ -499,7 +499,7 @@ function AdminDashboard() {
           <>
             {/* ── SECCIÓN 1: ESTRUCTURA OPERATIVA ─────────────────────────── */}
             <SectionLabel label="Estructura Operativa" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
               <KpiCard title="Clientes Activos" value={clientsCount}
                 icon={Building2} color="#6366f1"
                 subtext={`${objectivesCount} objetivos configurados`}
@@ -534,7 +534,7 @@ function AdminDashboard() {
                 <p className="text-sm font-bold">Sin planificación cargada para hoy — los indicadores operativos no están disponibles.</p>
               </div>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
               <KpiCard title="Presentes Hoy" value={presentesHoy}
                 icon={UserCheck} color="#10b981"
                 subtext={hasPlanificacion ? `de ${enServicioHoy} planificados` : 'Sin planificación'}
@@ -559,7 +559,7 @@ function AdminDashboard() {
 
             {/* ── SECCIÓN 3: DISTRIBUCIÓN DE HORAS SLA ─────────────────── */}
             <SectionLabel label="Distribución de Horas SLA — Mes Actual" />
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
               <KpiCard title="Horas Diurnas" value={fmt(normalHrs)}
                 icon={Sun} color="#10b981"
                 subtext="Jornada normal"
@@ -702,7 +702,7 @@ function AdminDashboard() {
 
             {/* ── SECCIÓN 6: ACCESOS RÁPIDOS ───────────────────────────── */}
             <SectionLabel label="Accesos Rápidos" />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { href:'/admin/planificacion', icon: Calendar, color:'text-indigo-500', hover:'hover:border-indigo-200', label:'Planificador', sub:'Gestionar y asignar turnos' },
                 { href:'/admin/empleados',     icon: Users,    color:'text-emerald-500', hover:'hover:border-emerald-200', label:'Personal',      sub:'Legajos y disponibilidad' },
@@ -727,4 +727,4 @@ function AdminDashboard() {
   );
 }
 
-export default withAuthGuard(AdminDashboard, ['admin', 'SuperAdmin', 'Director', 'Auditor']);
+export default withAuthGuard(AdminDashboard, ['admin', 'SuperAdmin', 'Director', 'Auditor']);

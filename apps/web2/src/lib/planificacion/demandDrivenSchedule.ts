@@ -65,6 +65,49 @@ function shiftDefForCode(pos: V2PositionDef, dayLetter: string, code: string, au
     return { code, name: code, hours: hrs, startTime: DEFAULT_START[code] || '07:00' };
 }
 
+function countAvailableForDay(
+    params: DemandDrivenFillParams,
+    dateStr: string,
+    pool?: string[],
+): number {
+    const { ctx, positionGroups, cycleWorkDays, customCoverEmps, runtime } = params;
+    const ids = pool ?? global24hsEmployeePool(params);
+    return ids.filter(empId => {
+        if (customCoverEmps.has(empId)) return false;
+        if (runtime[empId].assignedDays.has(dateStr)) return false;
+        if (ctx.absences[empId]?.has(dateStr)) return false;
+        return cycleWorkDays[empId]?.has(dateStr) ?? false;
+    }).length;
+}
+
+/** Marca F en días de descanso del ciclo antes de llenar SLA (mejora check CCT). */
+export function seedDemandDrivenCycleFrancos(
+    ctx: V2EngineContext,
+    cycleWorkDays: Record<string, Set<string>>,
+    assignments: V2Assignment[],
+    runtime: DemandDrivenFillParams['runtime'],
+): void {
+    for (const emp of ctx.employees) {
+        const st = runtime[emp.id];
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            if (st.assignedDays.has(dateStr)) continue;
+            if (cycleWorkDays[emp.id]?.has(dateStr)) continue;
+            assignments.push({
+                empId: emp.id,
+                dateStr,
+                positionName: '',
+                code: 'F',
+                name: 'Franco',
+                hours: 0,
+                startTime: '00:00',
+                isFranco: true,
+            });
+            st.assignedDays.add(dateStr);
+        }
+    }
+}
+
 function global24hsEmployeePool(params: DemandDrivenFillParams): string[] {
     const { ctx, positionGroups, isCustomCoverPosition } = params;
     const ids: string[] = [];
@@ -82,6 +125,7 @@ function global24hsEmployeePool(params: DemandDrivenFillParams): string[] {
 interface TryFillOptions {
     candidatePool?: string[];
     ignoreFixedShift?: boolean;
+    preferRemainingBudget?: boolean;
 }
 
 function tryFillOneSlot(
@@ -113,6 +157,11 @@ function tryFillOneSlot(
             return true;
         })
         .sort((a, b) => {
+            if (options?.preferRemainingBudget) {
+                const remA = HARD_MAX_HOURS - cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
+                const remB = HARD_MAX_HOURS - cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
+                if (remA !== remB) return remB - remA;
+            }
             const ha = cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
             const hb = cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
             if (ha !== hb) return ha - hb;
@@ -178,9 +227,9 @@ export function fillDemandGapsBeforeFrancos(
         const dayNum = parseInt(day.dateStr.split('-')[2], 10);
         const inCurrent = dayNum <= params.cutoffDay;
         const bandOrder = ['M', 'T', 'N', 'D12', 'N12'];
-        for (let pass = 0; pass < 3; pass++) {
-            const pool = pass >= 2 ? global24hsEmployeePool(params) : undefined;
-            const ignoreFixed = pass >= 2;
+        for (let pass = 0; pass < 4; pass++) {
+            const pool = pass >= 1 ? global24hsEmployeePool(params) : undefined;
+            const ignoreFixed = pass >= 1;
             for (const code of bandOrder) {
                 for (const pd of day.positions) {
                     const pos = ctx.positions.find(p => p.positionName === pd.positionName);
@@ -192,6 +241,7 @@ export function fillDemandGapsBeforeFrancos(
                         if (!tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                             candidatePool: pool,
                             ignoreFixedShift: ignoreFixed,
+                            preferRemainingBudget: pass >= 1,
                         })) break;
                         have++;
                     }
@@ -279,7 +329,14 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
         (pos, letter) => positionIsActiveOn(pos, letter),
     );
 
-    for (const day of dayDemands) {
+    const fillParams = params;
+    const sortedDays = [...dayDemands].sort((a, b) => {
+        const avA = countAvailableForDay(fillParams, a.dateStr);
+        const avB = countAvailableForDay(fillParams, b.dateStr);
+        return avA - avB;
+    });
+
+    for (const day of sortedDays) {
         if (day.totalPaxUnits <= 0) continue;
         const dayNum = parseInt(day.dateStr.split('-')[2], 10);
         const inCurrent = dayNum <= params.cutoffDay;
