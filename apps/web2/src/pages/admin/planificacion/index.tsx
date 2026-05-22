@@ -1441,7 +1441,9 @@ export default function PlanificacionPage() {
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
         const unsubE = onSnapshot(empleadosQ, snap => {
-            const map = (s: typeof snap) => s.docs.map(d => { const data = d.data(); return { id: d.id, name: data.name || data.firstName + ' ' + data.lastName, preferredObjectiveId: data.preferredObjectiveId, laborAgreement: data.laborAgreement, status: data.status || 'activo', lat: data.lat ?? data.latitude ?? null, lng: data.lng ?? data.longitude ?? null, address: data.address || '', restriccionesObjetivo: data.restriccionesObjetivo || [], restriccionesCliente: data.restriccionesCliente || [], conflictosEmpleados: data.conflictosEmpleados || [] }; });
+            const map = (s: typeof snap) => s.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .map(d => { const data = d.data(); return { id: d.id, name: data.name || data.firstName + ' ' + data.lastName, preferredObjectiveId: data.preferredObjectiveId, laborAgreement: data.laborAgreement, status: data.status || 'activo', lat: data.lat ?? data.latitude ?? null, lng: data.lng ?? data.longitude ?? null, address: data.address || '', restriccionesObjetivo: data.restriccionesObjetivo || [], restriccionesCliente: data.restriccionesCliente || [], conflictosEmpleados: data.conflictosEmpleados || [] }; });
             setEmployees(map(snap));
         }, (e) => console.error('[plan] empleados error:', e));
 
