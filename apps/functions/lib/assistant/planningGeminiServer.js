@@ -38,6 +38,8 @@ R3b. ESQUEMA PREFERIDO: ciclo 6+2 con bandas M/T/N/F. No proponer D12/N12 salvo 
 
 R3c. RET (Retén): estado de guardia SOBRANTE en el objetivo. 0 h planificadas/liquidables. Solo asignar RET a empleados idle/sobrantes; un día laborable sin turno asignado → F, no RET. Podés promover RET→facturable para cubrir déficit (P2) respetando R3 y R10.
 
+R3d. TURNOS CUSTOM (EN, RO, etc.): cobertura obligatoria de una persona en los días activos del puesto. NO recortar ni bloquear por R3 si superan 200h cuando es el único titular del puesto custom. No convertir a M/T/N ni mover a otro puesto. Sí respetar R4 descansos y R6 ausencias.
+
 R4. DESCANSOS: 12h entre fin de turno e inicio del siguiente (8h solo si el turno previo fue ≤6h).
 
 R5. CAP SEMANAL: máximo 60h/semana ISO; emergencia hasta 72h sin romper R3 ni R4.

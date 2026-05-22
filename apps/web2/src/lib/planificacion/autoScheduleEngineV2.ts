@@ -68,6 +68,51 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
+/** Preferencia auto: más descanso con M/T/N 8h; 4+2 solo si no cierra con 8h. */
+const AUTO_CYCLE_PREFERENCE = ['6+2', '5+1', '6+1', '4+2'] as const;
+
+function scoreAutoCycleFeasibility(feas: V2FeasibilityReport, cycleKey: string): number {
+    if (!feas.ok) {
+        const cmp = feas.metrics.cycleComparison.find(c => c.cycleKey === cycleKey);
+        const gap = (cmp?.structuralPeakPeople ?? 99) - feas.metrics.peopleAvailable;
+        return -5000 - gap * 200 - feas.reasons.length * 50;
+    }
+    const cmp = feas.metrics.cycleComparison.find(c => c.cycleKey === cycleKey);
+    const buffer = cmp?.bufferHours ?? 0;
+    const hourMargin = feas.metrics.offerHours - feas.metrics.effectiveTargetHours;
+    const idle = feas.metrics.idleEmployees ?? 0;
+    const d12Penalty = cycleKey === '4+2' ? 40 : 0;
+    const spiritBonus = cycleKey === '6+2' ? 25 : cycleKey === '5+1' ? 10 : 0;
+    return buffer + hourMargin * 0.3 - idle * 15 - d12Penalty + spiritBonus;
+}
+
+/**
+ * Elige el esquema de ciclo más conveniente para la dotación y el SLA.
+ * Regla COSP: el primer esquema VIABLE en orden de preferencia (6+2 → 5+1 → 6+1).
+ * 4+2 (D12/N12) solo si ningún ciclo de 8h cierra la estructura.
+ */
+export function pickOptimalAutoCycles(ctx: V2EngineContext): {
+    cycles: string[];
+    feasibility: V2FeasibilityReport;
+    pickedKey: string;
+    evaluated: Array<{ cycleKey: string; ok: boolean; score: number }>;
+} {
+    const evaluated = AUTO_CYCLE_PREFERENCE.map((key) => {
+        const feas = checkFeasibility({ ...ctx, autoCycles: [key] });
+        return { cycleKey: key, ok: feas.ok, score: scoreAutoCycleFeasibility(feas, key), feas };
+    });
+    const eightHour = new Set(['6+2', '5+1', '6+1']);
+    const firstViable8h = evaluated.find(e => e.ok && eightHour.has(e.cycleKey));
+    const firstViableAny = evaluated.find(e => e.ok);
+    const pick = firstViable8h ?? firstViableAny ?? [...evaluated].sort((a, b) => b.score - a.score)[0];
+    return {
+        cycles: [pick.cycleKey],
+        feasibility: pick.feas,
+        pickedKey: pick.cycleKey,
+        evaluated: evaluated.map(e => ({ cycleKey: e.cycleKey, ok: e.ok, score: Math.round(e.score) })),
+    };
+}
+
 /**
  * Reglas base de descanso (sin tope de ciclo).
  * El tope `maxConsecutiveWorkDays` se setea dinámicamente con `cL` del ciclo elegido
@@ -800,6 +845,10 @@ export interface V2GenerateStats {
     suvicoWeekBillableOver48?: Array<{ empId: string; weekKey: string; hours: number }>;
     /** Copia de `feasibility.metrics.cctSchemeCalendarProjection` tras generar (solo 2026 con datos). */
     cctSchemeCalendarProjection?: CctSchemeCalendarProjectionBlock;
+    /** Horas que faltaron para igualar slaVendidas tras el pase de cierre (0 = cerró). */
+    slaDeficitRemaining?: number;
+    /** true si totalBillableHours alcanzó slaVendidas (±0.5h). */
+    slaHoursClosed?: boolean;
 }
 
 export interface CapOverflowSlot {
@@ -828,6 +877,24 @@ const SHIFT_END_HOUR: Record<string, number> = { M: 14, T: 22, N: 6, D12: 19, N1
 const SHIFT_START_HOUR: Record<string, number> = { M: 6, T: 14, N: 22, D12: 7, N12: 19 };
 const DEFAULT_SHIFT_TIMES: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
 
+const STANDARD_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
+
+/** EN/RO/etc.: titular cubre L–V; puede superar 200h. */
+function isCustomCoverPosition(pos: V2PositionDef): boolean {
+    const cov = String(pos.coverageType || '').toLowerCase();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return false;
+    const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
+    if (working.length === 0) return false;
+    return working.every(s => !STANDARD_BANDS.has(String(s.code ?? '').toUpperCase()));
+}
+
+function findPrimary24hsPosition(positions: V2PositionDef[]): V2PositionDef | undefined {
+    return positions.find(p => {
+        const cov = String(p.coverageType || '').toLowerCase();
+        return !isCustomCoverPosition(p) && (cov === '24hs' || cov === '24' || cov === '24h');
+    });
+}
+
 interface EmpRuntimeState {
     monthHours: number;
     cycleCurrentUsed: number; // tramo 1→cutoff
@@ -849,7 +916,8 @@ function isoWeekKey(d: Date): string {
     return `${t.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-/** Genera asignaciones respetando ciclo CCT (4+2, 6+1...), 200h/ciclo, ausencias y horas vendidas. */
+/** Genera asignaciones respetando ciclo CCT (4+2, 6+1...), 200h/ciclo, ausencias y horas vendidas.
+ *  V4 (alias generateScheduleV4): + D12/N12 por ausencia T; EN/RO titular + backup Puesto 24hs. */
 export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Wrapper de shiftHours que usa ctx.codeHoursHint como fallback para códigos custom (RO, RON, etc.).
     const _hint = ctx.codeHoursHint || {};
@@ -965,7 +1033,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const cyclicN = Math.max(1, positionNeed[pos.positionName] || 1);
                 const posPerf = feasibility.perPosition.find(p => p.positionName === pos.positionName);
                 const capN = posPerf && posPerf.monthHours > 0
-                    ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS) + 1
+                    ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS)
                     : cyclicN;
                 const need = Math.max(cyclicN, capN);
                 const have = positionGroups[pos.positionName].length;
@@ -985,17 +1053,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     // ── SURPLUS: mover empleados sobrantes a capacidad ociosa real ──────────
-    // Solo se mueven a ocioso los que superen MAX(need_ciclo, need_cap200h + 1 retén).
-    // El +1 garantiza siempre un retén disponible para cubrir ausentismo.
-    // Con más empleados en el grupo cada uno trabaja menos días y nadie supera 200h.
+    // Solo cuando el grupo supera MAX(need_ciclo, need_cap200h). Sin +1 retén artificial:
+    // con dotación justa (18 cubren 6+2) nadie queda idle ni recibe RET.
     const initialGroupSizes: Record<string, number> = {};
     Object.entries(positionGroups).forEach(([pos, g]) => { initialGroupSizes[pos] = g.length; });
     for (const posName of Object.keys(positionGroups)) {
         const cyclicNeed = Math.max(1, positionNeed[posName] || 1);
         const posPerf = feasibility.perPosition.find(p => p.positionName === posName);
-        // cap-based: mínimo de personas para que nadie supere 200h, más 1 retén de buffer.
         const capNeed = posPerf && posPerf.monthHours > 0
-            ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS) + 1
+            ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS)
             : cyclicNeed;
         const need = Math.max(cyclicNeed, capNeed);
         const group = positionGroups[posName];
@@ -1014,6 +1080,38 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    const primary24hsPosition = findPrimary24hsPosition(ctx.positions);
+    for (const pos of ctx.positions) {
+        if (!isCustomCoverPosition(pos)) continue;
+        const cap = Math.max(1, Number(pos.qty) || 1);
+        const group = positionGroups[pos.positionName] ?? [];
+        while (group.length > cap && primary24hsPosition) {
+            const titularId = group.find(eid => defaultPos[eid] === pos.positionName) ?? group[0];
+            const excessId = group.find(eid => eid !== titularId);
+            if (!excessId) break;
+            group.splice(group.indexOf(excessId), 1);
+            positionGroups[primary24hsPosition.positionName].push(excessId);
+            empAssignedTo[excessId] = primary24hsPosition.positionName;
+        }
+    }
+    const customTitular: Record<string, string> = {};
+    for (const pos of ctx.positions) {
+        if (!isCustomCoverPosition(pos)) continue;
+        const group = positionGroups[pos.positionName] ?? [];
+        const owner = group.find(eid => defaultPos[eid] === pos.positionName) ?? group[0];
+        if (owner) customTitular[pos.positionName] = owner;
+    }
+    const customCoverEmps = new Set<string>(
+        ctx.employees
+            .filter(emp => {
+                const pn = empAssignedTo[emp.id];
+                if (!pn) return false;
+                const p = ctx.positions.find(x => x.positionName === pn);
+                return !!p && isCustomCoverPosition(p);
+            })
+            .map(e => e.id),
+    );
+
     // ── ALERTA DE EXCESO DE EMPLEADOS POR PUESTO ─────────────────────────────
     const excessPositionEmployees: { positionName: string; assigned: number; needed: number; excess: number }[] = [];
     Object.entries(initialGroupSizes).forEach(([posName, initial]) => {
@@ -1023,21 +1121,31 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     });
 
-    // ── RET-DESIGNATE: UN SOLO empleado por puesto recibe RET, rotando mes a mes ──
-    // RET = horas excedentes del servicio disponibles para reasignar a otro objetivo.
-    // Se ordena por priorityScore; el designado rota según (año*12+mes) % candidatos,
-    // así cada mes le toca a un empleado diferente del grupo.
-    // Owners fijos del puesto (userLockedPos) nunca son retén.
+    // ── RET-DESIGNATE: una sola persona por objetivo, solo si hay excedente ──
+    // RET = sobrante (0 h) disponible para otro objetivo. Dotación justa → sin RET.
     const retDesignateSet = new Set<string>();
     const _firstDay = ctx.daysInMonth[0];
     const _retMonth = _firstDay ? (_firstDay.getFullYear() * 12 + _firstDay.getMonth()) : 0;
-    Object.entries(positionGroups).forEach(([posName, group]) => {
-        if (group.length === 0) return;
-        const candidates = group.filter(id => userLockedPos[id] !== posName);
-        if (candidates.length === 0) return;
-        const sorted = [...candidates].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+    const structuralIdle = Math.max(0, feasibility.metrics.idleEmployees ?? 0);
+    const idleForRet = ctx.employees.filter(e => empAssignedTo[e.id] === null).map(e => e.id);
+    if (idleForRet.length > 0) {
+        const sorted = [...idleForRet].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
         retDesignateSet.add(sorted[_retMonth % sorted.length]);
-    });
+    } else if (structuralIdle > 0) {
+        const primary24 = ctx.positions.find(p => {
+            const cov = String(p.coverageType || '').toLowerCase();
+            return cov === '24hs' || cov === '24' || cov === '24h';
+        });
+        if (primary24) {
+            const group = positionGroups[primary24.positionName] ?? [];
+            const need = positionNeed[primary24.positionName] ?? group.length;
+            const candidates = group.filter(id => userLockedPos[id] !== primary24.positionName);
+            if (candidates.length > need) {
+                const sorted = [...candidates].sort((a, b) => empMeta[a].priorityScore - empMeta[b].priorityScore);
+                retDesignateSet.add(sorted[_retMonth % sorted.length]);
+            }
+        }
+    }
 
     // ── INFERENCIA DE OWNER VIRTUAL ──
     // Si un puesto singular (qty=1) tiene UN solo empleado en su grupo y ese
@@ -1075,11 +1183,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
     /**
      * Banda esperada para un empleado en un día dado.
-     * - rotateShifts=true (default): rotación péndulo M→T→N→T→M→T→N…
-     *   Evita la transición N→M directa (sin descanso entre noche y mañana).
-     *   Para anillos ≥3: period=2*(len-1), idx=pos<len?pos:period-pos (ping-pong).
-     *   Para anillos de 1-2 elementos: circular normal.
-     * - rotateShifts=false: banda FIJA todo el mes.
+     * - rotateShifts=true: rotación por bloque de ciclo CCT (6+2, 4+2…): mismo turno
+     *   todo el tramo laboral (MMMMMM + FF, luego siguiente banda en péndulo M→T→N→T…).
+     *   Ejemplo 6+2: MMMMMMFF → TTTTTTFF → NNNNNNFF → TTTTTTFF…
+     * - rotateShifts=false: banda fija todo el mes (solo M, solo T o solo N).
      */
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const ring = shiftRingByPosition[posName];
@@ -1089,10 +1196,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (ctx.rotateShifts !== false) {
             const di = dayIndexMap.get(dateStr) ?? 0;
             const eCycleLen = empCycleLen[empId] ?? cycleLen;
+            const eCL = empCL_map[empId] ?? cL;
             const offset = empGroupIdx[empId] ?? 0;
+            const cycleSlot = (di + offset) % eCycleLen;
+            if (cycleSlot >= eCL) return null;
             const blockNum = Math.floor((di + offset) / eCycleLen);
             if (ring.length >= 3) {
-                // Péndulo: M→T→N→T→M→T→N… evita salto N→M sin franco de por medio.
                 const period = 2 * (ring.length - 1);
                 const pos = (slot + blockNum) % period;
                 const idx = pos < ring.length ? pos : period - pos;
@@ -1206,10 +1315,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 assignedOffsets.set(empId, desiredByEmp.get(empId)!);
             });
 
-            // Sin trailing: todos reciben el base de su banda (mismo offset = correcto)
+            // Sin trailing: escalonar offsets en puestos rotativos (M+T+N) para que
+            // no descansen todos el mismo día — antes compartían bandOff y quedaban ~25% días sin cobertura.
             const bandOff = bandBase % eCycleLen;
-            group.filter(id => !desiredByEmp.has(id)).forEach(empId => {
-                assignedOffsets.set(empId, bandOff);
+            const staggerRotating = shiftCodes.length > 1;
+            group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
+                const idxInGroup = group.indexOf(empId);
+                assignedOffsets.set(
+                    empId,
+                    staggerRotating ? (bandOff + idxInGroup) % eCycleLen : bandOff,
+                );
             });
 
             group.forEach(empId => {
@@ -1515,10 +1630,85 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         stats.totalBillableHours += sHrs;
     };
 
+    const FRANCO_BREAK_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+    const cctTrancheUsed = (empId: string, inCur: boolean) =>
+        limitedEmpIds.has(empId)
+            ? runtime[empId].cycleCurrentUsed + runtime[empId].cycleNextUsed
+            : (inCur ? runtime[empId].cycleCurrentUsed : runtime[empId].cycleNextUsed);
+    const sortByFewerHours = (empIds: string[], inCur: boolean) =>
+        [...empIds].sort((a, b) => cctTrancheUsed(a, inCur) - cctTrancheUsed(b, inCur));
+
+    const tryAssignBandSlot = (
+        empId: string,
+        pos: V2PositionDef,
+        dateStr: string,
+        sCode: string,
+        sh: V2ShiftDef,
+        inCurrent: boolean,
+    ): boolean => {
+        if (runtime[empId].assignedDays.has(dateStr)) return false;
+        if (ctx.absences[empId]?.has(dateStr)) return false;
+        if (!cycleWorkDays[empId]?.has(dateStr)) return false;
+        const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
+        if (primary && primary !== sCode) return false;
+        const sHrs = shiftHoursH(sh);
+        const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+        const sEnd = sh.endTime || undefined;
+        if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) return false;
+        if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
+        writeAssignment(empId, dateStr, pos.positionName, sCode, sh.name || sCode, sHrs, sStart, inCurrent, sEnd);
+        return true;
+    };
+
     // Mapa de turnos bloqueados SOLO por el cap 200h (key = posName||dateStr||code).
     // Al final de los dos pases, filtramos los que corresponden a slots que quedaron sin cubrir.
     const capBlockedMap = new Map<string, CapOverflowSlot[]>();
-    const capBlockedEmpSeen = new Set<string>(); // empId||dateStr||code para deduplicar
+    const capBlockedEmpSeen = new Set<string>();
+
+    const writeCustomCoverShift = (
+        empId: string,
+        pos: V2PositionDef,
+        dateStr: string,
+        dayLetter: string,
+        inCurrentCycle: boolean,
+        opts?: { strictRest?: boolean },
+    ): boolean => {
+        if (runtime[empId].assignedDays.has(dateStr)) return false;
+        if (ctx.absences[empId]?.has(dateStr)) return false;
+        if (!positionIsActiveOn(pos, dayLetter)) return false;
+        const dayBands = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+        if (dayBands.length === 0) return false;
+        const sh = dayBands[0];
+        const sCode = String(sh.code ?? '').toUpperCase();
+        const sHrs = shiftHoursH(sh);
+        const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+        const sEnd = sh.endTime || undefined;
+        const sName = sh.name || sCode;
+        if (opts?.strictRest) {
+            if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
+        }
+        writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
+        return true;
+    };
+
+    // Pre-asignación titulares EN/RO (L–V)
+    for (const pos of ctx.positions) {
+        if (!isCustomCoverPosition(pos)) continue;
+        const titular = customTitular[pos.positionName];
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            const inCur = day.getDate() <= cutoffDay;
+            let covered = assignments.filter(a =>
+                a.dateStr === dateStr && a.positionName === pos.positionName && a.hours > 0
+                && !FRANCO_SET.has(String(a.code ?? '').toUpperCase()),
+            ).length;
+            if (covered >= qty) continue;
+            if (titular && covered < qty) writeCustomCoverShift(titular, pos, dateStr, dayLetter, inCur);
+        }
+    }
 
     // ── GENERACIÓN: loop único día×puesto×banda ──────────────────────────
     // Regla de oro: cada empleado trabaja SOLO su banda asignada todo el mes.
@@ -1530,18 +1720,45 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
         for (const pos of ctx.positions) {
             if (!positionIsActiveOn(pos, dayLetter)) continue;
+            if (isCustomCoverPosition(pos)) continue;
             const qty = Math.max(1, Number(pos.qty) || 1);
             const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            const group = positionGroups[pos.positionName] || [];
+            const extD12Assigns: V2Assignment[] = [];
+            const extN12Assigns: V2Assignment[] = [];
+            const bandCodes = dayShifts.map(x => String(x.code || '').toUpperCase());
+            let extensionMode = false;
+            if (bandCodes.includes('M') && bandCodes.includes('T') && bandCodes.includes('N')) {
+                extensionMode = group.some(eid => {
+                    const primary = expectedShiftForDay(eid, dateStr, pos.positionName);
+                    return primary === 'T' && ctx.absences[eid]?.has(dateStr);
+                });
+            }
 
             for (const sh of dayShifts) {
                 const sCode = String(sh.code || '').toUpperCase();
-                const sHrs = shiftHoursH(sh);
-                const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
-                const sEnd = sh.endTime || undefined;
+                if (extensionMode && sCode === 'T') continue;
+
+                const baseHrs = shiftHoursH(sh);
+                const baseStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
+                const baseEnd = sh.endTime || undefined;
                 const sName = sh.name || sCode;
 
+                let assignCode = sCode;
+                let assignHrs = baseHrs;
+                let assignStart = baseStart;
+                let assignEnd = baseEnd;
+                if (extensionMode && sCode === 'M') {
+                    assignCode = 'D12';
+                    assignHrs = SHIFT_HRS_DEFAULT.D12;
+                    assignStart = DEFAULT_SHIFT_TIMES.D12;
+                } else if (extensionMode && sCode === 'N') {
+                    assignCode = 'N12';
+                    assignHrs = SHIFT_HRS_DEFAULT.N12;
+                    assignStart = DEFAULT_SHIFT_TIMES.N12;
+                }
+
                 // Solo empleados del grupo de ESTE puesto con ESTA banda asignada
-                const group = positionGroups[pos.positionName] || [];
                 const candidates = group.filter((empId) => {
                     if (runtime[empId].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[empId]?.has(dateStr)) return false;
@@ -1575,27 +1792,61 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const used = limitedEmpIds.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    if (used + sHrs > HARD_MAX_HOURS) {
-                        // Registrar como candidato a autorización si también pasa el check CCT
-                        const seenKey = `${empId}||${dateStr}||${sCode}`;
-                        if (!capBlockedEmpSeen.has(seenKey) && passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) {
+                    if (used + assignHrs > HARD_MAX_HOURS) {
+                        const seenKey = `${empId}||${dateStr}||${assignCode}`;
+                        if (!capBlockedEmpSeen.has(seenKey) && passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) {
                             capBlockedEmpSeen.add(seenKey);
-                            const capKey = `${pos.positionName}||${dateStr}||${sCode}`;
+                            const capKey = `${pos.positionName}||${dateStr}||${assignCode}`;
                             if (!capBlockedMap.has(capKey)) capBlockedMap.set(capKey, []);
-                            capBlockedMap.get(capKey)!.push({ empId, dateStr, positionName: pos.positionName, code: sCode, name: sName, hours: sHrs, startTime: sStart, ...(sEnd ? { endTime: sEnd } : {}) });
+                            capBlockedMap.get(capKey)!.push({ empId, dateStr, positionName: pos.positionName, code: assignCode, name: sh.name || assignCode, hours: assignHrs, startTime: assignStart, ...(assignEnd ? { endTime: assignEnd } : {}) });
                         }
                         continue;
                     }
-                    if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) continue;
-                    writeAssignment(empId, dateStr, pos.positionName, sCode, sName, sHrs, sStart, inCurrentCycle, sEnd);
+                    if (!passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) continue;
+                    writeAssignment(empId, dateStr, pos.positionName, assignCode, sh.name || assignCode, assignHrs, assignStart, inCurrentCycle, assignEnd);
+                    if (extensionMode && assignCode === 'D12') extD12Assigns.push(assignments[assignments.length - 1]);
+                    if (extensionMode && assignCode === 'N12') extN12Assigns.push(assignments[assignments.length - 1]);
                     covered++;
                 }
 
-                if (covered < qty) {
+                if (covered < qty && !(extensionMode && sCode === 'T')) {
                     const missing = qty - covered;
                     stats.uncoveredSlots += missing;
                     if (!stats.uncoveredSlotsByDay![dateStr]) stats.uncoveredSlotsByDay![dateStr] = [];
                     stats.uncoveredSlotsByDay![dateStr].push({ positionName: pos.positionName, code: sCode, missing });
+                }
+            }
+
+            if (extensionMode && (extD12Assigns.length > 0) !== (extN12Assigns.length > 0)) {
+                const toRevert = extD12Assigns.length > 0 ? extD12Assigns : extN12Assigns;
+                const isD12Side = extD12Assigns.length > 0;
+                const baseCode = isD12Side ? 'M' : 'N';
+                const baseSh = dayShifts.find(x => String(x.code || '').toUpperCase() === baseCode);
+                const baseHrsRev = baseSh ? shiftHoursH(baseSh) : 8;
+                const baseStartRev = baseSh?.startTime || DEFAULT_SHIFT_TIMES[baseCode] || '07:00';
+                const baseEndRev = baseSh?.endTime || undefined;
+                for (const a of toRevert) {
+                    const diff = a.hours - baseHrsRev;
+                    const st = runtime[a.empId];
+                    const wk = isoWeekKey(new Date(a.dateStr));
+                    const inCur = parseInt(a.dateStr.split('-')[2]) <= cutoffDay;
+                    st.weekHours[wk] = (st.weekHours[wk] ?? 0) - diff;
+                    if (inCur) {
+                        st.cycleCurrentUsed -= diff;
+                        stats.employeeCycleHours.current[a.empId] = st.cycleCurrentUsed;
+                    } else {
+                        st.cycleNextUsed -= diff;
+                        stats.employeeCycleHours.next[a.empId] = st.cycleNextUsed;
+                    }
+                    st.monthHours -= diff;
+                    stats.employeeMonthlyHours[a.empId] = st.monthHours;
+                    stats.totalBillableHours -= diff;
+                    a.code = baseCode;
+                    a.name = baseSh?.name || baseCode;
+                    a.hours = baseHrsRev;
+                    a.startTime = baseStartRev;
+                    if (baseEndRev) a.endTime = baseEndRev; else delete a.endTime;
+                    st.lastShiftCode = baseCode;
                 }
             }
         }
@@ -1666,6 +1917,261 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    const assignCustomBackupOrSubstitute = (
+        empId: string,
+        pos: V2PositionDef,
+        dateStr: string,
+        dayLetter: string,
+        inCurrent: boolean,
+    ): boolean => {
+        if (runtime[empId].assignedDays.has(dateStr)) return false;
+        if (ctx.absences[empId]?.has(dateStr)) return false;
+        if (writeCustomCoverShift(empId, pos, dateStr, dayLetter, inCurrent, { strictRest: true })) return true;
+        if (primary24hsPosition) {
+            const p1Bands = effectiveShiftsForPositionDay(primary24hsPosition, dayLetter, ctx.autoCycles);
+            for (const sh of p1Bands) {
+                const code = String(sh.code ?? '').toUpperCase();
+                const sHrs = shiftHoursH(sh);
+                const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[code] || '07:00';
+                const sEnd = sh.endTime || undefined;
+                if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) continue;
+                if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
+                writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const stripFrancoOnCustomActiveDay = (
+        empId: string, pos: V2PositionDef, dateStr: string,
+    ): boolean => {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
+        if (!a || !FRANCO_BREAK_SET.has(String(a.code ?? '').toUpperCase())) return false;
+        runtime[empId].assignedDays.delete(dateStr);
+        const idx = assignments.indexOf(a);
+        if (idx >= 0) assignments.splice(idx, 1);
+        if (stats.totalAssignments > 0) stats.totalAssignments--;
+        return true;
+    };
+
+    // Cobertura custom EN/RO: titular L–V; respaldo desde Puesto 24hs (M/T/N/RO), nunca RET.
+    for (const pos of ctx.positions) {
+        if (!isCustomCoverPosition(pos)) continue;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        const titular = customTitular[pos.positionName];
+        const backupPool = primary24hsPosition
+            ? sortByFewerHours(positionGroups[primary24hsPosition.positionName] ?? [], true)
+            : [];
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            const inCurrent = day.getDate() <= cutoffDay;
+
+            if (titular && stripFrancoOnCustomActiveDay(titular, pos, dateStr)) {
+                writeCustomCoverShift(titular, pos, dateStr, dayLetter, inCurrent);
+            }
+
+            const countCover = () => assignments.filter(a =>
+                a.dateStr === dateStr &&
+                a.positionName === pos.positionName &&
+                a.hours > 0 &&
+                !FRANCO_BREAK_SET.has(String(a.code ?? '').toUpperCase()),
+            ).length;
+
+            let covered = countCover();
+            while (covered < qty) {
+                let filled = false;
+                if (titular && !runtime[titular].assignedDays.has(dateStr) && !ctx.absences[titular]?.has(dateStr)) {
+                    filled = writeCustomCoverShift(titular, pos, dateStr, dayLetter, inCurrent);
+                }
+                if (!filled) {
+                    for (const eid of backupPool) {
+                        if (eid === titular) continue;
+                        if (assignCustomBackupOrSubstitute(eid, pos, dateStr, dayLetter, inCurrent)) {
+                            filled = true;
+                            break;
+                        }
+                    }
+                }
+                if (!filled) break;
+                covered = countCover();
+            }
+        }
+    }
+
+    // ── TERCER PASE: cerrar slots y días laborables 24/7 sin turno ───────────
+    for (const day of ctx.daysInMonth) {
+        const dateStr = ctx.getDateKey(day);
+        const dayLetter = ctx.getDayLetter(dateStr);
+        const inCurrent = day.getDate() <= cutoffDay;
+        for (const pos of ctx.positions) {
+            if (isCustomCoverPosition(pos)) continue;
+            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const group = positionGroups[pos.positionName] || [];
+            const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            const bandCodes = dayShifts.map(x => String(x.code || '').toUpperCase());
+            const extensionMode = bandCodes.includes('M') && bandCodes.includes('T') && bandCodes.includes('N')
+                && group.some(eid => {
+                    const primary = expectedShiftForDay(eid, dateStr, pos.positionName);
+                    return primary === 'T' && ctx.absences[eid]?.has(dateStr);
+                });
+            for (const sh of dayShifts) {
+                const sCode = String(sh.code || '').toUpperCase();
+                if (extensionMode && sCode === 'T') continue;
+                let assignCode = sCode;
+                let assignSh = sh;
+                if (extensionMode && sCode === 'M') {
+                    assignCode = 'D12';
+                    assignSh = { ...sh, code: 'D12', hours: SHIFT_HRS_DEFAULT.D12, startTime: DEFAULT_SHIFT_TIMES.D12 };
+                } else if (extensionMode && sCode === 'N') {
+                    assignCode = 'N12';
+                    assignSh = { ...sh, code: 'N12', hours: SHIFT_HRS_DEFAULT.N12, startTime: DEFAULT_SHIFT_TIMES.N12 };
+                }
+                let covered = assignments.filter(a =>
+                    a.dateStr === dateStr && a.positionName === pos.positionName
+                    && String(a.code).toUpperCase() === assignCode && a.hours > 0,
+                ).length;
+                if (covered >= qty) continue;
+                const candidates = sortByFewerHours(group.filter(empId => {
+                    if (runtime[empId].assignedDays.has(dateStr)) return false;
+                    if (ctx.absences[empId]?.has(dateStr)) return false;
+                    if (!cycleWorkDays[empId]?.has(dateStr)) return false;
+                    const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
+                    if (primary && primary !== sCode) return false;
+                    return true;
+                }), inCurrent);
+                for (const empId of candidates) {
+                    if (covered >= qty) break;
+                    if (tryAssignBandSlot(empId, pos, dateStr, assignCode, assignSh, inCurrent)) covered++;
+                }
+            }
+        }
+        for (const emp of ctx.employees) {
+            const posName = empAssignedTo[emp.id];
+            if (!posName) continue;
+            const pos = ctx.positions.find(p => p.positionName === posName);
+            if (!pos || isCustomCoverPosition(pos)) continue;
+            const letters = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+            const operatesAllWeek = letters.every(l => positionIsActiveOn(pos, l));
+            if (!operatesAllWeek) continue;
+            if (runtime[emp.id].assignedDays.has(dateStr)) continue;
+            if (!cycleWorkDays[emp.id]?.has(dateStr)) continue;
+            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            const primary = expectedShiftForDay(emp.id, dateStr, posName);
+            const sh = primary
+                ? dayShifts.find(s => String(s.code || '').toUpperCase() === primary)
+                : dayShifts[0];
+            if (!sh) continue;
+            const code = String(sh.code || '').toUpperCase();
+            tryAssignBandSlot(emp.id, pos, dateStr, code, sh, inCurrent);
+        }
+    }
+
+    // ── CIERRE SLA: total facturable = horas vendidas (imperativo operativo) ──
+    {
+        const slaTarget = Math.round(Math.max(0, ctx.slaVendidas || contractedH || 0));
+        if (slaTarget > 0) {
+            let deficit = slaTarget - stats.totalBillableHours;
+            let guard = 0;
+            while (deficit > 0.5 && guard++ < 1200) {
+                const before = stats.totalBillableHours;
+                type SlotTry = { hrs: number; run: () => boolean };
+                const tries: SlotTry[] = [];
+
+                for (const pos of ctx.positions) {
+                    if (!isCustomCoverPosition(pos)) continue;
+                    const qty = Math.max(1, Number(pos.qty) || 1);
+                    const titular = customTitular[pos.positionName];
+                    const backupPool = primary24hsPosition
+                        ? sortByFewerHours(positionGroups[primary24hsPosition.positionName] ?? [], true)
+                        : [];
+                    for (const day of ctx.daysInMonth) {
+                        const dateStr = ctx.getDateKey(day);
+                        const dayLetter = ctx.getDayLetter(dateStr);
+                        if (!positionIsActiveOn(pos, dayLetter)) continue;
+                        const inCurrent = day.getDate() <= cutoffDay;
+                        const covered = assignments.filter(a =>
+                            a.dateStr === dateStr && a.positionName === pos.positionName && a.hours > 0
+                            && !FRANCO_BREAK_SET.has(String(a.code ?? '').toUpperCase()),
+                        ).length;
+                        if (covered >= qty) continue;
+                        const dayBands = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+                        const sh0 = dayBands[0];
+                        const h0 = sh0 ? shiftHoursH(sh0) : 8;
+                        tries.push({
+                            hrs: h0,
+                            run: () => {
+                                if (titular && writeCustomCoverShift(titular, pos, dateStr, dayLetter, inCurrent)) return true;
+                                for (const eid of backupPool) {
+                                    if (eid === titular) continue;
+                                    if (assignCustomBackupOrSubstitute(eid, pos, dateStr, dayLetter, inCurrent)) return true;
+                                }
+                                return false;
+                            },
+                        });
+                    }
+                }
+
+                for (const day of ctx.daysInMonth) {
+                    const dateStr = ctx.getDateKey(day);
+                    const dayLetter = ctx.getDayLetter(dateStr);
+                    const inCurrent = day.getDate() <= cutoffDay;
+                    for (const pos of ctx.positions) {
+                        if (isCustomCoverPosition(pos)) continue;
+                        if (!positionIsActiveOn(pos, dayLetter)) continue;
+                        const qty = Math.max(1, Number(pos.qty) || 1);
+                        const group = positionGroups[pos.positionName] || [];
+                        const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+                        for (const sh of dayShifts) {
+                            const sCode = String(sh.code || '').toUpperCase();
+                            const assignHrs = shiftHoursH(sh);
+                            let covered = assignments.filter(a =>
+                                a.dateStr === dateStr && a.positionName === pos.positionName
+                                && String(a.code).toUpperCase() === sCode && a.hours > 0,
+                            ).length;
+                            if (covered >= qty) continue;
+                            const candidates = sortByFewerHours(group.filter(empId => {
+                                if (runtime[empId].assignedDays.has(dateStr)) return false;
+                                if (ctx.absences[empId]?.has(dateStr)) return false;
+                                if (!cycleWorkDays[empId]?.has(dateStr)) return false;
+                                const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
+                                if (primary && primary !== sCode) return false;
+                                return true;
+                            }), inCurrent);
+                            for (const empId of candidates) {
+                                tries.push({
+                                    hrs: assignHrs,
+                                    run: () => tryAssignBandSlot(empId, pos, dateStr, sCode, sh, inCurrent),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                tries.sort((a, b) => {
+                    const da = Math.abs(a.hrs - deficit);
+                    const db = Math.abs(b.hrs - deficit);
+                    if (da !== db) return da - db;
+                    return b.hrs - a.hrs;
+                });
+                let progressed = false;
+                for (const t of tries) {
+                    if (t.hrs > deficit + 0.5) continue;
+                    if (t.run()) { progressed = true; break; }
+                }
+                if (!progressed) break;
+                deficit = slaTarget - stats.totalBillableHours;
+                if (stats.totalBillableHours - before < 0.5) break;
+            }
+            stats.slaDeficitRemaining = Math.max(0, Math.round((slaTarget - stats.totalBillableHours) * 10) / 10);
+            stats.slaHoursClosed = stats.slaDeficitRemaining <= 0.5;
+        }
+    }
+
     // ── CAP OVERFLOW: slots bloqueados por 200h que quedaron sin cubrir ──────
     const capOverflowSlots: CapOverflowSlot[] = [];
     const seenEmpDayOverflow = new Set<string>(); // un solo turno por (empId, dateStr)
@@ -1727,11 +2233,36 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             // Al detectar esa situación damos F extra (el empleado descansa; retoma al día siguiente).
             const lastCode = (st.lastShiftCode || '').toUpperCase();
             const isPostStreakShortCycle = cF === 1 && (lastCode === 'N' || lastCode === 'N12');
-            // Día de ciclo-trabajo sin turno:
-            //   - post-noche en 6+1 → F (descanso CCT 35h)
-            //   - retén designado del puesto → RET (horas excedentes disponibles para otro servicio)
-            //   - resto → F
-            // Día de ciclo-franco o empleado sin puesto → F siempre.
+            const inCurrent = day.getDate() <= cutoffDay;
+
+            const customPosName = empAssignedTo[emp.id];
+            const customPos = customPosName
+                ? ctx.positions.find(p => p.positionName === customPosName && isCustomCoverPosition(p))
+                : null;
+            if (customPos && positionIsActiveOn(customPos, dayLetter)) {
+                if (writeCustomCoverShift(emp.id, customPos, dateStr, dayLetter, inCurrent)) continue;
+                if (assignCustomBackupOrSubstitute(emp.id, customPos, dateStr, dayLetter, inCurrent)) continue;
+                continue;
+            }
+
+            const assignedPosName = empAssignedTo[emp.id];
+            const assignedPos = assignedPosName
+                ? ctx.positions.find(p => p.positionName === assignedPosName)
+                : null;
+            const is24hsAssigned = !!assignedPos
+                && !isCustomCoverPosition(assignedPos)
+                && ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every(l => positionIsActiveOn(assignedPos, l));
+            if (is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
+                const dayShifts = effectiveShiftsForPositionDay(assignedPos!, dayLetter, ctx.autoCycles);
+                const primary = expectedShiftForDay(emp.id, dateStr, assignedPosName!);
+                const sh = primary
+                    ? dayShifts.find(s => String(s.code || '').toUpperCase() === primary)
+                    : dayShifts[0];
+                if (sh && tryAssignBandSlot(emp.id, assignedPos!, dateStr, String(sh.code || '').toUpperCase(), sh, inCurrent)) {
+                    continue;
+                }
+            }
+
             const fallbackCode = isWorkDayInCycle
                 ? (isPostStreakShortCycle ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F'))
                 : 'F';
@@ -1754,6 +2285,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
+        if (customCoverEmps.has(emp.id)) continue;
         if (st.cycleCurrentUsed > HARD_MAX_HOURS || st.cycleNextUsed > HARD_MAX_HOURS) {
             stats.employeesOver200.push(emp.id);
         }
@@ -1802,9 +2334,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
  * Usar `generateScheduleV2(ctx)` para obtener asignaciones.
  */
 export function runAutoScheduleV2(ctx: V2EngineContext): V2EngineResult {
-    const feasibility = checkFeasibility(ctx);
-    return {
-        feasibility,
-        changes: {},
-    };
+    const explicit = ctx.autoCycles?.length;
+    if (explicit) {
+        return { feasibility: checkFeasibility(ctx), changes: {} };
+    }
+    const picked = pickOptimalAutoCycles(ctx);
+    return { feasibility: picked.feasibility, changes: {} };
 }

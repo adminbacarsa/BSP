@@ -45,6 +45,21 @@ import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, pickOptimalAutoCycles, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import {
+    countPositionClosedUnitsFromShifts,
+    PLANNING_NON_BILLABLE_CODES,
+    buildCodeCountsByPositionForDay,
+} from '@/lib/planificacion/positionCoverageUnits';
+import {
+    analyzeDayCoverageGaps,
+    analyzeObjectiveCoverageGaps,
+    flattenDayGapsForUi,
+} from '@/lib/planificacion/coverageGapAnalysis';
+import {
+    buildObjectiveCoveragePreflight,
+    formatDayDemandSummary,
+    type ObjectiveCoveragePreflight,
+} from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
@@ -124,7 +139,7 @@ const SHIFT_HOURS_LOOKUP: Record<string, number> = {
 };
 
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
-const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
+const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 
 const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number => {
     if (!shift) return 0;
@@ -275,7 +290,13 @@ export default function PlanificacionPage() {
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null } | null>(null);
-    const [coverageTooltip, setCoverageTooltip] = useState<{ dateStr: string; gaps: { positionName: string; code: string; missing: number }[]; x: number; y: number } | null>(null);
+    const [coverageTooltip, setCoverageTooltip] = useState<{
+        dateStr: string;
+        gaps: { positionName: string; code: string; missing: number; detail?: string }[];
+        x: number;
+        y: number;
+    } | null>(null);
+    const [showCoverageDiagnostic, setShowCoverageDiagnostic] = useState(false);
     const [columnSelectMode, setColumnSelectMode] = useState(false);
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | null>(null);
@@ -372,6 +393,7 @@ export default function PlanificacionPage() {
     const [autoV2Progress, setAutoV2Progress] = useState<{ pct: number; label: string } | null>(null);
     const [autoV2Report, setAutoV2Report] = useState<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const autoV2ReportRef = React.useRef<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
+    const [autoV2CoveragePreflight, setAutoV2CoveragePreflight] = useState<ObjectiveCoveragePreflight | null>(null);
     const [autoV2BudgetMode, setAutoV2BudgetMode] = useState<'cct'|'calendar'>('cct');
     const [autoV2ShowEmpDetail, setAutoV2ShowEmpDetail] = useState(false);
     // Stats post-generación (capacidad CCT por empleado)
@@ -1092,19 +1114,108 @@ export default function PlanificacionPage() {
             if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
                 if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
-                    current += calcShiftHours(shift);
+                    current += calcShiftHours(shift, slaCodeHoursHint);
                 }
             }
         });
         return { current, target, pax, isActiveDay: isDayActive };
     };
 
+    /**
+     * Puestos cerrados por día: 1 pax = esquema SLA completo del puesto.
+     * 24hs: M+T+N (24h) o D12+N12 (24h); custom: todas las bandas del turno (ej. M+T = 16h).
+     */
+    const countPositionClosedUnits = (
+        dateStr: string,
+        pos: any,
+        dayLetter: string,
+        employeesList: any[],
+        changes: any,
+        existing: any,
+        cycles?: string[],
+    ): { closed: number; required: number; schemeLabel: string } => {
+        if (!isPosActiveOnDay(pos, dayLetter)) return { closed: 0, required: 0, schemeLabel: '' };
+
+        const dominant = (positionStructure || []).reduce(
+            (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+            positionStructure[0] || { qty: 1, positionName: 'General' },
+        );
+        const codeCounts: Record<string, number> = {};
+        employeesList.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
+            if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
+            const code = String(shift.code || '').toUpperCase();
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+            const shiftPos = shift.positionName || dominant?.positionName || 'General';
+            if (shiftPos !== pos.positionName) return;
+            codeCounts[code] = (codeCounts[code] || 0) + 1;
+        });
+
+        return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles);
+    };
+
     // 🛑 MEMOIZACIÓN CRÍTICA PARA EL MODAL
     const modalCoverageStats = useMemo(() => {
         if (!selectedCell || !selectedObjective) return null;
         const currentPosName = activePosition || selectedCell.currentShift?.positionName || (positionStructure.length > 0 ? positionStructure[0].positionName : 'General');
-        return calculateCoverageStats(selectedCell.dateStr, currentPosName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
-    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective]);
+        const dateStr = selectedCell.dateStr;
+        const dayLetter = getDayLetter(dateStr);
+        const hoursStats = calculateCoverageStats(dateStr, currentPosName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
+        const posConfig = positionStructure.find((p: any) => p.positionName === currentPosName) || positionStructure[0];
+        const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
+        const units = posConfig
+            ? countPositionClosedUnits(dateStr, posConfig, dayLetter, displayedEmployees, pendingChanges, shiftsMap, cycles)
+            : { closed: 0, required: 0, schemeLabel: '' };
+        return {
+            ...hoursStats,
+            closedUnits: units.closed,
+            requiredUnits: units.required,
+            schemeLabel: units.schemeLabel,
+            isPositionClosed: units.required > 0 && units.closed >= units.required,
+        };
+    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective, autoCycles]);
+
+    const coverageCyclesForObjective = autoSelectedCyclesRef.current?.length
+        ? autoSelectedCyclesRef.current
+        : autoCycles;
+
+    const buildDayCodeCountsByPosition = (dateStr: string) => buildCodeCountsByPositionForDay(
+        positionStructure || [],
+        dateStr,
+        displayedEmployees,
+        (empId, ds) => {
+            const key = `${empId}_${ds}`;
+            const pending = pendingChanges[key];
+            if (pending?.isDeleted) return { isDeleted: true };
+            const shift = pending ? pending : shiftsMap[key];
+            return shift ?? null;
+        },
+        {
+            selectedObjective,
+            dominantPositionName: dominantPosition?.positionName || 'General',
+            isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+        },
+    );
+
+    const objectiveCoverageGapReport = useMemo(() => {
+        if (!selectedObjective || !(positionStructure?.length)) return null;
+        const days = daysInMonth.map(day => {
+            const dateStr = getDateKey(day);
+            return { dateStr, dayLetter: getDayLetter(dateStr) };
+        });
+        const codeCountsByDay: Record<string, Record<string, Record<string, number>>> = {};
+        for (const { dateStr } of days) {
+            codeCountsByDay[dateStr] = buildDayCodeCountsByPosition(dateStr);
+        }
+        return analyzeObjectiveCoverageGaps(
+            positionStructure,
+            days,
+            codeCountsByDay,
+            coverageCyclesForObjective,
+            isPosActiveOnDay,
+        );
+    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
     const getPositionDailyCoverage = (dateStr: string, positionName: string) => {
         return calculateCoverageStats(dateStr, positionName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
@@ -2665,6 +2776,23 @@ export default function PlanificacionPage() {
             autoSelectedCyclesRef.current = picked.cycles;
             setAutoCycles(picked.cycles);
 
+            await bumpAutoV2Progress(72, 'Leyendo demanda SLA del objetivo…');
+            const preflightDays = daysInMonth.map(day => {
+                const dateStr = getDateKey(day);
+                return { dateStr, dayLetter: getDayLetter(dateStr) };
+            });
+            const preflight = buildObjectiveCoveragePreflight({
+                positions: positionStructure,
+                days: preflightDays,
+                employees: displayedEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
+                absences,
+                slaVendidas,
+                cycles: picked.cycles,
+                objectiveId: selectedObjective,
+                isPosActiveOnDay,
+            });
+            setAutoV2CoveragePreflight(preflight);
+
             await bumpAutoV2Progress(100, `Esquema ${picked.pickedKey} · viabilidad`);
             await new Promise<void>((r) => setTimeout(r, 150));
             autoV2ReportRef.current = picked.feasibility;
@@ -2792,6 +2920,21 @@ export default function PlanificacionPage() {
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
             await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
+
+            const preflightDays = daysInMonth.map(day => {
+                const dateStr = getDateKey(day);
+                return { dateStr, dayLetter: getDayLetter(dateStr) };
+            });
+            setAutoV2CoveragePreflight(buildObjectiveCoveragePreflight({
+                positions: positionStructure,
+                days: preflightDays,
+                employees: displayedEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
+                absences,
+                slaVendidas,
+                cycles: cyclesForGen,
+                objectiveId: selectedObjective,
+                isPosActiveOnDay,
+            }));
 
             const empMonthlyInitial: Record<string,number> = {};
             displayedEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
@@ -3634,153 +3777,50 @@ export default function PlanificacionPage() {
                         const dateStr = getDateKey(day);
                         const dayLetter = getDayLetter(dateStr);
 
-                        // required = sum of pax across active positions for this day
-                        const required = (positionStructure || []).reduce((acc: number, pos: any) => {
-                            if (!isPosActiveOnDay(pos, dayLetter)) return acc;
-                            return acc + (Number(pos?.qty) || 1);
-                        }, 0);
-
-                        // current = covered pax per position (24hs: titulares activos; custom: horas vs meta diaria)
-                        let current = 0;
+                        // Puestos cerrados: 1 pax = esquema SLA completo (M+T+N, D12+N12, M+T, etc.).
+                        let requiredPax = 0;
+                        let closedPax = 0;
                         const cyclesForCoverage = autoSelectedCyclesRef.current?.length
                             ? autoSelectedCyclesRef.current
                             : autoCycles;
                         (positionStructure || []).forEach((pos: any) => {
-                            if (!isPosActiveOnDay(pos, dayLetter)) return;
-                            const pax = Number(pos?.qty) || 1;
-                            const coverageType = pos?.coverageType || 'custom';
-                            let dailyTarget = 24;
-                            if (coverageType !== '24hs') {
-                                const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
-                                const sum = shiftsArr.reduce((a: number, s: any) => {
-                                    const h = Number(s.hours);
-                                    if (h > 0) return a + h;
-                                    if (s.startTime && s.endTime) {
-                                        const parseH = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh + (mm || 0) / 60; };
-                                        let dur = parseH(s.endTime) - parseH(s.startTime);
-                                        if (dur <= 0) dur += 24;
-                                        if (dur > 0 && dur <= 24) return a + dur;
-                                    }
-                                    return a + 8;
-                                }, 0);
-                                dailyTarget = sum > 0 ? sum : 8;
-                            }
-                            if (coverageType === '24hs') {
-                                const seen = new Set<string>();
-                                displayedEmployees.forEach((emp: any) => {
-                                    const key = `${emp.id}_${dateStr}`;
-                                    const pending = pendingChanges[key];
-                                    const existing = shiftsMap[key];
-                                    const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
-                                    if (!activeShift) return;
-                                    const isWorking = !OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase());
-                                    const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
-                                    const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
-                                    if (isWorking && shiftObjective === selectedObjective && shiftPos === pos.positionName) {
-                                        seen.add(emp.id);
-                                    }
-                                });
-                                current += Math.min(seen.size, pax);
-                                return;
-                            }
-                            let coveredCustom = 0;
-                            displayedEmployees.forEach((emp: any) => {
-                                const key = `${emp.id}_${dateStr}`;
-                                const pending = pendingChanges[key];
-                                const existing = shiftsMap[key];
-                                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
-                                if (!activeShift) return;
-                                const isWorking = !OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase());
-                                const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
-                                const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
-                                if (isWorking && shiftObjective === selectedObjective && shiftPos === pos.positionName) {
-                                    coveredCustom++;
-                                }
-                            });
-                            current += Math.min(coveredCustom, pax);
+                            const units = countPositionClosedUnits(
+                                dateStr, pos, dayLetter,
+                                displayedEmployees, pendingChanges, shiftsMap,
+                                cyclesForCoverage,
+                            );
+                            requiredPax += units.required;
+                            closedPax += units.closed;
                         });
 
-                        const isCovered = required > 0 && current >= required;
-                        const cls = required === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
+                        const isCovered = requiredPax > 0 && closedPax >= requiredPax;
+                        const cls = requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
                         return (
                             <td
                                 key={dateStr}
                                 className={`text-center border-r border-b text-[10px] font-black ${cls}`}
                                 colSpan={1}
+                                title={requiredPax > 0
+                                    ? `${closedPax} de ${requiredPax} puestos cerrados (1 pax = esquema SLA completo del día)`
+                                    : undefined}
                                 onClick={(e) => {
-                                    if (isCovered || required === 0) return;
-                                    // Gaps en tiempo real: misma lógica hours-based que el cálculo de cobertura.
-                                    // NO itera códigos del SLA (evita falsos D12/N12 en esquema 6+2).
-                                    const liveGaps: { positionName: string; code: string; missing: number }[] = [];
-                                    (positionStructure || []).forEach((pos: any) => {
-                                        if (!isPosActiveOnDay(pos, dayLetter)) return;
-                                        const posQty = Number(pos?.qty) || 1;
-                                        const cvType = pos?.coverageType || 'custom';
-                                        let dailyTarget = 24;
-                                        if (cvType !== '24hs') {
-                                            const shiftsArr = Array.isArray(pos?.shifts) ? pos.shifts : [];
-                                            const sum = shiftsArr.reduce((a: number, s: any) => {
-                                                const h = Number(s.hours);
-                                                if (h > 0) return a + h;
-                                                if (s.startTime && s.endTime) {
-                                                    const parseH = (t: string) => { const [hh, mm] = t.split(':').map(Number); return hh + (mm || 0) / 60; };
-                                                    let dur = parseH(s.endTime) - parseH(s.startTime);
-                                                    if (dur <= 0) dur += 24;
-                                                    if (dur > 0 && dur <= 24) return a + dur;
-                                                }
-                                                return a + 8;
-                                            }, 0);
-                                            dailyTarget = sum > 0 ? sum : 8;
-                                        }
-                                        let hoursForPos = 0;
-                                        const codeCounts: Record<string, number> = {};
-                                        displayedEmployees.forEach((emp: any) => {
-                                            const key = `${emp.id}_${dateStr}`;
-                                            const pending = pendingChanges[key];
-                                            const existing = shiftsMap[key];
-                                            const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
-                                            if (!activeShift) return;
-                                            const code = String(activeShift.code || '').toUpperCase();
-                                            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                                            const shiftPos = activeShift.positionName || dominantPosition?.positionName || 'General';
-                                            const shiftObj = activeShift.objectiveId || (pending ? selectedObjective : '');
-                                            if (shiftPos !== pos.positionName || shiftObj !== selectedObjective) return;
-                                            hoursForPos += calcShiftHours(activeShift);
-                                            codeCounts[code] = (codeCounts[code] || 0) + 1;
-                                        });
-                                        const missingHours = dailyTarget * posQty - hoursForPos;
-                                        if (missingHours > 0.5) {
-                                            const posDef = {
-                                                positionName: pos.positionName,
-                                                qty: posQty,
-                                                coverageType: cvType,
-                                                shifts: pos?.shifts || [],
-                                                activeDays: pos?.activeDays,
-                                            };
-                                            const effBands = effectiveShiftsForPositionDay(posDef, dayLetter, cyclesForCoverage)
-                                                .map((s: any) => String(s.code || '').toUpperCase())
-                                                .filter((c: string) => c && !OBJECTIVE_NON_BILLABLE_CODES.has(c));
-                                            const posBands = effBands.length > 0 ? effBands : ['M', 'T', 'N'];
-                                            const has12h = posBands.some((b: string) => b === 'D12' || b === 'N12')
-                                                && (codeCounts['D12'] || 0) + (codeCounts['N12'] || 0) > 0;
-                                            const defaultH = posBands.length === 1
-                                                ? (Number((pos?.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === posBands[0])?.hours) || 8)
-                                                : (has12h ? 12 : 8);
-                                            const missCount = Math.max(1, Math.round(missingHours / defaultH));
-                                            let worstBand = posBands[0];
-                                            let worstCnt = Infinity;
-                                            for (const b of posBands) {
-                                                const cnt = codeCounts[b] ?? 0;
-                                                if (cnt < worstCnt) { worstCnt = cnt; worstBand = b; }
-                                            }
-                                            liveGaps.push({ positionName: pos.positionName, code: worstBand, missing: missCount });
-                                        }
-                                    });
-                                    const gaps = liveGaps.length > 0 ? liveGaps : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
+                                    if (isCovered || requiredPax === 0) return;
+                                    const codeCounts = buildDayCodeCountsByPosition(dateStr);
+                                    const dayReport = analyzeDayCoverageGaps(
+                                        positionStructure || [],
+                                        dateStr,
+                                        dayLetter,
+                                        codeCounts,
+                                        cyclesForCoverage,
+                                        isPosActiveOnDay,
+                                    );
+                                    const gaps = dayReport.positions.length > 0
+                                        ? flattenDayGapsForUi(dayReport)
+                                        : (autoV2GenStats?.uncoveredSlotsByDay?.[dateStr] || []);
                                     if (gaps.length > 0) setCoverageTooltip(prev => prev?.dateStr === dateStr ? null : { dateStr, gaps, x: e.clientX, y: e.clientY });
                                 }}
                             >
-                                {required > 0 ? `${current}/${required}` : '-'}
+                                {requiredPax > 0 ? `${closedPax}/${requiredPax}` : '-'}
                             </td>
                         );
                     })}
@@ -3803,12 +3843,17 @@ export default function PlanificacionPage() {
                     style={{ left: Math.min(coverageTooltip.x + 8, window.innerWidth - 220), top: coverageTooltip.y + 10 }}
                     onClick={() => setCoverageTooltip(null)}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-xl flex flex-col gap-1 min-w-[180px]">
-                        <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Cobertura incompleta · {coverageTooltip.dateStr.slice(8)}</div>
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-xl flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
+                        <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Puestos sin cerrar · {coverageTooltip.dateStr.slice(8)}</div>
                         {coverageTooltip.gaps.map((g, i) => (
-                            <div key={i} className="flex items-center justify-between gap-3">
-                                <span className="text-slate-300">{g.positionName}</span>
-                                <span className="text-rose-400 font-black">{g.missing}× {g.code} faltante{g.missing > 1 ? 's' : ''}</span>
+                            <div key={i} className="flex flex-col gap-0.5 border-b border-slate-700/50 pb-1 last:border-0">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-slate-200">{g.positionName}</span>
+                                    <span className="text-rose-400 font-black shrink-0">{g.missing} pax</span>
+                                </div>
+                                {'detail' in g && g.detail && (
+                                    <span className="text-[9px] text-slate-400 font-medium leading-snug">{g.detail}</span>
+                                )}
                             </div>
                         ))}
                         <div className="text-slate-500 text-[8px] mt-1">Click para cerrar</div>
@@ -4042,6 +4087,92 @@ export default function PlanificacionPage() {
                                                     <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 flex justify-between items-center">
                                                         <span className="text-[9px] font-black text-slate-400 uppercase">Hs. Vendidas / mes</span>
                                                         <span className="text-base font-black text-teal-600">{slaVendidas}h</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* DIAGNÓSTICO DE COBERTURA — qué falta por objetivo/mes */}
+                            {selectedObjective && !isServiceLocked && objectiveCoverageGapReport && (
+                                <div className="relative hidden md:block">
+                                    <button
+                                        onClick={() => setShowCoverageDiagnostic(v => !v)}
+                                        className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
+                                            objectiveCoverageGapReport.worstDays.length === 0
+                                                ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300'
+                                                : 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                                        }`}
+                                    >
+                                        <ShieldCheck size={14} className={objectiveCoverageGapReport.worstDays.length === 0 ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
+                                        <div className="flex flex-col leading-none">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Diagnóstico Cobertura</span>
+                                            <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                                                <span className="text-emerald-600 font-black">{objectiveCoverageGapReport.daysFull} días OK</span>
+                                                <span className="text-slate-300">|</span>
+                                                <span className="text-rose-600 font-black">{objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty} con huecos</span>
+                                            </span>
+                                        </div>
+                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
+                                    </button>
+
+                                    {showCoverageDiagnostic && (
+                                        <>
+                                            <div className="fixed inset-0 z-40" onClick={() => setShowCoverageDiagnostic(false)}/>
+                                            <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[320px] max-w-[420px] p-3 animate-in zoom-in-95">
+                                                <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
+                                                <div className="grid grid-cols-3 gap-2 mb-3">
+                                                    <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
+                                                        <div className="text-lg font-black text-emerald-700">{objectiveCoverageGapReport.daysFull}</div>
+                                                        <div className="text-[8px] font-bold text-emerald-600 uppercase">Días 100%</div>
+                                                    </div>
+                                                    <div className="bg-amber-50 rounded-lg p-2 text-center border border-amber-100">
+                                                        <div className="text-lg font-black text-amber-700">{objectiveCoverageGapReport.daysPartial}</div>
+                                                        <div className="text-[8px] font-bold text-amber-600 uppercase">Parcial</div>
+                                                    </div>
+                                                    <div className="bg-rose-50 rounded-lg p-2 text-center border border-rose-100">
+                                                        <div className="text-lg font-black text-rose-700">{objectiveCoverageGapReport.daysEmpty}</div>
+                                                        <div className="text-[8px] font-bold text-rose-600 uppercase">Sin cerrar</div>
+                                                    </div>
+                                                </div>
+                                                {Object.keys(objectiveCoverageGapReport.aggregateMissingPrimary).length > 0 && (
+                                                    <div className="mb-3">
+                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bandas faltantes en el mes (esquema M+T+N)</p>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {Object.entries(objectiveCoverageGapReport.aggregateMissingPrimary)
+                                                                .sort((a, b) => b[1] - a[1])
+                                                                .map(([code, n]) => (
+                                                                    <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
+                                                                        {n}×{code}
+                                                                    </span>
+                                                                ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {objectiveCoverageGapReport.worstDays.length > 0 && (
+                                                    <div>
+                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Peores días (click en pie para detalle)</p>
+                                                        <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                                                            {objectiveCoverageGapReport.worstDays.slice(0, 8).map(wd => {
+                                                                const dayGaps = objectiveCoverageGapReport.byDay[wd.dateStr]?.positions || [];
+                                                                return (
+                                                                    <div key={wd.dateStr} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                                                        <div className="flex justify-between text-[10px] font-black text-slate-700 dark:text-slate-200 mb-0.5">
+                                                                            <span>Día {wd.dateStr.slice(8)}</span>
+                                                                            <span className="text-rose-600">{wd.closed}/{wd.required}</span>
+                                                                        </div>
+                                                                        {dayGaps.slice(0, 3).map((g, i) => (
+                                                                            <p key={i} className="text-[9px] text-slate-500 leading-snug">{g.positionName}: {g.summary}</p>
+                                                                        ))}
+                                                                        {dayGaps.length > 3 && (
+                                                                            <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -4989,20 +5120,49 @@ export default function PlanificacionPage() {
                                             </select>
                                         </div>
                                         {(() => {
-                                            const coverageData = modalCoverageStats || { current: 0, target: 24, pax: 1, isActiveDay: true };
+                                            const coverageData = modalCoverageStats || {
+                                                current: 0, target: 24, pax: 1, isActiveDay: true,
+                                                closedUnits: 0, requiredUnits: 1, schemeLabel: '', isPositionClosed: false,
+                                            };
                                             const currentPosName = activePosition || 'General';
-                                            const isCovered = coverageData.current >= coverageData.target;
-                                            const coverageFull = coverageData.isActiveDay && coverageData.target > 0 && isCovered;
+                                            const isHoursCovered = coverageData.current >= coverageData.target;
+                                            const isUnitsCovered = coverageData.isPositionClosed;
+                                            const coverageFull = coverageData.isActiveDay && coverageData.requiredUnits > 0 && isUnitsCovered;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
-                                            const gap = coverageData.current - coverageData.target;
                                             const displayTarget = coverageData.isActiveDay ? `${coverageData.target}h` : `Sin cobertura`;
-                                            const bgClass = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600') : 'bg-slate-100 text-slate-500';
-                                            const barColor = coverageData.isActiveDay ? (isCovered ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-300';
+                                            const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0
+                                                ? `${coverageData.closedUnits}/${coverageData.requiredUnits} puesto${coverageData.requiredUnits > 1 ? 's' : ''}`
+                                                : null;
+                                            const bgClass = coverageData.isActiveDay
+                                                ? (isUnitsCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600')
+                                                : 'bg-slate-100 text-slate-500';
+                                            const barColor = coverageData.isActiveDay
+                                                ? (isHoursCovered ? 'bg-emerald-500' : 'bg-rose-500')
+                                                : 'bg-slate-300';
                                             return (
                                                 <>
                                                     <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                                                        <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><Layers size={14} className="text-slate-400"/><span className="text-[10px] font-bold text-slate-500 uppercase">Cobertura {currentPosName} ({coverageData.pax} pax)</span></div><div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>{coverageData.current}h / {displayTarget}</div></div>
-                                                        <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }}></div></div>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <Layers size={14} className="text-slate-400"/>
+                                                                <span className="text-[10px] font-bold text-slate-500 uppercase">Cobertura {currentPosName}</span>
+                                                            </div>
+                                                            {unitsLabel && (
+                                                                <div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>
+                                                                    {unitsLabel}
+                                                                    {coverageData.schemeLabel ? ` (${coverageData.schemeLabel})` : ''}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="text-[9px] text-slate-400 font-bold">Horas SLA</span>
+                                                            <span className={`text-[10px] font-black ${isHoursCovered ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                                                {coverageData.current}h / {displayTarget}
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                                            <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }} />
+                                                        </div>
                                                     </div>
                                                     <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
@@ -5015,7 +5175,7 @@ export default function PlanificacionPage() {
                                                                     key={s.code}
                                                                     onClick={() => !disabled && handleAssignShift(s, activePosition || 'General')}
                                                                     disabled={disabled}
-                                                                    title={disabledByCoverage ? 'Cobertura completa. Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
+                                                                    title={disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
                                                                     className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-transform relative ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:scale-105'} ${SHIFT_STYLES[s.code]}`}
                                                                 >
                                                                     <span className="font-black text-sm">{s.code}</span>
@@ -5718,6 +5878,35 @@ export default function PlanificacionPage() {
 
                             {/* Content */}
                             <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3">
+
+                                {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && autoV2CoveragePreflight && (
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1">
+                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Demanda SLA (objetivo)</p>
+                                        <p className="text-[11px] font-bold text-slate-800">
+                                            {autoV2CoveragePreflight.monthDemandHours}h estructura · {slaVendidas}h vendidas
+                                        </p>
+                                        <p className="text-[10px] text-slate-600">
+                                            Mes: {Object.entries(autoV2CoveragePreflight.monthBandDemand).map(([c, n]) => `${n}×${c}`).join(' · ')}
+                                        </p>
+                                        {autoV2CoveragePreflight.totalAbsenceDays > 0 && (
+                                            <p className="text-[10px] text-amber-700 font-bold">
+                                                Ausencias/licencias: {autoV2CoveragePreflight.totalAbsenceDays} días-persona bloqueados
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {autoWizardStep === 'done' && !autoV2Generating && autoV2CoveragePreflight && (
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide mb-1">Objetivo pedía (SLA)</p>
+                                        <p className="text-[10px] text-slate-700 font-bold">
+                                            {Object.entries(autoV2CoveragePreflight.monthBandDemand).map(([c, n]) => `${n}×${c}`).join(' · ')} en el mes
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-0.5">
+                                            Ej. día tipo: {formatDayDemandSummary(autoV2CoveragePreflight.dayDemands.find(d => d.totalPaxUnits > 0) || autoV2CoveragePreflight.dayDemands[0])}
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Paso 1: configuración antes de generar */}
                                 {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && (
