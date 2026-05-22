@@ -70,6 +70,9 @@ if (jdkHome) {
   env.PATH = `${path.join(jdkHome, 'bin')}${sep}${nodeBinDir}${sep}${env.PATH || ''}`;
   logErr(`[emulators] JAVA_HOME=${jdkHome}`);
   logErr(`[emulators] PATH (prefijo JDK + Node)=...${nodeBinDir}`);
+  // Heap fijo para evitar que el emulador de Firestore (JVM) crashee con exit 4294967295
+  env.JAVA_TOOL_OPTIONS = (env.JAVA_TOOL_OPTIONS || '') + ' -Xms128m -Xmx768m -XX:+UseG1GC';
+  logErr('[emulators] JAVA_TOOL_OPTIONS: heap 128m–768m, G1GC');
 } else {
   logErr('No se encontró JDK 21+. winget install EclipseAdoptium.Temurin.21.JDK o JAVA_HOME21.');
   process.exit(1);
