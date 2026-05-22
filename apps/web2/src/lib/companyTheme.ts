@@ -10,6 +10,8 @@ export const COMPANY_THEME_VARS = [
   '--company-primary-lighter','--company-primary-lightest','--company-primary-ring',
   '--company-primary-on-dark','--company-primary-dark-card',
   '--company-primary-dark-card2','--company-primary-dark-border',
+  '--company-primary-glow','--company-primary-active-bg',
+  '--company-primary-tag-bg','--company-primary-tag-text',
 ];
 
 function hexToHsl(hex: string): [number, number, number] {
@@ -73,6 +75,10 @@ export function buildCompanyTheme(hex: string): Record<string, string> {
     '--company-primary-dark-card':  hslToHex(h, Math.min(sat, 38), 9),
     '--company-primary-dark-card2': hslToHex(h, Math.min(sat, 32), 14),
     '--company-primary-dark-border':hslToHex(h, sat - 15, 32),
+    '--company-primary-glow':       hex + '40',
+    '--company-primary-active-bg':  hslToHex(h, Math.min(sat, 60), 94),
+    '--company-primary-tag-bg':     hslToHex(h, Math.min(sat, 55), 92),
+    '--company-primary-tag-text':   hslToHex(h, sat, 30),
   };
 }
 
@@ -124,6 +130,62 @@ function buildBrandCSS(): string {
     html.dark[data-brand] .text-indigo-400 { color: var(--company-primary-light) !important; }
     html.dark[data-brand] .focus\\:border-indigo-500:focus,
     html.dark[data-brand] .focus\\:border-indigo-400:focus { border-color: var(--company-primary-dark-border) !important; }
+
+    /* ── VIOLET / PURPLE — mismas reglas que indigo para componentes que usan esas clases ── */
+    html[data-brand] .bg-violet-600,
+    html[data-brand] .bg-violet-500,
+    html[data-brand] .bg-purple-600,
+    html[data-brand] .bg-purple-500 { background-color: var(--company-primary) !important; }
+    html[data-brand] .bg-violet-700,
+    html[data-brand] .bg-purple-700  { background-color: var(--company-primary-dark) !important; }
+    html[data-brand] .bg-violet-50,
+    html[data-brand] .bg-purple-50   { background-color: var(--company-primary-lightest) !important; }
+    html[data-brand] .bg-violet-100,
+    html[data-brand] .bg-purple-100  { background-color: var(--company-primary-lighter) !important; }
+    html[data-brand] .text-violet-600,
+    html[data-brand] .text-violet-500,
+    html[data-brand] .text-purple-600,
+    html[data-brand] .text-purple-500 { color: var(--company-primary) !important; }
+    html[data-brand] .text-violet-700,
+    html[data-brand] .text-purple-700 { color: var(--company-primary-dark) !important; }
+    html[data-brand] .text-violet-400,
+    html[data-brand] .text-purple-400 { color: var(--company-primary-light) !important; }
+    html[data-brand] .border-violet-300,
+    html[data-brand] .border-violet-400,
+    html[data-brand] .border-violet-500,
+    html[data-brand] .border-purple-300,
+    html[data-brand] .border-purple-400,
+    html[data-brand] .border-purple-500 { border-color: var(--company-primary) !important; }
+    html.dark[data-brand] .bg-violet-50,
+    html.dark[data-brand] .bg-violet-100,
+    html.dark[data-brand] .bg-purple-50,
+    html.dark[data-brand] .bg-purple-100 { background-color: var(--company-primary-dark-card) !important; }
+    html.dark[data-brand] .text-violet-600,
+    html.dark[data-brand] .text-violet-500,
+    html.dark[data-brand] .text-purple-600,
+    html.dark[data-brand] .text-purple-500 { color: var(--company-primary-on-dark) !important; }
+    html.theme-custom[data-brand] .bg-violet-50,
+    html.theme-custom[data-brand] .bg-violet-100,
+    html.theme-custom[data-brand] .bg-purple-50,
+    html.theme-custom[data-brand] .bg-purple-100 { background-color: var(--company-primary-dark-card) !important; }
+    html.theme-custom[data-brand] .text-violet-600,
+    html.theme-custom[data-brand] .text-violet-500,
+    html.theme-custom[data-brand] .text-purple-600,
+    html.theme-custom[data-brand] .text-purple-500 { color: var(--company-primary-on-dark) !important; }
+
+    /* ── ZINC / PERSONALIZADO — usa variantes oscuras del color empresa ── */
+    html.theme-custom[data-brand] .bg-indigo-50  { background-color: var(--company-primary-dark-card)  !important; }
+    html.theme-custom[data-brand] .bg-indigo-100 { background-color: var(--company-primary-dark-card2) !important; }
+    html.theme-custom[data-brand] .border-indigo-200,
+    html.theme-custom[data-brand] .border-indigo-300,
+    html.theme-custom[data-brand] .border-indigo-400,
+    html.theme-custom[data-brand] .border-indigo-500 { border-color: var(--company-primary-dark-border) !important; }
+    html.theme-custom[data-brand] .text-indigo-600,
+    html.theme-custom[data-brand] .text-indigo-500 { color: var(--company-primary-on-dark) !important; }
+    html.theme-custom[data-brand] .text-indigo-700 { color: var(--company-primary-light) !important; }
+    html.theme-custom[data-brand] .text-indigo-400 { color: var(--company-primary-light) !important; }
+    html.theme-custom[data-brand] .focus\\:border-indigo-500:focus,
+    html.theme-custom[data-brand] .focus\\:border-indigo-400:focus { border-color: var(--company-primary-dark-border) !important; }
 
     /* ── CONTRASTE — respeta accesibilidad, solo mantiene botones en color empresa ── */
     html.theme-contrast[data-brand] .bg-indigo-50,

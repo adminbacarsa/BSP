@@ -3,6 +3,7 @@ import { doc, onSnapshot, collection, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
 import { SUPERADMIN_EMPRESA_STORAGE_KEY } from '@/lib/multiempresa';
+import { applyCompanyTheme } from '@/lib/companyTheme';
 
 export interface Empresa {
   id: string;
@@ -16,6 +17,8 @@ export interface Empresa {
   plan?: string;
   active?: boolean;
   primaryColor?: string;
+  brandColor?: string;
+  assistantEnabled?: boolean;
   migracionCompleta?: boolean;
 }
 
@@ -85,6 +88,9 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
             setDoc(doc(db, 'empresas', empresaId), { name: defaultName }, { merge: true }).catch(() => {});
           }
           setEmpresa({ id: snap.id, name: defaultName, ...data });
+          if (data.brandColor && /^#[0-9a-fA-F]{6}$/.test(data.brandColor)) {
+            applyCompanyTheme(data.brandColor);
+          }
         } else {
           // Documento no existe.
           // Solo auto-crear para 'bacarsa' (empresa default del sistema).

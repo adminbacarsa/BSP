@@ -1,16 +1,17 @@
-export type AppTheme = 'light' | 'dark' | 'blue' | 'contrast' | 'system';
+export type AppTheme = 'light' | 'dark' | 'blue' | 'contrast' | 'custom' | 'system';
 
 export const THEMES: { id: AppTheme; label: string }[] = [
-  { id: 'light',    label: 'Claro'      },
-  { id: 'dark',     label: 'Oscuro'     },
-  { id: 'blue',     label: 'Azul Pro'   },
-  { id: 'contrast', label: 'Contraste'  },
-  { id: 'system',   label: 'Sistema'    },
+  { id: 'light',    label: 'Claro'         },
+  { id: 'dark',     label: 'Oscuro'        },
+  { id: 'blue',     label: 'Azul Pro'      },
+  { id: 'contrast', label: 'Contraste'     },
+  { id: 'custom',   label: 'Personalizado' },
+  { id: 'system',   label: 'Sistema'       },
 ];
 
 export function applyTheme(theme: AppTheme): void {
   const root = document.documentElement;
-  root.classList.remove('dark', 'theme-blue', 'theme-contrast');
+  root.classList.remove('dark', 'theme-blue', 'theme-contrast', 'theme-custom');
 
   switch (theme) {
     case 'dark':
@@ -22,6 +23,9 @@ export function applyTheme(theme: AppTheme): void {
     case 'contrast':
       root.classList.add('dark', 'theme-contrast');
       break;
+    case 'custom':
+      root.classList.add('theme-custom');
+      break;
     case 'system':
       if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
         root.classList.add('dark');
@@ -31,7 +35,6 @@ export function applyTheme(theme: AppTheme): void {
   }
 
   localStorage.setItem('cosp-theme', theme);
-  // Notificar a otros componentes en la misma pestaña
   window.dispatchEvent(new CustomEvent('cosp:theme', { detail: theme }));
 }
 

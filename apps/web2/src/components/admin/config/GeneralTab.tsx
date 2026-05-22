@@ -3,7 +3,7 @@ import Link from 'next/link';
 import {
     Save, Building, FileText, Mail, Phone, AlertTriangle, Trash2,
     ShieldAlert, RefreshCw, Moon, Sun, Monitor, Zap, Hexagon, ArrowRight, X, Loader2,
-    UserCircle, BookOpen, ShieldCheck, ExternalLink
+    UserCircle, BookOpen, ShieldCheck, ExternalLink, Layers, Palette
 } from 'lucide-react';
 import { functions, db } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -28,13 +28,17 @@ export default function GeneralTab() {
     const [loadingCompany, setLoadingCompany] = useState(true);
     const [savingCompany, setSavingCompany] = useState(false);
 
-    // TEMA SELECCIONADO
     const [theme, setTheme] = useState('light');
+    const [companyColor, setCompanyColor] = useState('#6366f1');
+    const [savingColor, setSavingColor] = useState(false);
 
-    // Cargar datos de organización desde Firestore (por empresa activa)
+    const BRAND_PRESETS = ['#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#0ea5e9'];
+
     useEffect(() => {
         const saved = (localStorage.getItem('cosp-theme') || localStorage.getItem('theme') || 'light') as any;
         setTheme(saved);
+        const savedColor = localStorage.getItem('cosp_last_primary_color');
+        if (savedColor) setCompanyColor(savedColor);
     }, []);
 
     useEffect(() => {
@@ -52,6 +56,7 @@ export default function GeneralTab() {
                         email:   data.email   || '',
                         phone:   data.phone   || '',
                     });
+                    if (data.brandColor) setCompanyColor(data.brandColor);
                 } else {
                     setCompany({ name: '', cuit: '', address: '', website: '', email: '', phone: '' });
                 }
@@ -63,6 +68,21 @@ export default function GeneralTab() {
     const handleApplyTheme = (newTheme: string) => {
         setTheme(newTheme);
         import('@/lib/themeManager').then(m => m.applyTheme(newTheme as any));
+    };
+
+    const handleApplyCompanyColor = async (hex: string) => {
+        setCompanyColor(hex);
+        import('@/lib/companyTheme').then(m => m.applyCompanyTheme(hex));
+        if (!empresaId) return;
+        setSavingColor(true);
+        try {
+            await setDoc(doc(db, 'empresas', empresaId), { brandColor: hex }, { merge: true });
+            toast.success('Color de empresa guardado');
+        } catch {
+            toast.error('No se pudo guardar el color');
+        } finally {
+            setSavingColor(false);
+        }
     };
 
     const handleChange = (e: any) => setCompany({ ...company, [e.target.name]: e.target.value });
@@ -146,7 +166,7 @@ export default function GeneralTab() {
                     <Monitor className="text-indigo-600"/> TEMAS Y APARIENCIA
                 </h3>
                 
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
                     {/* LIGHT */}
                     <button onClick={() => handleApplyTheme('light')} aria-pressed={theme === 'light'} aria-label="Tema Claro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'light' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:border-slate-300'}`}>
                         <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm"><Sun size={20} className="text-slate-600" aria-hidden="true"/></div>
@@ -171,13 +191,49 @@ export default function GeneralTab() {
                         <span className="text-xs font-black uppercase text-slate-600">Azul Pro</span>
                     </button>
 
+                    {/* PERSONALIZADO / ZINC */}
+                    <button onClick={() => handleApplyTheme('custom')} aria-pressed={theme === 'custom'} aria-label="Tema Personalizado" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'custom' ? 'border-zinc-400 bg-zinc-900 text-zinc-100' : 'border-slate-100 hover:border-slate-300'}`}>
+                        <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center shadow-sm"><Layers size={20} className="text-zinc-300" aria-hidden="true"/></div>
+                        <span className="text-xs font-black uppercase text-slate-600 dark:text-slate-400">Zinc</span>
+                    </button>
+
                     {/* SISTEMA */}
                     <button onClick={() => handleApplyTheme('system')} aria-pressed={theme === 'system'} aria-label="Tema Sistema (automático)" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'system' ? 'border-slate-400 bg-slate-100 text-slate-800' : 'border-slate-100 hover:border-slate-300'}`}>
                         <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shadow-sm"><Monitor size={20} className="text-slate-600" aria-hidden="true"/></div>
                         <span className="text-xs font-black uppercase text-slate-600">Sistema</span>
                     </button>
                 </div>
-                <p className="mt-4 text-xs text-slate-400 font-medium">Nota: El modo "Claro" ahora usa tipografía de alto contraste (Gris oscuro/Negro) para mejor legibilidad.</p>
+
+                {/* COLOR DE EMPRESA */}
+                <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700">
+                    <h4 className="text-sm font-black text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                        <Palette size={16} className="text-indigo-500"/> COLOR DE EMPRESA
+                    </h4>
+                    <p className="text-xs text-slate-400 mb-4">Tinta de acento aplicada a botones, badges y elementos de marca. Se guarda por empresa.</p>
+                    <div className="flex flex-wrap items-center gap-3">
+                        {BRAND_PRESETS.map(hex => (
+                            <button
+                                key={hex}
+                                aria-label={`Color ${hex}`}
+                                onClick={() => handleApplyCompanyColor(hex)}
+                                style={{ backgroundColor: hex }}
+                                className={`w-8 h-8 rounded-full transition-all hover:scale-110 ring-offset-2 ${companyColor === hex ? 'ring-2 ring-slate-700 dark:ring-white scale-110' : ''}`}
+                            />
+                        ))}
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="color"
+                                value={companyColor}
+                                onChange={e => setCompanyColor(e.target.value)}
+                                onBlur={e => handleApplyCompanyColor(e.target.value)}
+                                className="w-8 h-8 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+                                aria-label="Color personalizado"
+                            />
+                            <span className="text-xs text-slate-500 font-mono">{companyColor}</span>
+                        </label>
+                        {savingColor && <Loader2 size={14} className="animate-spin text-slate-400"/>}
+                    </div>
+                </div>
             </div>
 
             {/* 2. DATOS DE LA EMPRESA */}
