@@ -42,27 +42,50 @@ const SectionLabel = ({ label }: { label: string }) => (
   </div>
 );
 
+// ─── RADIAL PROGRESS ────────────────────────────────────────────────────────
+const RadialProgress = ({ pct, color, size = 76 }: { pct: number; color: string; size?: number }) => {
+  const r = size / 2 - 7;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (Math.min(100, Math.max(0, pct)) / 100) * circ;
+  return (
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }} aria-hidden="true">
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={6}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transition: 'stroke-dashoffset 0.7s ease' }}/>
+    </svg>
+  );
+};
+
 // ─── KPI CARD ────────────────────────────────────────────────────────────────
-const KpiCard = ({ title, value, icon: Icon, color, subtext, sub2, alert, noData }: any) => (
+const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, progress }: any) => (
   <div
     role="group"
     aria-label={title}
-    className={`px-4 py-3.5 rounded-xl border transition-all flex items-center gap-3 ${noData ? 'opacity-55' : ''}`}
+    className={`px-4 py-4 rounded-xl border transition-all flex flex-col gap-2.5 ${noData ? 'opacity-55' : ''}`}
     style={{
       backgroundColor: 'var(--surf)',
-      borderColor: alert ? 'rgba(239,68,68,0.5)' : 'var(--border)',
+      borderColor: alert ? 'rgba(239,68,68,0.4)' : 'var(--border)',
       borderTop: `2px solid var(--company-primary, #6366f1)`,
     }}>
-    <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '22' }}>
-      <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
+    <div className="flex items-start gap-3">
+      <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '22' }}>
+        <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[9px] font-black uppercase tracking-wider leading-tight truncate" style={{ color: 'var(--txt3)' }}>{title}</p>
+        <p className="text-2xl font-black leading-tight" style={{ color: noData ? 'var(--txt3)' : 'var(--txt)' }}>
+          {noData ? '—' : value}
+        </p>
+        {subtext && <p className="text-[10px] font-medium leading-tight mt-0.5 truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
+      </div>
     </div>
-    <div className="flex-1 min-w-0">
-      <p className="text-[9px] font-black uppercase tracking-wider leading-tight truncate" style={{ color: 'var(--txt3)' }}>{title}</p>
-      <p className="text-xl font-black leading-tight" style={{ color: noData ? 'var(--txt3)' : 'var(--txt)' }}>
-        {noData ? '—' : value}
-      </p>
-      {subtext && <p className="text-[10px] font-medium leading-tight truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
-    </div>
+    {progress !== undefined && (
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+        <div className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${Math.min(100, Math.max(0, progress))}%`, backgroundColor: alert ? '#ef4444' : color }}/>
+      </div>
+    )}
   </div>
 );
 
@@ -78,9 +101,9 @@ const StatusBadge = ({ ok, label }: { ok: boolean; label: string }) => (
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl border px-4 py-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-      <p className="text-xs font-bold text-slate-500 mb-1">{label}</p>
-      <p className="text-lg font-black text-indigo-600">{payload[0].value}</p>
+    <div className="rounded-xl border px-4 py-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', color: 'var(--txt)' }}>
+      <p className="text-xs font-bold mb-1" style={{ color: 'var(--txt3)' }}>{label}</p>
+      <p className="text-lg font-black" style={{ color: 'var(--company-primary, #6366f1)' }}>{payload[0].value}</p>
     </div>
   );
 };
@@ -438,23 +461,20 @@ function AdminDashboard() {
   return (
     <DashboardLayout>
       <Head><title>Panel de Control | CronoApp</title></Head>
-      <div className="min-h-screen p-6 pb-20 animate-in fade-in" style={{ backgroundColor: 'var(--app-bg)' }}>
+      <div className="min-h-screen p-4 sm:p-6 pb-24 lg:pb-10 animate-in fade-in" style={{ backgroundColor: 'var(--app-bg)' }}>
 
         {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-3">
           <div>
-            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" style={{ color: 'var(--txt)' }}>
-              <LayoutDashboard size={30} style={{ color: 'var(--company-primary,#6366f1)' }} aria-hidden="true"/>
-              PANEL DE CONTROL
-              <span aria-hidden="true" className="ml-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-400 self-center">
-                {process.env.NEXT_PUBLIC_BUILD_HASH || 'dev'}
-              </span>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5" style={{ color: 'var(--txt)' }}>
+              <LayoutDashboard size={26} style={{ color: 'var(--company-primary,#6366f1)' }} aria-hidden="true"/>
+              Panel de Control
             </h1>
-            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-              <p className="text-slate-500 font-medium text-sm">
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
+              <p className="text-sm font-medium capitalize" style={{ color: 'var(--txt3)' }}>
                 {today.toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
               </p>
-              <span role="status" aria-label="Datos en tiempo real" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+              <span role="status" className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
                 <span className="relative flex h-2 w-2" aria-hidden="true">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"/>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"/>
@@ -462,13 +482,13 @@ function AdminDashboard() {
                 EN VIVO
               </span>
               {lastUpdated && (
-                <span className="text-[10px] text-slate-400 font-medium">
+                <span className="text-[10px] font-medium" style={{ color: 'var(--txt3)' }}>
                   Act. {lastUpdated.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}
                   {fromCache && <span className="ml-1 text-amber-500">· caché</span>}
                 </span>
               )}
               {isRefreshing && !loading && (
-                <span className="flex items-center gap-1 text-[10px] text-indigo-400 font-medium">
+                <span className="flex items-center gap-1 text-[10px] font-medium" style={{ color: 'var(--company-primary,#6366f1)' }}>
                   <RefreshCw size={10} className="animate-spin"/> actualizando…
                 </span>
               )}
@@ -481,10 +501,10 @@ function AdminDashboard() {
               setRefreshKey(k => k + 1);
             }}
             disabled={loading || isRefreshing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 border"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 border shrink-0"
             style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', color: 'var(--txt2)' }}
           >
-            <RefreshCw size={14} className={isRefreshing || loading ? 'animate-spin' : ''}/> Actualizar
+            <RefreshCw size={13} className={isRefreshing || loading ? 'animate-spin' : ''}/> Actualizar
           </button>
         </div>
 
@@ -492,7 +512,7 @@ function AdminDashboard() {
           <div className="flex items-center justify-center py-32">
             <div className="flex flex-col items-center gap-4">
               <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"/>
-              <p className="text-slate-400 text-sm font-medium">Cargando métricas...</p>
+              <p className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>Cargando métricas...</p>
             </div>
           </div>
         ) : (
@@ -502,111 +522,219 @@ function AdminDashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
               <KpiCard title="Clientes Activos" value={clientsCount}
                 icon={Building2} color="#6366f1"
-                subtext={`${objectivesCount} objetivos configurados`}
+                subtext={`${objectivesCount} objetivos`}
                 noData={clientsCount === 0}/>
               <KpiCard title="Servicios Activos" value={activeServicesCount}
                 icon={Briefcase} color="#0ea5e9"
-                subtext={`en ${today.toLocaleString('es-AR',{month:'long',year:'numeric'})}`}
+                subtext={today.toLocaleString('es-AR',{month:'long',year:'numeric'})}
                 noData={activeServicesCount === 0}/>
               <KpiCard title="Empleados en Nómina" value={totalEmployees}
                 icon={Users} color="#10b981"
-                subtext={totalEmployees > 0 ? `${enServicioHoy} asignados hoy` : 'Sin personal cargado'}
+                subtext={totalEmployees > 0 ? `${enServicioHoy} asignados hoy` : 'Sin personal'}
+                progress={totalEmployees > 0 ? (enServicioHoy / totalEmployees) * 100 : undefined}
                 noData={totalEmployees === 0}/>
               <KpiCard title="Horas SLA del Mes" value={fmt(slaTotalHrs)}
                 icon={Clock} color="#8b5cf6"
-                subtext={activeServicesCount > 0 ? `proyectadas por ${activeServicesCount} servicio${activeServicesCount>1?'s':''}` : 'Sin servicios activos'}
+                subtext={activeServicesCount > 0 ? `${activeServicesCount} servicio${activeServicesCount>1?'s':''}` : 'Sin servicios'}
                 noData={slaTotalHrs === 0}/>
               <KpiCard
                 title="Prom. Hs/Vigilador"
                 value={avgHrsVigilador > 0 ? `${avgHrsVigilador}h` : '—'}
                 icon={TrendingUp} color="#f59e0b"
-                subtext={vigiladoresConTurno > 0
-                  ? `${monthTotalPlannedHrs}hs SLA ÷ ${vigiladoresConTurno} vigiladores`
-                  : 'Sin servicios activos'}
+                subtext={vigiladoresConTurno > 0 ? `${vigiladoresConTurno} vigiladores` : 'Sin servicios'}
                 noData={avgHrsVigilador === 0}/>
             </div>
 
             {/* ── SECCIÓN 2: ESTADO HOY ─────────────────────────────────── */}
             <SectionLabel label="Estado del Día" />
             {!hasPlanificacion && (
-              <div className="mb-4 flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-700">
-                <Info size={18} className="shrink-0"/>
-                <p className="text-sm font-bold">Sin planificación cargada para hoy — los indicadores operativos no están disponibles.</p>
+              <div className="mb-4 flex items-center gap-3 p-3.5 rounded-xl border"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'rgba(245,158,11,0.35)', borderLeft: '3px solid #f59e0b' }}>
+                <Info size={15} className="text-amber-500 shrink-0"/>
+                <p className="text-sm font-bold text-amber-600">Sin planificación cargada para hoy — los indicadores operativos no están disponibles.</p>
               </div>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            {hasPlanificacion && vacantesHoy > 0 && (
+              <div className="mb-4 flex items-center gap-3 p-3.5 rounded-xl border"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'rgba(239,68,68,0.35)', borderLeft: '3px solid #ef4444' }}>
+                <AlertTriangle size={15} className="text-red-500 shrink-0"/>
+                <p className="text-sm font-bold text-red-600">{vacantesHoy} puesto{vacantesHoy>1?'s':''} vacante{vacantesHoy>1?'s':''} sin cubrir hoy</p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+
+              {/* ── Cumplimiento — card grande, 2 columnas ── */}
+              <div
+                className={`sm:col-span-2 lg:col-span-2 px-5 py-5 rounded-xl border transition-all ${!hasPlanificacion ? 'opacity-55' : ''}`}
+                style={{
+                  backgroundColor: 'var(--surf)',
+                  borderColor: hasPlanificacion && coveragePct < 95 ? 'rgba(239,68,68,0.4)' : 'var(--border)',
+                  borderTop: '2px solid var(--company-primary, #6366f1)',
+                }}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>CUMPLIMIENTO HOY</p>
+                    <p className="text-4xl font-black leading-tight mt-1" style={{
+                      color: !hasPlanificacion ? 'var(--txt3)' : coveragePct >= 95 ? '#10b981' : '#ef4444'
+                    }}>
+                      {hasPlanificacion ? `${coveragePct.toFixed(1)}%` : '—'}
+                    </p>
+                    <p className="text-[10px] font-medium mt-1" style={{ color: 'var(--txt3)' }}>
+                      {!hasPlanificacion
+                        ? 'Sin planificación'
+                        : coveragePct >= 95
+                          ? '✓ Dentro de parámetros'
+                          : '⚠ Por debajo del umbral (95%)'}
+                    </p>
+                    {hasPlanificacion && (
+                      <div className="mt-3">
+                        <div className="flex justify-between text-[10px] font-bold mb-1.5" style={{ color: 'var(--txt3)' }}>
+                          <span>{presentesHoy} presentes</span>
+                          <span>de {enServicioHoy} planificados</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{
+                              width: enServicioHoy > 0 ? `${Math.min(100,(presentesHoy/enServicioHoy)*100)}%` : '0%',
+                              backgroundColor: coveragePct >= 95 ? '#10b981' : '#ef4444'
+                            }}/>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative shrink-0 self-start">
+                    <RadialProgress
+                      pct={hasPlanificacion ? coveragePct : 0}
+                      color={!hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444'}
+                      size={76}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Shield size={22} style={{ color: !hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444' }}/>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Presentes */}
               <KpiCard title="Presentes Hoy" value={presentesHoy}
                 icon={UserCheck} color="#10b981"
                 subtext={hasPlanificacion ? `de ${enServicioHoy} planificados` : 'Sin planificación'}
+                progress={hasPlanificacion && enServicioHoy > 0 ? (presentesHoy/enServicioHoy)*100 : undefined}
                 noData={!hasPlanificacion}/>
+
+              {/* En Servicio */}
               <KpiCard title="En Servicio" value={enServicioActivo}
                 icon={Activity} color="#6366f1"
-                subtext="Activos — sin completar turno"
+                subtext="Activos ahora"
                 noData={!hasPlanificacion}/>
+
+              {/* De Franco */}
               <KpiCard title="De Franco" value={francoCount}
                 icon={Sun} color="#06b6d4"
                 subtext={hasPlanificacion ? 'estimado' : 'Sin planificación'}
                 noData={!hasPlanificacion && totalEmployees === 0}/>
-              <KpiCard
-                title="Cumplimiento"
-                value={hasPlanificacion ? coveragePct.toFixed(1)+'%' : '—'}
-                icon={Shield}
-                color={!hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444'}
-                subtext={!hasPlanificacion ? 'Sin planificación' : coveragePct >= 95 ? 'Dentro de parámetros' : 'Por debajo del umbral'}
-                alert={hasPlanificacion && coveragePct < 95}
-                noData={!hasPlanificacion}/>
             </div>
 
-            {/* ── SECCIÓN 3: DISTRIBUCIÓN DE HORAS SLA ─────────────────── */}
-            <SectionLabel label="Distribución de Horas SLA — Mes Actual" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-              <KpiCard title="Horas Diurnas" value={fmt(normalHrs)}
-                icon={Sun} color="#10b981"
-                subtext="Jornada normal"
-                noData={slaTotalHrs === 0}/>
-              <KpiCard title="Horas Nocturnas" value={fmt(slaNightHrs)}
-                icon={Moon} color="#6366f1"
-                subtext="21:00–06:00"
-                noData={slaTotalHrs === 0}/>
-              <KpiCard title="Plus Feriados" value={fmt(slaHolidayHrs)}
-                icon={Star} color="#f59e0b"
-                subtext="Horas en feriados nacionales"
-                noData={slaTotalHrs === 0}/>
-              <KpiCard title="Puestos Vacantes" value={hasPlanificacion ? vacantesHoy : '—'}
-                icon={AlertTriangle}
-                color={vacantesHoy > 0 ? '#ef4444' : '#94a3b8'}
-                subtext={hasPlanificacion ? 'Sin cubrir hoy' : 'Sin planificación'}
-                alert={hasPlanificacion && vacantesHoy > 0}
-                noData={!hasPlanificacion}/>
-            </div>
+            {/* ── SECCIÓN 3: HORAS SLA ─────────────────────────────────── */}
+            <SectionLabel label="Horas SLA — Mes Actual" />
+            {slaTotalHrs === 0 ? (
+              <div className="mb-6 p-5 rounded-xl border text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin horas SLA proyectadas para el mes</p>
+              </div>
+            ) : (
+              <div className="mb-6 rounded-xl border p-5"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
+                <div className="flex items-start justify-between mb-4 gap-4">
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>
+                      TOTAL PROYECTADO — {today.toLocaleString('es-AR',{month:'long',year:'numeric'}).toUpperCase()}
+                    </p>
+                    <p className="text-3xl font-black mt-0.5" style={{ color: 'var(--txt)' }}>
+                      {fmt(slaTotalHrs)}{' '}
+                      <span className="text-base font-bold" style={{ color: 'var(--txt3)' }}>hrs</span>
+                    </p>
+                  </div>
+                  <div className="shrink-0 p-2.5 rounded-xl" style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
+                    <Clock size={20} style={{ color: 'var(--company-primary, #6366f1)' }}/>
+                  </div>
+                </div>
+                {/* Barra de distribución proporcional */}
+                <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-4">
+                  {normalHrs > 0 && (
+                    <div style={{ flex: normalHrs, backgroundColor: '#10b981', minWidth: '4px' }} title={`Diurnas: ${fmt(normalHrs)} hrs`}/>
+                  )}
+                  {slaNightHrs > 0 && (
+                    <div style={{ flex: slaNightHrs, backgroundColor: 'var(--company-primary, #6366f1)', minWidth: '4px' }} title={`Nocturnas: ${fmt(slaNightHrs)} hrs`}/>
+                  )}
+                  {slaHolidayHrs > 0 && (
+                    <div style={{ flex: slaHolidayHrs, backgroundColor: '#f59e0b', minWidth: '4px' }} title={`Feriados: ${fmt(slaHolidayHrs)} hrs`}/>
+                  )}
+                </div>
+                {/* Sub-métricas */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1.5 shrink-0"/>
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Diurnas</p>
+                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(normalHrs)}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
+                        {slaTotalHrs > 0 ? `${((normalHrs/slaTotalHrs)*100).toFixed(0)}% del total` : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: 'var(--company-primary, #6366f1)' }}/>
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Nocturnas</p>
+                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(slaNightHrs)}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
+                        {slaTotalHrs > 0 ? `${((slaNightHrs/slaTotalHrs)*100).toFixed(0)}% del total` : '—'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 mt-1.5 shrink-0"/>
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Feriados</p>
+                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(slaHolidayHrs)}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
+                        {slaHolidayHrs > 0 ? `${((slaHolidayHrs/slaTotalHrs)*100).toFixed(0)}% del total` : 'Sin feriados'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
-            {/* ── SECCIÓN 4: LICENCIAS + DISTRIBUCIÓN ──────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* ── SECCIÓN 4: LICENCIAS ─────────────────────────────────── */}
+            <SectionLabel label="Licencias Activas" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
 
               {/* Licencias activas hoy */}
-              <div className="lg:col-span-2 rounded-xl border p-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
-                  <Coffee className="text-amber-500" size={18}/> Licencias Activas Hoy
+              <div className="lg:col-span-2 rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Coffee size={16} className="text-amber-500"/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Hoy</h3>
                   {licencias.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-black">{licencias.length}</span>
+                    <span className="ml-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-black">{licencias.length}</span>
                   )}
-                </h3>
+                </div>
                 {licencias.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-300">
-                    <CheckCircle2 size={32}/>
-                    <p className="text-sm font-bold text-slate-400">Sin licencias activas hoy</p>
+                  <div className="flex flex-col items-center justify-center py-8 gap-2">
+                    <CheckCircle2 size={28} style={{ color: 'var(--border)' }}/>
+                    <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin licencias activas</p>
                   </div>
                 ) : (
-                  <div className="rounded-xl overflow-hidden divide-y border" style={{ borderColor: 'var(--border)' }}>
+                  <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
                     {licencias.map((lic, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 transition-colors hover:opacity-80">
+                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity">
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-black text-[11px]">
+                          <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-black text-[11px] shrink-0">
                             {lic.empName.charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{lic.empName}</p>
-                            <p className="text-[10px] text-slate-400">{lic.from} → {lic.to}</p>
+                            <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>{lic.from} → {lic.to}</p>
                           </div>
                         </div>
                         <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap">
@@ -619,12 +747,13 @@ function AdminDashboard() {
               </div>
 
               {/* Licencias por motivo */}
-              <div className="rounded-xl border p-6 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
-                  <PieChartIcon className="text-indigo-500" size={18}/> Por Motivo
-                </h3>
+              <div className="rounded-xl border p-5 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <PieChartIcon size={16} style={{ color: 'var(--company-primary, #6366f1)' }}/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Por Motivo</h3>
+                </div>
                 {licenciasByReason.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center text-slate-300 text-xs">Sin datos</div>
+                  <div className="flex-1 flex items-center justify-center text-xs" style={{ color: 'var(--txt3)' }}>Sin datos</div>
                 ) : (
                   <div className="flex-1 w-full" style={{minHeight: 180}}>
                     <ResponsiveContainer width="100%" height="100%">
@@ -632,9 +761,9 @@ function AdminDashboard() {
                         <Pie data={licenciasByReason} cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={4} dataKey="value">
                           {licenciasByReason.map((e,i) => <Cell key={i} fill={e.color}/>)}
                         </Pie>
-                        <Tooltip contentStyle={{borderRadius:'12px',border:'none',boxShadow:'0 10px 25px -5px rgb(0 0 0 / 0.1)'}}/>
+                        <Tooltip contentStyle={{ borderRadius:'12px', border:'1px solid var(--border)', backgroundColor:'var(--surf)', color:'var(--txt)', boxShadow:'none' }}/>
                         <Legend layout="vertical" verticalAlign="bottom" align="center" iconType="circle" iconSize={8}
-                          formatter={(v:string) => <span style={{fontSize:10,fontWeight:700}}>{v}</span>}/>
+                          formatter={(v:string) => <span style={{fontSize:10,fontWeight:700,color:'var(--txt3)'}}>{v}</span>}/>
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
@@ -642,33 +771,39 @@ function AdminDashboard() {
               </div>
             </div>
 
-            {/* ── SECCIÓN 5: SERVICIOS ACTIVOS + AUSENCIAS ─────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* ── SECCIÓN 5: SERVICIOS + AUSENCIAS ─────────────────────── */}
+            <SectionLabel label="Servicios y Ausencias" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
 
               {/* Servicios activos este mes */}
-              <div className="rounded-xl border p-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
-                  <Briefcase className="text-blue-500" size={18}/> Servicios Activos — {today.toLocaleString('es-AR',{month:'long'})}
-                </h3>
+              <div className="rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Briefcase size={16} className="text-blue-500"/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>
+                    Servicios Activos — {today.toLocaleString('es-AR',{month:'long'})}
+                  </h3>
+                </div>
                 {activeServicesList.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 gap-2 text-slate-300">
-                    <Info size={28}/>
-                    <p className="text-sm font-bold text-slate-400">Sin servicios activos este mes</p>
+                  <div className="flex flex-col items-center justify-center py-8 gap-2">
+                    <Info size={24} style={{ color: 'var(--border)' }}/>
+                    <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin servicios activos este mes</p>
                   </div>
                 ) : (
-                  <div className="rounded-xl overflow-hidden divide-y border" style={{ borderColor: 'var(--border)' }}>
+                  <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
                     {activeServicesList.map((svc, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 transition-colors hover:opacity-80">
+                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity">
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
-                            <Shield size={13} className="text-blue-500"/>
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                            style={{ backgroundColor: 'rgba(99,102,241,0.08)' }}>
+                            <Shield size={13} style={{ color: 'var(--company-primary, #6366f1)' }}/>
                           </div>
                           <div>
                             <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{svc.client}</p>
-                            <p className="text-[10px] text-slate-400">{svc.objective}</p>
+                            <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>{svc.objective}</p>
                           </div>
                         </div>
-                        <span className="text-xs font-black text-indigo-600 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-xl">
+                        <span className="text-xs font-black px-2.5 py-1 rounded-xl shrink-0"
+                          style={{ color: 'var(--company-primary, #6366f1)', backgroundColor: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
                           {fmt(svc.hrs)} hs
                         </span>
                       </div>
@@ -678,19 +813,22 @@ function AdminDashboard() {
               </div>
 
               {/* Ausencias últimos 30 días */}
-              <div className="rounded-xl border p-6 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
-                  <UserX className="text-rose-500" size={18}/> Ausencias — Últimos 30 días
-                </h3>
+              <div className="rounded-xl border p-5 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <UserX size={16} className="text-rose-500"/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Ausencias — Últimos 30 días</h3>
+                </div>
                 {absenceChart.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center text-slate-300 text-xs">Sin ausencias registradas</div>
+                  <div className="flex-1 flex items-center justify-center text-xs" style={{ color: 'var(--txt3)' }}>Sin ausencias registradas</div>
                 ) : (
-                  <div className="flex-1 w-full" style={{minHeight: 180}}>
+                  <div className="flex-1 w-full" style={{minHeight: 200}}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={absenceChart} layout="vertical" margin={{left:10, right:30, top:4, bottom:4}}>
+                      <BarChart data={absenceChart} layout="vertical" margin={{left:10, right:36, top:4, bottom:4}}>
                         <XAxis type="number" hide/>
-                        <YAxis dataKey="name" type="category" width={130} tick={{fontSize:10, fontWeight:600}} axisLine={false} tickLine={false}/>
-                        <Tooltip cursor={{fill:'#f8fafc'}} contentStyle={{borderRadius:'12px',border:'none',boxShadow:'0 10px 25px -5px rgb(0 0 0 / 0.1)'}}/>
+                        <YAxis dataKey="name" type="category" width={130}
+                          tick={{fontSize:10, fontWeight:600, fill:'#6b7280'}} axisLine={false} tickLine={false}/>
+                        <Tooltip cursor={{fill:'rgba(0,0,0,0.04)'}}
+                          contentStyle={{ borderRadius:'12px', border:'1px solid var(--border)', backgroundColor:'var(--surf)', color:'var(--txt)', boxShadow:'none' }}/>
                         <Bar dataKey="value" fill="#6366f1" radius={[0,6,6,0]} barSize={18}
                           label={{position:'right', fontSize:10, fontWeight:700, fill:'#6366f1'}}/>
                       </BarChart>
@@ -704,15 +842,17 @@ function AdminDashboard() {
             <SectionLabel label="Accesos Rápidos" />
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { href:'/admin/planificacion', icon: Calendar, color:'text-indigo-500', hover:'hover:border-indigo-200', label:'Planificador', sub:'Gestionar y asignar turnos' },
-                { href:'/admin/empleados',     icon: Users,    color:'text-emerald-500', hover:'hover:border-emerald-200', label:'Personal',      sub:'Legajos y disponibilidad' },
-                { href:'/admin/crm',           icon: Building2, color:'text-blue-500',  hover:'hover:border-blue-200',   label:'Comercial',     sub:'Clientes, objetivos y tarifas' },
-                { href:'/admin/servicios',     icon: Briefcase, color:'text-purple-500', hover:'hover:border-purple-200', label:'Servicios SLA', sub:'Puestos y proyecciones' },
-              ].map(({ href, icon: Icon, color, hover, label, sub }) => (
+                { href:'/admin/planificacion', icon: Calendar,  color:'#6366f1',  label:'Planificador',  sub:'Gestionar y asignar turnos' },
+                { href:'/admin/empleados',     icon: Users,     color:'#10b981',  label:'Personal',      sub:'Legajos y disponibilidad' },
+                { href:'/admin/crm',           icon: Building2, color:'#0ea5e9',  label:'Comercial',     sub:'Clientes y objetivos' },
+                { href:'/admin/servicios',     icon: Briefcase, color:'#8b5cf6',  label:'Servicios SLA', sub:'Puestos y proyecciones' },
+              ].map(({ href, icon: Icon, color, label, sub }) => (
                 <button key={href} onClick={() => window.location.href = href}
-                  className="h-24 p-5 rounded-xl border transition-all text-left group flex flex-col justify-between hover:opacity-90"
-                  style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                  <Icon size={22} className={`${color} group-hover:scale-110 transition-transform`}/>
+                  className="p-4 sm:p-5 rounded-xl border transition-all text-left group flex flex-col gap-3 hover:opacity-80"
+                  style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: color + '22' }}>
+                    <Icon size={16} color={color} strokeWidth={2.5}/>
+                  </div>
                   <div>
                     <p className="font-black text-sm leading-tight" style={{ color: 'var(--txt)' }}>{label}</p>
                     <p className="text-[11px] font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{sub}</p>
@@ -727,4 +867,4 @@ function AdminDashboard() {
   );
 }
 
-export default withAuthGuard(AdminDashboard, ['admin', 'SuperAdmin', 'Director', 'Auditor']);
+export default withAuthGuard(AdminDashboard, ['admin', 'SuperAdmin', 'Director', 'Auditor']);
