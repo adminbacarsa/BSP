@@ -1622,42 +1622,64 @@ export default function EmployeesPage() {
                                             </div>
                                         </div>
                                         <div className="flex gap-1.5 shrink-0 items-center flex-wrap justify-end">
+                                            {/* ── Editar — acción primaria ── */}
+                                            <button
+                                                onClick={openEditFromDetail}
+                                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-black uppercase transition-all shadow-sm"
+                                                style={{ backgroundColor: 'var(--company-primary, #6366f1)', color: '#fff' }}
+                                                title="Editar datos del legajo"
+                                            >
+                                                <Edit2 size={13} aria-hidden="true"/> Editar
+                                            </button>
+                                            {/* ── Enviar / Reenviar acceso portal ── */}
                                             {selectedEmp.email && (
                                                 <button
                                                     onClick={() => handleSendPortalOne(selectedEmp)}
                                                     disabled={sendingPortalIds.has(selectedEmp.id)}
                                                     title={(selectedEmp as any).portalInvite?.sent ? 'Reenviar acceso al portal' : 'Enviar acceso al portal de empleados'}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors text-xs font-black uppercase disabled:opacity-50"
+                                                    className="flex items-center gap-1.5 px-3 py-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-indigo-200 dark:border-indigo-800 disabled:opacity-50"
                                                 >
-                                                    {sendingPortalIds.has(selectedEmp.id) ? <Loader2 size={15} className="animate-spin"/> : <KeyRound size={15}/>}
-                                                    {(selectedEmp as any).portalInvite?.sent ? 'Reenviar' : 'Enviar acceso'}
+                                                    {sendingPortalIds.has(selectedEmp.id) ? <Loader2 size={13} className="animate-spin"/> : <KeyRound size={13}/>}
+                                                    {(selectedEmp as any).portalInvite?.sent ? 'Reenviar' : 'Portal'}
                                                 </button>
                                             )}
+                                            {/* ── Dar de baja / Reactivar ── */}
                                             {(selectedEmp.status === 'activo' || selectedEmp.status === 'active' || !selectedEmp.status) ? (
                                                 <button
                                                     onClick={() => { setBajaForm({ motivo: 'Desvinculación', fecha: new Date().toISOString().split('T')[0], observacion: '' }); setShowBajaModal(true); }}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors text-xs font-black uppercase"
+                                                    className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-rose-200 dark:border-rose-800"
+                                                    title="Dar de baja al empleado"
                                                 >
-                                                    <UserX size={15} aria-hidden="true"/> Dar de baja
+                                                    <UserX size={13} aria-hidden="true"/> Baja
                                                 </button>
                                             ) : (
                                                 <button
                                                     onClick={() => handleReactivar(selectedEmp)}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors text-xs font-black uppercase"
+                                                    className="flex items-center gap-1.5 px-3 py-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-emerald-200 dark:border-emerald-800"
+                                                    title="Reactivar empleado"
                                                 >
-                                                    <UserCheck size={15} aria-hidden="true"/> Reactivar
+                                                    <UserCheck size={13} aria-hidden="true"/> Reactivar
                                                 </button>
                                             )}
+                                            {/* ── Eliminar (solo SuperAdmin) ── */}
                                             {isSuperAdmin && (
                                                 <button
                                                     onClick={() => handleDelete(selectedEmp.id!)}
-                                                    className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                                                    className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors border border-slate-200 dark:border-slate-700 text-xs font-black uppercase"
                                                     aria-label={`Eliminar permanente: ${selectedEmp.lastName}, ${selectedEmp.firstName}`}
+                                                    title="Eliminar permanente"
                                                 >
-                                                    <Trash2 size={15} aria-hidden="true"/>
+                                                    <Trash2 size={13} aria-hidden="true"/> Eliminar
                                                 </button>
                                             )}
-                                            <button onClick={() => setSelectedEmp(null)} aria-label="Cerrar detalle del empleado" className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"><X size={17} aria-hidden="true"/></button>
+                                            {/* ── Cerrar ── */}
+                                            <button
+                                                onClick={() => setSelectedEmp(null)}
+                                                aria-label="Cerrar detalle del empleado"
+                                                className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                                            >
+                                                <X size={16} aria-hidden="true"/>
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -1844,11 +1866,6 @@ export default function EmployeesPage() {
                                             Calculando métricas del período...
                                         </div>
                                     )}
-                                </div>
-                                <div className="p-4 border-t dark:border-slate-700 bg-white dark:bg-slate-800">
-                                    <button onClick={openEditFromDetail} className="w-full py-3.5 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-xl font-black uppercase text-sm hover:scale-[1.02] transition-transform shadow-sm flex items-center justify-center gap-2">
-                                        <Edit2 size={16}/> Editar Datos del Legajo
-                                    </button>
                                 </div>
                             </div>
                         ) : (
@@ -2581,7 +2598,6 @@ export default function EmployeesPage() {
                                 <option>Fin de contrato</option>
                                 <option>Jubilación</option>
                                 <option>Fallecimiento</option>
-                                <option>Otro</option>
                             </select>
                         </div>
                         <div>
@@ -2589,8 +2605,8 @@ export default function EmployeesPage() {
                             <input type="date" value={bajaForm.fecha} onChange={e => setBajaForm(f => ({...f, fecha: e.target.value}))} className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"/>
                         </div>
                         <div>
-                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Observación (opcional)</label>
-                            <textarea rows={2} value={bajaForm.observacion} onChange={e => setBajaForm(f => ({...f, observacion: e.target.value}))} placeholder="Notas adicionales..." className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400 resize-none"/>
+                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Observaciones</label>
+                            <textarea value={bajaForm.observacion} onChange={e => setBajaForm(f => ({...f, observacion: e.target.value}))} rows={3} placeholder="Detalles adicionales..." className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400 resize-none"/>
                         </div>
                     </div>
                     <div className="flex gap-3 mt-6">
@@ -2605,3 +2621,4 @@ export default function EmployeesPage() {
     </DashboardLayout>
   );
 }
+
