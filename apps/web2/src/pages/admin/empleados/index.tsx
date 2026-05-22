@@ -119,7 +119,7 @@ export default function EmployeesPage() {
       const oList = filterRowsByEmpresa(
         sSnap.docs.map(d => {
           const data = d.data();
-          return { id: data.objectiveId, name: data.objectiveName, clientId: data.clientId, empresaId: data.empresaId || '' };
+          return { id: data.objectiveId || d.id, name: data.objectiveName || data.name, clientId: data.clientId, empresaId: data.empresaId || '' };
         }),
         empresaId, scopeEmpresa, migracionCompleta,
       );

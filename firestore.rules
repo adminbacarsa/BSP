@@ -388,5 +388,10 @@ service cloud.firestore {
     match /historial_operaciones/{docId} {
       allow read, write: if isAdmin();
     }
+
+    match /convenios_colectivos/{docId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
   }
 }

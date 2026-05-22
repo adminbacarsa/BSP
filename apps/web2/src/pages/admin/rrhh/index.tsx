@@ -1383,6 +1383,14 @@ export default function EmployeesPage() {
                                         <span className="text-[10px]">{bulkProgress.done}/{bulkProgress.total}</span>
                                     </div>
                                 )}
+                                {/* Acceso Portal Empleados */}
+                                <a
+                                    href="/admin/empleados"
+                                    title="Gestionar acceso Portal Empleados"
+                                    className="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-600 text-violet-500 dark:text-violet-400 transition-colors"
+                                >
+                                    <ShieldCheckIcon size={15}/>
+                                </a>
                                 {/* Acción primaria */}
                                 <button onClick={openNew} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-indigo-500/25 flex items-center gap-1.5 hover:bg-indigo-700 transition-colors">
                                     <Plus size={14}/> Nuevo Legajo
