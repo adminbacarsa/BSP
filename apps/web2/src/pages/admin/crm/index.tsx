@@ -1197,7 +1197,7 @@ export default function CRMPage() {
           }
           accentFn={c => (c.status || '').toUpperCase() === 'INACTIVO' ? 'bg-slate-300' : 'bg-indigo-700'}
           topContent={
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden">
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
                   <BarChart3 size={14} />
@@ -1205,18 +1205,18 @@ export default function CRMPage() {
                   {calculatingMetrics && <Loader2 className="animate-spin ml-1" size={12} />}
                 </div>
                 <div className="flex items-center gap-2">
-                  <select aria-label="Período del resumen" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
+                  <select aria-label="Período del resumen" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
                     <option value="month">Mes</option>
                     <option value="year">Año</option>
                     <option value="all">Todo</option>
                   </select>
                   {rangeMode !== 'all' && (
-                    <select aria-label="Año del período" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeYear} onChange={(e) => setRangeYear(Number(e.target.value))}>
+                    <select aria-label="Año del período" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeYear} onChange={(e) => setRangeYear(Number(e.target.value))}>
                       {[rangeYear - 2, rangeYear - 1, rangeYear, rangeYear + 1].map((y) => <option key={y} value={y}>{y}</option>)}
                     </select>
                   )}
                   {rangeMode === 'month' && (
-                    <select aria-label="Mes del período" className="text-[10px] font-black uppercase border border-slate-200 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-700 dark:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-400" value={rangeMonth} onChange={(e) => setRangeMonth(Number(e.target.value))}>
+                    <select aria-label="Mes del período" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeMonth} onChange={(e) => setRangeMonth(Number(e.target.value))}>
                       {MONTHS_ES.map((m, idx) => <option key={m} value={idx}>{m}</option>)}
                     </select>
                   )}
@@ -1405,14 +1405,14 @@ export default function CRMPage() {
               }
             />
             {!selectedClientWritable && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-900">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-900">
                 Este cliente pertenece a otra empresa (p. ej. Bacarsa). No podés editarlo desde «{empresa?.name || empresaId}».
                 Volvé al listado o cambiá el selector superior.
               </div>
             )}
             {selectedClientWritable &&
               (foreignRelatedCounts.servicios_sla > 0 || foreignRelatedCounts.turnos > 0) && (
-              <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs font-bold text-violet-900 space-y-2">
+              <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs font-bold text-violet-900 space-y-2">
                 <p>
                   Hay datos vinculados a este cliente que siguen etiquetados como otra empresa (
                   {foreignRelatedCounts.servicios_sla} SLA, {foreignRelatedCounts.turnos} turnos).
@@ -1432,8 +1432,8 @@ export default function CRMPage() {
             )}
           <div className="flex flex-col lg:flex-row gap-8">
             <div className="w-full lg:w-1/4 space-y-6">
-              <div className="bg-white p-8 rounded-[2.5rem] border text-center shadow-sm sticky top-6">
-                <div className="w-24 h-24 bg-indigo-50 rounded-[2rem] flex items-center justify-center text-indigo-600 mx-auto mb-6 shadow-lg">
+              <div className="rounded-xl border p-8 text-center shadow-sm sticky top-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="w-24 h-24 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 mx-auto mb-6 shadow-lg">
                   <Building2 size={40} />
                 </div>
                 <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedClient.name}</h2>
@@ -1467,7 +1467,7 @@ export default function CRMPage() {
               </div>
 
               {/* Acceso Portal Cliente */}
-              <div className="bg-white p-5 rounded-[2rem] border shadow-sm space-y-3">
+              <div className="rounded-xl border p-5 shadow-sm space-y-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ShieldCheck size={14} className="text-indigo-500" />
@@ -1638,7 +1638,7 @@ export default function CRMPage() {
               </div>
             </div>
 
-            <div className="flex-1 bg-white rounded-[2.5rem] border shadow-sm overflow-hidden flex flex-col min-h-[600px]">
+            <div className="flex-1 rounded-xl border shadow-sm overflow-hidden flex flex-col min-h-[600px]" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
               <div className="flex border-b">
                 {['INFO', 'CONTRATOS', 'SERVICIOS', 'SEDES', 'COTIZACIONES', 'HISTORIAL'].map((t) => (
                   <button
@@ -1655,7 +1655,7 @@ export default function CRMPage() {
 
               <div className="p-10 flex-1 space-y-6">
                 {loadingClientData ? (
-                  <div className="p-6 bg-slate-50 rounded-2xl border flex items-center gap-3 text-slate-500 font-bold">
+                  <div className="p-6 bg-slate-50 rounded-xl border flex items-center gap-3 text-slate-500 font-bold">
                     <Loader2 className="animate-spin" size={18} /> Cargando datos del cliente...
                   </div>
                 ) : null}
@@ -1679,76 +1679,76 @@ export default function CRMPage() {
                     {isEditingInfo ? (
                       <div className="space-y-4">
                         {/* Identidad */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Identidad</p>
                           </div>
                           <div className="p-4 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Nombre Comercial</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Nombre comercial" value={infoForm.name || ''} onChange={(e) => setInfoForm({ ...infoForm, name: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Nombre comercial" value={infoForm.name || ''} onChange={(e) => setInfoForm({ ...infoForm, name: e.target.value })} />
                               </div>
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Razón Social</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Razón social" value={infoForm.legalName || ''} onChange={(e) => setInfoForm({ ...infoForm, legalName: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Razón social" value={infoForm.legalName || ''} onChange={(e) => setInfoForm({ ...infoForm, legalName: e.target.value })} />
                               </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">CUIT / Tax ID</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="CUIT / Tax ID" value={infoForm.taxId || ''} onChange={(e) => setInfoForm({ ...infoForm, taxId: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="CUIT / Tax ID" value={infoForm.taxId || ''} onChange={(e) => setInfoForm({ ...infoForm, taxId: e.target.value })} />
                               </div>
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Condición IVA</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Condición IVA" value={infoForm.ivaStatus || ''} onChange={(e) => setInfoForm({ ...infoForm, ivaStatus: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Condición IVA" value={infoForm.ivaStatus || ''} onChange={(e) => setInfoForm({ ...infoForm, ivaStatus: e.target.value })} />
                               </div>
                             </div>
                           </div>
                         </div>
 
                         {/* Domicilio */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Domicilio</p>
                           </div>
                           <div className="p-4 space-y-3">
                             <div>
                               <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Dirección</label>
-                              <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Dirección" value={infoForm.address || ''} onChange={(e) => setInfoForm({ ...infoForm, address: e.target.value })} />
+                              <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Dirección" value={infoForm.address || ''} onChange={(e) => setInfoForm({ ...infoForm, address: e.target.value })} />
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Ciudad</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Ciudad" value={infoForm.city || ''} onChange={(e) => setInfoForm({ ...infoForm, city: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Ciudad" value={infoForm.city || ''} onChange={(e) => setInfoForm({ ...infoForm, city: e.target.value })} />
                               </div>
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Provincia</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Provincia" value={infoForm.state || ''} onChange={(e) => setInfoForm({ ...infoForm, state: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Provincia" value={infoForm.state || ''} onChange={(e) => setInfoForm({ ...infoForm, state: e.target.value })} />
                               </div>
                             </div>
                           </div>
                         </div>
 
                         {/* Contacto */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Contacto</p>
                           </div>
                           <div className="p-4 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Nombre de contacto</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Contacto" value={infoForm.contactName || ''} onChange={(e) => setInfoForm({ ...infoForm, contactName: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Contacto" value={infoForm.contactName || ''} onChange={(e) => setInfoForm({ ...infoForm, contactName: e.target.value })} />
                               </div>
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Teléfono</label>
-                                <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Teléfono" value={infoForm.phone || ''} onChange={(e) => setInfoForm({ ...infoForm, phone: e.target.value })} />
+                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Teléfono" value={infoForm.phone || ''} onChange={(e) => setInfoForm({ ...infoForm, phone: e.target.value })} />
                               </div>
                             </div>
                             <div>
                               <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Email</label>
-                              <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Email" value={infoForm.email || ''} onChange={(e) => setInfoForm({ ...infoForm, email: e.target.value })} />
+                              <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Email" value={infoForm.email || ''} onChange={(e) => setInfoForm({ ...infoForm, email: e.target.value })} />
                             </div>
                           </div>
                         </div>
@@ -1765,8 +1765,8 @@ export default function CRMPage() {
                     ) : (
                       <div className="space-y-4">
                         {/* Identidad */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Identidad</p>
                           </div>
                           <div className="divide-y divide-slate-100">
@@ -1794,8 +1794,8 @@ export default function CRMPage() {
                         </div>
 
                         {/* Domicilio */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Domicilio</p>
                           </div>
                           <div className="divide-y divide-slate-100">
@@ -1817,8 +1817,8 @@ export default function CRMPage() {
                         </div>
 
                         {/* Contacto */}
-                        <div className="border border-slate-200 rounded-2xl overflow-hidden">
-                          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2.5 border-b" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Contacto</p>
                           </div>
                           <div className="divide-y divide-slate-100">
@@ -1866,19 +1866,19 @@ export default function CRMPage() {
 
                     {/* Stats */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="p-4 bg-slate-50 rounded-2xl border">
+                      <div className="p-4 bg-slate-50 rounded-xl border">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Contratos</p>
                         <p className="text-2xl font-black text-slate-800">{clientContracts.length}</p>
                       </div>
-                      <div className="p-4 bg-slate-50 rounded-2xl border">
+                      <div className="p-4 bg-slate-50 rounded-xl border">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Hs Totales</p>
                         <p className="text-2xl font-black text-slate-800">{clientContracts.reduce((acc, c) => acc + (Number(c.totalHours) || 0), 0)} hs</p>
                       </div>
-                      <div className="p-4 bg-slate-50 rounded-2xl border">
+                      <div className="p-4 bg-slate-50 rounded-xl border">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Abiertos</p>
                         <p className="text-2xl font-black text-slate-800">{clientContracts.filter((c) => c.type === 'abierto').length}</p>
                       </div>
-                      <div className="p-4 bg-slate-50 rounded-2xl border">
+                      <div className="p-4 bg-slate-50 rounded-xl border">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Temporales</p>
                         <p className="text-2xl font-black text-slate-800">{clientContracts.filter((c) => c.type === 'temporal').length}</p>
                       </div>
@@ -1886,11 +1886,11 @@ export default function CRMPage() {
 
                     {/* New contract inline form */}
                     {contractFormOpen && !editingContractId && (
-                      <div className="border-2 border-indigo-200 bg-indigo-50/50 rounded-2xl p-5 space-y-3">
+                      <div className="border-2 border-indigo-200 bg-indigo-50/50 rounded-xl p-5 space-y-3">
                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">Nuevo contrato</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Nombre del contrato" value={contractForm.name} onChange={(e) => setContractForm({ ...contractForm, name: e.target.value })} />
-                          <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Horas totales" value={contractForm.totalHours} onChange={(e) => setContractForm({ ...contractForm, totalHours: e.target.value })} />
+                          <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Nombre del contrato" value={contractForm.name} onChange={(e) => setContractForm({ ...contractForm, name: e.target.value })} />
+                          <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Horas totales" value={contractForm.totalHours} onChange={(e) => setContractForm({ ...contractForm, totalHours: e.target.value })} />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <select className="w-full p-3 rounded-xl border border-slate-200 bg-white font-black uppercase text-[10px] focus:outline-none focus:ring-2 focus:ring-indigo-400" value={contractForm.type} onChange={(e) => setContractForm({ ...contractForm, type: e.target.value })}>
@@ -1898,11 +1898,11 @@ export default function CRMPage() {
                             <option value="abierto">Abierto</option>
                             <option value="temporal">Temporal</option>
                           </select>
-                          <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Link / ID de Drive" value={contractForm.driveUrl} onChange={(e) => setContractForm({ ...contractForm, driveUrl: e.target.value })} />
+                          <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Link / ID de Drive" value={contractForm.driveUrl} onChange={(e) => setContractForm({ ...contractForm, driveUrl: e.target.value })} />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Inicio (YYYY-MM-DD)" value={contractForm.startDate} onChange={(e) => setContractForm({ ...contractForm, startDate: e.target.value })} />
-                          <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Fin (YYYY-MM-DD)" value={contractForm.endDate} onChange={(e) => setContractForm({ ...contractForm, endDate: e.target.value })} />
+                          <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Inicio (YYYY-MM-DD)" value={contractForm.startDate} onChange={(e) => setContractForm({ ...contractForm, startDate: e.target.value })} />
+                          <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Fin (YYYY-MM-DD)" value={contractForm.endDate} onChange={(e) => setContractForm({ ...contractForm, endDate: e.target.value })} />
                         </div>
                         <div className="flex gap-2 pt-1">
                           <button onClick={handleSaveContract} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">Guardar</button>
@@ -1919,7 +1919,7 @@ export default function CRMPage() {
                         <p className="text-[11px]">Hacé clic en "Nuevo Contrato" para agregar uno</p>
                       </div>
                     ) : (
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                         {clientContracts.map((c) => {
                           const badge = c.type === 'cerrado' ? 'bg-slate-50 text-slate-500 border-slate-200' : c.type === 'abierto' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100';
                           const iconColor = c.type === 'abierto' ? 'bg-amber-100 text-amber-600' : c.type === 'temporal' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500';
@@ -1966,8 +1966,8 @@ export default function CRMPage() {
                               {isExpanded && (
                                 <div className="px-4 pb-4 pt-2 bg-indigo-50/40 border-t border-indigo-100 space-y-3">
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Nombre del contrato" value={contractForm.name} onChange={(e) => setContractForm({ ...contractForm, name: e.target.value })} />
-                                    <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Horas totales" value={contractForm.totalHours} onChange={(e) => setContractForm({ ...contractForm, totalHours: e.target.value })} />
+                                    <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Nombre del contrato" value={contractForm.name} onChange={(e) => setContractForm({ ...contractForm, name: e.target.value })} />
+                                    <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Horas totales" value={contractForm.totalHours} onChange={(e) => setContractForm({ ...contractForm, totalHours: e.target.value })} />
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     <select className="w-full p-3 rounded-xl border border-slate-200 bg-white font-black uppercase text-[10px] focus:outline-none focus:ring-2 focus:ring-indigo-400" value={contractForm.type} onChange={(e) => setContractForm({ ...contractForm, type: e.target.value })}>
@@ -1975,11 +1975,11 @@ export default function CRMPage() {
                                       <option value="abierto">Abierto</option>
                                       <option value="temporal">Temporal</option>
                                     </select>
-                                    <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Link / ID de Drive" value={contractForm.driveUrl} onChange={(e) => setContractForm({ ...contractForm, driveUrl: e.target.value })} />
+                                    <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Link / ID de Drive" value={contractForm.driveUrl} onChange={(e) => setContractForm({ ...contractForm, driveUrl: e.target.value })} />
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Inicio (YYYY-MM-DD)" value={contractForm.startDate} onChange={(e) => setContractForm({ ...contractForm, startDate: e.target.value })} />
-                                    <input className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Fin (YYYY-MM-DD)" value={contractForm.endDate} onChange={(e) => setContractForm({ ...contractForm, endDate: e.target.value })} />
+                                    <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Inicio (YYYY-MM-DD)" value={contractForm.startDate} onChange={(e) => setContractForm({ ...contractForm, startDate: e.target.value })} />
+                                    <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="Fin (YYYY-MM-DD)" value={contractForm.endDate} onChange={(e) => setContractForm({ ...contractForm, endDate: e.target.value })} />
                                   </div>
                                   <div className="flex gap-2 pt-1">
                                     <button onClick={handleSaveContract} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">Actualizar</button>
@@ -2126,7 +2126,7 @@ export default function CRMPage() {
 
                       {/* Form: nuevo servicio o nueva versión */}
                       {serviceVersionForm.open && (
-                        <div className="border-2 border-indigo-200 bg-indigo-50/30 rounded-2xl p-5 space-y-4">
+                        <div className="border-2 border-indigo-200 bg-indigo-50/30 rounded-xl p-5 space-y-4">
                           <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">
                             {serviceVersionForm.sourceId ? 'Nueva versión del servicio' : 'Nuevo servicio'}
                           </p>
@@ -2135,7 +2135,7 @@ export default function CRMPage() {
                           <div>
                             <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Nombre del objetivo / servicio</label>
                             <input
-                              className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                              className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                               placeholder="Ej: Planta Norte"
                               value={serviceVersionForm.objectiveName}
                               onChange={(e) => setServiceVersionForm({ ...serviceVersionForm, objectiveName: e.target.value })}
@@ -2146,11 +2146,11 @@ export default function CRMPage() {
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Fecha inicio</label>
-                              <input type="date" className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" value={serviceVersionForm.startDate} onChange={(e) => setServiceVersionForm({ ...serviceVersionForm, startDate: e.target.value })} />
+                              <input type="date" className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={serviceVersionForm.startDate} onChange={(e) => setServiceVersionForm({ ...serviceVersionForm, startDate: e.target.value })} />
                             </div>
                             <div>
                               <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Fecha fin</label>
-                              <input type="date" className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" value={serviceVersionForm.endDate} onChange={(e) => setServiceVersionForm({ ...serviceVersionForm, endDate: e.target.value })} />
+                              <input type="date" className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={serviceVersionForm.endDate} onChange={(e) => setServiceVersionForm({ ...serviceVersionForm, endDate: e.target.value })} />
                             </div>
                           </div>
 
@@ -2179,7 +2179,7 @@ export default function CRMPage() {
                             const isExpanded = expandedServiceId === s.id;
 
                             return (
-                              <div key={s.id} className="border border-slate-200 rounded-2xl overflow-hidden">
+                              <div key={s.id} className="border border-slate-200 rounded-xl overflow-hidden">
                                 {/* Service row header */}
                                 <div
                                   className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-indigo-50/40' : ''}`}
@@ -2395,18 +2395,18 @@ export default function CRMPage() {
 
                     {/* Inline new-sede form */}
                     {editingObjectiveIndex === -1 && (
-                      <div className="border-2 border-indigo-200 bg-indigo-50/50 rounded-2xl p-5 space-y-3">
+                      <div className="border-2 border-indigo-200 bg-indigo-50/50 rounded-xl p-5 space-y-3">
                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">Nueva sede</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
-                            className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Nombre de la sede"
                             value={objectiveForm.name}
                             onChange={(e) => setObjectiveForm({ ...objectiveForm, name: e.target.value })}
                           />
                           <div className="flex gap-2">
                             <input
-                              className="flex-1 p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                              className="borderflex-1 p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                               placeholder="Dirección completa"
                               value={objectiveForm.address}
                               onChange={(e) => setObjectiveForm({ ...objectiveForm, address: e.target.value })}
@@ -2423,26 +2423,26 @@ export default function CRMPage() {
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <input
-                            className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Latitud"
                             value={objectiveForm.lat}
                             onChange={(e) => setObjectiveForm({ ...objectiveForm, lat: e.target.value })}
                           />
                           <input
-                            className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Longitud"
                             value={objectiveForm.lng}
                             onChange={(e) => setObjectiveForm({ ...objectiveForm, lng: e.target.value })}
                           />
                           <input
-                            className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Contacto"
                             value={objectiveForm.contact}
                             onChange={(e) => setObjectiveForm({ ...objectiveForm, contact: e.target.value })}
                           />
                         </div>
                         <input
-                          className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                           placeholder="Notas"
                           value={objectiveForm.notes}
                           onChange={(e) => setObjectiveForm({ ...objectiveForm, notes: e.target.value })}
@@ -2484,7 +2484,7 @@ export default function CRMPage() {
                         <p className="text-[11px]">Hacé clic en "Nueva Sede" para agregar una</p>
                       </div>
                     ) : (
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                         {(selectedClient.objetivos || []).map((o: any, idx: number) => (
                           <div key={idx}>
                             {/* Row */}
@@ -2549,14 +2549,14 @@ export default function CRMPage() {
                               <div className="px-4 pb-4 pt-2 bg-indigo-50/40 border-t border-indigo-100 space-y-3">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <input
-                                    className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                    className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                     placeholder="Nombre de la sede"
                                     value={objectiveForm.name}
                                     onChange={(e) => setObjectiveForm({ ...objectiveForm, name: e.target.value })}
                                   />
                                   <div className="flex gap-2">
                                     <input
-                                      className="flex-1 p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                      className="borderflex-1 p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                       placeholder="Dirección completa"
                                       value={objectiveForm.address}
                                       onChange={(e) => setObjectiveForm({ ...objectiveForm, address: e.target.value })}
@@ -2573,26 +2573,26 @@ export default function CRMPage() {
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                   <input
-                                    className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                    className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                     placeholder="Latitud"
                                     value={objectiveForm.lat}
                                     onChange={(e) => setObjectiveForm({ ...objectiveForm, lat: e.target.value })}
                                   />
                                   <input
-                                    className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                    className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                     placeholder="Longitud"
                                     value={objectiveForm.lng}
                                     onChange={(e) => setObjectiveForm({ ...objectiveForm, lng: e.target.value })}
                                   />
                                   <input
-                                    className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                    className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                     placeholder="Contacto"
                                     value={objectiveForm.contact}
                                     onChange={(e) => setObjectiveForm({ ...objectiveForm, contact: e.target.value })}
                                   />
                                 </div>
                                 <input
-                                  className="w-full p-3 rounded-xl border border-slate-200 bg-white font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                  className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                                   placeholder="Notas"
                                   value={objectiveForm.notes}
                                   onChange={(e) => setObjectiveForm({ ...objectiveForm, notes: e.target.value })}
@@ -2651,7 +2651,7 @@ export default function CRMPage() {
                         <p className="text-sm font-bold">Sin propuestas registradas</p>
                       </div>
                     ) : (
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                         {clientQuotes.map((q) => (
                           <div key={q.id} className="flex items-center gap-3 px-4 py-3">
                             <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0">
@@ -2703,7 +2703,7 @@ export default function CRMPage() {
                         <p className="text-sm font-bold">Sin notas registradas</p>
                       </div>
                     ) : (
-                      <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                         {[...(selectedClient.historial || [])].reverse().map((h: any, i: number) => (
                           <div key={i} className="flex items-start gap-3 px-4 py-3">
                             <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-400 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -2725,7 +2725,7 @@ export default function CRMPage() {
 
         {proformaOpen ? (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setProformaOpen(false)}>
-            <div className="bg-white rounded-[2rem] p-8 w-full max-w-6xl shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-white rounded-xl p-8 w-full max-w-6xl shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-black text-slate-800 uppercase">Proforma</h3>
                 <button onClick={() => setProformaOpen(false)} className="p-2 rounded-xl hover:bg-slate-100">
@@ -2734,7 +2734,7 @@ export default function CRMPage() {
               </div>
 
               <div className="space-y-6">
-                <div className="p-4 bg-slate-50 rounded-2xl border">
+                <div className="p-4 bg-slate-50 rounded-xl border">
                   <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Pre-factura</p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm font-bold text-slate-600">
                     <div>Cliente: <span className="text-slate-800">{selectedClient?.name || '-'}</span></div>
@@ -2746,24 +2746,24 @@ export default function CRMPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                  <select className="w-full p-3 rounded-2xl border font-black uppercase text-[10px]" value={proformaYear} onChange={(e) => setProformaYear(Number(e.target.value))}>
+                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaYear} onChange={(e) => setProformaYear(Number(e.target.value))}>
                     {[proformaYear - 2, proformaYear - 1, proformaYear, proformaYear + 1].map((y) => (
                       <option key={y} value={y}>{y}</option>
                     ))}
                   </select>
-                  <select className="w-full p-3 rounded-2xl border font-black uppercase text-[10px]" value={proformaMonth} onChange={(e) => setProformaMonth(Number(e.target.value))}>
+                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaMonth} onChange={(e) => setProformaMonth(Number(e.target.value))}>
                     {MONTHS_ES.map((m, idx) => (
                       <option key={m} value={idx}>{m}</option>
                     ))}
                   </select>
-                  <input type="date" className="w-full p-3 rounded-2xl border font-bold" value={proformaStartDate} onChange={(e) => setProformaStartDate(e.target.value)} />
-                  <input type="date" className="w-full p-3 rounded-2xl border font-bold" value={proformaEndDate} onChange={(e) => setProformaEndDate(e.target.value)} />
-                  <select className="w-full p-3 rounded-2xl border font-black uppercase text-[10px]" value={proformaDetailMode} onChange={(e) => setProformaDetailMode(e.target.value as ProformaDetailMode)}>
+                  <input type="date" className="w-full p-3 rounded-xl border font-bold" value={proformaStartDate} onChange={(e) => setProformaStartDate(e.target.value)} />
+                  <input type="date" className="w-full p-3 rounded-xl border font-bold" value={proformaEndDate} onChange={(e) => setProformaEndDate(e.target.value)} />
+                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaDetailMode} onChange={(e) => setProformaDetailMode(e.target.value as ProformaDetailMode)}>
                     <option value="auto">Detalle Auto</option>
                     <option value="planned">Detalle Planificado</option>
                     <option value="executed">Detalle Ejecutado</option>
                   </select>
-                  <select className="w-full p-3 rounded-2xl border font-black uppercase text-[10px]" value={proformaBase} onChange={(e) => setProformaBase(e.target.value as ProformaBase)}>
+                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaBase} onChange={(e) => setProformaBase(e.target.value as ProformaBase)}>
                     <option value="requested">Solicitado (SLA)</option>
                     <option value="planned">Planificado</option>
                     <option value="executed">Ejecutado</option>
@@ -2771,7 +2771,7 @@ export default function CRMPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input className="w-full p-3 rounded-2xl border font-bold" placeholder="Valor hora (ARS)" value={proformaHourlyValue} onChange={(e) => setProformaHourlyValue(e.target.value)} />
+                  <input className="w-full p-3 rounded-xl border font-bold" placeholder="Valor hora (ARS)" value={proformaHourlyValue} onChange={(e) => setProformaHourlyValue(e.target.value)} />
                   <div className="md:col-span-2 flex items-center gap-3">
                     <button onClick={calculateProformaTurnos} className="bg-white border px-4 py-2 rounded-xl text-[10px] font-black uppercase flex gap-2">
                       <Calculator size={14} /> Recalcular turnos
@@ -2785,21 +2785,21 @@ export default function CRMPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="p-4 bg-slate-50 rounded-2xl border">
+                  <div className="p-4 bg-slate-50 rounded-xl border">
                     <p className="text-[10px] font-black text-slate-400 uppercase">Horas base</p>
                     <p className="text-2xl font-black text-slate-800">{baseHours} hs</p>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-2xl border">
+                  <div className="p-4 bg-slate-50 rounded-xl border">
                     <p className="text-[10px] font-black text-slate-400 uppercase">Valor hora</p>
                     <p className="text-2xl font-black text-slate-800">{formatMoney(Number(proformaHourlyValue) || 0)}</p>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-2xl border">
+                  <div className="p-4 bg-slate-50 rounded-xl border">
                     <p className="text-[10px] font-black text-slate-400 uppercase">Total estimado</p>
                     <p className="text-2xl font-black text-slate-800">{formatMoney(totalEstimate)}</p>
                   </div>
                 </div>
 
-                <div className="p-4 bg-white rounded-2xl border space-y-3">
+                <div className="p-4 bg-white rounded-xl border space-y-3">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[10px] font-black uppercase text-slate-400">Detalle por objetivo y puesto</p>
                     <span className="text-[10px] font-black uppercase text-slate-400">HS</span>
@@ -2809,7 +2809,7 @@ export default function CRMPage() {
 
                   <div className="space-y-2">
                     {proformaBreakdown.map((o) => (
-                      <div key={o.objectiveName} className="border rounded-2xl overflow-hidden">
+                      <div key={o.objectiveName} className="border rounded-xl overflow-hidden">
                         <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
                           <div>
                             <p className="text-sm font-black text-slate-800">{o.objectiveName}</p>
@@ -2821,7 +2821,7 @@ export default function CRMPage() {
                           {o.positions.map((p: any) => {
                             const key = `${o.objectiveName}__${p.positionName}`;
                             return (
-                              <div key={key} className="border rounded-2xl overflow-hidden">
+                              <div key={key} className="border rounded-xl overflow-hidden">
                                 <button onClick={() => toggleExpandedKey(key)} className="w-full flex items-center justify-between px-4 py-3 text-left">
                                   <div>
                                     <p className="text-sm font-black text-slate-800">{p.positionName}</p>
@@ -2864,7 +2864,7 @@ export default function CRMPage() {
       )}
       {newClientOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setNewClientOpen(false)}>
-          <div className="bg-white rounded-[2rem] p-8 w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl p-8 w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-black text-slate-800 uppercase">Nuevo Cliente</h3>
               <button onClick={() => setNewClientOpen(false)} className="p-2 rounded-xl hover:bg-slate-100"><X size={16} /></button>

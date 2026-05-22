@@ -24,7 +24,7 @@ export function applyTheme(theme: AppTheme): void {
       root.classList.add('dark', 'theme-contrast');
       break;
     case 'custom':
-      root.classList.add('theme-custom');
+      root.classList.add('dark', 'theme-custom');
       break;
     case 'system':
       if (window.matchMedia('(prefers-color-scheme: dark)').matches) {

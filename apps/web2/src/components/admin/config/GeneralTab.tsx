@@ -161,53 +161,65 @@ export default function GeneralTab() {
         <div className="space-y-8 animate-in fade-in pb-10">
             
             {/* 1. SELECTOR DE TEMAS (5 OPCIONES REALES) */}
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2">
-                    <Monitor className="text-indigo-600"/> TEMAS Y APARIENCIA
+            <div className="rounded-xl border p-8" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="text-xl font-black mb-6 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
+                    <Monitor style={{ color: 'var(--company-primary, #6366f1)' }}/> TEMAS Y APARIENCIA
                 </h3>
                 
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
                     {/* LIGHT */}
-                    <button onClick={() => handleApplyTheme('light')} aria-pressed={theme === 'light'} aria-label="Tema Claro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'light' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('light')} aria-pressed={theme === 'light'} aria-label="Tema Claro"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'light' ? { borderColor: 'var(--company-primary,#6366f1)', backgroundColor: 'var(--surf2)' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm"><Sun size={20} className="text-slate-600" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600">Claro</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Claro</span>
                     </button>
 
                     {/* DARK */}
-                    <button onClick={() => handleApplyTheme('dark')} aria-pressed={theme === 'dark'} aria-label="Tema Oscuro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'dark' ? 'border-indigo-500 bg-slate-900 text-white' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('dark')} aria-pressed={theme === 'dark'} aria-label="Tema Oscuro"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'dark' ? { borderColor: 'var(--company-primary,#6366f1)', backgroundColor: 'var(--surf2)' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center shadow-sm"><Moon size={20} className="text-white" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600 dark:text-slate-400">Oscuro</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Oscuro</span>
                     </button>
 
                     {/* CONTRASTE */}
-                    <button onClick={() => handleApplyTheme('contrast')} aria-pressed={theme === 'contrast'} aria-label="Tema Alto contraste" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'contrast' ? 'border-black bg-black text-yellow-400' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('contrast')} aria-pressed={theme === 'contrast'} aria-label="Tema Alto contraste"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'contrast' ? { borderColor: '#FFD700', backgroundColor: '#000' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-black border border-white flex items-center justify-center shadow-sm"><Zap size={20} className="text-yellow-400" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600">Contraste</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Contraste</span>
                     </button>
 
                     {/* AZUL / NAVY */}
-                    <button onClick={() => handleApplyTheme('blue')} aria-pressed={theme === 'blue'} aria-label="Tema Azul Pro" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'blue' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('blue')} aria-pressed={theme === 'blue'} aria-label="Tema Azul Pro"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'blue' ? { borderColor: '#3b82f6', backgroundColor: '#0f1f4a' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-blue-900 flex items-center justify-center shadow-sm"><Hexagon size={20} className="text-blue-200" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600">Azul Pro</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Azul Pro</span>
                     </button>
 
                     {/* PERSONALIZADO / ZINC */}
-                    <button onClick={() => handleApplyTheme('custom')} aria-pressed={theme === 'custom'} aria-label="Tema Personalizado" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'custom' ? 'border-zinc-400 bg-zinc-900 text-zinc-100' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('custom')} aria-pressed={theme === 'custom'} aria-label="Tema Personalizado"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'custom' ? { borderColor: '#a1a1aa', backgroundColor: '#18181b' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center shadow-sm"><Layers size={20} className="text-zinc-300" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600 dark:text-slate-400">Zinc</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Zinc</span>
                     </button>
 
                     {/* SISTEMA */}
-                    <button onClick={() => handleApplyTheme('system')} aria-pressed={theme === 'system'} aria-label="Tema Sistema (automático)" className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105 ${theme === 'system' ? 'border-slate-400 bg-slate-100 text-slate-800' : 'border-slate-100 hover:border-slate-300'}`}>
+                    <button onClick={() => handleApplyTheme('system')} aria-pressed={theme === 'system'} aria-label="Tema Sistema (automático)"
+                        className="p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all hover:scale-105"
+                        style={theme === 'system' ? { borderColor: 'var(--company-primary,#6366f1)', backgroundColor: 'var(--surf2)' } : { borderColor: 'var(--border)' }}>
                         <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shadow-sm"><Monitor size={20} className="text-slate-600" aria-hidden="true"/></div>
-                        <span className="text-xs font-black uppercase text-slate-600">Sistema</span>
+                        <span className="text-xs font-black uppercase" style={{ color: 'var(--txt3)' }}>Sistema</span>
                     </button>
                 </div>
 
                 {/* COLOR DE EMPRESA */}
-                <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700">
-                    <h4 className="text-sm font-black text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
-                        <Palette size={16} className="text-indigo-500"/> COLOR DE EMPRESA
+                <div className="mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
+                    <h4 className="text-sm font-black mb-3 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
+                        <Palette style={{ color: 'var(--company-primary,#6366f1)' }} size={16}/> COLOR DE EMPRESA
                     </h4>
                     <p className="text-xs text-slate-400 mb-4">Tinta de acento aplicada a botones, badges y elementos de marca. Se guarda por empresa.</p>
                     <div className="flex flex-wrap items-center gap-3">
@@ -237,21 +249,21 @@ export default function GeneralTab() {
             </div>
 
             {/* 2. DATOS DE LA EMPRESA */}
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl relative overflow-hidden">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-8 flex items-center gap-3 relative z-10">
-                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/50 rounded-xl text-indigo-600 dark:text-indigo-400"><Building size={24}/></div>
+            <div className="rounded-xl border p-8 relative overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="text-xl font-black mb-8 flex items-center gap-3 relative z-10" style={{ color: 'var(--txt)' }}>
+                    <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--surf2)', color: 'var(--company-primary,#6366f1)' }}><Building size={24}/></div>
                     DATOS DE LA ORGANIZACIÓN
                 </h3>
                 {loadingCompany ? (
                     <div className="flex items-center gap-2 text-slate-400 py-8"><Loader2 size={18} className="animate-spin"/> Cargando datos...</div>
                 ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                    <div><label htmlFor="cfg-razon-social" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Razón Social</label><input id="cfg-razon-social" name="name" value={company.name} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-900 dark:text-white outline-none transition-all"/></div>
-                    <div><label htmlFor="cfg-cuit" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">CUIT</label><input id="cfg-cuit" name="cuit" value={company.cuit} onChange={handleChange} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-mono font-medium text-slate-900 dark:text-white outline-none transition-all"/></div>
-                    <div className="md:col-span-2"><label htmlFor="cfg-direccion" className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Dirección</label><div className="relative"><FileText size={20} className="absolute left-4 top-4 text-slate-400" aria-hidden="true"/><input id="cfg-direccion" name="address" value={company.address} onChange={handleChange} className="w-full pl-12 p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-medium text-slate-900 dark:text-white outline-none transition-all"/></div></div>
+                    <div><label htmlFor="cfg-razon-social" className="text-[10px] font-black uppercase tracking-widest mb-2 block" style={{ color: 'var(--txt3)' }}>Razón Social</label><input id="cfg-razon-social" name="name" value={company.name} onChange={handleChange} className="w-full p-4 border-2 rounded-xl font-bold outline-none transition-all" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}/></div>
+                    <div><label htmlFor="cfg-cuit" className="text-[10px] font-black uppercase tracking-widest mb-2 block" style={{ color: 'var(--txt3)' }}>CUIT</label><input id="cfg-cuit" name="cuit" value={company.cuit} onChange={handleChange} className="w-full p-4 border-2 rounded-xl font-mono font-medium outline-none transition-all" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}/></div>
+                    <div className="md:col-span-2"><label htmlFor="cfg-direccion" className="text-[10px] font-black uppercase tracking-widest mb-2 block" style={{ color: 'var(--txt3)' }}>Dirección</label><div className="relative"><FileText size={20} className="absolute left-4 top-4 text-slate-400" aria-hidden="true"/><input id="cfg-direccion" name="address" value={company.address} onChange={handleChange} className="w-full pl-12 p-4 border-2 rounded-xl font-medium outline-none transition-all" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}/></div></div>
                 </div>
                 )}
-                <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-end">
+                <div className="mt-8 pt-6 border-t flex justify-end" style={{ borderColor: 'var(--border)' }}>
                     <button onClick={handleSaveCompany} disabled={savingCompany || loadingCompany} className="bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 text-white px-8 py-4 rounded-xl font-black text-xs uppercase flex items-center gap-2 shadow-xl hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                         {savingCompany ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>}
                         {savingCompany ? 'GUARDANDO...' : 'GUARDAR DATOS'}
@@ -260,9 +272,9 @@ export default function GeneralTab() {
             </div>
 
             {/* 2b. PORTALES DE ACCESO */}
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-xl">
-                <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-3">
-                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/50 rounded-xl text-indigo-600 dark:text-indigo-400"><ExternalLink size={24}/></div>
+            <div className="rounded-xl border p-8" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="text-xl font-black mb-6 flex items-center gap-3" style={{ color: 'var(--txt)' }}>
+                    <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--surf2)', color: 'var(--company-primary,#6366f1)' }}><ExternalLink size={24}/></div>
                     PORTALES DE ACCESO
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

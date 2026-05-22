@@ -613,7 +613,7 @@ export default function GuiaInteractivaPage() {
 
       <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-300">
         <div className="flex items-start gap-4">
-          <div className="p-3 rounded-2xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 shrink-0">
+          <div className="p-3 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 shrink-0">
             <BookOpen size={28} />
           </div>
           <div>
@@ -646,7 +646,7 @@ export default function GuiaInteractivaPage() {
         </div>
 
         {/* Tarjeta paso */}
-        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-lg overflow-hidden">
+        <div className="rounded-xl border shadow-lg overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-3 bg-gradient-to-br from-indigo-50 to-white dark:from-slate-800 dark:to-slate-800">
             {current.id === 'bienvenida' && <Sparkles className="text-indigo-500 shrink-0" size={22} />}
             {current.id === 'cliente' && <Building2 className="text-indigo-500 shrink-0" size={22} />}

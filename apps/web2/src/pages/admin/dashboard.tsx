@@ -37,8 +37,8 @@ const fmt = (n: number, decimals = 0) => n.toLocaleString('es-AR', { maximumFrac
 
 const SectionLabel = ({ label }: { label: string }) => (
   <div className="flex items-center gap-3 mb-4">
-    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{label}</span>
-    <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+    <span className="text-[10px] font-black uppercase tracking-[0.2em] whitespace-nowrap" style={{ color: 'var(--txt3)' }}>{label}</span>
+    <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
   </div>
 );
 
@@ -47,18 +47,21 @@ const KpiCard = ({ title, value, icon: Icon, color, subtext, sub2, alert, noData
   <div
     role="group"
     aria-label={title}
-    className={`bg-white dark:bg-slate-800 px-4 py-3.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-3
-    ${alert ? 'border-rose-300 ring-2 ring-rose-200 dark:ring-rose-800' : 'border-slate-100 dark:border-slate-700'}
-    ${noData ? 'opacity-55' : ''}`}>
-    <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '18' }}>
+    className={`px-4 py-3.5 rounded-xl border transition-all flex items-center gap-3 ${noData ? 'opacity-55' : ''}`}
+    style={{
+      backgroundColor: 'var(--surf)',
+      borderColor: alert ? 'rgba(239,68,68,0.5)' : 'var(--border)',
+      borderTop: `2px solid var(--company-primary, #6366f1)`,
+    }}>
+    <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '22' }}>
       <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
     </div>
     <div className="flex-1 min-w-0">
-      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-tight truncate">{title}</p>
-      <p className={`text-xl font-black leading-tight ${noData ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-white'}`}>
+      <p className="text-[9px] font-black uppercase tracking-wider leading-tight truncate" style={{ color: 'var(--txt3)' }}>{title}</p>
+      <p className="text-xl font-black leading-tight" style={{ color: noData ? 'var(--txt3)' : 'var(--txt)' }}>
         {noData ? '—' : value}
       </p>
-      {subtext && <p className="text-[10px] text-slate-500 font-medium leading-tight truncate">{subtext}</p>}
+      {subtext && <p className="text-[10px] font-medium leading-tight truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
     </div>
   </div>
 );
@@ -75,7 +78,7 @@ const StatusBadge = ({ ok, label }: { ok: boolean; label: string }) => (
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 px-4 py-3">
+    <div className="rounded-xl border px-4 py-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
       <p className="text-xs font-bold text-slate-500 mb-1">{label}</p>
       <p className="text-lg font-black text-indigo-600">{payload[0].value}</p>
     </div>
@@ -435,13 +438,13 @@ function AdminDashboard() {
   return (
     <DashboardLayout>
       <Head><title>Panel de Control | CronoApp</title></Head>
-      <div className="min-h-screen bg-slate-50/50 dark:bg-slate-900 p-6 pb-20 animate-in fade-in">
+      <div className="min-h-screen p-6 pb-20 animate-in fade-in" style={{ backgroundColor: 'var(--app-bg)' }}>
 
         {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
-              <LayoutDashboard size={30} className="text-indigo-600" aria-hidden="true"/>
+            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" style={{ color: 'var(--txt)' }}>
+              <LayoutDashboard size={30} style={{ color: 'var(--company-primary,#6366f1)' }} aria-hidden="true"/>
               PANEL DE CONTROL
               <span aria-hidden="true" className="ml-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-mono font-bold text-slate-400 self-center">
                 {process.env.NEXT_PUBLIC_BUILD_HASH || 'dev'}
@@ -478,7 +481,8 @@ function AdminDashboard() {
               setRefreshKey(k => k + 1);
             }}
             disabled={loading || isRefreshing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 border"
+            style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', color: 'var(--txt2)' }}
           >
             <RefreshCw size={14} className={isRefreshing || loading ? 'animate-spin' : ''}/> Actualizar
           </button>
@@ -580,8 +584,8 @@ function AdminDashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 
               {/* Licencias activas hoy */}
-              <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
-                <h3 className="font-black text-base text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <div className="lg:col-span-2 rounded-xl border p-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
                   <Coffee className="text-amber-500" size={18}/> Licencias Activas Hoy
                   {licencias.length > 0 && (
                     <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-black">{licencias.length}</span>
@@ -593,15 +597,15 @@ function AdminDashboard() {
                     <p className="text-sm font-bold text-slate-400">Sin licencias activas hoy</p>
                   </div>
                 ) : (
-                  <div className="border border-slate-100 dark:border-slate-700 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="rounded-xl overflow-hidden divide-y border" style={{ borderColor: 'var(--border)' }}>
                     {licencias.map((lic, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      <div key={i} className="flex items-center justify-between px-4 py-3 transition-colors hover:opacity-80">
                         <div className="flex items-center gap-3">
                           <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-black text-[11px]">
                             {lic.empName.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-slate-800 dark:text-white">{lic.empName}</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{lic.empName}</p>
                             <p className="text-[10px] text-slate-400">{lic.from} → {lic.to}</p>
                           </div>
                         </div>
@@ -615,8 +619,8 @@ function AdminDashboard() {
               </div>
 
               {/* Licencias por motivo */}
-              <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 flex flex-col">
-                <h3 className="font-black text-base text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <div className="rounded-xl border p-6 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
                   <PieChartIcon className="text-indigo-500" size={18}/> Por Motivo
                 </h3>
                 {licenciasByReason.length === 0 ? (
@@ -642,8 +646,8 @@ function AdminDashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
 
               {/* Servicios activos este mes */}
-              <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
-                <h3 className="font-black text-base text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <div className="rounded-xl border p-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
                   <Briefcase className="text-blue-500" size={18}/> Servicios Activos — {today.toLocaleString('es-AR',{month:'long'})}
                 </h3>
                 {activeServicesList.length === 0 ? (
@@ -652,15 +656,15 @@ function AdminDashboard() {
                     <p className="text-sm font-bold text-slate-400">Sin servicios activos este mes</p>
                   </div>
                 ) : (
-                  <div className="border border-slate-100 dark:border-slate-700 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-700">
+                  <div className="rounded-xl overflow-hidden divide-y border" style={{ borderColor: 'var(--border)' }}>
                     {activeServicesList.map((svc, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      <div key={i} className="flex items-center justify-between px-4 py-3 transition-colors hover:opacity-80">
                         <div className="flex items-center gap-3">
                           <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
                             <Shield size={13} className="text-blue-500"/>
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-slate-800 dark:text-white">{svc.client}</p>
+                            <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{svc.client}</p>
                             <p className="text-[10px] text-slate-400">{svc.objective}</p>
                           </div>
                         </div>
@@ -674,8 +678,8 @@ function AdminDashboard() {
               </div>
 
               {/* Ausencias últimos 30 días */}
-              <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm p-6 flex flex-col">
-                <h3 className="font-black text-base text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <div className="rounded-xl border p-6 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <h3 className="font-black text-base mb-4 flex items-center gap-2" style={{ color: 'var(--txt)' }}>
                   <UserX className="text-rose-500" size={18}/> Ausencias — Últimos 30 días
                 </h3>
                 {absenceChart.length === 0 ? (
@@ -706,11 +710,12 @@ function AdminDashboard() {
                 { href:'/admin/servicios',     icon: Briefcase, color:'text-purple-500', hover:'hover:border-purple-200', label:'Servicios SLA', sub:'Puestos y proyecciones' },
               ].map(({ href, icon: Icon, color, hover, label, sub }) => (
                 <button key={href} onClick={() => window.location.href = href}
-                  className={`h-24 p-5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-lg ${hover} transition-all text-left group flex flex-col justify-between`}>
+                  className="h-24 p-5 rounded-xl border transition-all text-left group flex flex-col justify-between hover:opacity-90"
+                  style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                   <Icon size={22} className={`${color} group-hover:scale-110 transition-transform`}/>
                   <div>
-                    <p className="font-black text-slate-700 dark:text-slate-200 text-sm leading-tight">{label}</p>
-                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">{sub}</p>
+                    <p className="font-black text-sm leading-tight" style={{ color: 'var(--txt)' }}>{label}</p>
+                    <p className="text-[11px] font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{sub}</p>
                   </div>
                 </button>
               ))}

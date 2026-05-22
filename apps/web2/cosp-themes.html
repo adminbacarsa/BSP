@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COSP — Sistema de Temas y Colores</title>
+<style>
+/* ── RESET ── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;background:#0a0a0f;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 12px 80px}
+
+/* ── CONTROL PANEL (top) ── */
+#ctrl{
+  width:100%;max-width:1100px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;padding:16px 20px;
+  display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+  margin-bottom:20px;
+  backdrop-filter:blur(10px);
+}
+.ctrl-group{display:flex;flex-direction:column;gap:6px}
+.ctrl-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.35)}
+.ctrl-row{display:flex;gap:6px;align-items:center}
+
+/* Theme buttons */
+.th-btn{
+  padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;
+  cursor:pointer;border:1px solid rgba(255,255,255,.12);
+  color:rgba(255,255,255,.5);background:transparent;transition:all .2s;
+  letter-spacing:.03em;
+}
+.th-btn:hover{color:rgba(255,255,255,.8);border-color:rgba(255,255,255,.25)}
+.th-btn.active{color:#fff;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.3)}
+
+/* Color swatches */
+.sw{
+  width:26px;height:26px;border-radius:6px;cursor:pointer;
+  border:2px solid transparent;transition:all .2s;
+  box-shadow:0 2px 6px rgba(0,0,0,.3);
+}
+.sw:hover{transform:scale(1.15)}
+.sw.active{border-color:#fff;transform:scale(1.1);box-shadow:0 0 0 2px rgba(255,255,255,.3)}
+
+/* Custom hue slider */
+#hue-wrap{display:flex;align-items:center;gap:8px}
+#hue-slider{
+  -webkit-appearance:none;width:120px;height:8px;border-radius:4px;outline:none;cursor:pointer;
+  background:linear-gradient(to right,#f97316,#eab308,#22c55e,#06b6d4,#6366f1,#a855f7,#ec4899,#f97316);
+}
+#hue-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid rgba(0,0,0,.2);cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+#custom-preview{width:24px;height:24px;border-radius:50%;border:2px solid rgba(255,255,255,.3)}
+
+.ctrl-sep{width:1px;height:40px;background:rgba(255,255,255,.1);align-self:center}
+.ctrl-info{font-size:11px;color:rgba(255,255,255,.3);margin-left:auto;text-align:right;line-height:1.5}
+
+/* ── BROWSER FRAME ── */
+#browser{
+  width:100%;max-width:1100px;
+  border-radius:14px;overflow:hidden;
+  box-shadow:0 32px 80px rgba(0,0,0,.6);
+  border:1px solid rgba(255,255,255,.08);
+}
+.browser-bar{
+  background:#1a1a1e;padding:8px 14px;
+  display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.bb-dots{display:flex;gap:5px}
+.bb-dot{width:11px;height:11px;border-radius:50%}
+.bb-url{flex:1;background:rgba(255,255,255,.05);border-radius:5px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.3);max-width:340px;margin:0 auto}
+
+/* ── APP SHELL ── */
+#app{display:flex;height:640px;overflow:hidden;transition:background .3s}
+
+/* ── SIDEBAR ── */
+#sb{
+  width:56px;min-width:56px;
+  display:flex;flex-direction:column;
+  padding:8px 0;
+  transition:all .3s;
+  border-right-width:1px;border-right-style:solid;
+}
+.sb-logo-wrap{padding:8px 0 16px;display:flex;justify-content:center;border-bottom-width:1px;border-bottom-style:solid;margin-bottom:8px}
+.sb-logo-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff}
+.sb-item{width:40px;height:40px;border-radius:8px;margin:2px auto;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;position:relative}
+.sb-item svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:color .2s}
+.sb-bottom{margin-top:auto;padding:8px 0;border-top-width:1px;border-top-style:solid}
+.sb-av{width:30px;height:30px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+
+/* ── TOPBAR ── */
+#top{
+  height:48px;min-height:48px;
+  display:flex;align-items:center;padding:0 16px;gap:10px;
+  border-bottom-width:1px;border-bottom-style:solid;
+  transition:all .3s;
+}
+.top-title{font-size:13px;font-weight:700;letter-spacing:.01em;transition:color .3s}
+.top-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px}
+.top-sep{flex:1}
+.top-empresa{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border-width:1px;border-style:solid;transition:all .3s}
+.empresa-dot{width:8px;height:8px;border-radius:50%}
+.top-online{font-size:10px;font-weight:600;padding:3px 9px;border-radius:20px;display:flex;align-items:center;gap:4px}
+.online-dot{width:6px;height:6px;border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.top-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.top-icon svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── CONTENT ── */
+#content{flex:1;overflow-y:auto;padding:20px;transition:all .3s}
+#content::-webkit-scrollbar{width:5px}
+#content::-webkit-scrollbar-thumb{border-radius:3px}
+
+/* ── KPI CARDS ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.kpi-card{border-radius:10px;padding:14px;border-width:1px;border-style:solid;transition:all .3s;cursor:default;position:relative;overflow:hidden}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;transition:background .3s}
+.kpi-icon{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;transition:all .3s}
+.kpi-icon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.kpi-val{font-size:24px;font-weight:700;margin-bottom:3px;transition:color .3s}
+.kpi-lbl{font-size:11px;transition:color .3s}
+.kpi-sub{font-size:10px;margin-top:6px;transition:color .3s}
+
+/* ── ESTADO DÍA (2nd KPI row) ── */
+.estado-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.est-card{border-radius:10px;padding:12px;border-width:1px;border-style:solid;transition:all .3s;display:flex;align-items:center;gap:10px}
+.est-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .3s}
+.est-icon svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.est-val{font-size:20px;font-weight:700;transition:color .3s}
+.est-lbl{font-size:10px;transition:color .3s}
+
+/* ── CHARTS ROW ── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.chart-card{border-radius:10px;padding:14px;border-width:1px;border-style:solid;transition:all .3s}
+.chart-title{font-size:12px;font-weight:600;margin-bottom:3px;transition:color .3s}
+.chart-sub{font-size:10px;margin-bottom:14px;transition:color .3s}
+.bars{display:flex;align-items:flex-end;gap:6px;height:80px}
+.bar{flex:1;border-radius:3px 3px 0 0;transition:background .3s}
+.bar-lbl{font-size:9px;margin-top:4px;text-align:center;transition:color .3s}
+.bar-row{flex:1;display:flex;flex-direction:column;align-items:stretch}
+
+/* ── LICENCIAS LIST ── */
+.lic-card{border-radius:10px;border-width:1px;border-style:solid;overflow:hidden;transition:all .3s}
+.lic-row{display:flex;align-items:center;padding:10px 14px;gap:10px;border-bottom-width:1px;border-bottom-style:solid;transition:all .3s}
+.lic-row:last-child{border-bottom:none}
+.lic-av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;transition:background .3s}
+.lic-name{flex:1;font-size:12px;font-weight:500;transition:color .3s}
+.lic-tag{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600;transition:all .3s}
+
+/* ── SECCIÓN LABELS ── */
+.sec-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;margin-top:4px;transition:color .3s}
+.page-heading{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom-width:1px;border-bottom-style:solid}
+.ph-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;transition:all .3s}
+.ph-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ph-title{font-size:18px;font-weight:800;letter-spacing:-.01em;transition:color .3s}
+.ph-sub{font-size:11px;transition:color .3s}
+.ph-badge{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600;transition:all .3s}
+.ph-live{font-size:11px;display:flex;align-items:center;gap:5px;transition:color .3s}
+
+/* ── PALETTE PREVIEW strip ── */
+#palette-strip{
+  width:100%;max-width:1100px;
+  display:flex;gap:6px;margin-bottom:16px;
+  align-items:center;
+}
+.ps-swatch{height:32px;flex:1;border-radius:6px;transition:background .3s;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:rgba(0,0,0,.4)}
+.ps-swatch.dark-text{color:rgba(255,255,255,.6)}
+.ps-label{font-size:10px;color:rgba(255,255,255,.3);white-space:nowrap;margin-right:8px}
+
+/* ── COMPLIANCE alert ── */
+.compliance-card{border-radius:10px;padding:14px;border-width:2px;border-style:solid;transition:all .3s;grid-column:span 1}
+.compliance-val{font-size:22px;font-weight:700;margin-bottom:2px;transition:color .3s}
+
+/* ── FOOTER ── */
+#footer-note{
+  margin-top:20px;font-size:11px;color:rgba(255,255,255,.25);text-align:center;line-height:1.7;
+  max-width:600px;
+}
+</style>
+</head>
+<body>
+
+<!-- CONTROL PANEL -->
+<div id="ctrl">
+  <div class="ctrl-group">
+    <div class="ctrl-label">Tema</div>
+    <div class="ctrl-row">
+      <button class="th-btn" onclick="setTheme('claro')" id="btn-claro">☀ Claro</button>
+      <button class="th-btn active" onclick="setTheme('oscuro')" id="btn-oscuro">● Oscuro</button>
+      <button class="th-btn" onclick="setTheme('contraste')" id="btn-contraste">◑ Contraste</button>
+      <button class="th-btn" onclick="setTheme('custom')" id="btn-custom">✦ Personalizado</button>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <div class="ctrl-label">Color de empresa</div>
+    <div class="ctrl-row">
+      <div class="sw active" style="background:#f97316" onclick="setColor('#f97316',this)" id="sw-orange" title="Naranja"></div>
+      <div class="sw" style="background:#7c3aed" onclick="setColor('#7c3aed',this)" id="sw-violet" title="Violeta"></div>
+      <div class="sw" style="background:#2563eb" onclick="setColor('#2563eb',this)" id="sw-blue" title="Azul"></div>
+      <div class="sw" style="background:#16a34a" onclick="setColor('#16a34a',this)" id="sw-green" title="Verde"></div>
+      <div class="sw" style="background:#dc2626" onclick="setColor('#dc2626',this)" id="sw-red" title="Rojo"></div>
+      <div class="sw" style="background:#0d9488" onclick="setColor('#0d9488',this)" id="sw-teal" title="Teal"></div>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group" id="custom-group">
+    <div class="ctrl-label">Tono personalizado</div>
+    <div id="hue-wrap">
+      <input type="range" id="hue-slider" min="0" max="360" value="25" oninput="applyHue(this.value)"/>
+      <div id="custom-preview" style="background:#f97316"></div>
+      <span style="font-size:11px;color:rgba(255,255,255,.4)" id="hue-label">Hue 25°</span>
+    </div>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group" style="margin-left:auto">
+    <div class="ctrl-label" style="text-align:right">Paleta generada</div>
+    <div class="ctrl-row" id="palette-mini" style="gap:3px"></div>
+  </div>
+
+  <div class="ctrl-info">
+    COSP V1.0 · Sistema de temas<br>
+    <span id="theme-name" style="color:rgba(255,255,255,.5)">Oscuro · Naranja</span>
+  </div>
+</div>
+
+<!-- PALETTE STRIP -->
+<div id="palette-strip">
+  <span class="ps-label">Paleta:</span>
+  <div class="ps-swatch dark-text" id="ps0" title="50"></div>
+  <div class="ps-swatch dark-text" id="ps1" title="100"></div>
+  <div class="ps-swatch dark-text" id="ps2" title="200"></div>
+  <div class="ps-swatch dark-text" id="ps3" title="300"></div>
+  <div class="ps-swatch" id="ps4" title="400"></div>
+  <div class="ps-swatch" id="ps5" title="500 Base"></div>
+  <div class="ps-swatch" id="ps6" title="600"></div>
+  <div class="ps-swatch" id="ps7" title="700"></div>
+  <div class="ps-swatch" id="ps8" title="900"></div>
+</div>
+
+<!-- BROWSER FRAME -->
+<div id="browser">
+  <div class="browser-bar">
+    <div class="bb-dots">
+      <div class="bb-dot" style="background:#ff5f57"></div>
+      <div class="bb-dot" style="background:#febc2e"></div>
+      <div class="bb-dot" style="background:#28c840"></div>
+    </div>
+    <div class="bb-url">comtroldata.web.app/admin/dashboard/</div>
+  </div>
+
+  <div id="app">
+    <!-- SIDEBAR -->
+    <aside id="sb">
+      <div class="sb-logo-wrap">
+        <div class="sb-logo-icon" id="sb-logo-icon">C</div>
+      </div>
+      <div class="sb-item" id="sbi-0" style="margin-top:4px">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-1" style="background:var(--c-active)">
+        <svg viewBox="0 0 24 24" id="sbi1-ic"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-2">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-3">
+        <svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8v4h8z"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-4">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-5">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div class="sb-item" id="sbi-6">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M20 12h2M2 12h2"/></svg>
+      </div>
+      <div class="sb-bottom">
+        <div class="sb-av" id="sb-av">MA</div>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+      <!-- TOPBAR -->
+      <div id="top">
+        <div class="top-icon">
+          <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </div>
+        <span class="top-title" id="top-title">DASHBOARD</span>
+        <span class="top-badge" id="top-badge">SUPERADMIN · MULTI-EMPRESA</span>
+        <div class="top-sep"></div>
+        <div class="top-empresa" id="top-empresa">
+          <div class="empresa-dot" id="empresa-dot"></div>
+          <span id="empresa-name">Prueba sa.</span>
+          <svg viewBox="0 0 24 24" style="width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <span style="font-size:12px;font-weight:500;margin-left:8px" id="user-name">SuperAdmin: Mauro Martínez Almeyra</span>
+        <div class="top-online" id="top-online">
+          <span class="online-dot" id="online-dot"></span>
+          ONLINE
+        </div>
+      </div>
+
+      <!-- CONTENT -->
+      <div id="content">
+        <!-- Page heading -->
+        <div class="page-heading" id="page-heading">
+          <div class="ph-icon" id="ph-icon">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <div>
+            <div class="ph-title" id="ph-title">PANEL DE CONTROL</div>
+            <div class="ph-sub" id="ph-sub">viernes, 22 de mayo de 2026 · <span class="ph-live" style="display:inline-flex" id="ph-live"><span class="online-dot" id="live-dot"></span>EN VIVO</span> · Act. 04:03 p.m.</div>
+          </div>
+          <div style="margin-left:auto">
+            <span class="ph-badge" id="ph-badge">6bf27b8</span>
+          </div>
+        </div>
+
+        <!-- ESTRUCTURA OPERATIVA -->
+        <div class="sec-lbl" id="sec-lbl1">Estructura Operativa</div>
+        <div class="kpi-grid">
+          <div class="kpi-card" id="kc0">
+            <div class="kpi-icon" id="ki0"><svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8v4h8z"/></svg></div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em" id="kl0-lbl" class="kpi-lbl">Clientes activos</div>
+            <div class="kpi-val" id="kv0">21</div>
+            <div class="kpi-sub" id="ks0">96 objetivos configurados</div>
+          </div>
+          <div class="kpi-card" id="kc1">
+            <div class="kpi-icon" id="ki1"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em" id="kl1-lbl" class="kpi-lbl">Servicios activos</div>
+            <div class="kpi-val" id="kv1">4</div>
+            <div class="kpi-sub" id="ks1">en mayo de 2026</div>
+          </div>
+          <div class="kpi-card" id="kc2">
+            <div class="kpi-icon" id="ki2"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em" id="kl2-lbl" class="kpi-lbl">Empleados en nómina</div>
+            <div class="kpi-val" id="kv2">62</div>
+            <div class="kpi-sub" id="ks2">47 asignados hoy</div>
+          </div>
+          <div class="kpi-card" id="kc3">
+            <div class="kpi-icon" id="ki3"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em" id="kl3-lbl" class="kpi-lbl">Horas SLA del mes</div>
+            <div class="kpi-val" id="kv3">9.323</div>
+            <div class="kpi-sub" id="ks3">proyectadas por 4 servicios</div>
+          </div>
+        </div>
+
+        <!-- ESTADO DEL DÍA -->
+        <div class="sec-lbl" id="sec-lbl2">Estado del Día</div>
+        <div class="estado-grid">
+          <div class="est-card" id="ec0">
+            <div class="est-icon" id="ei0"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+            <div><div class="est-val" id="ev0">0</div><div class="est-lbl" id="el0">PRESENTES HOY<br><span style="font-size:9px">de 47 planificados</span></div></div>
+          </div>
+          <div class="est-card" id="ec1">
+            <div class="est-icon" id="ei1"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div><div class="est-val" id="ev1">0</div><div class="est-lbl" id="el1">EN SERVICIO<br><span style="font-size:9px">Activos — sin completar turno</span></div></div>
+          </div>
+          <div class="est-card" id="ec2">
+            <div class="est-icon" id="ei2"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 1v3M10 1v3M14 1v3"/></svg></div>
+            <div><div class="est-val" id="ev2">15</div><div class="est-lbl" id="el2">DE FRANCO<br><span style="font-size:9px">estimado</span></div></div>
+          </div>
+          <div class="compliance-card" id="ec3">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px" id="el3-lbl">Cumplimiento</div>
+            <div class="compliance-val" id="cv3">72.6%</div>
+            <div style="font-size:10px" id="el3-sub">Por debajo del umbral</div>
+          </div>
+        </div>
+
+        <!-- DISTRIBUCIÓN HORAS SLA -->
+        <div class="sec-lbl" id="sec-lbl3">Distribución de Horas SLA — Mes Actual</div>
+        <div class="charts-row">
+          <div class="chart-card" id="chart0">
+            <div class="chart-title" id="ct0">Ausentismo por tipo</div>
+            <div class="chart-sub" id="cs0">Últimos 6 meses · días</div>
+            <div class="bars" id="bars-area"></div>
+            <div style="display:flex;gap:6px;margin-top:4px" id="bars-labels"></div>
+          </div>
+          <div class="chart-card" id="chart1">
+            <div class="chart-title" id="ct1">Horas SLA por turno</div>
+            <div class="chart-sub" id="cs1">Mes actual · 9.323 hs totales</div>
+            <div style="display:flex;gap:16px;align-items:center;margin-top:8px">
+              <svg width="90" height="90" viewBox="0 0 90 90">
+                <circle cx="45" cy="45" r="34" fill="none" id="donut-bg" stroke-width="15"/>
+                <circle cx="45" cy="45" r="34" fill="none" id="donut-1" stroke-width="15" stroke-dasharray="65 148" stroke-dashoffset="0" transform="rotate(-90 45 45)"/>
+                <circle cx="45" cy="45" r="34" fill="none" id="donut-2" stroke-width="15" stroke-dasharray="43 148" stroke-dashoffset="-65" transform="rotate(-90 45 45)"/>
+                <circle cx="45" cy="45" r="34" fill="none" id="donut-3" stroke-width="15" stroke-dasharray="25 148" stroke-dashoffset="-108" transform="rotate(-90 45 45)"/>
+                <circle cx="45" cy="45" r="34" fill="none" id="donut-4" stroke-width="15" stroke-dasharray="15 148" stroke-dashoffset="-133" transform="rotate(-90 45 45)"/>
+              </svg>
+              <div style="display:flex;flex-direction:column;gap:6px" id="donut-legend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LICENCIAS -->
+        <div class="sec-lbl" id="sec-lbl4">Licencias Activas Hoy</div>
+        <div class="lic-card" id="lic-card">
+          <div class="lic-row" id="lr0">
+            <div class="lic-av" id="la0">A</div>
+            <span class="lic-name" id="ln0">ARAYA, SANTIAGO EMANUEL</span>
+            <span style="font-size:10px;margin-right:10px" id="ld0">2026-05-22 — 2026-05-22</span>
+            <span class="lic-tag" id="lt0">Injustificada</span>
+          </div>
+          <div class="lic-row" id="lr1">
+            <div class="lic-av" id="la1">N</div>
+            <span class="lic-name" id="ln1">NAVARRO ASTRADA, ROXANA GABRIELA</span>
+            <span style="font-size:10px;margin-right:10px" id="ld1">2026-05-22 — 2026-05-22</span>
+            <span class="lic-tag" id="lt1">Injustificada</span>
+          </div>
+          <div class="lic-row" id="lr2">
+            <div class="lic-av" id="la2">S</div>
+            <span class="lic-name" id="ln2">SOSA, OSCAR EDUARDO</span>
+            <span style="font-size:10px;margin-right:10px" id="ld2">2026-05-22 — 2026-05-22</span>
+            <span class="lic-tag" id="lt2">Injustificada</span>
+          </div>
+          <div class="lic-row" id="lr3">
+            <div class="lic-av" id="la3">F</div>
+            <span class="lic-name" id="ln3">FLORES, FERNANDO DEL VALLE</span>
+            <span style="font-size:10px;margin-right:10px" id="ld3">2026-05-22 — 2026-05-22</span>
+            <span class="lic-tag" id="lt3">Injustificada</span>
+          </div>
+        </div>
+
+      </div><!-- /content -->
+    </div>
+  </div><!-- /app -->
+</div><!-- /browser -->
+
+<div id="footer-note">
+  ☝ Este mockup es solo visual — ningún código operativo fue modificado.<br>
+  El sistema de colores usa tonos generados desde el color base de empresa.<br>
+  En producción, Cursor aplicará los tokens CSS correspondientes.
+</div>
+
+<script>
+// ── Color utilities ──
+function hexToHsl(hex){
+  let r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b);
+  let h,s,l=(max+min)/2;
+  if(max===min){h=s=0}else{
+    const d=max-min;s=l>.5?d/(2-max-min):d/(max+min);
+    switch(max){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;case b:h=(r-g)/d+4;break}
+    h/=6;
+  }
+  return[Math.round(h*360),Math.round(s*100),Math.round(l*100)];
+}
+function hslToHex(h,s,l){
+  s/=100;l/=100;
+  const a=s*Math.min(l,1-l);
+  const f=n=>{const k=(n+h/30)%12;const color=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*color).toString(16).padStart(2,'0')};
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function generatePalette(hex){
+  const[h,s,l]=hexToHsl(hex);
+  return {
+    50:  hslToHex(h,Math.max(s-20,10),97),
+    100: hslToHex(h,Math.max(s-15,15),93),
+    200: hslToHex(h,Math.max(s-10,20),86),
+    300: hslToHex(h,s,74),
+    400: hslToHex(h,s,62),
+    500: hex,
+    600: hslToHex(h,Math.min(s+5,100),Math.max(l-10,10)),
+    700: hslToHex(h,Math.min(s+8,100),Math.max(l-22,8)),
+    900: hslToHex(h,Math.min(s+10,100),Math.max(l-36,5)),
+  };
+}
+
+// ── State ──
+let currentTheme='oscuro';
+let currentColor='#f97316';
+let currentPalette=generatePalette(currentColor);
+
+// ── Themes ──
+const themes={
+  claro:{
+    '--app-bg':'#f1f0ef',
+    '--surf':'#ffffff',
+    '--surf2':'#f5f4f2',
+    '--surf3':'#ebebeb',
+    '--sb-bg':'#ffffff',
+    '--sb-border':'rgba(0,0,0,.08)',
+    '--top-bg':'#ffffff',
+    '--top-border':'rgba(0,0,0,.08)',
+    '--txt':'#111111',
+    '--txt2':'#555555',
+    '--txt3':'#999999',
+    '--border':'rgba(0,0,0,.07)',
+    '--border2':'rgba(0,0,0,.13)',
+    '--scroll-thumb':'rgba(0,0,0,.12)',
+  },
+  oscuro:{
+    '--app-bg':'#09090b',
+    '--surf':'#111113',
+    '--surf2':'#18181b',
+    '--surf3':'#1c1c1f',
+    '--sb-bg':'#111113',
+    '--sb-border':'rgba(255,255,255,.07)',
+    '--top-bg':'#111113',
+    '--top-border':'rgba(255,255,255,.07)',
+    '--txt':'#f4f4f5',
+    '--txt2':'#a1a1aa',
+    '--txt3':'#52525b',
+    '--border':'rgba(255,255,255,.07)',
+    '--border2':'rgba(255,255,255,.13)',
+    '--scroll-thumb':'rgba(255,255,255,.08)',
+  },
+  contraste:{
+    '--app-bg':'#000000',
+    '--surf':'#0a0a0a',
+    '--surf2':'#111111',
+    '--surf3':'#181818',
+    '--sb-bg':'#000000',
+    '--sb-border':'rgba(255,255,255,.15)',
+    '--top-bg':'#000000',
+    '--top-border':'rgba(255,255,255,.15)',
+    '--txt':'#ffffff',
+    '--txt2':'#cccccc',
+    '--txt3':'#888888',
+    '--border':'rgba(255,255,255,.12)',
+    '--border2':'rgba(255,255,255,.22)',
+    '--scroll-thumb':'rgba(255,255,255,.15)',
+  },
+  custom:{
+    '--app-bg':'#0d0d12',
+    '--surf':'#14141a',
+    '--surf2':'#1a1a22',
+    '--surf3':'#1f1f28',
+    '--sb-bg':'#0d0d12',
+    '--sb-border':'rgba(255,255,255,.09)',
+    '--top-bg':'#14141a',
+    '--top-border':'rgba(255,255,255,.09)',
+    '--txt':'#f0f0f8',
+    '--txt2':'#9898b0',
+    '--txt3':'#555568',
+    '--border':'rgba(255,255,255,.09)',
+    '--border2':'rgba(255,255,255,.16)',
+    '--scroll-thumb':'rgba(255,255,255,.1)',
+  }
+};
+
+function applyThemeAndColor(){
+  const th=themes[currentTheme];
+  const pal=currentPalette;
+  const isLight=currentTheme==='claro';
+  const isHC=currentTheme==='contraste';
+
+  // company-color derived
+  const cAccentBg=isLight?pal[100]:isHC?pal[900]+`aa`:pal[900];
+  const cAccentTxt=isLight?pal[700]:pal[300];
+  const cActiveBg=isLight?pal[100]:pal[900];
+  const cActiveTxt=isLight?pal[600]:pal[300];
+  const cIconBg=isLight?pal[100]:pal[900]+'88';
+  const cIconTxt=isLight?pal[600]:pal[300];
+  const cBadgeBg=isLight?pal[100]:pal[900]+'88';
+  const cBadgeTxt=isLight?pal[700]:pal[300];
+  const cBorderTop=pal[500];
+  const cDot=pal[500];
+  const cOnlineBg=isLight?'rgba(34,197,94,.12)':'rgba(34,197,94,.12)';
+  const cOnlineTxt=isLight?'#15803d':'#4ade80';
+  const cOnlineDot='#22c55e';
+  const cEmpresaBg=isLight?pal[50]:pal[900]+'55';
+  const cEmpresaTxt=isLight?pal[700]:pal[200];
+  const cEmpresaBorder=isLight?pal[200]:pal[700]+'55';
+  const cKpiBorderTop=pal[500];
+
+  // apply theme vars to #app
+  const app=document.getElementById('app');
+  const all={...th,
+    '--c-active':isLight?pal[100]:pal[900]+'88',
+    '--c-active-txt':isLight?pal[600]:pal[300],
+  };
+  for(const[k,v] of Object.entries(all)){
+    app.style.setProperty(k,v);
+  }
+
+  // app background
+  app.style.background=th['--app-bg'];
+
+  // sidebar
+  const sb=document.getElementById('sb');
+  sb.style.background=th['--sb-bg'];
+  sb.style.borderRightColor=th['--sb-border'];
+
+  // sb logo
+  const sbl=document.getElementById('sb-logo-icon');
+  sbl.style.background=`linear-gradient(135deg,${pal[500]},${pal[600]})`;
+
+  // sb items
+  const sbItems=[0,2,3,4,5,6];
+  sbItems.forEach(i=>{
+    const el=document.getElementById('sbi-'+i);
+    if(!el)return;
+    el.style.background='transparent';
+    el.style.color=th['--txt3'];
+  });
+  // active item
+  const act=document.getElementById('sbi-1');
+  act.style.background=cActiveBg;
+  act.style.color=cActiveTxt;
+  const ic=document.getElementById('sbi1-ic');
+  if(ic)ic.style.stroke=cActiveTxt;
+
+  // sb avatar
+  const av=document.getElementById('sb-av');
+  av.style.background=`linear-gradient(135deg,${pal[500]},${pal[700]})`;
+  av.style.borderTopColor=th['--sb-border'];
+
+  // sb bottom border
+  sb.querySelector('.sb-bottom').style.borderTopColor=th['--sb-border'];
+  sb.querySelector('.sb-logo-wrap').style.borderBottomColor=th['--sb-border'];
+
+  // topbar
+  const top=document.getElementById('top');
+  top.style.background=th['--top-bg'];
+  top.style.borderBottomColor=th['--top-border'];
+
+  document.getElementById('top-title').style.color=th['--txt'];
+  const topBadge=document.getElementById('top-badge');
+  topBadge.style.background=cBadgeBg;
+  topBadge.style.color=cBadgeTxt;
+  topBadge.style.border=`1px solid ${pal[isLight?200:700]}55`;
+
+  const topOnline=document.getElementById('top-online');
+  topOnline.style.background=cOnlineBg;
+  topOnline.style.color=cOnlineTxt;
+  topOnline.style.border=`1px solid rgba(34,197,94,.25)`;
+  document.getElementById('online-dot').style.background=cOnlineDot;
+
+  const topEmp=document.getElementById('top-empresa');
+  topEmp.style.background=cEmpresaBg;
+  topEmp.style.color=cEmpresaTxt;
+  topEmp.style.borderColor=cEmpresaBorder;
+  document.getElementById('empresa-dot').style.background=pal[500];
+  document.getElementById('empresa-name').style.color=isLight?pal[700]:pal[200];
+  document.getElementById('user-name').style.color=th['--txt2'];
+
+  // content bg
+  const content=document.getElementById('content');
+  content.style.background=th['--app-bg'];
+  content.style.setProperty('scrollbar-color',`${th['--scroll-thumb']} transparent`);
+
+  // page heading
+  document.getElementById('ph-title').style.color=th['--txt'];
+  document.getElementById('ph-sub').style.color=th['--txt3'];
+  const phIcon=document.getElementById('ph-icon');
+  phIcon.style.background=cIconBg;
+  phIcon.style.color=cIconTxt;
+  document.getElementById('page-heading').style.borderBottomColor=th['--border'];
+  const phBadge=document.getElementById('ph-badge');
+  phBadge.style.background=cBadgeBg;
+  phBadge.style.color=cBadgeTxt;
+  phBadge.style.border=`1px solid ${pal[isLight?200:700]}55`;
+  phBadge.style.padding='2px 8px';phBadge.style.borderRadius='4px';phBadge.style.fontSize='10px';
+  document.getElementById('live-dot').style.background=cOnlineDot;
+  document.getElementById('ph-live').style.color=cOnlineTxt;
+
+  // section labels
+  ['sec-lbl1','sec-lbl2','sec-lbl3','sec-lbl4'].forEach(id=>{
+    document.getElementById(id).style.color=th['--txt3'];
+  });
+
+  // KPI cards
+  for(let i=0;i<4;i++){
+    const card=document.getElementById('kc'+i);
+    card.style.background=th['--surf'];
+    card.style.borderColor=th['--border'];
+    card.style.setProperty('--before-bg',cKpiBorderTop);
+    // top border strip via inline style hack
+    card.style.boxShadow=`inset 0 2px 0 ${pal[isLight?400:500]}`;
+
+    const ki=document.getElementById('ki'+i);
+    ki.style.background=cIconBg;
+    ki.style.color=cIconTxt;
+
+    document.getElementById('kv'+i).style.color=th['--txt'];
+    document.getElementById('kl'+i+'-lbl').style.color=th['--txt3'];
+    document.getElementById('ks'+i).style.color=th['--txt3'];
+  }
+
+  // estado cards
+  for(let i=0;i<3;i++){
+    const ec=document.getElementById('ec'+i);
+    ec.style.background=th['--surf'];
+    ec.style.borderColor=th['--border'];
+    const ei=document.getElementById('ei'+i);
+    ei.style.background=cIconBg;
+    ei.style.color=cIconTxt;
+    document.getElementById('ev'+i).style.color=th['--txt'];
+    document.getElementById('el'+i).style.color=th['--txt3'];
+  }
+  // compliance card
+  const cc=document.getElementById('ec3');
+  cc.style.background=isLight?'#fff5f5':isHC?'#180000':'rgba(239,68,68,.06)';
+  cc.style.borderColor=isLight?'rgba(239,68,68,.3)':'rgba(239,68,68,.25)';
+  document.getElementById('el3-lbl').style.color=isLight?'#991b1b':'#f87171';
+  document.getElementById('cv3').style.color=isLight?'#dc2626':'#f87171';
+  document.getElementById('el3-sub').style.color=isLight?'#dc2626':'rgba(248,113,113,.7)';
+
+  // charts
+  for(let i=0;i<2;i++){
+    const ch=document.getElementById('chart'+i);
+    ch.style.background=th['--surf'];
+    ch.style.borderColor=th['--border'];
+    document.getElementById('ct'+i).style.color=th['--txt'];
+    document.getElementById('cs'+i).style.color=th['--txt3'];
+  }
+
+  // rebuild bars
+  buildBars(pal, th, isLight);
+  buildDonut(pal, th, isLight);
+
+  // licencias
+  const licCard=document.getElementById('lic-card');
+  licCard.style.background=th['--surf'];
+  licCard.style.borderColor=th['--border'];
+  for(let i=0;i<4;i++){
+    const lr=document.getElementById('lr'+i);
+    lr.style.borderBottomColor=th['--border'];
+    const la=document.getElementById('la'+i);
+    la.style.background=`linear-gradient(135deg,${pal[isLight?500:600]},${pal[isLight?600:700]})`;
+    document.getElementById('ln'+i).style.color=th['--txt'];
+    document.getElementById('ld'+i).style.color=th['--txt3'];
+    const lt=document.getElementById('lt'+i);
+    lt.style.background=isLight?pal[100]:pal[900]+'66';
+    lt.style.color=isLight?pal[700]:pal[300];
+    lt.style.border=`1px solid ${isLight?pal[200]:pal[700]+'44'}`;
+  }
+
+  // update palette strip
+  updatePaletteStrip(pal);
+  updatePaletteMini(pal);
+
+  // theme label
+  const thNames={claro:'Claro',oscuro:'Oscuro',contraste:'Contraste',custom:'Personalizado'};
+  const[hh,,]=hexToHsl(currentColor);
+  const cName=hh<30||hh>330?'Naranja/Rojo':hh<60?'Amarillo':hh<150?'Verde':hh<200?'Teal/Cyan':hh<270?'Azul/Índigo':hh<300?'Violeta':'Rosa';
+  document.getElementById('theme-name').textContent=`${thNames[currentTheme]} · ${cName}`;
+}
+
+function buildBars(pal,th,isLight){
+  const ba=document.getElementById('bars-area');
+  const bl=document.getElementById('bars-labels');
+  ba.innerHTML='';bl.innerHTML='';
+  const data=[{l:'Dic',v:8},{l:'Ene',v:12},{l:'Feb',v:9},{l:'Mar',v:14},{l:'Abr',v:7},{l:'May',v:5}];
+  const maxV=Math.max(...data.map(d=>d.v));
+  const opacities=[.35,.45,.55,.65,.75,.9];
+  data.forEach((d,i)=>{
+    const col=document.createElement('div');
+    col.className='bar-row';
+    const bar=document.createElement('div');
+    bar.className='bar';
+    bar.style.height=(d.v/maxV*100)+'%';
+    const baseHex=pal[isLight?500:400];
+    bar.style.background=baseHex;
+    bar.style.opacity=opacities[i];
+    col.appendChild(bar);
+    const lbl=document.createElement('div');
+    lbl.className='bar-lbl';lbl.textContent=d.l;
+    lbl.style.color=th['--txt3'];
+    col.appendChild(lbl);
+    ba.appendChild(col);
+    ba.style.alignItems='flex-end';
+  });
+}
+
+function buildDonut(pal,th,isLight){
+  const colors=[pal[isLight?500:400],pal[isLight?400:300],pal[isLight?600:600],pal[isLight?300:200]];
+  const ids=['donut-1','donut-2','donut-3','donut-4'];
+  ids.forEach((id,i)=>{ const el=document.getElementById(id);if(el)el.style.stroke=colors[i]; });
+  const bg=document.getElementById('donut-bg');
+  if(bg)bg.style.stroke=th['--surf2'];
+
+  const legend=document.getElementById('donut-legend');
+  const items=[{l:'Mañana',v:'5.569 hs'},{l:'Noche',v:'3.375 hs'},{l:'Tarde',v:'Plus ferias'},{l:'Guardias',v:'379 hs'}];
+  legend.innerHTML='';
+  items.forEach((it,i)=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:6px;font-size:11px';
+    row.style.color=th['--txt2'];
+    const dot=document.createElement('div');
+    dot.style.cssText=`width:8px;height:8px;border-radius:2px;flex-shrink:0;background:${colors[i]}`;
+    const txt=document.createElement('span');
+    txt.textContent=it.l;
+    const val=document.createElement('span');
+    val.style.cssText=`font-weight:700;margin-left:4px;color:${th['--txt']}`;
+    val.textContent=it.v;
+    row.appendChild(dot);row.appendChild(txt);row.appendChild(val);
+    legend.appendChild(row);
+  });
+}
+
+function updatePaletteStrip(pal){
+  const steps=['50','100','200','300','400','500','600','700','900'];
+  const labels=['50','100','200','300','400','500\nBase','600','700','900'];
+  steps.forEach((k,i)=>{
+    const el=document.getElementById('ps'+i);
+    if(!el)return;
+    el.style.background=pal[k];
+    el.textContent=labels[i].replace('\n',' ');
+    // decide text color based on lightness
+    const[,, l]=hexToHsl(pal[k]);
+    el.classList.toggle('dark-text', l>55);
+    el.classList.toggle('light-text', l<=55);
+    if(l<=55)el.style.color='rgba(255,255,255,.55)';
+    else el.style.color='rgba(0,0,0,.45)';
+  });
+}
+
+function updatePaletteMini(pal){
+  const pm=document.getElementById('palette-mini');
+  pm.innerHTML='';
+  const steps=['200','400','500','600','800'];
+  steps.forEach(k=>{
+    const d=document.createElement('div');
+    d.style.cssText=`width:18px;height:18px;border-radius:4px;background:${pal[k]||pal[900]}`;
+    pm.appendChild(d);
+  });
+}
+
+function setTheme(t){
+  currentTheme=t;
+  document.querySelectorAll('.th-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('btn-'+t).classList.add('active');
+  // show/hide custom controls
+  document.getElementById('custom-group').style.opacity=t==='custom'?'1':'0.4';
+  applyThemeAndColor();
+}
+
+function setColor(hex, el){
+  currentColor=hex;
+  currentPalette=generatePalette(hex);
+  document.querySelectorAll('.sw').forEach(s=>s.classList.remove('active'));
+  el.classList.add('active');
+  // sync hue slider
+  const[h]=hexToHsl(hex);
+  document.getElementById('hue-slider').value=h;
+  document.getElementById('custom-preview').style.background=hex;
+  document.getElementById('hue-label').textContent=`Hue ${h}°`;
+  applyThemeAndColor();
+}
+
+function applyHue(hue){
+  // generate a vivid color from hue
+  const hex=hslToHex(Number(hue),75,50);
+  currentColor=hex;
+  currentPalette=generatePalette(hex);
+  document.getElementById('custom-preview').style.background=hex;
+  document.getElementById('hue-label').textContent=`Hue ${hue}°`;
+  // deselect presets
+  document.querySelectorAll('.sw').forEach(s=>s.classList.remove('active'));
+  applyThemeAndColor();
+}
+
+// ── init ──
+document.getElementById('custom-group').style.opacity='0.4';
+applyThemeAndColor();
+</script>
+</body>
+</html>

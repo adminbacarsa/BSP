@@ -273,7 +273,7 @@ export default function EmployeesPage() {
             <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium">Gestión de Legajos y Dotación.</p>
           </div>
           {view === 'list' && (
-            <button onClick={openNew} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-xl hover:scale-105 transition-all flex gap-2">
+            <button onClick={openNew} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-sm hover:scale-105 transition-all flex gap-2">
               <Plus size={16}/> Nuevo Legajo
             </button>
           )}
@@ -282,7 +282,7 @@ export default function EmployeesPage() {
         {view === 'list' && (
           <>
             {/* BARRA DE BÚSQUEDA */}
-            <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-700 flex items-center gap-4 shadow-sm">
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 flex items-center gap-4 shadow-sm">
               <Search className="text-slate-400 shrink-0"/>
               <input
                 placeholder="Buscar por nombre, apellido, legajo o email..."
@@ -296,7 +296,7 @@ export default function EmployeesPage() {
             </div>
 
             {/* PANEL DE ACCESO AL PORTAL */}
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border dark:border-slate-700 shadow-sm overflow-hidden">
+            <div className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 shadow-sm overflow-hidden">
               <div className="p-4 border-b dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg flex items-center justify-center">
@@ -351,7 +351,7 @@ export default function EmployeesPage() {
                     <div
                       key={emp.id}
                       onClick={() => emp.id && toggleSelect(emp.id)}
-                      className={`bg-white dark:bg-slate-800 p-5 rounded-[2rem] border-2 shadow-sm hover:shadow-md transition-all cursor-pointer group relative overflow-hidden
+                      className={`bg-white dark:bg-slate-800 p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-all cursor-pointer group relative overflow-hidden
                         ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-200 dark:ring-indigo-800' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-200'}`}
                     >
                       {/* Checkbox */}
@@ -438,15 +438,15 @@ export default function EmployeesPage() {
               <button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs">Cancelar</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Apellido</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Apellido</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })}/></div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">DNI</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.dni} onChange={e => setForm({ ...form, dni: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Legajo</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.fileNumber} onChange={e => setForm({ ...form, fileNumber: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">DNI</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.dni} onChange={e => setForm({ ...form, dni: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Legajo</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.fileNumber} onChange={e => setForm({ ...form, fileNumber: e.target.value })}/></div>
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Categoría</label>
-                <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
                   <option value="Vigilador">Vigilador</option>
                   <option value="Supervisor">Supervisor</option>
                   <option value="Monitoreo">Monitoreo</option>
@@ -455,23 +455,23 @@ export default function EmployeesPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Email</label><input type="email" className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Teléfono</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Email</label><input type="email" className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}/></div>
+              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Teléfono</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}/></div>
             </div>
 
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-3xl border dark:border-slate-700 mb-6">
+            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border dark:border-slate-700 mb-6">
               <h3 className="text-sm font-black uppercase text-indigo-500 mb-4 flex items-center gap-2"><MapPin size={16}/> Dotación Fija (Objetivo Preferido)</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label>
-                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.preferredClientId || ''} onChange={e => setForm({ ...form, preferredClientId: e.target.value, preferredObjectiveId: '' })}>
+                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.preferredClientId || ''} onChange={e => setForm({ ...form, preferredClientId: e.target.value, preferredObjectiveId: '' })}>
                     <option value="">- Sin Asignar -</option>
                     {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.razonSocial}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label>
-                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-2xl font-bold" value={form.preferredObjectiveId || ''} onChange={e => setForm({ ...form, preferredObjectiveId: e.target.value })} disabled={!form.preferredClientId}>
+                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.preferredObjectiveId || ''} onChange={e => setForm({ ...form, preferredObjectiveId: e.target.value })} disabled={!form.preferredClientId}>
                     <option value="">- Sin Asignar -</option>
                     {filteredObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>
@@ -480,7 +480,7 @@ export default function EmployeesPage() {
             </div>
 
             <div className="flex justify-end pt-6 border-t dark:border-slate-700">
-              <button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-xl hover:scale-105 transition-transform">
+              <button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm hover:scale-105 transition-transform">
                 Guardar Legajo
               </button>
             </div>

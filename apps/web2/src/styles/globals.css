@@ -151,6 +151,7 @@
 
 /* ── ZINC (Personalizado) ────────────────────────────────────── */
 .theme-custom {
+  color-scheme: dark;
   --sb-bg:          #18181b;
   --sb-border:      #27272a;
   --sb-text:        #d4d4d8;
@@ -282,6 +283,25 @@ body:not(.dark) .text-slate-400 { color: #64748b; }
 .theme-custom body { background-color: #09090b !important; color: #fafafa !important; }
 .theme-custom ::-webkit-scrollbar-thumb { background: #3f3f46; }
 
+/* Zinc: sobreescribe fondos slate que activa la clase dark en módulos */
+.theme-custom .bg-slate-800,
+.theme-custom .bg-slate-900        { background-color: #18181b !important; }
+.theme-custom .bg-slate-700        { background-color: #27272a !important; }
+.theme-custom .bg-slate-600        { background-color: #3f3f46 !important; }
+.theme-custom .border-slate-700,
+.theme-custom .border-slate-800    { border-color: #3f3f46 !important; }
+.theme-custom .border-slate-600    { border-color: #52525b !important; }
+/* dark: variant overrides via .dark selector — también necesitan zinc */
+.theme-custom .dark\:bg-slate-800  { background-color: #18181b !important; }
+.theme-custom .dark\:bg-slate-900  { background-color: #09090b !important; }
+.theme-custom .dark\:bg-slate-700  { background-color: #27272a !important; }
+.theme-custom .dark\:border-slate-700 { border-color: #3f3f46 !important; }
+.theme-custom .dark\:text-white    { color: #fafafa !important; }
+.theme-custom .dark\:text-slate-100 { color: #f4f4f5 !important; }
+.theme-custom .dark\:text-slate-200 { color: #e4e4e7 !important; }
+.theme-custom .dark\:text-slate-300 { color: #d4d4d8 !important; }
+.theme-custom .dark\:text-slate-400 { color: #a1a1aa !important; }
+
 /* ═══════════════════════════════════════════════════════════════
    FIX CHROME DARK MODE — evita que el browser fuerce sus colores
    ═══════════════════════════════════════════════════════════════ */
@@ -302,6 +322,20 @@ input, select, textarea, button {
 ::-webkit-scrollbar-track    { background: transparent; }
 ::-webkit-scrollbar-thumb    { background: #cbd5e1; border-radius: 4px; }
 .dark ::-webkit-scrollbar-thumb { background: #334155; }
+
+/* ═══════════════════════════════════════════════════════════════
+   FOCUS RING — usa color de empresa en inputs del tema actual
+   ═══════════════════════════════════════════════════════════════ */
+input:focus, select:focus, textarea:focus {
+  border-color: var(--company-primary, #6366f1) !important;
+  box-shadow: 0 0 0 2px var(--company-primary-ring, rgba(99,102,241,0.2)) !important;
+}
+
+/* Texto muted y utilidades de tema */
+.text-muted { color: var(--txt3) !important; }
+.text-primary-theme { color: var(--txt) !important; }
+.bg-surf { background-color: var(--surf) !important; }
+.border-theme { border-color: var(--border) !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    IMPRESIÓN

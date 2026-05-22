@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COSP V1.0 — Dark Theme Mockup</title>
+<style>
+/* ── TOKENS ───────────────────────────────────────────────── */
+:root {
+  --bg:        #09090b;
+  --surf:      #111113;
+  --surf2:     #18181b;
+  --surf3:     #1c1c1f;
+  --border:    rgba(255,255,255,.07);
+  --border2:   rgba(255,255,255,.12);
+  --txt:       #f4f4f5;
+  --txt2:      #a1a1aa;
+  --txt3:      #52525b;
+  --accent:    #7c3aed;
+  --accent-l:  #a78bfa;
+  --accent-ll: #ede9fe;
+  --accent-d:  #5b21b6;
+  --green:     #22c55e;
+  --green-bg:  rgba(34,197,94,.12);
+  --red:       #ef4444;
+  --red-bg:    rgba(239,68,68,.12);
+  --amber:     #f59e0b;
+  --amber-bg:  rgba(245,158,11,.12);
+  --blue:      #3b82f6;
+  --blue-bg:   rgba(59,130,246,.12);
+  --sb-w:      56px;
+  --top-h:     48px;
+  --radius:    8px;
+  --radius-lg: 12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:13px;overflow:hidden;height:100vh}
+
+/* ── LAYOUT ──────────────────────────────────────────────── */
+#app{display:flex;height:100vh}
+
+/* ── SIDEBAR ─────────────────────────────────────────────── */
+#sb{
+  width:var(--sb-w);min-width:var(--sb-w);
+  background:var(--surf);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  padding:8px 0;
+  z-index:50;
+  transition:width .2s ease;
+  overflow:hidden;
+}
+#sb:hover{width:220px}
+#sb:hover .sb-label{opacity:1;width:auto;margin-left:10px}
+#sb:hover .sb-logo-text{opacity:1}
+.sb-logo{display:flex;align-items:center;padding:8px 14px 16px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.sb-logo-icon{width:28px;height:28px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
+.sb-logo-text{opacity:0;transition:opacity .2s;white-space:nowrap;margin-left:10px}
+.sb-logo-text strong{display:block;font-size:13px;color:var(--txt)}
+.sb-logo-text span{font-size:10px;color:var(--txt3)}
+.sb-item{
+  display:flex;align-items:center;
+  padding:9px 14px;margin:1px 6px;
+  border-radius:6px;cursor:pointer;
+  color:var(--txt2);transition:all .15s;
+  white-space:nowrap;
+}
+.sb-item:hover{background:var(--surf2);color:var(--txt)}
+.sb-item.active{background:rgba(124,58,237,.18);color:var(--accent-l)}
+.sb-item svg{width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sb-label{opacity:0;transition:opacity .2s;font-size:13px;width:0;overflow:hidden}
+.sb-bottom{margin-top:auto;padding:8px 6px;border-top:1px solid var(--border)}
+.sb-user{display:flex;align-items:center;padding:8px 8px;border-radius:6px;cursor:pointer}
+.sb-user:hover{background:var(--surf2)}
+.sb-avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-d);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff;flex-shrink:0}
+.sb-user-info{opacity:0;transition:opacity .2s;margin-left:8px;white-space:nowrap}
+#sb:hover .sb-user-info{opacity:1}
+
+/* ── MAIN ─────────────────────────────────────────────────── */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+/* ── TOPBAR ──────────────────────────────────────────────── */
+#top{
+  height:var(--top-h);min-height:var(--top-h);
+  background:var(--surf);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;
+  padding:0 16px;gap:10px;
+  z-index:40;
+}
+.top-title{font-size:14px;font-weight:600;color:var(--txt)}
+.top-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:rgba(124,58,237,.2);color:var(--accent-l);border:1px solid rgba(124,58,237,.3)}
+.top-badge.green{background:rgba(34,197,94,.15);color:#4ade80;border-color:rgba(34,197,94,.3)}
+.top-badge.amber{background:var(--amber-bg);color:var(--amber);border-color:rgba(245,158,11,.3)}
+.top-sep{flex:1}
+.top-empresa{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;background:var(--surf2);border:1px solid var(--border);cursor:pointer;font-size:12px}
+.top-empresa:hover{border-color:var(--border2)}
+.empresa-dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.top-online{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25);display:flex;align-items:center;gap:4px}
+.online-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.top-icon-btn{width:32px;height:32px;border-radius:6px;background:transparent;border:none;color:var(--txt2);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.top-icon-btn:hover{background:var(--surf2);color:var(--txt)}
+.top-icon-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── CONTENT ─────────────────────────────────────────────── */
+#content{flex:1;overflow-y:auto;overflow-x:hidden;background:var(--bg)}
+#content::-webkit-scrollbar{width:6px}
+#content::-webkit-scrollbar-track{background:transparent}
+#content::-webkit-scrollbar-thumb{background:var(--surf3);border-radius:3px}
+.screen{display:none;height:100%}
+.screen.active{display:flex;flex-direction:column;height:100%}
+
+/* ── SHARED COMPONENTS ───────────────────────────────────── */
+.page-pad{padding:20px}
+.section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--txt3);margin-bottom:12px}
+.card{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px}
+.card-sm{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:6px;border:none;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-d)}
+.btn-ghost{background:transparent;color:var(--txt2);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--surf2);color:var(--txt);border-color:var(--border2)}
+.btn-ghost.active-btn{background:rgba(124,58,237,.15);color:var(--accent-l);border-color:rgba(124,58,237,.3)}
+.btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.tag-green{background:var(--green-bg);color:#4ade80}
+.tag-red{background:var(--red-bg);color:#f87171}
+.tag-amber{background:var(--amber-bg);color:var(--amber)}
+.tag-blue{background:var(--blue-bg);color:#60a5fa}
+.tag-purple{background:rgba(124,58,237,.15);color:var(--accent-l)}
+input,select{background:var(--surf2);border:1px solid var(--border);border-radius:6px;color:var(--txt);padding:7px 10px;font-size:12px;outline:none}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(124,58,237,.2)}
+input::placeholder{color:var(--txt3)}
+
+/* ── NAV TABS ─────────────────────────────────────────────── */
+.nav-tabs{display:flex;gap:1px;border-bottom:1px solid var(--border);padding:0 20px;background:var(--surf)}
+.nav-tab{padding:10px 14px;font-size:12px;font-weight:500;color:var(--txt2);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.nav-tab:hover{color:var(--txt)}
+.nav-tab.active{color:var(--txt);border-bottom-color:var(--accent)}
+
+/* ═══════════════════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════════════════ */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.kpi-card{
+  background:var(--surf);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:16px;
+  display:flex;flex-direction:column;gap:10px;
+  position:relative;overflow:hidden;
+}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi-card.c-violet::before{background:var(--accent)}
+.kpi-card.c-green::before{background:var(--green)}
+.kpi-card.c-red::before{background:var(--red)}
+.kpi-card.c-blue::before{background:var(--blue)}
+.kpi-card.c-amber::before{background:var(--amber)}
+.kpi-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.kpi-icon svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.kpi-icon.vi{background:rgba(124,58,237,.15);color:var(--accent-l)}
+.kpi-icon.gr{background:var(--green-bg);color:#4ade80}
+.kpi-icon.re{background:var(--red-bg);color:#f87171}
+.kpi-icon.bl{background:var(--blue-bg);color:#60a5fa}
+.kpi-icon.am{background:var(--amber-bg);color:var(--amber)}
+.kpi-val{font-size:26px;font-weight:700;color:var(--txt);line-height:1}
+.kpi-label{font-size:11px;color:var(--txt2)}
+.kpi-sub{font-size:11px;color:var(--txt3);display:flex;align-items:center;gap:4px}
+.kpi-sub .up{color:var(--green)}
+.kpi-sub .dn{color:var(--red)}
+
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.chart-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px}
+.chart-title{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:4px}
+.chart-sub{font-size:11px;color:var(--txt3);margin-bottom:16px}
+.chart-area{height:140px;position:relative;display:flex;align-items:flex-end;gap:6px}
+.bar{flex:1;border-radius:4px 4px 0 0;transition:opacity .2s;min-height:4px}
+.bar:hover{opacity:.8}
+.chart-labels{display:flex;gap:6px;margin-top:6px}
+.chart-label{flex:1;text-align:center;font-size:9px;color:var(--txt3)}
+.donut-wrap{display:flex;align-items:center;justify-content:center;height:140px;gap:20px}
+.donut-legend{display:flex;flex-direction:column;gap:6px}
+.dl-item{display:flex;align-items:center;gap:6px;font-size:11px}
+.dl-dot{width:8px;height:8px;border-radius:2px}
+.dl-val{color:var(--txt2)}
+
+/* ═══════════════════════════════════════════════════════════
+   CENTRO DE CONTROL
+═══════════════════════════════════════════════════════════ */
+#cc-screen{flex-direction:row!important;height:calc(100vh - var(--top-h));overflow:hidden}
+.cc-map{flex:1;background:#0d1117;position:relative;overflow:hidden;border-right:1px solid var(--border)}
+.cc-map-inner{width:100%;height:100%;position:relative}
+.map-bg{width:100%;height:100%;background:
+  radial-gradient(circle at 30% 40%, rgba(124,58,237,.04) 0%, transparent 50%),
+  radial-gradient(circle at 70% 60%, rgba(59,130,246,.03) 0%, transparent 40%),
+  #0c0e12;
+}
+/* fake map grid lines */
+.map-grid{position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size:60px 60px;
+}
+.map-roads{position:absolute;inset:0;overflow:hidden}
+.map-overlay-top{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:flex-start}
+.map-search{flex:1;background:rgba(17,17,19,.9);border:1px solid var(--border);border-radius:8px;padding:7px 12px;color:var(--txt);font-size:12px;max-width:280px;backdrop-filter:blur(8px)}
+.map-legend{background:rgba(17,17,19,.9);border:1px solid var(--border);border-radius:8px;padding:8px 12px;backdrop-filter:blur(8px);display:flex;gap:12px}
+.ml-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--txt2)}
+.ml-dot{width:9px;height:9px;border-radius:50%}
+/* map pins */
+.mp{position:absolute;transform:translate(-50%,-50%);cursor:pointer}
+.mp-dot{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.3);position:relative}
+.mp-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1px solid currentColor;opacity:.3;animation:ping 2s ease-in-out infinite}
+@keyframes ping{0%{transform:scale(1);opacity:.3}100%{transform:scale(2);opacity:0}}
+.mp-label{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(17,17,19,.9);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:9px;color:var(--txt);white-space:nowrap;backdrop-filter:blur(4px)}
+
+/* CC right panel */
+.cc-panel{width:340px;min-width:340px;background:var(--surf);display:flex;flex-direction:column;overflow:hidden}
+.cc-panel-header{padding:14px 16px;border-bottom:1px solid var(--border)}
+.cc-panel-title{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:10px}
+.cc-counters{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.cc-counter{background:var(--surf2);border-radius:6px;padding:8px 4px;text-align:center;border:1px solid var(--border)}
+.cc-counter-val{font-size:18px;font-weight:700;color:var(--txt)}
+.cc-counter-lbl{font-size:9px;color:var(--txt3);font-weight:500;text-transform:uppercase;margin-top:2px}
+.cc-counter.c-green .cc-counter-val{color:#4ade80}
+.cc-counter.c-amber .cc-counter-val{color:var(--amber)}
+.cc-counter.c-red .cc-counter-val{color:#f87171}
+.cc-cliente-sel{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto}
+.cc-cliente-sel::-webkit-scrollbar{height:3px}
+.cc-cliente-sel::-webkit-scrollbar-thumb{background:var(--surf3)}
+.cc-clt-pill{padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;white-space:nowrap;border:1px solid var(--border);color:var(--txt2);background:transparent}
+.cc-clt-pill:hover{background:var(--surf2);color:var(--txt)}
+.cc-clt-pill.active{background:rgba(124,58,237,.18);color:var(--accent-l);border-color:rgba(124,58,237,.35)}
+.cc-table{flex:1;overflow-y:auto;padding:0}
+.cc-table::-webkit-scrollbar{width:4px}
+.cc-table::-webkit-scrollbar-thumb{background:var(--surf3)}
+.cc-table table{width:100%;border-collapse:collapse}
+.cc-table th{position:sticky;top:0;background:var(--surf2);font-size:10px;font-weight:600;color:var(--txt3);text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--border);text-align:center}
+.cc-table th:first-child{text-align:left;padding-left:14px}
+.cc-table td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;text-align:center;color:var(--txt2)}
+.cc-table td:first-child{text-align:left;padding-left:14px;color:var(--txt);font-weight:500}
+.cc-table tr:hover td{background:rgba(255,255,255,.02)}
+.cc-td-n{color:var(--txt2)}
+.cc-td-ok{color:#4ade80;font-weight:600}
+.cc-td-warn{color:var(--amber);font-weight:600}
+.cc-td-bad{color:#f87171;font-weight:600}
+
+/* ALERTAS overlay */
+.cc-alertas{
+  position:absolute;bottom:16px;right:16px;width:260px;
+  background:rgba(17,17,19,.92);border:1px solid var(--border);
+  border-radius:10px;backdrop-filter:blur(12px);
+  overflow:hidden;z-index:10;
+}
+.cc-alertas-header{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.cc-alertas-title{font-size:11px;font-weight:600;color:var(--txt);display:flex;align-items:center;gap:6px}
+.alert-count{background:var(--red-bg);color:#f87171;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;border:1px solid rgba(239,68,68,.3)}
+.cc-alert-item{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.04);display:flex;gap:8px;align-items:flex-start}
+.cc-alert-item:last-child{border-bottom:none}
+.alert-icon{width:7px;height:7px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.alert-txt{font-size:11px;color:var(--txt2);line-height:1.4}
+.alert-txt strong{color:var(--txt);display:block;font-size:11px}
+.alert-time{font-size:10px;color:var(--txt3);margin-top:2px}
+
+/* ═══════════════════════════════════════════════════════════
+   PLANIFICADOR
+═══════════════════════════════════════════════════════════ */
+.plan-toolbar{padding:10px 16px;background:var(--surf);border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.plan-toolbar-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plan-breadcrumb{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--txt3)}
+.plan-breadcrumb .bc-active{color:var(--txt);font-weight:600}
+.plan-breadcrumb svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2}
+.plan-diag{font-size:11px;color:var(--txt3);display:flex;gap:8px;align-items:center;padding:5px 10px;background:var(--surf2);border-radius:6px;border:1px solid var(--border)}
+.plan-diag span{color:var(--txt2)}
+.plan-toolbar-mid{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.plan-month-nav{display:flex;align-items:center;gap:4px}
+.plan-month-nav button{width:26px;height:26px;border-radius:5px;background:var(--surf2);border:1px solid var(--border);color:var(--txt2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px}
+.plan-month-nav button:hover{background:var(--surf3);color:var(--txt)}
+.plan-month-label{font-size:13px;font-weight:600;color:var(--txt);padding:0 8px;min-width:120px;text-align:center}
+.plan-shift-pills{display:flex;gap:4px;flex-wrap:wrap}
+.shl{padding:3px 9px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:opacity .15s}
+.shl:hover{opacity:.8}
+.shl-all{background:var(--surf2);color:var(--txt);border-color:var(--border)}
+.shl-M{background:#1d4ed8;color:#bfdbfe}
+.shl-T{background:#92400e;color:#fde68a}
+.shl-N{background:#312e81;color:#c7d2fe}
+.shl-D12{background:#164e63;color:#a5f3fc}
+.shl-N12{background:#4c1d95;color:#e9d5ff}
+.shl-RET{background:#78350f;color:#fde68a}
+.plan-actions{display:flex;gap:4px;margin-left:auto}
+.plan-grid-wrap{flex:1;overflow:auto;position:relative}
+.plan-grid-wrap::-webkit-scrollbar{width:6px;height:6px}
+.plan-grid-wrap::-webkit-scrollbar-track{background:transparent}
+.plan-grid-wrap::-webkit-scrollbar-thumb{background:var(--surf3);border-radius:3px}
+.plan-table{border-collapse:collapse;min-width:max-content}
+.plan-table th,.plan-table td{border:1px solid var(--border);white-space:nowrap}
+.plan-th-emp{
+  position:sticky;left:0;z-index:20;
+  background:var(--surf);
+  width:160px;min-width:160px;
+  padding:8px 12px;
+  font-size:11px;font-weight:600;color:var(--txt3);
+  text-transform:uppercase;letter-spacing:.05em;
+  border-right:1px solid var(--border2)!important;
+}
+.plan-th-day{
+  background:var(--surf);
+  width:38px;min-width:38px;
+  padding:6px 2px;text-align:center;
+  font-size:10px;font-weight:600;color:var(--txt3);
+}
+.plan-th-day.weekend{color:rgba(167,139,250,.7)}
+.plan-td-emp{
+  position:sticky;left:0;z-index:10;
+  background:var(--surf);
+  padding:4px 10px;
+  font-size:12px;color:var(--txt);font-weight:500;
+  border-right:1px solid var(--border2)!important;
+  min-width:160px;
+}
+.plan-td-emp:hover{background:var(--surf2)}
+.plan-td{
+  width:38px;min-width:38px;
+  height:32px;
+  text-align:center;vertical-align:middle;
+  font-size:11px;font-weight:700;
+  cursor:pointer;
+  transition:filter .1s;
+}
+.plan-td:hover{filter:brightness(1.3)}
+.plan-td.empty{background:transparent;color:transparent}
+/* shift colors */
+.sh-M  {background:rgba(29,78,216,.3);color:#93c5fd}
+.sh-T  {background:rgba(146,64,14,.35);color:#fcd34d}
+.sh-N  {background:rgba(49,46,129,.35);color:#a5b4fc}
+.sh-D12{background:rgba(22,78,99,.35);color:#67e8f9}
+.sh-N12{background:rgba(76,29,149,.35);color:#d8b4fe}
+.sh-F  {background:rgba(22,101,52,.4);color:#86efac}
+.sh-V  {background:rgba(15,118,110,.35);color:#5eead4}
+.sh-A  {background:rgba(153,27,27,.35);color:#fca5a5}
+.sh-FT {background:rgba(109,40,217,.4);color:#c4b5fd}
+.sh-RET{background:rgba(120,53,15,.4);color:#fcd34d}
+.sh-PG {background:rgba(3,105,161,.35);color:#7dd3fc}
+.sh-FF {background:rgba(124,58,237,.25);color:#c4b5fd}
+.plan-day-num{font-size:9px;display:block;opacity:.55;font-weight:400;margin-bottom:1px}
+/* plan totals row */
+.plan-td-tot{
+  background:var(--surf2);
+  padding:5px 10px;
+  font-size:11px;font-weight:600;color:var(--txt2);
+  position:sticky;bottom:0;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RRHH
+═══════════════════════════════════════════════════════════ */
+.rrhh-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:20px;height:calc(100vh - var(--top-h) - 42px);overflow-y:auto}
+.emp-card{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;display:flex;flex-direction:column;gap:10px}
+.emp-card:hover{border-color:var(--border2)}
+.emp-header{display:flex;align-items:center;gap:10px}
+.emp-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;flex-shrink:0}
+.emp-name{font-size:13px;font-weight:600;color:var(--txt)}
+.emp-role{font-size:11px;color:var(--txt3)}
+.emp-stats{display:flex;gap:8px}
+.emp-stat{flex:1;background:var(--surf2);border-radius:6px;padding:8px;text-align:center}
+.emp-stat-val{font-size:15px;font-weight:700;color:var(--txt)}
+.emp-stat-lbl{font-size:9px;color:var(--txt3);text-transform:uppercase}
+.emp-tags{display:flex;gap:4px;flex-wrap:wrap}
+
+/* ═══════════════════════════════════════════════════════════
+   CRM
+═══════════════════════════════════════════════════════════ */
+.crm-layout{display:grid;grid-template-columns:260px 1fr;height:calc(100vh - var(--top-h));overflow:hidden}
+.crm-list{border-right:1px solid var(--border);overflow-y:auto;padding:12px}
+.crm-list::-webkit-scrollbar{width:4px}
+.crm-list::-webkit-scrollbar-thumb{background:var(--surf3)}
+.crm-search{margin-bottom:12px}
+.crm-search input{width:100%}
+.crm-item{padding:10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid transparent}
+.crm-item:hover{background:var(--surf2)}
+.crm-item.active{background:rgba(124,58,237,.12);border-color:rgba(124,58,237,.25)}
+.crm-item-name{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:3px}
+.crm-item-meta{font-size:11px;color:var(--txt3);display:flex;justify-content:space-between}
+.crm-detail{overflow-y:auto;padding:20px}
+.crm-detail::-webkit-scrollbar{width:6px}
+.crm-detail::-webkit-scrollbar-thumb{background:var(--surf3)}
+.crm-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px}
+.crm-logo{width:48px;height:48px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;margin-bottom:8px}
+.crm-name{font-size:20px;font-weight:700;color:var(--txt)}
+.crm-sub{font-size:12px;color:var(--txt3)}
+.crm-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.crm-stat{background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:14px}
+.crm-stat-val{font-size:22px;font-weight:700;color:var(--txt)}
+.crm-stat-lbl{font-size:11px;color:var(--txt2);margin-top:3px}
+.crm-objetivos{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.crm-obj-row{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.04);gap:10px}
+.crm-obj-row:last-child{border-bottom:none}
+.crm-obj-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.crm-obj-name{flex:1;font-size:12px;color:var(--txt)}
+.crm-obj-meta{font-size:11px;color:var(--txt3);display:flex;gap:10px}
+
+/* ═══════════════════════════════════════════════════════════
+   REPORTES
+═══════════════════════════════════════════════════════════ */
+.rep-filters{padding:12px 20px;background:var(--surf);border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rep-table-wrap{padding:20px;overflow-y:auto}
+.data-table{width:100%;border-collapse:collapse}
+.data-table th{background:var(--surf);border:1px solid var(--border);padding:9px 12px;font-size:11px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;text-align:left;position:sticky;top:0}
+.data-table td{border:1px solid rgba(255,255,255,.04);padding:9px 12px;font-size:12px;color:var(--txt2)}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+.data-table td:first-child{color:var(--txt);font-weight:500}
+
+/* ═══════════════════════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════════════════════ */
+.config-layout{display:grid;grid-template-columns:200px 1fr;height:calc(100vh - var(--top-h));overflow:hidden}
+.config-nav{border-right:1px solid var(--border);padding:16px 8px;overflow-y:auto}
+.config-nav-item{padding:8px 12px;border-radius:6px;font-size:12px;color:var(--txt2);cursor:pointer;margin-bottom:2px;display:flex;align-items:center;gap:8px}
+.config-nav-item:hover{background:var(--surf2);color:var(--txt)}
+.config-nav-item.active{background:rgba(124,58,237,.15);color:var(--accent-l)}
+.config-nav-item svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.config-content{overflow-y:auto;padding:24px}
+.config-section{max-width:560px}
+.config-section h2{font-size:16px;font-weight:600;color:var(--txt);margin-bottom:4px}
+.config-section p{font-size:12px;color:var(--txt3);margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.form-row{margin-bottom:14px}
+.form-label{font-size:11px;font-weight:500;color:var(--txt2);margin-bottom:5px;display:block}
+.form-row input,.form-row select{width:100%}
+.form-hint{font-size:11px;color:var(--txt3);margin-top:4px}
+.empresa-color-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.color-swatch{width:28px;height:28px;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:transform .1s}
+.color-swatch:hover{transform:scale(1.1)}
+.color-swatch.selected{border-color:var(--txt)}
+
+/* ═══════════════════════════════════════════════════════════
+   MODALS
+═══════════════════════════════════════════════════════════ */
+.modal-backdrop{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.7);
+  backdrop-filter:blur(4px);
+  z-index:100;
+  display:none;align-items:center;justify-content:center;
+}
+.modal-backdrop.open{display:flex}
+.modal{
+  background:var(--surf);
+  border:1px solid var(--border2);
+  border-radius:14px;
+  width:480px;max-width:95vw;
+  max-height:85vh;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  box-shadow:0 24px 80px rgba(0,0,0,.6);
+}
+.modal-header{padding:16px 20px;display:flex;justify-content:space-between;align-items:flex-start}
+.modal-header.h-emerald{background:linear-gradient(135deg,#064e3b,#065f46)}
+.modal-header.h-rose{background:linear-gradient(135deg,#881337,#9f1239)}
+.modal-header.h-purple{background:linear-gradient(135deg,#2e1065,#3b0764)}
+.modal-header.h-amber{background:linear-gradient(135deg,#78350f,#92400e)}
+.modal-h-title{font-size:15px;font-weight:700;color:#fff;margin-bottom:3px}
+.modal-h-sub{font-size:11px;color:rgba(255,255,255,.65)}
+.modal-close{width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,.1);border:none;color:#fff;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.modal-close:hover{background:rgba(255,255,255,.2)}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+.modal-body::-webkit-scrollbar{width:4px}
+.modal-body::-webkit-scrollbar-thumb{background:var(--surf3)}
+.ctx-box{background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ctx-item{font-size:11px}
+.ctx-lbl{color:var(--txt3);display:block;margin-bottom:2px}
+.ctx-val{color:var(--txt);font-weight:500}
+.guard-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05);gap:10px}
+.guard-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff;flex-shrink:0}
+.guard-info{flex:1}
+.guard-name{font-size:12px;font-weight:600;color:var(--txt)}
+.guard-meta{font-size:11px;color:var(--txt3)}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+.cov-section{margin-bottom:16px}
+.cov-sec-title{font-size:11px;font-weight:600;color:var(--txt2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.cov-sec-num{width:18px;height:18px;border-radius:50%;background:var(--surf3);font-size:10px;font-weight:700;color:var(--txt3);display:flex;align-items:center;justify-content:center}
+.cov-row{display:flex;align-items:center;padding:8px 10px;background:var(--surf2);border-radius:7px;margin-bottom:4px;gap:8px}
+.cov-name{flex:1;font-size:12px;color:var(--txt)}
+.cov-sub{font-size:11px;color:var(--txt3);display:block}
+.btn-wa{background:rgba(37,211,102,.15);color:#25d366;border:1px solid rgba(37,211,102,.25);padding:5px 9px;border-radius:5px;font-size:11px;cursor:pointer;border:1px solid rgba(37,211,102,.25)}
+.btn-assign{background:var(--green-bg);color:#4ade80;border:1px solid rgba(34,197,94,.25);padding:5px 9px;border-radius:5px;font-size:11px;cursor:pointer}
+
+/* ── NAV PILLS (screen switcher) ─────────────────────────── */
+#nav-pills{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:rgba(17,17,19,.95);border:1px solid var(--border2);
+  border-radius:30px;padding:6px 10px;display:flex;gap:4px;
+  backdrop-filter:blur(16px);z-index:200;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+}
+.np{padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;color:var(--txt2);border:none;background:transparent;transition:all .15s;white-space:nowrap}
+.np:hover{color:var(--txt);background:var(--surf2)}
+.np.active{background:var(--accent);color:#fff}
+
+/* ── SVG ICONS ───────────────────────────────────────────── */
+.ic{display:inline-flex;align-items:center;justify-content:center}
+.ic svg{stroke:currentColor;fill:none;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <aside id="sb">
+    <div class="sb-logo">
+      <div class="sb-logo-icon">C</div>
+      <div class="sb-logo-text">
+        <strong>COSP V1.0</strong>
+        <span>Grupo Bacar</span>
+      </div>
+    </div>
+
+    <nav>
+      <div class="sb-item" onclick="showScreen('dashboard')" id="sbi-dashboard">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span class="sb-label">Dashboard</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('cc')" id="sbi-cc">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span class="sb-label">Centro Control</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('plan')" id="sbi-plan">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <span class="sb-label">Planificador</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('crm')" id="sbi-crm">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/></svg>
+        <span class="sb-label">CRM Clientes</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('rrhh')" id="sbi-rrhh">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        <span class="sb-label">RRHH</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('reportes')" id="sbi-reportes">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span class="sb-label">Reportes</span>
+      </div>
+      <div class="sb-item" onclick="showScreen('config')" id="sbi-config">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M20 12h2M2 12h2M17.66 17.66l-1.41-1.41M6.34 6.34L4.93 4.93"/></svg>
+        <span class="sb-label">Configuración</span>
+      </div>
+    </nav>
+
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">MA</div>
+        <div class="sb-user-info">
+          <div style="font-size:12px;font-weight:500;color:var(--txt)">Mauro Admin</div>
+          <div style="font-size:10px;color:var(--txt3)">SuperAdmin</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div id="main">
+    <!-- TOPBAR -->
+    <header id="top">
+      <button class="top-icon-btn">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="top-title" id="top-title">Dashboard</span>
+      <span class="top-badge">SuperAdmin</span>
+      <div style="flex:1"></div>
+      <div class="top-empresa">
+        <span class="empresa-dot"></span>
+        <span style="font-size:12px;color:var(--txt2)">Empresa:</span>
+        <span style="font-size:12px;font-weight:600;color:var(--txt)">Grupo Bacar</span>
+        <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--txt3);fill:none;stroke-width:2"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="top-online">
+        <span class="online-dot"></span>
+        ONLINE
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <div id="content">
+
+      <!-- ══════════ DASHBOARD ══════════ -->
+      <div class="screen active" id="screen-dashboard">
+        <div class="page-pad">
+          <!-- KPIs -->
+          <p class="section-title">Resumen Operacional</p>
+          <div class="kpi-grid">
+            <div class="kpi-card c-violet">
+              <div class="kpi-icon vi">
+                <svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8v4h8z"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">4</div>
+                <div class="kpi-label">Clientes activos</div>
+              </div>
+              <div class="kpi-sub"><span class="up">↑</span>+1 este mes</div>
+            </div>
+            <div class="kpi-card c-blue">
+              <div class="kpi-icon bl">
+                <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">18</div>
+                <div class="kpi-label">Objetivos</div>
+              </div>
+              <div class="kpi-sub">3 clientes</div>
+            </div>
+            <div class="kpi-card c-green">
+              <div class="kpi-icon gr">
+                <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">142</div>
+                <div class="kpi-label">Vigiladores</div>
+              </div>
+              <div class="kpi-sub"><span class="up">↑</span>128 activos</div>
+            </div>
+            <div class="kpi-card c-green">
+              <div class="kpi-icon gr">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val" style="color:#4ade80">124</div>
+                <div class="kpi-label">Presentes hoy</div>
+              </div>
+              <div class="kpi-sub"><span class="up">↑</span>87.3% cobertura</div>
+            </div>
+            <div class="kpi-card c-red">
+              <div class="kpi-icon re">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val" style="color:#f87171">5</div>
+                <div class="kpi-label">Vacantes</div>
+              </div>
+              <div class="kpi-sub"><span class="dn">↓</span>3.5% vacancia</div>
+            </div>
+            <div class="kpi-card c-amber">
+              <div class="kpi-icon am">
+                <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">46.2</div>
+                <div class="kpi-label">Hs prom. vigilador</div>
+              </div>
+              <div class="kpi-sub">semana actual</div>
+            </div>
+            <div class="kpi-card c-violet">
+              <div class="kpi-icon vi">
+                <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">91%</div>
+                <div class="kpi-label">Cobertura global</div>
+              </div>
+              <div class="kpi-sub"><span class="up">↑</span>+2% vs anterior</div>
+            </div>
+            <div class="kpi-card c-amber">
+              <div class="kpi-icon am">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+              </div>
+              <div>
+                <div class="kpi-val">3</div>
+                <div class="kpi-label">Licencias activas</div>
+              </div>
+              <div class="kpi-sub">1 médica · 2 art.</div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-row">
+            <div class="chart-card">
+              <div class="chart-title">Ausentismo por tipo</div>
+              <div class="chart-sub">Últimos 6 meses · Cantidad de días</div>
+              <div class="chart-area" id="bar-chart">
+                <!-- bars generated by JS -->
+              </div>
+              <div class="chart-labels" id="bar-labels"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Distribución de turnos</div>
+              <div class="chart-sub">Semana actual</div>
+              <div class="donut-wrap">
+                <svg width="110" height="110" viewBox="0 0 110 110">
+                  <circle cx="55" cy="55" r="40" fill="none" stroke="var(--surf2)" stroke-width="18"/>
+                  <!-- donut segments -->
+                  <circle cx="55" cy="55" r="40" fill="none" stroke="#1d4ed8" stroke-width="18" stroke-dasharray="75 176" stroke-dashoffset="0" transform="rotate(-90 55 55)" opacity=".85"/>
+                  <circle cx="55" cy="55" r="40" fill="none" stroke="#92400e" stroke-width="18" stroke-dasharray="50 176" stroke-dashoffset="-75" transform="rotate(-90 55 55)" opacity=".85"/>
+                  <circle cx="55" cy="55" r="40" fill="none" stroke="#312e81" stroke-width="18" stroke-dasharray="40 176" stroke-dashoffset="-125" transform="rotate(-90 55 55)" opacity=".85"/>
+                  <circle cx="55" cy="55" r="40" fill="none" stroke="#164e63" stroke-width="18" stroke-dasharray="11 176" stroke-dashoffset="-165" transform="rotate(-90 55 55)" opacity=".85"/>
+                  <text x="55" y="51" text-anchor="middle" fill="var(--txt)" font-size="16" font-weight="700">124</text>
+                  <text x="55" y="64" text-anchor="middle" fill="var(--txt3)" font-size="9">efectivos</text>
+                </svg>
+                <div class="donut-legend">
+                  <div class="dl-item"><div class="dl-dot" style="background:#1d4ed8"></div><span>Mañana</span><span class="dl-val" style="margin-left:6px;font-weight:600">42</span></div>
+                  <div class="dl-item"><div class="dl-dot" style="background:#92400e"></div><span>Tarde</span><span class="dl-val" style="margin-left:6px;font-weight:600">28</span></div>
+                  <div class="dl-item"><div class="dl-dot" style="background:#312e81"></div><span>Noche</span><span class="dl-val" style="margin-left:6px;font-weight:600">22</span></div>
+                  <div class="dl-item"><div class="dl-dot" style="background:#164e63"></div><span>D12/N12</span><span class="dl-val" style="margin-left:6px;font-weight:600">32</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent activity -->
+          <p class="section-title">Actividad reciente</p>
+          <div class="card" style="padding:0;overflow:hidden">
+            <div style="display:flex;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px;align-items:center">
+              <div class="online-dot" style="background:var(--green)"></div>
+              <span style="font-size:12px;color:var(--txt)">García, Roberto</span>
+              <span class="tag tag-green">INGRESÓ</span>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--txt3)">CASISA · Obrador Malagueño</span>
+              <span style="font-size:11px;color:var(--txt3);margin-left:12px">08:03</span>
+            </div>
+            <div style="display:flex;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px;align-items:center">
+              <div class="online-dot" style="background:var(--amber);animation:none"></div>
+              <span style="font-size:12px;color:var(--txt)">Martínez, Diego</span>
+              <span class="tag tag-amber">RETENCIÓN</span>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--txt3)">Banco Córdoba · Casa Central</span>
+              <span style="font-size:11px;color:var(--txt3);margin-left:12px">07:45</span>
+            </div>
+            <div style="display:flex;padding:10px 14px;border-bottom:1px solid var(--border);gap:8px;align-items:center">
+              <div class="online-dot" style="background:var(--red);animation:none"></div>
+              <span style="font-size:12px;color:var(--txt)">López, Claudia</span>
+              <span class="tag tag-red">VACANTE</span>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--txt3)">ALZO · Depósito Norte</span>
+              <span style="font-size:11px;color:var(--txt3);margin-left:12px">06:58</span>
+            </div>
+            <div style="display:flex;padding:10px 14px;gap:8px;align-items:center">
+              <div class="online-dot" style="background:#60a5fa;animation:none"></div>
+              <span style="font-size:12px;color:var(--txt)">Romero, Carlos</span>
+              <span class="tag tag-blue">FRANCO</span>
+              <span style="flex:1"></span>
+              <span style="font-size:11px;color:var(--txt3)">CASISA · Ruta 19</span>
+              <span style="font-size:11px;color:var(--txt3);margin-left:12px">06:30</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ CENTRO DE CONTROL ══════════ -->
+      <div class="screen" id="screen-cc" style="flex-direction:row">
+        <!-- MAP -->
+        <div class="cc-map">
+          <div class="map-bg">
+            <div class="map-grid"></div>
+            <!-- SVG roads -->
+            <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.25" viewBox="0 0 800 600" preserveAspectRatio="none">
+              <path d="M0 300 Q200 280 400 300 Q600 320 800 300" stroke="#a1a1aa" stroke-width="2.5" fill="none"/>
+              <path d="M400 0 Q380 150 400 300 Q420 450 400 600" stroke="#a1a1aa" stroke-width="2" fill="none"/>
+              <path d="M0 150 Q300 140 600 180 Q700 190 800 200" stroke="#71717a" stroke-width="1.5" fill="none"/>
+              <path d="M100 0 Q120 200 80 400 Q70 500 100 600" stroke="#71717a" stroke-width="1.5" fill="none"/>
+              <path d="M200 600 Q220 400 180 200 Q160 100 200 0" stroke="#71717a" stroke-width="1" fill="none"/>
+              <path d="M0 450 Q400 430 800 460" stroke="#52525b" stroke-width="1" fill="none"/>
+              <path d="M600 0 Q620 300 580 600" stroke="#52525b" stroke-width="1" fill="none"/>
+              <path d="M700 0 Q680 150 700 300 Q720 450 700 600" stroke="#52525b" stroke-width="1" fill="none"/>
+            </svg>
+
+            <!-- Map overlay UI -->
+            <div class="map-overlay-top">
+              <input class="map-search" placeholder="🔍  Buscar objetivo..."/>
+              <div class="map-legend">
+                <div class="ml-item"><div class="ml-dot" style="background:#4ade80"></div>Cubierto</div>
+                <div class="ml-item"><div class="ml-dot" style="background:var(--amber)"></div>Retención</div>
+                <div class="ml-item"><div class="ml-dot" style="background:#f87171"></div>Vacante</div>
+              </div>
+            </div>
+
+            <!-- Map pins -->
+            <div class="mp" style="top:38%;left:42%">
+              <div class="mp-dot" style="background:#4ade80;color:#4ade80"></div>
+              <div class="mp-label">Obrador Malagueño</div>
+            </div>
+            <div class="mp" style="top:52%;left:61%">
+              <div class="mp-dot" style="background:#4ade80;color:#4ade80"></div>
+              <div class="mp-label">Casa Central BC</div>
+            </div>
+            <div class="mp" style="top:30%;left:68%">
+              <div class="mp-dot" style="background:var(--amber);color:var(--amber)"></div>
+              <div class="mp-label">Depósito Norte</div>
+            </div>
+            <div class="mp" style="top:65%;left:35%">
+              <div class="mp-dot" style="background:#f87171;color:#f87171"></div>
+              <div class="mp-label">Ruta 19 Km 7</div>
+            </div>
+            <div class="mp" style="top:45%;left:25%">
+              <div class="mp-dot" style="background:#4ade80;color:#4ade80"></div>
+              <div class="mp-label">Sucursal Nueva Italia</div>
+            </div>
+            <div class="mp" style="top:22%;left:50%">
+              <div class="mp-dot" style="background:#4ade80;color:#4ade80"></div>
+              <div class="mp-label">Subcentral</div>
+            </div>
+            <div class="mp" style="top:70%;left:58%">
+              <div class="mp-dot" style="background:#4ade80;color:#4ade80"></div>
+              <div class="mp-label">Terminal Río IV</div>
+            </div>
+
+            <!-- Alertas overlay -->
+            <div class="cc-alertas">
+              <div class="cc-alertas-header">
+                <span class="cc-alertas-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" style="stroke:var(--red);fill:none;stroke-width:2;stroke-linecap:round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Alertas y Prioridad
+                </span>
+                <span class="alert-count">3</span>
+              </div>
+              <div class="cc-alert-item">
+                <div class="alert-icon" style="background:#f87171"></div>
+                <div class="alert-txt">
+                  <strong>Vacante sin cubrir</strong>
+                  Ruta 19 · Turno Noche
+                  <div class="alert-time">hace 42 min</div>
+                </div>
+              </div>
+              <div class="cc-alert-item">
+                <div class="alert-icon" style="background:var(--amber)"></div>
+                <div class="alert-txt">
+                  <strong>Retención en curso</strong>
+                  Dep. Norte · Martínez, D.
+                  <div class="alert-time">hace 1h 15min</div>
+                </div>
+              </div>
+              <div class="cc-alert-item">
+                <div class="alert-icon" style="background:#60a5fa"></div>
+                <div class="alert-txt">
+                  <strong>Relevo pendiente</strong>
+                  Casa Central BC · 14:00h
+                  <div class="alert-time">en 22 min</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Zoom controls -->
+            <div style="position:absolute;bottom:16px;left:16px;display:flex;flex-direction:column;gap:4px">
+              <button style="width:32px;height:32px;background:rgba(17,17,19,.9);border:1px solid var(--border);border-radius:6px;color:var(--txt);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">+</button>
+              <button style="width:32px;height:32px;background:rgba(17,17,19,.9);border:1px solid var(--border);border-radius:6px;color:var(--txt);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">−</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ESTADO DE OPERACIONES panel -->
+        <div class="cc-panel">
+          <div class="cc-panel-header">
+            <div class="cc-panel-title">Estado de Operaciones</div>
+            <div class="cc-counters">
+              <div class="cc-counter c-green">
+                <div class="cc-counter-val">124</div>
+                <div class="cc-counter-lbl">PRES.</div>
+              </div>
+              <div class="cc-counter">
+                <div class="cc-counter-val">129</div>
+                <div class="cc-counter-lbl">PLAN.</div>
+              </div>
+              <div class="cc-counter c-amber">
+                <div class="cc-counter-val">4</div>
+                <div class="cc-counter-lbl">RET.</div>
+              </div>
+              <div class="cc-counter">
+                <div class="cc-counter-val">8</div>
+                <div class="cc-counter-lbl">VAC.</div>
+              </div>
+              <div class="cc-counter c-red">
+                <div class="cc-counter-val">5</div>
+                <div class="cc-counter-lbl">AUS.</div>
+              </div>
+              <div class="cc-counter">
+                <div class="cc-counter-val" style="font-size:14px">142</div>
+                <div class="cc-counter-lbl">TOTAL</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- cliente filter pills -->
+          <div class="cc-cliente-sel">
+            <div class="cc-clt-pill active">Todos</div>
+            <div class="cc-clt-pill">CASISA</div>
+            <div class="cc-clt-pill">Banco Córdoba</div>
+            <div class="cc-clt-pill">ALZO</div>
+          </div>
+
+          <!-- table -->
+          <div class="cc-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Objetivo</th>
+                  <th>Plan</th>
+                  <th>Act.</th>
+                  <th>Ret.</th>
+                  <th>Vac.</th>
+                  <th>Aus.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Obrador Malagueño</td>
+                  <td class="cc-td-n">12</td>
+                  <td class="cc-td-ok">12</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Ruta 19 Km 7</td>
+                  <td class="cc-td-n">8</td>
+                  <td class="cc-td-warn">6</td>
+                  <td class="cc-td-warn">1</td>
+                  <td class="cc-td-bad">1</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Subcentral CASISA</td>
+                  <td class="cc-td-n">6</td>
+                  <td class="cc-td-ok">6</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Casa Central BC</td>
+                  <td class="cc-td-n">15</td>
+                  <td class="cc-td-ok">15</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Suc. Nueva Italia</td>
+                  <td class="cc-td-n">4</td>
+                  <td class="cc-td-ok">4</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Depósito Norte</td>
+                  <td class="cc-td-n">10</td>
+                  <td class="cc-td-warn">8</td>
+                  <td class="cc-td-warn">2</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-bad">2</td>
+                </tr>
+                <tr>
+                  <td>Terminal Río IV</td>
+                  <td class="cc-td-n">5</td>
+                  <td class="cc-td-ok">5</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Suc. Río Cuarto</td>
+                  <td class="cc-td-n">3</td>
+                  <td class="cc-td-warn">2</td>
+                  <td class="cc-td-warn">1</td>
+                  <td class="cc-td-bad">1</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+                <tr>
+                  <td>Planta ALZO</td>
+                  <td class="cc-td-n">8</td>
+                  <td class="cc-td-warn">7</td>
+                  <td class="cc-td-n">0</td>
+                  <td class="cc-td-bad">1</td>
+                  <td class="cc-td-n">0</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ PLANIFICADOR ══════════ -->
+      <div class="screen" id="screen-plan">
+        <!-- toolbar -->
+        <div class="plan-toolbar">
+          <div class="plan-toolbar-top">
+            <div class="plan-breadcrumb">
+              <span>CASISA</span>
+              <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+              <span class="bc-active">OBRADOR MALAGUEÑO</span>
+            </div>
+            <div class="plan-diag">
+              Dotación requerida: <span>12</span> &nbsp;·&nbsp; Cubiertos: <span style="color:#4ade80">12</span> &nbsp;·&nbsp; Déficit: <span>0</span> &nbsp;·&nbsp; Excedente: <span>0</span>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:6px">
+              <button class="btn btn-ghost" style="font-size:11px">BORRADOR</button>
+              <button class="btn btn-primary" style="font-size:11px">PUBLICAR</button>
+            </div>
+          </div>
+          <div class="plan-toolbar-mid">
+            <div class="plan-month-nav">
+              <button>‹</button>
+              <span class="plan-month-label">Mayo 2026</span>
+              <button>›</button>
+            </div>
+            <button class="btn btn-ghost" style="font-size:11px">AUTO</button>
+            <button class="btn btn-ghost" style="font-size:11px">DOTACIÓN</button>
+            <button class="btn btn-ghost" style="font-size:11px">ASIGNAR</button>
+            <div style="width:1px;height:20px;background:var(--border);margin:0 4px"></div>
+            <div class="plan-shift-pills">
+              <span class="shl shl-all">TODO</span>
+              <span class="shl shl-M">M</span>
+              <span class="shl shl-T">T</span>
+              <span class="shl shl-N">N</span>
+              <span class="shl shl-D12">D12</span>
+              <span class="shl shl-N12">N12</span>
+              <span class="shl shl-RET">RET</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- grid -->
+        <div class="plan-grid-wrap">
+          <table class="plan-table" id="plan-table"></table>
+        </div>
+      </div>
+
+      <!-- ══════════ CRM ══════════ -->
+      <div class="screen" id="screen-crm">
+        <div class="crm-layout">
+          <div class="crm-list">
+            <div class="crm-search"><input placeholder="Buscar cliente..."/></div>
+            <div class="crm-item active">
+              <div class="crm-item-name" style="display:flex;align-items:center;gap:6px">
+                <div style="width:8px;height:8px;border-radius:50%;background:#7c3aed"></div>
+                CASISA
+              </div>
+              <div class="crm-item-meta"><span>8 objetivos</span><span class="tag tag-green" style="padding:1px 5px;font-size:10px">Activo</span></div>
+            </div>
+            <div class="crm-item">
+              <div class="crm-item-name" style="display:flex;align-items:center;gap:6px">
+                <div style="width:8px;height:8px;border-radius:50%;background:#1d4ed8"></div>
+                Banco de Córdoba
+              </div>
+              <div class="crm-item-meta"><span>6 objetivos</span><span class="tag tag-green" style="padding:1px 5px;font-size:10px">Activo</span></div>
+            </div>
+            <div class="crm-item">
+              <div class="crm-item-name" style="display:flex;align-items:center;gap:6px">
+                <div style="width:8px;height:8px;border-radius:50%;background:#0891b2"></div>
+                ALZO
+              </div>
+              <div class="crm-item-meta"><span>4 objetivos</span><span class="tag tag-green" style="padding:1px 5px;font-size:10px">Activo</span></div>
+            </div>
+            <div class="crm-item">
+              <div class="crm-item-name" style="display:flex;align-items:center;gap:6px">
+                <div style="width:8px;height:8px;border-radius:50%;background:#15803d"></div>
+                Municipal Río IV
+              </div>
+              <div class="crm-item-meta"><span>2 objetivos</span><span class="tag tag-amber" style="padding:1px 5px;font-size:10px">Propuesta</span></div>
+            </div>
+          </div>
+          <div class="crm-detail">
+            <div class="crm-header">
+              <div>
+                <div class="crm-logo" style="background:linear-gradient(135deg,#5b21b6,#7c3aed)">C</div>
+                <div class="crm-name">CASISA</div>
+                <div class="crm-sub">Cliente activo · Zona Córdoba Interior</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost" style="font-size:11px">Editar</button>
+                <button class="btn btn-primary" style="font-size:11px">+ Objetivo</button>
+              </div>
+            </div>
+            <div class="crm-stats-row">
+              <div class="crm-stat">
+                <div class="crm-stat-val">8</div>
+                <div class="crm-stat-lbl">Objetivos</div>
+              </div>
+              <div class="crm-stat">
+                <div class="crm-stat-val" style="color:#4ade80">54</div>
+                <div class="crm-stat-lbl">Efectivos asignados</div>
+              </div>
+              <div class="crm-stat">
+                <div class="crm-stat-val" style="color:#f87171">2</div>
+                <div class="crm-stat-lbl">Vacantes hoy</div>
+              </div>
+              <div class="crm-stat">
+                <div class="crm-stat-val">96%</div>
+                <div class="crm-stat-lbl">Cobertura mensual</div>
+              </div>
+            </div>
+            <p class="section-title">Objetivos del cliente</p>
+            <div class="crm-objetivos">
+              <div class="crm-obj-row">
+                <div class="crm-obj-dot" style="background:#4ade80"></div>
+                <div style="flex:1">
+                  <div class="crm-obj-name">Obrador Malagueño</div>
+                  <div class="crm-obj-meta"><span>12 puestos</span><span>M/T/N</span></div>
+                </div>
+                <span class="tag tag-green">100%</span>
+              </div>
+              <div class="crm-obj-row">
+                <div class="crm-obj-dot" style="background:#f87171"></div>
+                <div style="flex:1">
+                  <div class="crm-obj-name">Ruta 19 Km 7</div>
+                  <div class="crm-obj-meta"><span>8 puestos</span><span>M/T/N/D12</span></div>
+                </div>
+                <span class="tag tag-red">87%</span>
+              </div>
+              <div class="crm-obj-row">
+                <div class="crm-obj-dot" style="background:#4ade80"></div>
+                <div style="flex:1">
+                  <div class="crm-obj-name">Subcentral CASISA</div>
+                  <div class="crm-obj-meta"><span>6 puestos</span><span>N12</span></div>
+                </div>
+                <span class="tag tag-green">100%</span>
+              </div>
+              <div class="crm-obj-row">
+                <div class="crm-obj-dot" style="background:#4ade80"></div>
+                <div style="flex:1">
+                  <div class="crm-obj-name">Planta Central</div>
+                  <div class="crm-obj-meta"><span>5 puestos</span><span>D12/N12</span></div>
+                </div>
+                <span class="tag tag-green">100%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ RRHH ══════════ -->
+      <div class="screen" id="screen-rrhh">
+        <div class="nav-tabs">
+          <div class="nav-tab active">Empleados</div>
+          <div class="nav-tab">Ausencias</div>
+          <div class="nav-tab">Convenios</div>
+          <div class="nav-tab">Documentación</div>
+        </div>
+        <div style="padding:12px 20px;background:var(--surf);border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+          <input placeholder="Buscar empleado..." style="width:220px"/>
+          <select style="width:140px"><option>Todos los estados</option><option>Activo</option><option>Vacaciones</option><option>Licencia</option></select>
+          <select style="width:140px"><option>Todos los clientes</option><option>CASISA</option><option>Banco Córdoba</option></select>
+          <div style="flex:1"></div>
+          <button class="btn btn-primary" style="font-size:11px">+ Nuevo empleado</button>
+        </div>
+        <div class="rrhh-grid">
+          <!-- employee cards -->
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#5b21b6">RG</div>
+              <div><div class="emp-name">García, Roberto</div><div class="emp-role">Vigilador · CASISA</div></div>
+              <div style="margin-left:auto"><span class="tag tag-green">Activo</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">46</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">2</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">98%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag tag-blue">M</span><span class="tag tag-purple">Obrador</span></div>
+          </div>
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#1d4ed8">DM</div>
+              <div><div class="emp-name">Martínez, Diego</div><div class="emp-role">Vigilador · Banco Córdoba</div></div>
+              <div style="margin-left:auto"><span class="tag tag-amber">Retención</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">52</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">1</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">96%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag tag-amber" style="background:rgba(146,64,14,.3);color:#fcd34d">T</span><span class="tag tag-purple">Casa Central</span></div>
+          </div>
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#0891b2">CL</div>
+              <div><div class="emp-name">López, Claudia</div><div class="emp-role">Vigiladora · ALZO</div></div>
+              <div style="margin-left:auto"><span class="tag tag-red">Ausente</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">0</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">5</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">82%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag tag-red">AUS</span><span class="tag tag-purple">Dep. Norte</span></div>
+          </div>
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#15803d">CR</div>
+              <div><div class="emp-name">Romero, Carlos</div><div class="emp-role">Vigilador · CASISA</div></div>
+              <div style="margin-left:auto"><span class="tag tag-blue">Franco</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">44</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">0</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">100%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag" style="background:rgba(49,46,129,.35);color:#a5b4fc">N</span><span class="tag tag-purple">Ruta 19</span></div>
+          </div>
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#7c3aed">AP</div>
+              <div><div class="emp-name">Pérez, Ana</div><div class="emp-role">Supervisora · CASISA</div></div>
+              <div style="margin-left:auto"><span class="tag tag-green">Activo</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">48</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">1</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">97%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag tag-purple">Supervisión</span><span class="tag tag-blue">D12</span></div>
+          </div>
+          <div class="emp-card">
+            <div class="emp-header">
+              <div class="emp-av" style="background:#b45309">JF</div>
+              <div><div class="emp-name">Fernández, Juan</div><div class="emp-role">Vigilador · Banco Córdoba</div></div>
+              <div style="margin-left:auto"><span class="tag tag-green">Activo</span></div>
+            </div>
+            <div class="emp-stats">
+              <div class="emp-stat"><div class="emp-stat-val">44</div><div class="emp-stat-lbl">Hs/sem</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">3</div><div class="emp-stat-lbl">Ausencias</div></div>
+              <div class="emp-stat"><div class="emp-stat-val">94%</div><div class="emp-stat-lbl">Asist.</div></div>
+            </div>
+            <div class="emp-tags"><span class="tag" style="background:rgba(29,78,216,.3);color:#93c5fd">M</span><span class="tag tag-purple">Suc. N. Italia</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ REPORTES ══════════ -->
+      <div class="screen" id="screen-reportes">
+        <div class="nav-tabs">
+          <div class="nav-tab active">Empleados</div>
+          <div class="nav-tab">Objetivos</div>
+          <div class="nav-tab">Auditoría</div>
+          <div class="nav-tab">Turnos</div>
+          <div class="nav-tab">Planificado vs Real</div>
+        </div>
+        <div class="rep-filters">
+          <select style="width:130px"><option>Mayo 2026</option><option>Abril 2026</option></select>
+          <select style="width:140px"><option>Todos los clientes</option><option>CASISA</option></select>
+          <select style="width:140px"><option>Todos los turnos</option><option>Mañana</option><option>Tarde</option><option>Noche</option></select>
+          <div style="flex:1"></div>
+          <button class="btn btn-ghost" style="font-size:11px">
+            <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            Exportar CSV
+          </button>
+          <button class="btn btn-ghost" style="font-size:11px">Imprimir</button>
+        </div>
+        <div class="rep-table-wrap" style="flex:1">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Empleado</th>
+                <th>Cliente</th>
+                <th>Objetivo</th>
+                <th>Turno</th>
+                <th>Días trab.</th>
+                <th>Hs totales</th>
+                <th>Ausencias</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>García, Roberto</td><td>CASISA</td><td>Obrador Malagueño</td><td><span class="sh-M" style="padding:2px 6px;border-radius:3px;font-size:11px">M</span></td><td>22</td><td>176</td><td>0</td><td><span class="tag tag-green">Completo</span></td></tr>
+              <tr><td>Martínez, Diego</td><td>Banco Córdoba</td><td>Casa Central</td><td><span class="sh-T" style="padding:2px 6px;border-radius:3px;font-size:11px">T</span></td><td>20</td><td>160</td><td>2</td><td><span class="tag tag-amber">Retención</span></td></tr>
+              <tr><td>López, Claudia</td><td>ALZO</td><td>Depósito Norte</td><td><span class="sh-N" style="padding:2px 6px;border-radius:3px;font-size:11px">N</span></td><td>18</td><td>144</td><td>4</td><td><span class="tag tag-red">Ausentismo</span></td></tr>
+              <tr><td>Romero, Carlos</td><td>CASISA</td><td>Ruta 19 Km 7</td><td><span class="sh-N" style="padding:2px 6px;border-radius:3px;font-size:11px">N</span></td><td>22</td><td>176</td><td>0</td><td><span class="tag tag-green">Completo</span></td></tr>
+              <tr><td>Pérez, Ana</td><td>CASISA</td><td>Supervisión</td><td><span class="sh-D12" style="padding:2px 6px;border-radius:3px;font-size:11px">D12</span></td><td>15</td><td>180</td><td>1</td><td><span class="tag tag-green">Completo</span></td></tr>
+              <tr><td>Fernández, Juan</td><td>Banco Córdoba</td><td>Suc. Nueva Italia</td><td><span class="sh-M" style="padding:2px 6px;border-radius:3px;font-size:11px">M</span></td><td>21</td><td>168</td><td>1</td><td><span class="tag tag-green">Completo</span></td></tr>
+              <tr><td>Soria, Patricia</td><td>CASISA</td><td>Subcentral</td><td><span class="sh-N12" style="padding:2px 6px;border-radius:3px;font-size:11px">N12</span></td><td>15</td><td>180</td><td>0</td><td><span class="tag tag-green">Completo</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ══════════ CONFIGURACIÓN ══════════ -->
+      <div class="screen" id="screen-config">
+        <div class="config-layout">
+          <div class="config-nav">
+            <div class="config-nav-item active">
+              <svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8v4h8z"/></svg>
+              General
+            </div>
+            <div class="config-nav-item">
+              <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+              Branding / Empresa
+            </div>
+            <div class="config-nav-item">
+              <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+              Usuarios
+            </div>
+            <div class="config-nav-item">
+              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Turnos y puestos
+            </div>
+            <div class="config-nav-item">
+              <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+              Notificaciones
+            </div>
+            <div class="config-nav-item">
+              <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+              Seguridad
+            </div>
+          </div>
+          <div class="config-content">
+            <div class="config-section">
+              <h2>General</h2>
+              <p>Configuración básica de la plataforma y datos de la empresa.</p>
+              <div class="form-row">
+                <label class="form-label">Nombre de la empresa</label>
+                <input value="Grupo Bacar S.A."/>
+              </div>
+              <div class="form-row">
+                <label class="form-label">CUIT</label>
+                <input value="30-71234567-8"/>
+              </div>
+              <div class="form-row">
+                <label class="form-label">Zona horaria</label>
+                <select><option selected>America/Argentina/Cordoba (UTC-3)</option><option>America/Argentina/Buenos_Aires (UTC-3)</option></select>
+              </div>
+              <div class="form-row">
+                <label class="form-label">Color de empresa (acento)</label>
+                <div class="form-hint" style="margin-bottom:8px">Define el color principal que se usa en el sidebar, badges y destacados de tu empresa.</div>
+                <div class="empresa-color-row">
+                  <div class="color-swatch selected" style="background:#7c3aed" title="Violet"></div>
+                  <div class="color-swatch" style="background:#1d4ed8" title="Blue"></div>
+                  <div class="color-swatch" style="background:#0891b2" title="Cyan"></div>
+                  <div class="color-swatch" style="background:#15803d" title="Green"></div>
+                  <div class="color-swatch" style="background:#b45309" title="Amber"></div>
+                  <div class="color-swatch" style="background:#be123c" title="Rose"></div>
+                  <div class="color-swatch" style="background:#374151" title="Slate"></div>
+                </div>
+              </div>
+              <div style="margin-top:20px">
+                <button class="btn btn-primary">Guardar cambios</button>
+                <button class="btn btn-ghost" style="margin-left:8px">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- MODALS -->
+
+<!-- Handover Modal -->
+<div class="modal-backdrop" id="modal-handover">
+  <div class="modal">
+    <div class="modal-header h-emerald">
+      <div>
+        <div class="modal-h-title">Relevo de Guardia</div>
+        <div class="modal-h-sub">Obrador Malagueño · Puesto Principal · Turno Mañana → Tarde</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-handover')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="ctx-box">
+        <div class="ctx-item"><span class="ctx-lbl">Objetivo</span><span class="ctx-val">Obrador Malagueño</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Puesto</span><span class="ctx-val">Acceso Principal</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Turno saliente</span><span class="ctx-val">Mañana 06:00–14:00</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Turno entrante</span><span class="ctx-val">Tarde 14:00–22:00</span></div>
+      </div>
+      <p style="font-size:11px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Guardias disponibles para relevar</p>
+      <div class="guard-row">
+        <div class="guard-av" style="background:#5b21b6">RG</div>
+        <div class="guard-info"><div class="guard-name">García, Roberto</div><div class="guard-meta">Turno Tarde · Asignado · 7h disponibles</div></div>
+        <button class="btn btn-primary" style="font-size:11px">RELEVAR</button>
+      </div>
+      <div class="guard-row">
+        <div class="guard-av" style="background:#1d4ed8">JF</div>
+        <div class="guard-info"><div class="guard-name">Fernández, Juan</div><div class="guard-meta">Turno Tarde · Disponible · 6h disponibles</div></div>
+        <button class="btn btn-primary" style="font-size:11px">RELEVAR</button>
+      </div>
+      <div class="guard-row">
+        <div class="guard-av" style="background:#0891b2">PS</div>
+        <div class="guard-info"><div class="guard-name">Soria, Patricia</div><div class="guard-meta">Franco · Retención posible</div></div>
+        <button class="btn btn-ghost" style="font-size:11px">RELEVAR</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-handover')">Cancelar</button>
+      <button class="btn" style="background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3);font-size:12px">INGRESAR SIN RELEVAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- Coverage Modal -->
+<div class="modal-backdrop" id="modal-coverage">
+  <div class="modal">
+    <div class="modal-header h-rose">
+      <div>
+        <div class="modal-h-title">Gestión de Cobertura</div>
+        <div class="modal-h-sub">Ruta 19 Km 7 · Turno Noche · Vacante sin cubrir</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-coverage')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="cov-section">
+        <div class="cov-sec-title"><span class="cov-sec-num">1</span>Retención</div>
+        <div class="cov-row">
+          <div><div class="cov-name">Soria, Patricia</div><span class="cov-sub">Turno N · Finaliza 06:00 · 2h extra máx.</span></div>
+          <button class="btn-wa">WA</button>
+          <button class="btn-assign">Retener</button>
+        </div>
+      </div>
+      <div class="cov-section">
+        <div class="cov-sec-title"><span class="cov-sec-num">2</span>Adelanto de turno</div>
+        <div class="cov-row">
+          <div><div class="cov-name">Romero, Carlos</div><span class="cov-sub">Turno M · Libre desde 00:00 · +2h</span></div>
+          <button class="btn-wa">WA</button>
+          <button class="btn-assign">Adelantar</button>
+        </div>
+        <div class="cov-row">
+          <div><div class="cov-name">García, Roberto</div><span class="cov-sub">Turno M · Libre desde 00:00</span></div>
+          <button class="btn-wa">WA</button>
+          <button class="btn-assign">Adelantar</button>
+        </div>
+      </div>
+      <div class="cov-section">
+        <div class="cov-sec-title"><span class="cov-sec-num">3</span>Retenes disponibles</div>
+        <div class="cov-row">
+          <div><div class="cov-name">Vega, Marcos</div><span class="cov-sub">Retén activo · Disponible inmediato</span></div>
+          <button class="btn-wa">WA</button>
+          <button class="btn-assign" style="background:rgba(124,58,237,.15);color:var(--accent-l);border:1px solid rgba(124,58,237,.25)">Asignar</button>
+        </div>
+      </div>
+      <div class="cov-section">
+        <div class="cov-sec-title"><span class="cov-sec-num">4</span>Francos disponibles</div>
+        <div class="cov-row">
+          <div><div class="cov-name">Torres, Miguel</div><span class="cov-sub">Franco hoy · Acepta con recargo</span></div>
+          <button class="btn-wa">WA</button>
+          <button class="btn-assign">Asignar</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-coverage')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Interrupt Modal -->
+<div class="modal-backdrop" id="modal-interrupt">
+  <div class="modal" style="width:360px">
+    <div class="modal-header h-purple">
+      <div>
+        <div class="modal-h-title">Interrupción de turno</div>
+        <div class="modal-h-sub">García, Roberto · Obrador Malagueño</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-interrupt')">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--txt2);margin-bottom:16px;line-height:1.6">¿Confirmás la interrupción anticipada del turno de <strong style="color:var(--txt)">García, Roberto</strong>? Se registrará la hora de salida y se actualizará el estado del puesto.</p>
+      <div class="ctx-box">
+        <div class="ctx-item"><span class="ctx-lbl">Entrada registrada</span><span class="ctx-val">06:03</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Turno planificado hasta</span><span class="ctx-val">14:00</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Horas efectivas</span><span class="ctx-val">5h 47min</span></div>
+        <div class="ctx-item"><span class="ctx-lbl">Diferencia</span><span class="ctx-val" style="color:#f87171">−2h 13min</span></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-interrupt')">Cancelar</button>
+      <button class="btn" style="background:rgba(109,40,217,.35);color:#c4b5fd;border:1px solid rgba(109,40,217,.4)">Confirmar interrupción</button>
+    </div>
+  </div>
+</div>
+
+<!-- NAV PILLS -->
+<div id="nav-pills">
+  <button class="np active" onclick="showScreen('dashboard')">Dashboard</button>
+  <button class="np" onclick="showScreen('cc')">Centro Control</button>
+  <button class="np" onclick="showScreen('plan')">Planificador</button>
+  <button class="np" onclick="showScreen('crm')">CRM</button>
+  <button class="np" onclick="showScreen('rrhh')">RRHH</button>
+  <button class="np" onclick="showScreen('reportes')">Reportes</button>
+  <button class="np" onclick="showScreen('config')">Config</button>
+  <span style="width:1px;height:16px;background:var(--border2);margin:0 4px;align-self:center"></span>
+  <button class="np" onclick="openModal('modal-handover')" style="color:#4ade80">▶ Relevo</button>
+  <button class="np" onclick="openModal('modal-coverage')" style="color:#f87171">▶ Cobertura</button>
+  <button class="np" onclick="openModal('modal-interrupt')" style="color:#d8b4fe">▶ Interrupción</button>
+</div>
+
+<script>
+// ── Screen navigation ──
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+  document.querySelectorAll('.sb-item').forEach(i => i.classList.remove('active'));
+  const sbi = document.getElementById('sbi-' + id);
+  if (sbi) sbi.classList.add('active');
+  document.querySelectorAll('.np').forEach(p => p.classList.remove('active'));
+  const pills = document.querySelectorAll('.np');
+  const names = ['dashboard','cc','plan','crm','rrhh','reportes','config'];
+  const idx = names.indexOf(id);
+  if (idx >= 0) pills[idx].classList.add('active');
+  const titles = {dashboard:'Dashboard',cc:'Centro de Control',plan:'Planificador',crm:'CRM Clientes',rrhh:'RRHH',reportes:'Reportes',config:'Configuración'};
+  document.getElementById('top-title').textContent = titles[id] || id;
+}
+
+// ── Modal helpers ──
+function openModal(id){ document.getElementById(id).classList.add('open') }
+function closeModal(id){ document.getElementById(id).classList.remove('open') }
+document.querySelectorAll('.modal-backdrop').forEach(b => {
+  b.addEventListener('click', e => { if(e.target === b) b.classList.remove('open') });
+});
+
+// ── Bar chart (Dashboard) ──
+const barData = [
+  {lbl:'Dic',v:8},{lbl:'Ene',v:12},{lbl:'Feb',v:9},{lbl:'Mar',v:14},{lbl:'Abr',v:7},{lbl:'May',v:5}
+];
+const maxV = Math.max(...barData.map(d=>d.v));
+const barColors = ['rgba(124,58,237,.4)','rgba(124,58,237,.5)','rgba(124,58,237,.6)','rgba(167,139,250,.7)','rgba(167,139,250,.8)','rgba(167,139,250,.9)'];
+const ca = document.getElementById('bar-chart');
+const cl = document.getElementById('bar-labels');
+if(ca) {
+  barData.forEach((d,i) => {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    b.style.height = (d.v/maxV*100)+'%';
+    b.style.background = barColors[i];
+    b.title = d.v + ' días';
+    ca.appendChild(b);
+    const l = document.createElement('div');
+    l.className = 'chart-label';
+    l.textContent = d.lbl;
+    cl.appendChild(l);
+  });
+}
+
+// ── Planificador grid ──
+const employees = [
+  'García, Roberto','Martínez, Diego','López, Claudia',
+  'Romero, Carlos','Pérez, Ana','Fernández, Juan',
+  'Soria, Patricia','Torres, Miguel','Vega, Marcos',
+  'Díaz, Sofía','Cruz, Andrés','Molina, Lucía',
+  'Ríos, Pablo','Cabrera, Elena','Aguilar, Omar',
+  'Herrera, Rita','Mora, Sebastián','Silva, Valeria'
+];
+const shifts = ['M','T','N','D12','N12','F','V','A','FT','RET','PG','FF',''];
+const weekends = [3,4,10,11,17,18,24,25,31];
+function rndShift(i,j) {
+  const seed = (i*31+j*7+13)%17;
+  const patterns = [
+    ['M','M','M','M','M','F','F'],
+    ['T','T','T','T','T','F','F'],
+    ['N','N','N','N','N','F','F'],
+    ['D12','','D12','','D12','F','F'],
+    ['N12','','N12','','N12','F','F'],
+    ['M','T','M','T','M','F','F'],
+    ['V','V','V','V','V','V','V'],
+    ['RET','RET','M','M','M','F','F']
+  ];
+  const pat = patterns[i % patterns.length];
+  return pat[j % pat.length] || '';
+}
+const tbl = document.getElementById('plan-table');
+if(tbl){
+  // header row
+  let hr = '<thead><tr><th class="plan-th-emp">Empleado</th>';
+  for(let d=1;d<=31;d++){
+    const isWE = weekends.includes(d);
+    hr += `<th class="plan-th-day${isWE?' weekend':''}">${d}</th>`;
+  }
+  hr += '</tr></thead>';
+  // body
+  let bd = '<tbody>';
+  employees.forEach((emp,i)=>{
+    bd += `<tr><td class="plan-td-emp">${emp}</td>`;
+    for(let d=1;d<=31;d++){
+      const sh = rndShift(i,d);
+      if(!sh){ bd+=`<td class="plan-td empty"></td>` }
+      else { bd+=`<td class="plan-td sh-${sh}" title="${emp} · Día ${d} · ${sh}">${sh}</td>` }
+    }
+    bd+='</tr>';
+  });
+  bd += '</tbody>';
+  tbl.innerHTML = hr+bd;
+}
+
+// init
+showScreen('dashboard');
+</script>
+</body>
+</html>

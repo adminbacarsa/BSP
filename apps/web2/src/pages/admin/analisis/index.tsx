@@ -307,7 +307,7 @@ const formatYmdLocal = (d: Date) => {
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-3 text-xs min-w-[140px]">
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm p-3 text-xs min-w-[140px]">
       {label && <p className="font-black text-slate-700 dark:text-white mb-2 uppercase">{label}</p>}
       {payload.map((p: any, i: number) => (
         <div key={i} className="flex items-center gap-2 py-0.5">
@@ -368,8 +368,8 @@ function KpiCard({ icon: Icon, color, label, value, unit, subtext, alert }: {
   unit?: string; subtext?: string; alert?: boolean;
 }) {
   return (
-    <div className={`bg-white dark:bg-slate-800 rounded-2xl border shadow-sm px-4 py-3.5 flex items-center gap-3
-      ${alert ? 'border-rose-300 dark:border-rose-800 ring-1 ring-rose-200 dark:ring-rose-900' : 'border-slate-100 dark:border-slate-700'}`}>
+    <div className="rounded-xl border px-4 py-3.5 flex items-center gap-3
+      ${alert ? 'border-rose-300 dark:border-rose-800 ring-1 ring-rose-200 dark:ring-rose-900' : 'border-slate-100 dark:border-slate-700'}" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
       <div className="p-2 rounded-lg shrink-0" style={{ background: color + '1a' }}>
         <Icon size={14} color={color} strokeWidth={2.5}/>
       </div>
@@ -389,7 +389,7 @@ function SectionCard({ title, icon: Icon, loading, children, className = '' }: {
   title: string; icon: React.ElementType; loading?: boolean; children: React.ReactNode; className?: string;
 }) {
   return (
-    <div className={`bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden ${className}`}>
+    <div className={`bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden ${className}`}>
       <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/40 flex items-center justify-between">
         <h3 className="font-black text-xs uppercase text-slate-700 dark:text-white flex gap-2 items-center tracking-wide">
           <Icon size={14}/> {title}
@@ -1458,8 +1458,8 @@ export default function AnalisisPage() {
                 <TrendingUp size={20} className="text-white"/>
               </div>
               <div>
-                <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Análisis Operativo</h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">Capacidad · cobertura · proyección</p>
+                <h1 className="text-2xl font-black tracking-tight uppercase" style={{ color: 'var(--txt)' }}>Análisis Operativo</h1>
+                <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>Capacidad · cobertura · proyección</p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -1578,7 +1578,7 @@ export default function AnalisisPage() {
 
           {/* ── Panel viabilidad global ──────────────────────────────────── */}
           {theoretical.totalHours > 0 && (
-            <div className={`rounded-2xl border p-4 ${
+            <div className={`rounded-xl border p-4 ${
               superavitGlobal < 0
                 ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
                 : utilizacionPct >= 90
@@ -1684,7 +1684,7 @@ export default function AnalisisPage() {
               { label:'Licencias / Otros',       val:ausOtros, set:setAusOtros, color:'#0891b2', hint:'Matrimonio, duelo, etc.',      real: ausenciasStats?.otrosPct ?? null },
             ];
             return (
-              <div className={`rounded-2xl border transition-colors ${
+              <div className={`rounded-xl border transition-colors ${
                 showAusentismo
                   ? 'border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-900/10'
                   : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
@@ -2200,7 +2200,7 @@ export default function AnalisisPage() {
                             if (!active||!payload?.length) return null;
                             const d = payload[0].payload;
                             return (
-                              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-3 text-xs">
+                              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm p-3 text-xs">
                                 <p className="font-black text-slate-700 dark:text-white">{d.name}</p>
                                 <p style={{ color: d.fill }} className="font-bold">{d.pct}% del límite ({Math.round(d.pct*2)} hs)</p>
                               </div>
@@ -2337,7 +2337,7 @@ export default function AnalisisPage() {
                 );
                 if (!free.length) return null;
                 return (
-                  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5">
+                  <div className="rounded-xl border shadow-sm p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-3">
                       Guardias sin turnos en el período · disponibles totales ({free.length})
                       <span className="ml-1 normal-case font-medium text-slate-400">
@@ -2611,7 +2611,7 @@ export default function AnalisisPage() {
               {/* Cards 3 meses */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {projectionDisplay.map(p => (
-                  <div key={p.label} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-5 space-y-3">
+                  <div key={p.label} className="rounded-xl border shadow-sm p-5 space-y-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     <div className="flex items-center justify-between">
                       <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{p.label}</p>
                       <Calendar size={13} className="text-slate-300"/>
@@ -2651,7 +2651,7 @@ export default function AnalisisPage() {
                 });
                 if (!soon.length) return null;
                 return (
-                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
                     <p className="text-[9px] font-black uppercase text-amber-600 tracking-widest flex items-center gap-1">
                       <AlertTriangle size={11}/> Servicios que vencen en el período ({soon.length})
                     </p>
@@ -2669,7 +2669,7 @@ export default function AnalisisPage() {
               })()}
 
               {/* Barra capacidad */}
-              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-3">
                   Guardias necesarios vs disponibles · {availableGuards} efectivos (plantel {plantelGuardias})
                   {guardiasNoDispTotal > 0 ? ` · −${guardiasNoDispTotal} no disp.` : ''}
@@ -3037,7 +3037,7 @@ export default function AnalisisPage() {
             <div className="space-y-4">
 
               {/* ── Panel de filtros ─────────────────────────────────────────── */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 space-y-3">
+              <div className="rounded-xl border shadow-sm p-4 space-y-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
                   <Filter size={10}/> Filtros y configuración
                 </p>
@@ -3127,7 +3127,7 @@ export default function AnalisisPage() {
 
               {/* ── Configuración de visualización ────────────────────────────── */}
               {analLoaded && (
-                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+                <div className="rounded-xl border shadow-sm p-4" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                   <div className="flex flex-wrap gap-4 items-start">
                     {/* Ver por */}
                     <div className="space-y-1.5">
@@ -3330,7 +3330,7 @@ export default function AnalisisPage() {
 
               {/* ── Estado vacío ──────────────────────────────────────────────── */}
               {!analLoaded && !loadAnal && (
-                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-12 text-center">
+                <div className="rounded-xl border shadow-sm p-12 text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                   <BarChart3 size={40} className="mx-auto text-slate-200 dark:text-slate-700 mb-4"/>
                   <p className="text-sm font-black text-slate-400">Seleccioná un rango de fechas y presioná <span className="text-indigo-600">Cargar datos</span></p>
                   <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Podés filtrar por cliente, objetivo, empleado y estado, y elegir la dimensión y métrica que querés ver.</p>
@@ -3339,7 +3339,7 @@ export default function AnalisisPage() {
 
               {/* ── Sin resultados ────────────────────────────────────────────── */}
               {analLoaded && analData.data.length === 0 && (
-                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-200 dark:border-amber-800 p-8 text-center">
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-8 text-center">
                   <AlertCircle size={32} className="mx-auto text-amber-400 mb-3"/>
                   <p className="text-sm font-black text-amber-700 dark:text-amber-300">Sin datos para los filtros seleccionados</p>
                   <p className="text-[10px] text-amber-500 mt-1">{analRawTurnos.length} turnos cargados en total — probá relajar los filtros.</p>

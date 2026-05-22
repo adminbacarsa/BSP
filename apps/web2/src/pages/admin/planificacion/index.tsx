@@ -1363,7 +1363,7 @@ export default function PlanificacionPage() {
 
         return (
             <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowLegend(false)}>
-                <div className="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl relative border border-slate-100 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                <div className="bg-white w-full max-w-2xl rounded-xl p-6 shadow-2xl relative border border-slate-100 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center mb-6 pb-3 border-b border-slate-100 shrink-0">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shadow-sm">
@@ -1392,7 +1392,7 @@ export default function PlanificacionPage() {
                     </div>
                     <div className="mt-auto pt-4 border-t border-slate-100 shrink-0 min-h-[80px]">
                         {selectedRef ? (
-                            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 animate-in slide-in-from-bottom-2 fade-in duration-300">
+                            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 animate-in slide-in-from-bottom-2 fade-in duration-300">
                                 <div className="flex items-center gap-4">
                                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black border shadow-md ${selectedStyle}`}>
                                         {selectedRef === 'CONSOLIDATED' ? 'C' : selectedRef}
@@ -3843,7 +3843,7 @@ export default function PlanificacionPage() {
                     style={{ left: Math.min(coverageTooltip.x + 8, window.innerWidth - 220), top: coverageTooltip.y + 10 }}
                     onClick={() => setCoverageTooltip(null)}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-xl flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
                         <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Puestos sin cerrar · {coverageTooltip.dateStr.slice(8)}</div>
                         {coverageTooltip.gaps.map((g, i) => (
                             <div key={i} className="flex flex-col gap-0.5 border-b border-slate-700/50 pb-1 last:border-0">
@@ -3865,7 +3865,7 @@ export default function PlanificacionPage() {
                     className="fixed z-[9999] pointer-events-none"
                     style={{ left: shiftTooltip.x + 10, top: shiftTooltip.y - 64 }}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-xl whitespace-nowrap flex flex-col gap-1">
+                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm whitespace-nowrap flex flex-col gap-1">
                         {shiftTooltip.label && (
                             <div className="flex items-center gap-1.5 text-white">
                                 <Clock size={9} className="text-indigo-300 shrink-0" />
@@ -3959,7 +3959,7 @@ export default function PlanificacionPage() {
             </div>
             <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out ${selectedClient ? 'h-full p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
                             <div className="flex items-center gap-4">
@@ -3981,7 +3981,7 @@ export default function PlanificacionPage() {
                                             Cliente <ChevronDown size={12}/>
                                         </button>
                                         {openDrop === 'client' && (
-                                            <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl min-w-[220px] max-h-64 overflow-y-auto">
+                                            <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-sm min-w-[220px] max-h-64 overflow-y-auto">
                                                 {[...clients].sort((a,b) => a.name.localeCompare(b.name)).map(c => (
                                                     <button key={c.id} onClick={() => { handleContextChange(c.id, ''); }} className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors first:rounded-t-xl last:rounded-b-xl border-b border-slate-100 last:border-0">
                                                         {c.name}
@@ -4008,7 +4008,7 @@ export default function PlanificacionPage() {
                                                 <ChevronDown size={12}/>
                                             </button>
                                             {openDrop === 'objective' && (
-                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl min-w-[220px] max-h-64 overflow-y-auto">
+                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-sm min-w-[220px] max-h-64 overflow-y-auto">
                                                     {[...(clients.find(c => c.id === selectedClient)?.objetivos||[])].sort((a:any,b:any) => a.name.localeCompare(b.name)).map((o:any) => (
                                                         <button key={o.id||o.name} onClick={() => { handleContextChange(selectedClient, o.id||o.name); }} className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl last:rounded-b-xl border-b border-slate-100 last:border-0 ${(o.id||o.name) === selectedObjective ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'}`}>
                                                             {o.name}
@@ -4244,7 +4244,7 @@ export default function PlanificacionPage() {
                                     </button>
                                     
                                     {showNotifications && (
-                                        <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-2xl shadow-2xl border overflow-hidden z-50 animate-in zoom-in-95">
+                                        <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-xl shadow-2xl border overflow-hidden z-50 animate-in zoom-in-95">
                                             <div className="p-3 bg-slate-50 border-b flex justify-between items-center">
                                                 <h3 className="font-black text-xs uppercase text-slate-500">Alertas</h3>
                                                 <div className="flex items-center gap-2">
@@ -4354,7 +4354,7 @@ export default function PlanificacionPage() {
                     
                     {!selectedObjective ? (
                         <div className="flex flex-col items-center justify-center h-full gap-3 select-none">
-                            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+                            <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center">
                                 <Calendar size={32} className="text-slate-300" aria-hidden="true"/>
                             </div>
                             <p className="font-bold text-base text-slate-400">Seleccioná un cliente y objetivo</p>
@@ -4449,7 +4449,7 @@ export default function PlanificacionPage() {
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 text-white p-2 rounded-2xl shadow-2xl flex gap-1 animate-in zoom-in-95 items-center border border-slate-600 no-print">
+                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 text-white p-2 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 items-center border border-slate-600 no-print">
                         {columnSelectMode ? (
                             <>
                                 <span className="text-[10px] font-bold px-2 text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -4512,7 +4512,7 @@ export default function PlanificacionPage() {
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/francos/licencias.'
                         : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, francos ni licencias). Compará con Vendidas del SLA.';
                     return (
-                    <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700">
+                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                         <div className="text-center pr-3" title={hoursMode === 'cct' ? 'Empleados con horas en el ciclo CCT actual.' : 'Empleados con horas planificadas en el mes.'}>
                             <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Empl.</p>
                             <p className="text-sm font-black text-slate-700 dark:text-slate-200 leading-tight">{empCount}</p>
@@ -4584,7 +4584,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
 
-                <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm shrink-0 no-print overflow-hidden">
+                <div className="rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
                         onClick={() => setShowActivityModal(true)}
@@ -4620,7 +4620,7 @@ export default function PlanificacionPage() {
 
                 {showActivityModal && (
                     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowActivityModal(false)}>
-                        <div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="bg-white w-full max-w-3xl h-[80vh] rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
                                 <h3 className="font-black text-lg flex items-center gap-2"><Clock className="text-indigo-600" size={18}/> Actividad Reciente</h3>
                                 <button onClick={() => setShowActivityModal(false)} className="p-2 hover:bg-slate-200 rounded-lg"><X size={18}/></button>
@@ -4728,7 +4728,7 @@ export default function PlanificacionPage() {
                 {/* 1. MODAL SELECTOR DE TURNOS */}
                 {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
-                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
                                 const employeeName = employees.find(e => e.id === selectedCell.empId)?.name || 'Empleado';
                                 const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
@@ -4958,7 +4958,7 @@ export default function PlanificacionPage() {
                                             </div>
 
                                             {/* Badge principal del turno */}
-                                            <div className={`flex items-center gap-3 p-4 rounded-2xl border mb-4 ${shiftStyle}`}>
+                                            <div className={`flex items-center gap-3 p-4 rounded-xl border mb-4 ${shiftStyle}`}>
                                                 <span className="text-3xl font-black">{code || '—'}</span>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="font-black text-base leading-tight">{shift.type || shift.name || (isFrancoShift ? 'Franco' : code)}</p>
@@ -5219,7 +5219,7 @@ export default function PlanificacionPage() {
                     </div>
                 )}
 
-                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[9000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button onClick={() => {
+                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[9000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button onClick={() => {
                                         const cap = pendingAssignment;
                                         const empName = employees.find((e: any) => e.id === selectedCell?.empId)?.name || 'Empleado';
                                         setPendingAssignment(null);
@@ -5232,10 +5232,10 @@ export default function PlanificacionPage() {
                                             operatorName: activeActorName || operatorName
                                         });
                                     }} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Autorizar con PIN</button></div></div></div></div>, document.body)}
-                {showConflictModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-rose-900/20 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px] border-2 border-rose-100"><div className="text-center mb-6"><div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3"><Siren size={24}/></div><h3 className="text-lg font-black text-slate-800">Conflicto Detectado</h3><p className="text-xs text-slate-500 mt-1">Hay una superposición entre Novedad y Turno.</p></div><div className="space-y-3"><button onClick={() => resolveConflict('SPLIT')} className="w-full p-3 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-200 hover:bg-indigo-700 flex items-center justify-center gap-2"><Split size={16}/> Dividir Turno (Extensión + Adelanto)</button><button onClick={() => resolveConflict('FULL_COVERAGE')} className="w-full p-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-50 flex items-center justify-center gap-2"><Shield size={16}/> Cobertura Total (Franco Trabajado)</button><button onClick={() => setShowConflictModal(false)} className="w-full p-3 text-slate-400 font-bold text-xs hover:text-slate-600">Cancelar</button></div></div></div>)}
+                {showConflictModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-rose-900/20 backdrop-blur-sm"><div className="bg-white p-6 rounded-xl shadow-2xl w-[400px] border-2 border-rose-100"><div className="text-center mb-6"><div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3"><Siren size={24}/></div><h3 className="text-lg font-black text-slate-800">Conflicto Detectado</h3><p className="text-xs text-slate-500 mt-1">Hay una superposición entre Novedad y Turno.</p></div><div className="space-y-3"><button onClick={() => resolveConflict('SPLIT')} className="w-full p-3 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-200 hover:bg-indigo-700 flex items-center justify-center gap-2"><Split size={16}/> Dividir Turno (Extensión + Adelanto)</button><button onClick={() => resolveConflict('FULL_COVERAGE')} className="w-full p-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-50 flex items-center justify-center gap-2"><Shield size={16}/> Cobertura Total (Franco Trabajado)</button><button onClick={() => setShowConflictModal(false)} className="w-full p-3 text-slate-400 font-bold text-xs hover:text-slate-600">Cancelar</button></div></div></div>)}
                 {showSwapModal && (
                     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[500px]">
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px]">
                             <h3 className="font-black text-lg mb-4 flex items-center gap-2">
                                 <ArrowLeftRight size={20} className="text-indigo-500" /> Intercambio de Turno
                             </h3>
@@ -5308,7 +5308,7 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 )}
-                {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-2xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Seleccionar cambia el objetivo preferido del colaborador a <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span>.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{employees.filter(e => e.name.toLowerCase().includes(addSearchTerm.toLowerCase())).map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
+                {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Seleccionar cambia el objetivo preferido del colaborador a <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span>.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{employees.filter(e => e.name.toLowerCase().includes(addSearchTerm.toLowerCase())).map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';
                     const isVac = absType === 'Vacaciones';
@@ -5364,7 +5364,7 @@ export default function PlanificacionPage() {
                     const restoCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'WORKING' && e.monthHours >= (e.maxHours||200) - 16);
                     return (
                     <div className="fixed inset-0 z-[70] flex items-end justify-end p-6 bg-black/25 backdrop-blur-[2px]">
-                        <div className={`bg-white p-6 rounded-2xl shadow-2xl w-[520px] border-l-4 ${colorMap[color].split(' ')[0]}`}>
+                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-[520px] border-l-4 ${colorMap[color].split(' ')[0]}`}>
                             <div className="flex items-start justify-between mb-4">
                                 <div>
                                     <h3 className="font-black text-lg text-slate-800">{title}</h3>
@@ -5410,15 +5410,15 @@ export default function PlanificacionPage() {
                     </div>
                     );
                 })()}
-                {showRRHHModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="bg-white p-6 rounded-2xl shadow-2xl w-[400px]"><h3 className="font-black text-lg mb-4">Registrar Novedad RRHH</h3><div className="space-y-4"><div><label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Novedad</label><select className="w-full border p-2 rounded-lg" value={rrhhData.type} onChange={e => setRrhhData({...rrhhData, type: e.target.value})}><option>Vacaciones</option><option>Enfermedad</option><option>ART</option><option>Injustificada</option><option>Licencia Esp.</option></select></div><div><label className="text-xs font-bold text-slate-500 block mb-1">Detalle / Motivo</label><textarea className="w-full border p-2 rounded-lg h-24 text-sm" value={rrhhData.reason} onChange={e => setRrhhData({...rrhhData, reason: e.target.value})} placeholder="Especifique el motivo..."></textarea></div><button onClick={handleRRHHSubmit} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Guardar Novedad</button><button onClick={() => setShowRRHHModal(false)} className="w-full text-slate-400 text-xs font-bold py-2">Cancelar</button></div></div></div>)}
-                {showHistoryModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}><div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}><div className="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 className="font-black text-lg flex items-center gap-2"><History className="text-indigo-600"/> Historial de Versiones</h3><button onClick={() => setShowHistoryModal(false)}><X size={20}/></button></div><p className="px-4 py-2 text-[10px] text-slate-500 border-b bg-slate-50">Cada versión se compara con la <span className="font-bold text-indigo-600">planificación activa</span> (guardada + pendientes).</p><div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">{historyVersions.map(v => (<div key={v.id} className="border p-4 rounded-xl flex items-center justify-between hover:bg-slate-50 transition-colors group"><div><p className="font-black text-slate-800 text-sm">{new Date(v.timestamp.seconds*1000).toLocaleString()}</p><p className="text-xs text-slate-500 font-mono mt-1">Modificado por: <span className="font-bold text-indigo-600">{v.user}</span></p><div className="mt-2 flex gap-2"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 border border-slate-200">{v.count} cambios</span></div></div><button onClick={() => handleViewSnapshot(v)} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-black shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">Comparar vs actual</button></div>))}{historyVersions.length === 0 && <div className="text-center text-slate-400 py-10">No hay versiones guardadas para este periodo.</div>}</div></div></div>)}
+                {showRRHHModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"><div className="bg-white p-6 rounded-xl shadow-2xl w-[400px]"><h3 className="font-black text-lg mb-4">Registrar Novedad RRHH</h3><div className="space-y-4"><div><label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Novedad</label><select className="w-full border p-2 rounded-lg" value={rrhhData.type} onChange={e => setRrhhData({...rrhhData, type: e.target.value})}><option>Vacaciones</option><option>Enfermedad</option><option>ART</option><option>Injustificada</option><option>Licencia Esp.</option></select></div><div><label className="text-xs font-bold text-slate-500 block mb-1">Detalle / Motivo</label><textarea className="w-full border p-2 rounded-lg h-24 text-sm" value={rrhhData.reason} onChange={e => setRrhhData({...rrhhData, reason: e.target.value})} placeholder="Especifique el motivo..."></textarea></div><button onClick={handleRRHHSubmit} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Guardar Novedad</button><button onClick={() => setShowRRHHModal(false)} className="w-full text-slate-400 text-xs font-bold py-2">Cancelar</button></div></div></div>)}
+                {showHistoryModal && (<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}><div className="bg-white w-full max-w-3xl h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}><div className="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 className="font-black text-lg flex items-center gap-2"><History className="text-indigo-600"/> Historial de Versiones</h3><button onClick={() => setShowHistoryModal(false)}><X size={20}/></button></div><p className="px-4 py-2 text-[10px] text-slate-500 border-b bg-slate-50">Cada versión se compara con la <span className="font-bold text-indigo-600">planificación activa</span> (guardada + pendientes).</p><div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">{historyVersions.map(v => (<div key={v.id} className="border p-4 rounded-xl flex items-center justify-between hover:bg-slate-50 transition-colors group"><div><p className="font-black text-slate-800 text-sm">{new Date(v.timestamp.seconds*1000).toLocaleString()}</p><p className="text-xs text-slate-500 font-mono mt-1">Modificado por: <span className="font-bold text-indigo-600">{v.user}</span></p><div className="mt-2 flex gap-2"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-bold text-slate-600 border border-slate-200">{v.count} cambios</span></div></div><button onClick={() => handleViewSnapshot(v)} className="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-black shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600 transition-all">Comparar vs actual</button></div>))}{historyVersions.length === 0 && <div className="text-center text-slate-400 py-10">No hay versiones guardadas para este periodo.</div>}</div></div></div>)}
 
                 {/* MODAL AUTORIZACIÓN SUPERVISOR 200H */}
                 {authModal.pendingFn && createPortal(
                     <div className="fixed inset-0 z-[9000] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-                        <div className="bg-white dark:bg-slate-800 rounded-3xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 border dark:border-slate-700">
+                        <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 border dark:border-slate-700">
                             <div className="text-center mb-6">
-                                <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                <div className="w-16 h-16 bg-amber-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                                     <ShieldAlert size={32} className="text-amber-600"/>
                                 </div>
                                 <h3 className="font-black text-xl text-slate-900 dark:text-white">Autorización Requerida</h3>
@@ -5440,7 +5440,7 @@ export default function PlanificacionPage() {
                                     placeholder="••••"
                                     value={authPin}
                                     onChange={e => { setAuthPin(e.target.value.replace(/\D/g,'').slice(0,4)); setAuthError(''); }}
-                                    className="w-full text-center text-3xl font-black tracking-[0.6em] bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-indigo-500 outline-none dark:text-white rounded-2xl px-4 py-4"
+                                    className="w-full text-center text-3xl font-black tracking-[0.6em] bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-indigo-500 outline-none dark:text-white rounded-xl px-4 py-4"
                                 />
                                 {authError && <p className="text-rose-600 text-xs font-bold text-center mt-2">{authError}</p>}
                             </div>
@@ -5492,7 +5492,7 @@ export default function PlanificacionPage() {
                 {/* ── MODAL CAPACIDAD CCT POR EMPLEADO ── */}
                 {showCapacityModal && autoV2GenStats && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCapacityModal(false)}>
-                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[860px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[860px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                             <h3 className="font-black text-lg mb-1 flex items-center gap-2">
                                 <span className="text-indigo-600">Cap. CCT</span>
                                 <span className="text-slate-700">Capacidad por empleado — ciclo CCT</span>
@@ -5641,7 +5641,7 @@ export default function PlanificacionPage() {
                 {/* ── Modal verificación de cobertura post-generación ── */}
                 {showCoverageModal && autoV2Coverage && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCoverageModal(false)}>
-                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                             <h3 className="font-black text-lg mb-1 flex items-center gap-2">
                                 <span className={`${autoV2Coverage.ok ? 'text-emerald-600' : autoV2Coverage.warnings ? 'text-amber-600' : 'text-rose-600'}`}>
                                     {autoV2Coverage.ok ? '✓' : autoV2Coverage.warnings ? '⚠' : '✗'}
@@ -5862,7 +5862,7 @@ export default function PlanificacionPage() {
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
-                        <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white rounded-xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
                             {/* Header */}
                             <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">

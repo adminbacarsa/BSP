@@ -51,6 +51,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups } from './demandDrivenSchedule';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -253,6 +254,13 @@ export interface V2EngineContext {
      * El límite semanal de 48h sigue aplicando.
      */
     authorizedOver200Ids?: Set<string>;
+    /**
+     * Planificación demand-driven: llena slots SLA (M/T/N por puesto/día) antes de francos.
+     * Default true si hay puestos 24hs.
+     */
+    demandDriven?: boolean;
+    /** Offsets de ciclo tras rebalance demand-driven (0..perPos-1 por puesto). */
+    demandDrivenStaggerByEmp?: Record<string, number>;
 }
 
 export interface V2PositionDemand {
@@ -1112,6 +1120,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             .map(e => e.id),
     );
 
+    if (shouldUseDemandDrivenScheduling(ctx)) {
+        const stagger: Record<string, number> = {};
+        rebalanceEqual24hsPositionGroups(ctx.positions, positionGroups, empAssignedTo, stagger);
+        ctx.demandDrivenStaggerByEmp = stagger;
+    }
+
     // ── ALERTA DE EXCESO DE EMPLEADOS POR PUESTO ─────────────────────────────
     const excessPositionEmployees: { positionName: string; assigned: number; needed: number; excess: number }[] = [];
     Object.entries(initialGroupSizes).forEach(([posName, initial]) => {
@@ -1242,7 +1256,14 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const nb = Math.max(1, sortedBands.length);
         sortedBands.forEach((band, i) => {
             const base = Math.round(i * cycleLen / nb);
-            bandToPositions.get(band)!.forEach(pName => { positionBandBase[pName] = base; });
+            const posNames = bandToPositions.get(band)!;
+            if (band === '__ROT__' && shouldUseDemandDrivenScheduling(ctx) && posNames.length > 1) {
+                posNames.forEach((pName, pi) => {
+                    positionBandBase[pName] = Math.round(pi * cycleLen / posNames.length);
+                });
+            } else {
+                posNames.forEach(pName => { positionBandBase[pName] = base; });
+            }
         });
     }
 
@@ -1321,9 +1342,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const staggerRotating = shiftCodes.length > 1;
             group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
                 const idxInGroup = group.indexOf(empId);
+                const staggerIdx = ctx.demandDrivenStaggerByEmp?.[empId];
                 assignedOffsets.set(
                     empId,
-                    staggerRotating ? (bandOff + idxInGroup) % eCycleLen : bandOff,
+                    staggerRotating
+                        ? (bandOff + (staggerIdx !== undefined ? staggerIdx : idxInGroup)) % eCycleLen
+                        : bandOff,
                 );
             });
 
@@ -1710,6 +1734,29 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    const useDemandDriven = shouldUseDemandDrivenScheduling(ctx);
+    let dayDemandsFromFill: import('./objectiveCoverageDemand').ObjectiveDayDemand[] = [];
+    if (useDemandDriven) {
+        dayDemandsFromFill = fillScheduleFromDemand({
+            ctx,
+            positionGroups,
+            cycleWorkDays,
+            customCoverEmps,
+            limitedEmpIds,
+            assignments,
+            stats,
+            runtime,
+            cutoffDay,
+            shiftHoursH,
+            writeAssignment,
+            passesAgreementRest,
+            empMeta,
+            isCustomCoverPosition,
+        });
+    }
+
+    // ── GENERACIÓN clásica (banda fija por empleado) ──────────────────────────
+    if (!useDemandDriven) {
     // ── GENERACIÓN: loop único día×puesto×banda ──────────────────────────
     // Regla de oro: cada empleado trabaja SOLO su banda asignada todo el mes.
     // No hay cross-banda rescue. Los slots sin cobertura se reportan como vacantes.
@@ -2070,6 +2117,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             tryAssignBandSlot(emp.id, pos, dateStr, code, sh, inCurrent);
         }
     }
+    } // fin !useDemandDriven
 
     // ── CIERRE SLA: total facturable = horas vendidas (imperativo operativo) ──
     {
@@ -2207,6 +2255,28 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
     stats.suvicoWeekBillableOver48 = suvicoWeekBillableOver48;
 
+    if (useDemandDriven && dayDemandsFromFill.length > 0) {
+        fillDemandGapsBeforeFrancos(
+            {
+                ctx,
+                positionGroups,
+                cycleWorkDays,
+                customCoverEmps,
+                limitedEmpIds,
+                assignments,
+                stats,
+                runtime,
+                cutoffDay,
+                shiftHoursH,
+                writeAssignment,
+                passesAgreementRest,
+                empMeta,
+                isCustomCoverPosition,
+            },
+            dayDemandsFromFill,
+        );
+    }
+
     // Días sobrantes:
     //   - Empleado IDLE (sin puesto asignado por capacidad ociosa): TODO el mes en RET o F,
     //     según ciclo. Nunca se mezcla con un turno facturable, así queda evidente que
@@ -2252,7 +2322,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const is24hsAssigned = !!assignedPos
                 && !isCustomCoverPosition(assignedPos)
                 && ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every(l => positionIsActiveOn(assignedPos, l));
-            if (is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
+            if (!useDemandDriven && is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
                 const dayShifts = effectiveShiftsForPositionDay(assignedPos!, dayLetter, ctx.autoCycles);
                 const primary = expectedShiftForDay(emp.id, dateStr, assignedPosName!);
                 const sh = primary

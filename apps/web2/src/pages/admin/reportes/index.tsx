@@ -152,7 +152,7 @@ export default function ReportsPage() {
         }, { shifts: 0, vacantShifts: 0, vacantHours: 0, vendidas: 0, total: 0, diurnas: 0, nocturnas: 0, extra100: 0, plusFeriado: 0 });
 
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 items-center bg-slate-50 dark:bg-slate-700/50 no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white flex-1 min-w-[150px]"><Building size={16}/> Costos por Objetivo</h3>
                     <select
@@ -336,7 +336,7 @@ export default function ReportsPage() {
         }), { shifts: 0, total: 0, horasReales: 0, horasExtra: 0, diurnas: 0, nocturnas: 0, extra50: 0, extra100: 0, plusFeriado: 0 });
 
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
                     <div className="flex gap-2">
@@ -424,7 +424,7 @@ export default function ReportsPage() {
     const renderShiftsDetailTable = () => {
         if (!employeeReport.length) {
             return (
-                <div className="p-10 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
+                <div className="p-10 text-center bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
                     <User size={48} className="mx-auto mb-2 opacity-20"/>
                     <p className="font-bold uppercase text-sm">Generá el reporte para ver los turnos</p>
                 </div>
@@ -476,7 +476,7 @@ export default function ReportsPage() {
             : 'Todos los empleados';
 
         return (
-            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden print-container animate-in fade-in slide-in-from-bottom-4">
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden print-container animate-in fade-in slide-in-from-bottom-4">
                 <div className="p-4 border-b flex justify-between items-center bg-slate-50 no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 items-center">
                         <Calendar size={16} className="text-indigo-600"/>
@@ -670,7 +670,7 @@ export default function ReportsPage() {
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => setDetailItem(null)}>
-                <div className="bg-white w-full max-w-[95vw] rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                <div className="bg-white w-full max-w-[95vw] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                     <div className="p-6 bg-slate-50 border-b">
                         <div className="flex justify-between items-start mb-4">
                             <div>
@@ -823,7 +823,7 @@ export default function ReportsPage() {
     const renderPlanificadoTable = () => {
         if (!objectiveReport.length && !employeeReport.length) {
             return (
-                <div className="p-10 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
+                <div className="p-10 text-center bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
                     <CalendarDays size={48} className="mx-auto mb-2 opacity-20"/>
                     <p className="font-bold uppercase text-sm">Generá el reporte para ver la planificación</p>
                 </div>
@@ -898,7 +898,7 @@ export default function ReportsPage() {
         const staffedCount = filtered.length;
 
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex flex-wrap gap-3 items-center no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 items-center text-slate-800 dark:text-white flex-1 min-w-[150px]">
                         <CalendarDays size={16} className="text-indigo-600"/> Horas Planificadas

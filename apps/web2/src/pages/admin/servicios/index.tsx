@@ -974,7 +974,7 @@ export default function ServiciosSLAPage() {
                 <p className="text-xs text-slate-400">Contratos, puestos y proyección de costos</p>
               </div>
             </div>
-            <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-xl flex gap-2 items-center">
+            <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
               <Plus size={14}/> Nuevo Servicio
             </button>
           </div>
@@ -1008,7 +1008,7 @@ export default function ServiciosSLAPage() {
                 { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiCurrent.positions, unit: '' },
                 { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiCurrent.guards, unit: '' },
               ] as const).map(({ icon: Icon, color, label, value, unit }) => (
-                <div key={label} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
+                <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="p-1.5 rounded-lg shrink-0" style={{ background: color + '1a' }}>
                       <Icon size={13} color={color} strokeWidth={2.5} />
@@ -1043,7 +1043,7 @@ export default function ServiciosSLAPage() {
                 const hasActive = group.services.some(s => isSlaContractActive(s.status));
                 const isExpanded = expandedGroups.has(group.key);
                 return (
-                  <div key={group.key} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
+                  <div key={group.key} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
                     {/* Accent */}
                     <div className={`h-1 w-full ${hasActive ? 'bg-indigo-600' : 'bg-slate-300'}`}/>
                     <div className="p-4">
@@ -1198,7 +1198,7 @@ export default function ServiciosSLAPage() {
                   { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiCurrent.positions, unit: '' },
                   { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiCurrent.guards, unit: '' },
                 ] as const).map(({ icon: Icon, color, label, value, unit }) => (
-                  <div key={label} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
+                  <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
                     <div className="flex items-center gap-2 mb-2">
                       <div className="p-1.5 rounded-lg shrink-0" style={{ background: color + '1a' }}>
                         <Icon size={13} color={color} strokeWidth={2.5} />
@@ -1213,7 +1213,7 @@ export default function ServiciosSLAPage() {
               </div>
 
               {/* Histórico · timeline horizontal */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm px-6 py-4 overflow-hidden">
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm px-6 py-4 overflow-hidden">
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-5">Histórico · últimos 5 meses</p>
                 <div className="relative">
                   {/* Línea conectora */}
@@ -1428,7 +1428,7 @@ export default function ServiciosSLAPage() {
               icon={Shield}
             />
             {externalChange && (
-              <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-2xl px-5 py-3 mb-4">
+              <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-xl px-5 py-3 mb-4">
                 <AlertCircle size={16} className="text-amber-600 shrink-0"/>
                 <p className="text-sm font-bold text-amber-700 dark:text-amber-400 flex-1">
                   Otro usuario modificó este servicio. Tus cambios no guardados pueden sobreescribir los suyos.
@@ -1449,7 +1449,7 @@ export default function ServiciosSLAPage() {
                 </button>
               </div>
             )}
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border dark:border-slate-700 shadow-xl">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border dark:border-slate-700 shadow-sm">
             <div className="flex justify-between items-start mb-8">
                <div><h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase">{isEditing ? 'Editar' : 'Nuevo'} Contrato</h2><p className="text-slate-400 text-xs mt-1">Definición de SLA y Costos Laborales (SUVICO).</p></div>
                <div className="text-right">
@@ -1464,14 +1464,14 @@ export default function ServiciosSLAPage() {
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                <div className="space-y-6">
-                 <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-2xl font-bold text-sm dark:text-white" value={form.clientId} onChange={handleClientChange}><option value="">Seleccionar...</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                 <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-2xl font-bold text-sm dark:text-white" value={form.objectiveId} onChange={handleObjectiveChange} disabled={!form.clientId}><option value="">Seleccionar...</option>{availableObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
+                 <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.clientId} onChange={handleClientChange}><option value="">Seleccionar...</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                 <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.objectiveId} onChange={handleObjectiveChange} disabled={!form.clientId}><option value="">Seleccionar...</option>{availableObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                  <div className="grid grid-cols-2 gap-4">
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-2xl font-bold text-xs dark:text-white" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-2xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
                  
-                 <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700/50">
+                 <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border dark:border-slate-700/50">
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2"><Table size={12}/> Proyección de Costos</h4>
                       <button onClick={() => handleNewVersion(form)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1 shadow-md transition-colors"><Plus size={11}/> Nuevo Servicio</button>
@@ -1505,14 +1505,14 @@ export default function ServiciosSLAPage() {
                  </div>
                </div>
 
-               <div className="lg:col-span-2 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-[2.5rem] border dark:border-slate-700/50">
+               <div className="lg:col-span-2 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
                   <div className="flex justify-between items-center mb-6">
                      <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2"><Briefcase size={18} className="text-indigo-500"/> Estructura Operativa</h3>
                      <button onClick={openAddPositionModal} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1 shadow-md transition-colors"><Plus size={11}/> Agregar Puesto</button>
                   </div>
                   <div className="space-y-3">
                      {form.positions.map((pos) => (
-                        <div key={pos.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div key={pos.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
                            <div className="flex-1 text-left">
                               <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{pos.quantity} PAX</span></div>
                               <div className="mt-1 flex items-center gap-2 flex-wrap">
@@ -1547,7 +1547,7 @@ export default function ServiciosSLAPage() {
                   </div>
                </div>
             </div>
-            <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6"><button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button><button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-xl transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button></div>
+            <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6"><button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button><button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button></div>
             </div>
           </div>
         </PageShell>
@@ -1602,7 +1602,7 @@ export default function ServiciosSLAPage() {
                     </div>
 
                     {positionForm.coverageType === '24hs' && (
-                        <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-800 rounded-2xl p-4 space-y-3">
+                        <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-800 rounded-xl p-4 space-y-3">
                             <p className="text-[9px] font-black uppercase text-sky-600 dark:text-sky-400">Horarios base (24 h)</p>
                             <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-snug">
                                 Definí el inicio del turno M (cada bloque 8 h): se calculan T y N en cadena. Definí el inicio de D12 (12 h): N12 completa las 24 h. Los ciclos 8+8+8 y 12+12 son independientes (dos modelos de planificación).
@@ -1647,7 +1647,7 @@ export default function ServiciosSLAPage() {
                     )}
 
                     {positionForm.coverageType === 'custom' && (
-                        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-2xl border border-orange-100 dark:border-orange-800">
+                        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-xl border border-orange-100 dark:border-orange-800">
                              <div className="flex gap-2 items-center mb-4 text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/40 p-2 rounded-lg">
                                 <Info size={14}/>
                                 <p className="text-[9px] font-bold">El cálculo de horas (Noc/Finde) es automático según los días asignados.</p>
@@ -1691,7 +1691,7 @@ export default function ServiciosSLAPage() {
                         </div>
                     )}
 
-                    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700">
+                    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border dark:border-slate-700">
                         <label className="text-[10px] font-black uppercase text-slate-400 mb-3 block">Turnos Habilitados</label>
                         <div className="flex flex-col gap-2">
                             {positionForm.allowedShiftTypes.length > 0 ? positionForm.allowedShiftTypes.map((v, vIdx) => {
@@ -1748,7 +1748,7 @@ export default function ServiciosSLAPage() {
                       const guardsMin = Math.max(_minRot, Math.ceil(avgH / 192));
                       const hxg = guardsMin > 0 ? Math.round(avgH / guardsMin) : 0;
                       return (
-                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-4">
+                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-xl p-4">
                           <p className="text-[9px] font-black uppercase text-indigo-400 mb-3">Cálculo CCT 422/05 — por puesto (PAX: {positionForm.quantity})</p>
                           <div className="grid grid-cols-3 gap-3 text-center">
                             <div>
@@ -1767,7 +1767,7 @@ export default function ServiciosSLAPage() {
                         </div>
                       );
                     })()}
-                    <div className="pt-4 flex gap-3"><button onClick={() => { setShowPositionModal(false); setEditingShiftCode(null); }} className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 text-slate-500 font-bold rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button><button onClick={handleSavePosition} className="flex-1 py-3 bg-indigo-600 text-white font-black rounded-xl uppercase text-xs shadow-xl hover:bg-indigo-700">Confirmar</button></div>
+                    <div className="pt-4 flex gap-3"><button onClick={() => { setShowPositionModal(false); setEditingShiftCode(null); }} className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 text-slate-500 font-bold rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button><button onClick={handleSavePosition} className="flex-1 py-3 bg-indigo-600 text-white font-black rounded-xl uppercase text-xs shadow-sm hover:bg-indigo-700">Confirmar</button></div>
                  </div>
               </div>
            </div>
