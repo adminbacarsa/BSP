@@ -1270,14 +1270,19 @@ export default function CRMPage() {
           renderCardSummary={c => {
             const m = clientMetricsMap[c.id] || {};
             const burn = Math.round(m.burnRate || 0);
-            const burnColor = burn >= 110 ? 'text-rose-600' : burn >= 90 ? 'text-amber-500' : 'text-emerald-600';
+            const burnHex = burn >= 110 ? '#ef4444' : burn >= 90 ? '#f59e0b' : '#10b981';
+            const burnTextCls = burn >= 110 ? 'text-rose-600' : burn >= 90 ? 'text-amber-500' : 'text-emerald-600';
+            const status = (c as any).status || 'ACTIVO';
+            const statusCls = status === 'ACTIVO'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
+              : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600';
             return (
-              <>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-sm shrink-0">
+              <div className="flex flex-col gap-3 h-full" style={{ borderTop: `2px solid ${burnHex}`, marginTop: '-1px', paddingTop: '12px' }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shrink-0" style={{ backgroundColor: burnHex }}>
                     {(c.name || '?').charAt(0).toUpperCase()}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <h3 className="font-black text-sm text-slate-800 dark:text-white truncate">{c.name}</h3>
                     <p className="text-[10px] font-bold text-slate-400 uppercase">
                       {c.taxId || 'S/C'}
@@ -1286,31 +1291,50 @@ export default function CRMPage() {
                       ) : null}
                     </p>
                   </div>
+                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full border uppercase shrink-0 ${statusCls}`}>{status}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {[['SLA', `${m.sla || 0} hs`], ['Plan.', `${m.planned || 0} hs`], ['Ejec.', `${m.real || 0} hs`], ['Burn', `${burn}%`]].map(([label, val]) => (
+                  {([['SLA', `${m.sla || 0} hs`, false], ['Plan.', `${m.planned || 0} hs`, false], ['Ejec.', `${m.real || 0} hs`, false], ['Burn', `${burn}%`, true]] as [string, string, boolean][]).map(([label, val, isBurn]) => (
                     <div key={label} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
                       <p className="text-[8px] font-black text-slate-400 uppercase">{label}</p>
-                      <p className={`font-black text-sm ${label === 'Burn' ? burnColor : 'text-slate-700 dark:text-white'}`}>{val}</p>
+                      <p className={`font-black text-sm ${isBurn ? burnTextCls : 'text-slate-700 dark:text-white'}`}>{val}</p>
                     </div>
                   ))}
                 </div>
-              </>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[8px] font-black text-slate-400 uppercase">
+                    <span>Burn Rate</span>
+                    <span style={{ color: burnHex }}>{burn}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }}/>
+                  </div>
+                </div>
+              </div>
             );
           }}
           renderRowSummary={c => {
             const m = clientMetricsMap[c.id] || {};
             const burn = Math.round(m.burnRate || 0);
-            const burnCls = burn >= 110 ? 'bg-rose-50 text-rose-600 border-rose-100' : burn >= 90 ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100';
+            const burnHex = burn >= 110 ? '#ef4444' : burn >= 90 ? '#f59e0b' : '#10b981';
+            const burnCls = burn >= 110 ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800' : burn >= 90 ? 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' : 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800';
             return (
               <div className="flex items-center gap-4">
-                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0" style={{ backgroundColor: burnHex }}>
                   {(c.name || '?').charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <span className="font-black text-sm text-slate-800 dark:text-white">{c.name}</span>
-                  <span className="text-slate-300 dark:text-slate-600 mx-2">·</span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">{c.taxId || 'S/C'}</span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="font-black text-sm text-slate-800 dark:text-white">{c.name}</span>
+                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">{c.taxId || 'S/C'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <div className="w-20 h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }}/>
+                    </div>
+                    <span className="text-[8px] font-black text-slate-400">{burn}% burn</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${burnCls}`}>Burn {burn}%</span>
@@ -1378,6 +1402,13 @@ export default function CRMPage() {
                       <Trash2 size={13}/> Eliminar
                     </button>
                   )}
+                  <button
+                    onClick={() => { void openClientDetail(c); setActiveTab('COTIZACIONES'); setProformaOpen(true); close(); }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs uppercase transition-colors border"
+                    style={{ backgroundColor: 'var(--surf2, #fef3c7)', color: '#b45309', borderColor: '#fde68a' }}
+                  >
+                    <FileText size={13}/> Prefacturar
+                  </button>
                   <button
                     onClick={() => { void openClientDetail(c); close(); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white font-black text-xs uppercase hover:bg-indigo-700 transition-colors shadow-sm"
