@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 72">
+  <!-- Solo el símbolo B — para espacios pequeños (credencial, favicon, etc.) -->
+  <!-- Barra izquierda -->
+  <rect x="0" y="0" width="10" height="72" fill="white" rx="1.5"/>
+  <!-- Bump superior -->
+  <path fill-rule="evenodd" fill="white" d="
+    M 0 0 L 37 0 Q 52 0 52 18 Q 52 36 37 36 L 0 36 Z
+    M 10 7 L 34 7 Q 44 7 44 18 Q 44 29 34 29 L 10 29 Z
+    M 18 14 L 30 21 L 18 28 L 22 21 Z
+  "/>
+  <!-- Bump inferior -->
+  <path fill-rule="evenodd" fill="white" d="
+    M 0 36 L 39 36 Q 56 36 56 54 Q 56 72 39 72 L 0 72 Z
+    M 10 43 L 36 43 Q 48 43 48 54 Q 48 65 36 65 L 10 65 Z
+    M 18 50 L 32 57 L 18 64 L 22 57 Z
+  "/>
+</svg>

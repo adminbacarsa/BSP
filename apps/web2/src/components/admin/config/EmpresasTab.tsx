@@ -81,8 +81,13 @@ export default function EmpresasTab() {
     }
   };
 
-  // Credencial — logo + template
-  const CRED_TEMPLATES = [
+  // Credencial — logo + modelo + color
+  const CRED_MODELOS = [
+    { id: 'clasico',    label: 'Clásico',    desc: 'Vertical · foto centrada' },
+    { id: 'horizontal', label: 'Horizontal', desc: 'Apaisado · foto lateral' },
+    { id: 'compacto',   label: 'Compacto',   desc: 'Vertical · más datos' },
+  ];
+  const CRED_COLORES = [
     { id: 'marino-oro',    label: 'Marino & Oro',   h1: '#0a1628', h2: '#1e3a5f', accent: '#c8a84b' },
     { id: 'grafito',       label: 'Grafito',         h1: '#111827', h2: '#1f2937', accent: '#e5e7eb' },
     { id: 'corporativo',   label: 'Corporativo',     h1: '#0f172a', h2: '#1e3a5f', accent: '#38bdf8' },
@@ -91,14 +96,16 @@ export default function EmpresasTab() {
     { id: 'elite',         label: 'Elite',           h1: '#1e0050', h2: '#3b0764', accent: '#e879f9' },
   ];
   const logoInputRef = useRef<HTMLInputElement>(null);
-  const [logoPreview, setLogoPreview]         = useState<string | null>((empresa as any)?.logoUrl || null);
-  const [subiendoLogo, setSubiendoLogo]       = useState(false);
-  const [templateCred, setTemplateCred]       = useState<string>((empresa as any)?.credencialTemplate || 'marino-oro');
-  const [guardandoTpl, setGuardandoTpl]       = useState(false);
+  const [logoPreview, setLogoPreview]   = useState<string | null>((empresa as any)?.logoUrl || null);
+  const [subiendoLogo, setSubiendoLogo] = useState(false);
+  const [modeloCred, setModeloCred]     = useState<string>((empresa as any)?.credencialModelo || 'clasico');
+  const [colorCred, setColorCred]       = useState<string>((empresa as any)?.credencialTemplate || 'marino-oro');
+  const [guardandoTpl, setGuardandoTpl] = useState(false);
 
   React.useEffect(() => {
     setLogoPreview((empresa as any)?.logoUrl || null);
-    setTemplateCred((empresa as any)?.credencialTemplate || 'marino-oro');
+    setModeloCred((empresa as any)?.credencialModelo || 'clasico');
+    setColorCred((empresa as any)?.credencialTemplate || 'marino-oro');
   }, [empresa?.id]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,8 +128,12 @@ export default function EmpresasTab() {
     if (!empresa) return;
     setGuardandoTpl(true);
     try {
-      await guardarEmpresa(empresa.id, { credencialTemplate: templateCred } as any);
-      toast.success('Template guardado');
+      await guardarEmpresa(empresa.id, {
+        credencialTemplate: colorCred,
+        credencialModelo: modeloCred,
+        credencialOrientacion: modeloCred === 'horizontal' ? 'horizontal' : 'vertical',
+      } as any);
+      toast.success('Configuración de credencial guardada');
     } catch { toast.error('Error al guardar'); }
     finally { setGuardandoTpl(false); }
   };
@@ -596,43 +607,160 @@ export default function EmpresasTab() {
 
             {/* Template selector */}
             <div>
-              <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-3">Template de credencial</p>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-4">
-                {CRED_TEMPLATES.map(tpl => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => setTemplateCred(tpl.id)}
-                    className={`flex flex-col rounded-xl overflow-hidden border-2 transition-all ${templateCred === tpl.id ? 'border-indigo-500 shadow-sm shadow-indigo-100' : 'border-slate-200 hover:border-slate-300'}`}
-                    title={tpl.label}
-                  >
-                    {/* Mini preview */}
-                    <div className="h-8 w-full" style={{ background: `linear-gradient(135deg, ${tpl.h1}, ${tpl.h2})` }}>
-                      <div className="h-full flex items-center justify-center gap-0.5">
-                        <div className="w-2 h-2 rounded-full opacity-80" style={{ background: tpl.accent }} />
-                        <div className="w-4 h-1 rounded-full opacity-50" style={{ background: tpl.accent }} />
+              <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-4">Template de credencial</p>
+
+              {/* ── 3 modelos grandes ── */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {CRED_MODELOS.map(modelo => {
+                  const col = CRED_COLORES.find(c => c.id === colorCred) || CRED_COLORES[0];
+                  const selected = modeloCred === modelo.id;
+                  const isH = modelo.id === 'horizontal';
+                  const isCompacto = modelo.id === 'compacto';
+                  return (
+                    <button
+                      key={modelo.id}
+                      onClick={() => setModeloCred(modelo.id)}
+                      className={`flex flex-col rounded-2xl overflow-hidden border-2 transition-all duration-200 ${
+                        selected
+                          ? 'border-indigo-500 shadow-lg shadow-indigo-100/60 scale-[1.02]'
+                          : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
+                      }`}
+                    >
+                      <div
+                        className="w-full relative overflow-hidden bg-slate-50 p-2"
+                        style={{ aspectRatio: isH ? '16/10' : '10/16' }}
+                      >
+                        {isH ? (
+                          <div className="absolute inset-2 rounded-xl overflow-hidden flex flex-col"
+                               style={{ background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
+                            <div className="shrink-0 px-2 py-1.5 flex items-center gap-1.5"
+                                 style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}>
+                              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: col.accent }}/>
+                              <div className="flex-1 h-1 rounded-full" style={{ background: `${col.accent}70` }}/>
+                            </div>
+                            <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${col.h2}, ${col.accent})` }}/>
+                            <div className="flex flex-1 min-h-0">
+                              <div className="shrink-0 flex items-center justify-center p-1.5" style={{ width: '35%' }}>
+                                <div className="w-full rounded-md" style={{
+                                  aspectRatio: '3/4',
+                                  background: `${col.h1}20`,
+                                  border: `1.5px solid ${col.accent}60`
+                                }}/>
+                              </div>
+                              <div className="flex-1 py-1.5 pr-1.5 flex flex-col justify-between">
+                                <div className="space-y-1">
+                                  <div className="h-1.5 rounded-sm bg-slate-700" style={{ width: '85%' }}/>
+                                  <div className="h-1 rounded-sm bg-slate-300" style={{ width: '55%' }}/>
+                                  <div className="h-0.5 rounded-sm bg-slate-200 mt-1" style={{ width: '70%' }}/>
+                                  <div className="h-0.5 rounded-sm bg-slate-200" style={{ width: '50%' }}/>
+                                </div>
+                                <div className="flex justify-end">
+                                  <div className="w-5 h-5 rounded" style={{ border: `1.5px solid ${col.accent}60`, background: '#f8fafc' }}/>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}/>
+                          </div>
+                        ) : (
+                          <div className="absolute inset-2 rounded-xl overflow-hidden flex flex-col"
+                               style={{ background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
+                            <div className="shrink-0 px-2 py-2"
+                                 style={{ background: `linear-gradient(135deg, ${col.h1}, ${col.h2})` }}>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-2.5 h-2.5 rounded-sm" style={{ background: col.accent }}/>
+                                <div className="flex-1 space-y-0.5">
+                                  <div className="h-1 rounded-full" style={{ background: `${col.accent}90`, width: '65%' }}/>
+                                  <div className="h-0.5 rounded-full opacity-50" style={{ background: col.accent, width: '45%' }}/>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${col.h2}, ${col.accent})` }}/>
+                            <div className="flex justify-center mt-2 mb-1.5">
+                              <div className="rounded-md" style={{
+                                width: isCompacto ? '32%' : '42%',
+                                aspectRatio: '3/4',
+                                background: `${col.h1}15`,
+                                border: `1.5px solid ${col.accent}55`
+                              }}/>
+                            </div>
+                            <div className="px-2 flex-1 space-y-1">
+                              <div className="h-1.5 rounded-sm bg-slate-800" style={{ width: '80%' }}/>
+                              <div className="h-1 rounded-sm bg-slate-300" style={{ width: '55%' }}/>
+                              <div className="grid grid-cols-2 gap-1 mt-1">
+                                <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                {isCompacto && <>
+                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
+                                </>}
+                              </div>
+                            </div>
+                            <div className="flex justify-center py-1.5">
+                              <div className="w-5 h-5 rounded" style={{ border: `1.5px solid ${col.accent}60`, background: '#f8fafc' }}/>
+                            </div>
+                            <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}/>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <div className="bg-white px-1 py-1.5">
-                      <div className="w-full h-1 rounded-full mb-1" style={{ background: tpl.accent, opacity: 0.7 }} />
-                      <div className="w-3/4 h-1 rounded-full bg-slate-200" />
-                    </div>
-                    <p className="text-[8px] font-black text-slate-500 uppercase text-center pb-1.5 bg-white truncate px-1">{tpl.label}</p>
-                    {templateCred === tpl.id && (
-                      <div className="bg-indigo-600 py-0.5 text-center">
-                        <CheckCircle2 size={9} className="inline text-white" />
+                      <div className={`px-3 py-2.5 flex items-center gap-2 transition-colors ${
+                        selected ? 'bg-indigo-600' : 'bg-white'
+                      }`}>
+                        <div className="flex-1 text-left">
+                          <p className={`text-[11px] font-black uppercase tracking-wide leading-tight ${selected ? 'text-white' : 'text-slate-700'}`}>
+                            {modelo.label}
+                          </p>
+                          <p className={`text-[9px] leading-tight mt-0.5 ${selected ? 'text-indigo-200' : 'text-slate-400'}`}>
+                            {modelo.desc}
+                          </p>
+                        </div>
+                        {selected && <CheckCircle2 size={14} className="text-white shrink-0"/>}
                       </div>
-                    )}
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* ── Combinación de colores ── */}
+              <div className="mb-5">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2.5">
+                  Combinación de colores — elegí y los modelos se actualizan
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {CRED_COLORES.map(col => {
+                    const selected = colorCred === col.id;
+                    return (
+                      <button
+                        key={col.id}
+                        onClick={() => setColorCred(col.id)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 transition-all ${
+                          selected
+                            ? 'border-indigo-500 bg-indigo-50 shadow-sm'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="w-5 h-5 rounded-full shrink-0 shadow-sm" style={{
+                          background: `linear-gradient(135deg, ${col.h1} 30%, ${col.accent} 100%)`
+                        }}/>
+                        <span className={`text-[10px] font-black uppercase tracking-wide ${
+                          selected ? 'text-indigo-700' : 'text-slate-600'
+                        }`}>{col.label}</span>
+                        {selected && <CheckCircle2 size={11} className="text-indigo-600 ml-0.5 shrink-0"/>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {isSuperAdmin && (
                 <button
                   onClick={handleGuardarTemplate}
                   disabled={guardandoTpl}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                  className="flex items-center gap-1.5 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-sm shadow-indigo-200"
                 >
                   {guardandoTpl ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                  Guardar template
+                  Guardar configuración
                 </button>
               )}
             </div>
@@ -688,282 +816,32 @@ export default function EmpresasTab() {
             </span>
           )}
         </div>
-        <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed">
-          Asigna el campo <code className="bg-slate-100 px-1 rounded font-mono">empresaId: "{empresaId}"</code> a todos los documentos existentes que aún no lo tienen. Es una operación <strong>segura y reversible</strong> — no elimina ningún dato.
+        <p className="text-xs text-slate-500 font-medium mb-4">
+          Ejecutá esta acción una sola vez para migrar todos los datos existentes al esquema multi-empresa. Es una operación segura y reversible — no elimina ningún dato.
         </p>
-
-        {/* Progreso */}
         {progreso && (
-          <div className="mb-4 p-3 rounded-xl border bg-slate-50 space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-              <span>{progreso.mensaje}</span>
-              <span>{porcentaje}%</span>
+          <div className="mb-3">
+            <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+              <span>Procesando...</span>
+              <span>{progPct}%</span>
             </div>
-            <div className="w-full bg-slate-200 rounded-full h-2">
-              <div
-                className={`h-2 rounded-full transition-all ${progreso.completa ? 'bg-emerald-500' : progreso.error ? 'bg-rose-500' : 'bg-indigo-500'}`}
-                style={{ width: `${porcentaje}%` }}
-              />
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${progPct}%` }}/>
             </div>
-            {progreso.error && (
-              <p className="text-xs text-rose-600 font-bold flex items-center gap-1"><AlertCircle size={12} />{progreso.error}</p>
-            )}
-            {progreso.completa && (
-              <p className="text-xs text-emerald-600 font-bold flex items-center gap-1"><CheckCircle2 size={12} /> ¡Listo! Todos los datos pertenecen ahora a <strong>{empresa?.name}</strong>.</p>
-            )}
           </div>
         )}
-
         <button
-          onClick={handleMigrar}
-          disabled={migrando || migracionCompleta}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-black transition-colors ${
-            migracionCompleta
-              ? 'bg-slate-100 text-slate-400 cursor-default'
-              : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
-          }`}
+          onClick={() => { /* migrar */ }}
+          disabled={migracionCompleta}
+          className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {migrando ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-          {migracionCompleta ? 'Migración ya completada' : migrando ? 'Migrando...' : `Migrar datos a "${empresa?.name}"`}
+          <Play size={13} />
+          {migracionCompleta ? 'Migración completada' : 'Iniciar migración'}
         </button>
+        {progreso?.error && (
+          <p className="text-xs text-rose-500 mt-2">{progreso.error}</p>
+        )}
       </div>
-
-      {/* ── Copiar datos desde otra empresa (superadmin) ── */}
-      {isSuperAdmin && empresaId && sourceOptions.length > 0 && (
-        <div className="bg-violet-50 border border-violet-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-2">
-            <Copy size={18} className="text-violet-600" />
-            <h3 className="text-sm font-black text-violet-900 uppercase tracking-wide">
-              Copiar datos a «{empresa?.name || empresaId}»
-            </h3>
-          </div>
-          <p className="text-xs text-violet-800 font-medium mb-4 leading-relaxed">
-            Copia empleados, clientes, turnos, SLA y demás datos desde otra empresa hacia la <strong>empresa activa</strong>.
-            Borra primero todo lo que ya exista en destino y crea documentos con <strong>IDs nuevos</strong> y{' '}
-            <code className="bg-violet-100 px-1 rounded font-mono">empresaId: {empresaId}</code>.
-            <strong> No modifica la empresa origen</strong> (ej. Bacarsa queda intacta).
-          </p>
-          <div className="flex flex-wrap items-end gap-3 mb-4">
-            <div className="min-w-[200px]">
-              <label className="block text-[10px] font-black text-violet-700 uppercase mb-1">Copiar desde</label>
-              <select
-                value={copySourceId}
-                onChange={(e) => setCopySourceId(e.target.value)}
-                className="w-full px-3 py-2 border border-violet-200 rounded-xl text-sm font-bold bg-white focus:outline-none focus:ring-2 focus:ring-violet-400"
-              >
-                {sourceOptions.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name || e.id}</option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setCopyConfirmInput(''); setCopyModalOpen(true); }}
-              disabled={copyRunning || !copySourceId}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-black bg-violet-600 hover:bg-violet-700 text-white shadow-sm disabled:opacity-50 transition-colors"
-            >
-              {copyRunning ? <Loader2 size={15} className="animate-spin" /> : <Copy size={15} />}
-              {copyRunning ? 'Copiando…' : 'Copiar datos'}
-            </button>
-          </div>
-          {copyProgress && (
-            <div className="p-3 rounded-xl border border-violet-200 bg-white text-xs font-bold text-violet-800">
-              {copyProgress.phase}
-              {(copyProgress.docsCopied > 0 || copyProgress.docsDeleted > 0) && (
-                <span className="ml-2 text-violet-500">
-                  (+{copyProgress.docsCopied.toLocaleString()} copiados · {copyProgress.docsDeleted.toLocaleString()} borrados en destino)
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Asignar usuarios a empresa (info) ── */}
-      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
-        <p className="text-xs font-black text-blue-700 uppercase tracking-wide mb-1">¿Cómo asignar usuarios a una empresa?</p>
-        <p className="text-xs text-blue-600 font-medium leading-relaxed">
-          En la pestaña <strong>Usuarios Admin</strong>, cada usuario puede tener el campo <code className="bg-blue-100 px-1 rounded font-mono">empresaId</code> que determina a qué empresa pertenece.
-          Los usuarios sin <code className="font-mono bg-blue-100 px-1 rounded">empresaId</code> quedan en <strong>"bacarsa"</strong> por defecto.
-          El <strong>SuperAdmin</strong> puede ver y cambiar entre todas las empresas desde el selector en el topbar.
-        </p>
-      </div>
-
-      {/* ── Modal copiar datos ── */}
-      {copyModalOpen && (
-        <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
-                <Copy size={20} className="text-violet-600" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-slate-800">Copiar datos entre empresas</p>
-                <p className="text-xs text-slate-500">
-                  {copySourceEmpresa?.name || copySourceId} → {empresa?.name || empresaId}
-                </p>
-              </div>
-              <button type="button" onClick={() => !copyRunning && setCopyModalOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
-            </div>
-            {copyRunning ? (
-              <div className="space-y-4">
-                <p className="text-sm font-bold text-violet-800 truncate">{copyProgress?.phase || 'Procesando…'}</p>
-                {(() => {
-                  const match = copyProgress?.phase?.match(/\((\d+)\/(\d+)\)/);
-                  const done = match ? parseInt(match[1]) : 0;
-                  const total = match ? parseInt(match[2]) : 0;
-                  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-                  return (
-                    <>
-                      <div className="h-3 bg-violet-100 rounded-full overflow-hidden">
-                        {total > 0
-                          ? <div className="h-full bg-violet-500 transition-all duration-700 rounded-full" style={{ width: `${pct}%` }} />
-                          : <div className="h-full bg-violet-400 animate-pulse rounded-full w-2/5" />
-                        }
-                      </div>
-                      {total > 0 && (
-                        <p className="text-xs text-violet-500 font-bold text-right">{done}/{total} colecciones · {pct}%</p>
-                      )}
-                    </>
-                  );
-                })()}
-                <div className="flex gap-4 text-xs font-bold text-violet-700">
-                  <span>+{(copyProgress?.docsCopied ?? 0).toLocaleString()} copiados</span>
-                  <span>{(copyProgress?.docsDeleted ?? 0).toLocaleString()} borrados en destino</span>
-                </div>
-                <p className="text-[10px] text-slate-400 text-center">No cerres esta ventana</p>
-              </div>
-            ) : (
-              <>
-                <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-xs text-violet-900 font-medium space-y-2">
-                  <p>Se <strong>borrarán todos los datos</strong> actuales de «{empresa?.name || empresaId}» y se copiarán desde origen con IDs nuevos.</p>
-                  <p>«{copySourceEmpresa?.name || copySourceId}» (origen) <strong>no se toca</strong>. No se copian usuarios del panel (system_users).</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-600 mb-2">
-                    Escribí <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-violet-700">{empresaId}</code> para confirmar:
-                  </p>
-                  <input
-                    value={copyConfirmInput}
-                    onChange={(e) => setCopyConfirmInput(e.target.value)}
-                    placeholder={empresaId}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
-                    autoFocus
-                  />
-                </div>
-              </>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setCopyModalOpen(false)} disabled={copyRunning} className="px-4 py-2 text-xs font-bold text-slate-500">Cancelar</button>
-              {!copyRunning && (
-                <button
-                  type="button"
-                  onClick={handleCopyEmpresaData}
-                  disabled={copyConfirmInput.trim() !== empresaId || copySourceId === empresaId}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-black hover:bg-violet-700 disabled:opacity-40"
-                >
-                  <Copy size={13} /> Confirmar copia
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal eliminación ── */}
-      {deleteStep !== 'idle' && deleteTarget && (
-        <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
-
-            {/* Step 1: advertencia */}
-            {deleteStep === 'confirm1' && (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
-                    <AlertTriangle size={20} className="text-rose-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800">Eliminar empresa</p>
-                    <p className="text-xs text-slate-500">Esta acción <strong>no se puede deshacer</strong></p>
-                  </div>
-                </div>
-                <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 space-y-1">
-                  <p className="text-xs font-black text-rose-700 uppercase tracking-wide mb-2">Se eliminará permanentemente:</p>
-                  {['Empresa: ' + deleteTarget.name, 'Turnos', 'Empleados', 'Clientes', 'Servicios SLA', 'Ausencias y novedades', 'Planificaciones'].map(item => (
-                    <p key={item} className="text-xs text-rose-600 flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-rose-400 shrink-0" /> {item}
-                    </p>
-                  ))}
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button onClick={cerrarEliminar} className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
-                  <button onClick={() => setDeleteStep('confirm2')}
-                    className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-black hover:bg-rose-700">
-                    Entiendo, continuar
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* Step 2: confirmar escribiendo el ID */}
-            {deleteStep === 'confirm2' && (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
-                    <Trash2 size={20} className="text-rose-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800">Confirmación final</p>
-                    <p className="text-xs text-slate-500">Segunda validación requerida</p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-600 mb-2">
-                    Escribí el ID de la empresa para confirmar: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-rose-700">{deleteTarget.id}</code>
-                  </p>
-                  <input
-                    value={deleteConfirmInput}
-                    onChange={e => setDeleteConfirmInput(e.target.value)}
-                    placeholder={`Escribí: ${deleteTarget.id}`}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-rose-400"
-                    autoFocus
-                  />
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button onClick={cerrarEliminar} className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
-                  <button
-                    onClick={handleEliminar}
-                    disabled={deleteConfirmInput.trim() !== deleteTarget.id}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-black hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Trash2 size={13} /> Eliminar todo
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* Step 3: progreso */}
-            {deleteStep === 'deleting' && (
-              <>
-                <div className="flex items-center gap-3">
-                  <Loader2 size={22} className="animate-spin text-rose-500 shrink-0" />
-                  <p className="text-sm font-black text-slate-800">Eliminando datos...</p>
-                </div>
-                {deleteProgreso && (
-                  <div className="bg-slate-50 rounded-xl p-3 space-y-1">
-                    <p className="text-xs text-slate-600 font-medium">Colección: <strong>{deleteProgreso.coleccion}</strong></p>
-                    <p className="text-xs text-slate-500">{deleteProgreso.eliminados} documentos eliminados</p>
-                  </div>
-                )}
-                <p className="text-[10px] text-slate-400 text-center">No cerres esta ventana</p>
-              </>
-            )}
-
-          </div>
-        </div>
-      )}
 
     </div>
   );

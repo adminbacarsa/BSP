@@ -31,6 +31,7 @@ backups/
 *.jpeg
 *.gif
 *.svg
+!apps/web2/public/**/*.svg
 # Si usas bases de datos locales:
 *.sqlite
 *.db
