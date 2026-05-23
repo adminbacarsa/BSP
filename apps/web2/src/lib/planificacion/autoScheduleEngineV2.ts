@@ -1545,7 +1545,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // vea la racha real que viene del mes previo y evite violaciones cross-mes.
     // No se incluyen en el array assignments devuelto al caller.
     const syntheticPrevAssignments: V2Assignment[] = [];
-    if (ctx.daysInMonth.length > 0) {
+    const skipSyntheticPrev = shouldUseDemandDrivenScheduling(ctx);
+    if (ctx.daysInMonth.length > 0 && !skipSyntheticPrev) {
         const _fmd = ctx.daysInMonth[0];
         ctx.employees.forEach(emp => {
             const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];

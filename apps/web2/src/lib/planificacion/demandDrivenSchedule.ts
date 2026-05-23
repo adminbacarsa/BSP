@@ -65,21 +65,6 @@ function shiftDefForCode(pos: V2PositionDef, dayLetter: string, code: string, au
     return { code, name: code, hours: hrs, startTime: DEFAULT_START[code] || '07:00' };
 }
 
-function countAvailableForDay(
-    params: DemandDrivenFillParams,
-    dateStr: string,
-    pool?: string[],
-): number {
-    const { ctx, positionGroups, cycleWorkDays, customCoverEmps, runtime } = params;
-    const ids = pool ?? global24hsEmployeePool(params);
-    return ids.filter(empId => {
-        if (customCoverEmps.has(empId)) return false;
-        if (runtime[empId].assignedDays.has(dateStr)) return false;
-        if (ctx.absences[empId]?.has(dateStr)) return false;
-        return cycleWorkDays[empId]?.has(dateStr) ?? false;
-    }).length;
-}
-
 /** Marca F en días de descanso del ciclo antes de llenar SLA (mejora check CCT). */
 export function seedDemandDrivenCycleFrancos(
     ctx: V2EngineContext,
@@ -222,7 +207,8 @@ export function fillDemandGapsBeforeFrancos(
     dayDemands: ObjectiveDayDemand[],
 ): void {
     const { ctx, isCustomCoverPosition } = params;
-    for (const day of dayDemands) {
+    const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    for (const day of orderedDays) {
         if (day.totalPaxUnits <= 0) continue;
         const dayNum = parseInt(day.dateStr.split('-')[2], 10);
         const inCurrent = dayNum <= params.cutoffDay;
@@ -329,12 +315,9 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
         (pos, letter) => positionIsActiveOn(pos, letter),
     );
 
-    const fillParams = params;
-    const sortedDays = [...dayDemands].sort((a, b) => {
-        const avA = countAvailableForDay(fillParams, a.dateStr);
-        const avB = countAvailableForDay(fillParams, b.dateStr);
-        return avA - avB;
-    });
+    // Cronológico: llenar desde el día 1 evita que el tope CCT del mes se agote
+    // en días finales y deje la primera semana en F (0/4 cobertura).
+    const sortedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
     for (const day of sortedDays) {
         if (day.totalPaxUnits <= 0) continue;

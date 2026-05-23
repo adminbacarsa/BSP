@@ -1051,6 +1051,43 @@ export default function ReportsPage() {
                         <input id="rpt-date-hasta" type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
                     </div>
 
+                    {/* ── Chips de mes rápido ── */}
+                    <div className="w-full flex flex-wrap gap-2 items-center border-t border-slate-100 dark:border-slate-700 pt-3 mt-1">
+                        <span className="text-[10px] font-black text-slate-400 uppercase shrink-0">Período:</span>
+                        {[0, 1, 2, 3].map(offset => {
+                            const d = new Date();
+                            d.setMonth(d.getMonth() - offset);
+                            const ms = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+                            const me = new Date(d.getFullYear(), d.getMonth()+1, 0);
+                            const mes = `${me.getFullYear()}-${String(me.getMonth()+1).padStart(2,'0')}-${String(me.getDate()).padStart(2,'0')}`;
+                            const lbl = d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
+                            const isActive = dateRange.start === ms && dateRange.end === mes;
+                            return (
+                                <button key={offset}
+                                    onClick={() => setDateRange({ start: ms, end: mes })}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${isActive ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600'}`}>
+                                    {lbl}
+                                </button>
+                            );
+                        })}
+                        {(['Q1','Q2','Q3','Q4'] as const).map(q => {
+                            const year = new Date().getFullYear();
+                            const qm: Record<string,[number,number]> = { Q1:[1,3], Q2:[4,6], Q3:[7,9], Q4:[10,12] };
+                            const [m1, m2] = qm[q];
+                            const qs = `${year}-${String(m1).padStart(2,'0')}-01`;
+                            const qe = new Date(year, m2, 0);
+                            const qes = `${year}-${String(m2).padStart(2,'0')}-${String(qe.getDate()).padStart(2,'0')}`;
+                            const isActive = dateRange.start === qs && dateRange.end === qes;
+                            return (
+                                <button key={q}
+                                    onClick={() => setDateRange({ start: qs, end: qes })}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:hover:bg-indigo-900/40'}`}>
+                                    {q} {year}
+                                </button>
+                            );
+                        })}
+                    </div>
+
                     {activeTab === 'SHIFTS' && (<>
                         <div className="min-w-[180px]">
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Empleado</label>

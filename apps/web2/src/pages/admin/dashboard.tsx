@@ -641,70 +641,57 @@ function AdminDashboard() {
               <div className="mb-6 p-5 rounded-xl border text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin horas SLA proyectadas para el mes</p>
               </div>
-            ) : (
-              <div className="mb-6 rounded-xl border p-5"
-                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
-                <div className="flex items-start justify-between mb-4 gap-4">
-                  <div>
-                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>
-                      TOTAL PROYECTADO — {today.toLocaleString('es-AR',{month:'long',year:'numeric'}).toUpperCase()}
+            ) : (() => {
+              const slaSegments = [
+                { label: 'Diurnas',   value: normalHrs,      color: '#f97316' },
+                { label: 'Nocturnas', value: slaNightHrs,    color: '#fb923c' },
+                { label: 'Plus Feriados', value: slaHolidayHrs, color: '#fdba74' },
+              ].filter(s => s.value > 0);
+              return (
+                <div className="mb-6 rounded-xl border p-5 flex items-center gap-6"
+                  style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
+                  {/* Donut chart */}
+                  <div className="shrink-0" style={{ width: 110, height: 110 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={slaSegments}
+                          cx="50%" cy="50%"
+                          innerRadius={32} outerRadius={50}
+                          paddingAngle={3}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {slaSegments.map((s, i) => <Cell key={i} fill={s.color}/>)}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ borderRadius:'10px', border:'1px solid var(--border)', backgroundColor:'var(--surf)', color:'var(--txt)', boxShadow:'none', fontSize:11 }}
+                          formatter={(v: any) => [`${fmt(v)} hs`, '']}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {/* Texto + leyenda */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-black" style={{ color: 'var(--txt)' }}>Horas SLA por turno</p>
+                    <p className="text-[10px] font-medium mb-3" style={{ color: 'var(--txt3)' }}>
+                      {today.toLocaleString('es-AR',{month:'long',year:'numeric'})} · {fmt(slaTotalHrs)} hs totales
                     </p>
-                    <p className="text-3xl font-black mt-0.5" style={{ color: 'var(--txt)' }}>
-                      {fmt(slaTotalHrs)}{' '}
-                      <span className="text-base font-bold" style={{ color: 'var(--txt3)' }}>hrs</span>
-                    </p>
-                  </div>
-                  <div className="shrink-0 p-2.5 rounded-xl" style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
-                    <Clock size={20} style={{ color: 'var(--company-primary, #6366f1)' }}/>
-                  </div>
-                </div>
-                {/* Barra de distribución proporcional */}
-                <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-4">
-                  {normalHrs > 0 && (
-                    <div style={{ flex: normalHrs, backgroundColor: '#10b981', minWidth: '4px' }} title={`Diurnas: ${fmt(normalHrs)} hrs`}/>
-                  )}
-                  {slaNightHrs > 0 && (
-                    <div style={{ flex: slaNightHrs, backgroundColor: 'var(--company-primary, #6366f1)', minWidth: '4px' }} title={`Nocturnas: ${fmt(slaNightHrs)} hrs`}/>
-                  )}
-                  {slaHolidayHrs > 0 && (
-                    <div style={{ flex: slaHolidayHrs, backgroundColor: '#f59e0b', minWidth: '4px' }} title={`Feriados: ${fmt(slaHolidayHrs)} hrs`}/>
-                  )}
-                </div>
-                {/* Sub-métricas */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1.5 shrink-0"/>
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Diurnas</p>
-                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(normalHrs)}</p>
-                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
-                        {slaTotalHrs > 0 ? `${((normalHrs/slaTotalHrs)*100).toFixed(0)}% del total` : '—'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: 'var(--company-primary, #6366f1)' }}/>
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Nocturnas</p>
-                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(slaNightHrs)}</p>
-                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
-                        {slaTotalHrs > 0 ? `${((slaNightHrs/slaTotalHrs)*100).toFixed(0)}% del total` : '—'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 mt-1.5 shrink-0"/>
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Feriados</p>
-                      <p className="text-xl font-black" style={{ color: 'var(--txt)' }}>{fmt(slaHolidayHrs)}</p>
-                      <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>
-                        {slaHolidayHrs > 0 ? `${((slaHolidayHrs/slaTotalHrs)*100).toFixed(0)}% del total` : 'Sin feriados'}
-                      </p>
+                    <div className="space-y-2">
+                      {slaSegments.map((s, i) => (
+                        <div key={i} className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}/>
+                            <span className="text-xs font-bold truncate" style={{ color: 'var(--txt3)' }}>{s.label}</span>
+                          </div>
+                          <span className="text-sm font-black shrink-0" style={{ color: 'var(--txt)' }}>{fmt(s.value)} hs</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ── SECCIÓN 4: LICENCIAS ─────────────────────────────────── */}
             <SectionLabel label="Licencias Activas" />
