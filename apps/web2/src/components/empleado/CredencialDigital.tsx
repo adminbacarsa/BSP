@@ -18,22 +18,26 @@ interface Props {
     photoUrl?: string; empresaId?: string;
   };
   empresaNombre?: string;
+  empresaLogoUrl?: string;
+  templateId?: string;
 }
 
 const TEMAS = [
-  { id: 'navy',  label: 'Marino', h1: '#0a1628', h2: '#1a3a6b', accent: '#c8a84b' },
-  { id: 'rojo',  label: 'Rojo',   h1: '#7f1d1d', h2: '#b91c1c', accent: '#fca5a5' },
-  { id: 'verde', label: 'Verde',  h1: '#052e16', h2: '#166534', accent: '#86efac' },
-  { id: 'negro', label: 'Negro',  h1: '#000000', h2: '#262626', accent: '#d4d4d4' },
-  { id: 'acero', label: 'Acero',  h1: '#0f2040', h2: '#2d4a7a', accent: '#93c5fd' },
-  { id: 'royal', label: 'Royal',  h1: '#1e0050', h2: '#5b21b6', accent: '#c084fc' },
+  { id: 'marino-oro',   label: 'Marino & Oro',     h1: '#0a1628', h2: '#1e3a5f', accent: '#c8a84b' },
+  { id: 'grafito',      label: 'Grafito',           h1: '#111827', h2: '#1f2937', accent: '#e5e7eb' },
+  { id: 'corporativo',  label: 'Corporativo',       h1: '#0f172a', h2: '#1e3a5f', accent: '#38bdf8' },
+  { id: 'seguridad',    label: 'Seguridad',         h1: '#1a0505', h2: '#7f1d1d', accent: '#fca5a5' },
+  { id: 'institucional',label: 'Institucional',     h1: '#052e16', h2: '#14532d', accent: '#4ade80' },
+  { id: 'elite',        label: 'Elite',             h1: '#1e0050', h2: '#3b0764', accent: '#e879f9' },
 ];
 
-export default function CredencialDigital({ empDocId, empData, empresaNombre }: Props) {
+export default function CredencialDigital({ empDocId, empData, empresaNombre, empresaLogoUrl, templateId }: Props) {
   const [fotoSrc, setFotoSrc]             = useState<string | null>(empData.photoUrl || null);
   const [fotoFinal, setFotoFinal]         = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl]         = useState<string>('');
-  const [temaIdx, setTemaIdx]             = useState(0);
+  const [logoEmpresa, setLogoEmpresa]     = useState<string | null>(empresaLogoUrl || null);
+  const initIdx = templateId ? Math.max(0, TEMAS.findIndex(t => t.id === templateId)) : 0;
+  const [temaIdx, setTemaIdx]             = useState(initIdx);
   const [guardando, setGuardando]         = useState(false);
   const [quitandoFondo, setQuitandoFondo] = useState(false);
   const [progFondo, setProgFondo]         = useState(0);
@@ -76,17 +80,22 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
 
   // Empresa
   useEffect(() => {
-    if (empresaNombre) { setEmpresaLocal(empresaNombre); return; }
     if (!empData.empresaId) return;
     getDoc(doc(db, 'empresas', empData.empresaId))
       .then(snap => {
         if (snap.exists()) {
           const d = snap.data();
           const n = d.name || d.nombre || d.razonSocial || empData.empresaId;
-          if (n) setEmpresaLocal(n);
+          if (n && !empresaNombre) setEmpresaLocal(n);
+          if (d.logoUrl && !empresaLogoUrl) setLogoEmpresa(d.logoUrl);
+          if (d.credencialTemplate) {
+            const idx = TEMAS.findIndex(t => t.id === d.credencialTemplate);
+            if (idx >= 0 && !templateId) setTemaIdx(idx);
+          }
         }
       }).catch(() => {});
-  }, [empresaNombre, empData.empresaId]);
+    if (empresaNombre) setEmpresaLocal(empresaNombre);
+  }, [empresaNombre, empData.empresaId, empresaLogoUrl, templateId]);
 
   // Cargar / crear credencial pública
   useEffect(() => {
@@ -412,14 +421,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre }: 
           }}/>
           <div className="relative flex items-center gap-3">
             <div className="relative flex-shrink-0">
-              <ShieldCheck size={38} strokeWidth={1.5} style={{ color: tema.accent }}/>
+              {logoEmpresa ? (
+                <img
+                  src={logoEmpresa}
+                  alt="Logo empresa"
+                  className="w-10 h-10 object-contain rounded-lg"
+                  style={{ background: 'rgba(255,255,255,0.12)', padding: 3 }}
+                  onError={() => setLogoEmpresa(null)}
+                />
+              ) : (
+                <ShieldCheck size={38} strokeWidth={1.5} style={{ color: tema.accent }}/>
+              )}
             </div>
             <div>
               <p className="text-white font-black text-sm tracking-wide leading-tight">
                 {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
               </p>
               <p className="text-[9px] tracking-widest uppercase mt-0.5 font-bold" style={{ color: `${tema.accent}cc` }}>
-                Credencial Digital
+                Credencial Digital de Identidad
               </p>
             </div>
           </div>

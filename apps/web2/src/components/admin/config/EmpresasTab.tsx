@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, IdCard, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
-import { db, functions, auth } from '@/lib/firebase';
+import { db, functions, auth, storage } from '@/lib/firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 
@@ -78,6 +79,52 @@ export default function EmpresasTab() {
     } finally {
       setGuardandoColor(false);
     }
+  };
+
+  // Credencial — logo + template
+  const CRED_TEMPLATES = [
+    { id: 'marino-oro',    label: 'Marino & Oro',   h1: '#0a1628', h2: '#1e3a5f', accent: '#c8a84b' },
+    { id: 'grafito',       label: 'Grafito',         h1: '#111827', h2: '#1f2937', accent: '#e5e7eb' },
+    { id: 'corporativo',   label: 'Corporativo',     h1: '#0f172a', h2: '#1e3a5f', accent: '#38bdf8' },
+    { id: 'seguridad',     label: 'Seguridad',       h1: '#1a0505', h2: '#7f1d1d', accent: '#fca5a5' },
+    { id: 'institucional', label: 'Institucional',   h1: '#052e16', h2: '#14532d', accent: '#4ade80' },
+    { id: 'elite',         label: 'Elite',           h1: '#1e0050', h2: '#3b0764', accent: '#e879f9' },
+  ];
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoPreview, setLogoPreview]         = useState<string | null>((empresa as any)?.logoUrl || null);
+  const [subiendoLogo, setSubiendoLogo]       = useState(false);
+  const [templateCred, setTemplateCred]       = useState<string>((empresa as any)?.credencialTemplate || 'marino-oro');
+  const [guardandoTpl, setGuardandoTpl]       = useState(false);
+
+  React.useEffect(() => {
+    setLogoPreview((empresa as any)?.logoUrl || null);
+    setTemplateCred((empresa as any)?.credencialTemplate || 'marino-oro');
+  }, [empresa?.id]);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !empresa) return;
+    setSubiendoLogo(true);
+    try {
+      const path = `empresas/${empresa.id}/logo`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      await guardarEmpresa(empresa.id, { logoUrl: url } as any);
+      setLogoPreview(url);
+      toast.success('Logo guardado');
+    } catch { toast.error('Error al subir el logo'); }
+    finally { setSubiendoLogo(false); e.target.value = ''; }
+  };
+
+  const handleGuardarTemplate = async () => {
+    if (!empresa) return;
+    setGuardandoTpl(true);
+    try {
+      await guardarEmpresa(empresa.id, { credencialTemplate: templateCred } as any);
+      toast.success('Template guardado');
+    } catch { toast.error('Error al guardar'); }
+    finally { setGuardandoTpl(false); }
   };
 
   // Asistente IA
@@ -497,6 +544,97 @@ export default function EmpresasTab() {
               <div className="w-3 h-6 rounded" style={{ backgroundColor: colorForm }} />
               <div className="w-3 h-6 rounded opacity-60" style={{ backgroundColor: colorForm }} />
               <div className="w-3 h-6 rounded opacity-30" style={{ backgroundColor: colorForm }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Credencial de empleado ── */}
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <IdCard size={18} className="text-indigo-600" />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Credencial de empleado</h3>
+          </div>
+          <p className="text-xs text-slate-500 font-medium mb-5">
+            Logo e identidad visual que aparecen en las credenciales digitales de los empleados.
+          </p>
+
+          <div className="flex flex-col gap-6">
+            {/* Logo */}
+            <div>
+              <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-3">Logo de empresa</p>
+              <div className="flex items-center gap-4">
+                <div
+                  className="w-20 h-20 rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden shrink-0 cursor-pointer hover:border-indigo-400 transition-colors bg-slate-50"
+                  onClick={() => logoInputRef.current?.click()}
+                  title="Subir logo"
+                >
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-2" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 text-slate-300">
+                      <ImageIcon size={24} />
+                      <span className="text-[9px] font-bold uppercase">Logo</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={subiendoLogo || !isSuperAdmin}
+                    className="flex items-center gap-1.5 px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl text-xs font-black text-slate-600 disabled:opacity-60 transition-colors"
+                  >
+                    {subiendoLogo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    {logoPreview ? 'Reemplazar logo' : 'Subir logo'}
+                  </button>
+                  <p className="text-[10px] text-slate-400">PNG o SVG con fondo transparente · Recomendado 200×200px</p>
+                </div>
+                <input ref={logoInputRef} type="file" accept="image/png,image/svg+xml,image/webp" className="hidden" onChange={handleLogoUpload} />
+              </div>
+            </div>
+
+            {/* Template selector */}
+            <div>
+              <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-3">Template de credencial</p>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-4">
+                {CRED_TEMPLATES.map(tpl => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => setTemplateCred(tpl.id)}
+                    className={`flex flex-col rounded-xl overflow-hidden border-2 transition-all ${templateCred === tpl.id ? 'border-indigo-500 shadow-sm shadow-indigo-100' : 'border-slate-200 hover:border-slate-300'}`}
+                    title={tpl.label}
+                  >
+                    {/* Mini preview */}
+                    <div className="h-8 w-full" style={{ background: `linear-gradient(135deg, ${tpl.h1}, ${tpl.h2})` }}>
+                      <div className="h-full flex items-center justify-center gap-0.5">
+                        <div className="w-2 h-2 rounded-full opacity-80" style={{ background: tpl.accent }} />
+                        <div className="w-4 h-1 rounded-full opacity-50" style={{ background: tpl.accent }} />
+                      </div>
+                    </div>
+                    <div className="bg-white px-1 py-1.5">
+                      <div className="w-full h-1 rounded-full mb-1" style={{ background: tpl.accent, opacity: 0.7 }} />
+                      <div className="w-3/4 h-1 rounded-full bg-slate-200" />
+                    </div>
+                    <p className="text-[8px] font-black text-slate-500 uppercase text-center pb-1.5 bg-white truncate px-1">{tpl.label}</p>
+                    {templateCred === tpl.id && (
+                      <div className="bg-indigo-600 py-0.5 text-center">
+                        <CheckCircle2 size={9} className="inline text-white" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {isSuperAdmin && (
+                <button
+                  onClick={handleGuardarTemplate}
+                  disabled={guardandoTpl}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                >
+                  {guardandoTpl ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                  Guardar template
+                </button>
+              )}
             </div>
           </div>
         </div>

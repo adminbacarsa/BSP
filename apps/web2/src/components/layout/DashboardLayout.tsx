@@ -453,7 +453,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className={`absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${topbarVisible ? 'opacity-0' : 'opacity-60'}`}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
-          <main className="h-full overflow-hidden min-h-0">{children}</main>
+          <main className="h-full overflow-y-auto min-h-0">{children}</main>
         </div>
       ) : (
         <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16 min-w-0">
