@@ -225,6 +225,8 @@ export default function EmployeeDashboard() {
   const { user } = useAuth();
   const router = useRouter();
   const previousShiftRef = useRef<Map<string, Shift>>(new Map());
+  const shiftInitialLoadDone = useRef(false);
+  const [shiftAlerts, setShiftAlerts] = useState<Array<{ id: string; type: 'MODIFIED' | 'ADDED' | 'REMOVED'; shift: Shift; prev?: Shift; at: Date }>>([]);
   const empDocIdRef = useRef<string | null>(null);
   const [showLogoutMenu, setShowLogoutMenu] = useState(false);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -390,18 +392,35 @@ export default function EmployeeDashboard() {
 
       const newMap = new Map<string, Shift>();
       list.forEach((s) => newMap.set(s.id, s));
-      newMap.forEach((current, id) => {
-        const previous = previousShiftRef.current.get(id);
-        if (previous) {
-          const fields: Array<keyof Shift> = ['startTime', 'endTime', 'objectiveName', 'clientName', 'objectiveId', 'positionName', 'status'];
-          const changed = fields.some((f) => normalizeField((previous as any)[f]) !== normalizeField((current as any)[f]));
-          if (changed) {
-            const when = formatDate(current.startTime);
-            const obj = current.objectiveName || current.clientName || 'Objetivo';
-            addToast(`Cambio en tu cronograma: ${when} · ${obj}`, 'info');
+
+      if (shiftInitialLoadDone.current) {
+        const newAlerts: Array<{ id: string; type: 'MODIFIED' | 'ADDED' | 'REMOVED'; shift: Shift; prev?: Shift; at: Date }> = [];
+        // Detectar modificados y nuevos
+        newMap.forEach((current, id) => {
+          const previous = previousShiftRef.current.get(id);
+          if (previous) {
+            const fields: Array<keyof Shift> = ['startTime', 'endTime', 'objectiveName', 'clientName', 'objectiveId', 'positionName', 'status'];
+            const changed = fields.some((f) => normalizeField((previous as any)[f]) !== normalizeField((current as any)[f]));
+            if (changed) {
+              newAlerts.push({ id: `modified-${id}-${Date.now()}`, type: 'MODIFIED', shift: current, prev: previous, at: new Date() });
+            }
+          } else {
+            newAlerts.push({ id: `added-${id}-${Date.now()}`, type: 'ADDED', shift: current, at: new Date() });
           }
+        });
+        // Detectar eliminados
+        previousShiftRef.current.forEach((previous, id) => {
+          if (!newMap.has(id)) {
+            newAlerts.push({ id: `removed-${id}-${Date.now()}`, type: 'REMOVED', shift: previous, at: new Date() });
+          }
+        });
+        if (newAlerts.length > 0) {
+          setShiftAlerts(prev => [...newAlerts, ...prev].slice(0, 5));
         }
-      });
+      } else {
+        shiftInitialLoadDone.current = true;
+      }
+
       previousShiftRef.current = newMap;
       setShifts(list);
       setLoadingShifts(false);
@@ -1652,6 +1671,137 @@ export default function EmployeeDashboard() {
 
         <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
 
+          {/* ===== ALERTAS DE CRONOGRAMA ===== */}
+          {shiftAlerts.length > 0 && (
+            <div className="space-y-2">
+              {shiftAlerts.map(alert => {
+                const isAdded = alert.type === 'ADDED';
+                const isRemoved = alert.type === 'REMOVED';
+                const bgCls = isAdded
+                  ? 'bg-indigo-950/70 border-indigo-800/50'
+                  : isRemoved
+                  ? 'bg-rose-950/70 border-rose-800/50'
+                  : 'bg-amber-950/70 border-amber-800/50';
+                const titleCls = isAdded ? 'text-indigo-300' : isRemoved ? 'text-rose-300' : 'text-amber-300';
+                const iconCls = isAdded ? 'text-indigo-400' : isRemoved ? 'text-rose-400' : 'text-amber-400';
+                const label = isAdded ? 'Turno nuevo asignado' : isRemoved ? 'Turno eliminado' : 'Turno modificado';
+                const prevTime = alert.prev ? `${formatTime(alert.prev.startTime)} – ${formatTime(alert.prev.endTime)}` : null;
+                const newTime = !alert.shift.isFranco ? `${formatTime(alert.shift.startTime)} – ${formatTime(alert.shift.endTime)}` : null;
+                const timeChanged = prevTime && newTime && prevTime !== newTime;
+                return (
+                  <div key={alert.id} className={`${bgCls} border rounded-2xl px-4 py-3 flex items-start gap-3`}>
+                    <div className={`shrink-0 mt-0.5 ${iconCls}`}>
+                      {isAdded ? <Calendar size={16}/> : isRemoved ? <X size={16}/> : <AlertTriangle size={16}/>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[10px] font-black uppercase tracking-wider ${titleCls}`}>{label}</p>
+                      <p className="text-xs font-bold text-slate-300 mt-0.5">
+                        {formatDate(alert.shift.startTime)}
+                        {newTime && ` · ${newTime}`}
+                      </p>
+                      {(alert.shift.objectiveName || alert.shift.clientName) && (
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          {alert.shift.objectiveName || alert.shift.clientName}
+                        </p>
+                      )}
+                      {timeChanged && (
+                        <p className="text-[10px] text-slate-600 mt-1">Antes: {prevTime}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShiftAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                      className="text-slate-600 hover:text-slate-400 transition-colors shrink-0 mt-0.5"
+                      aria-label="Descartar alerta"
+                    >
+                      <X size={14}/>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ===== ESTADO DEL DÍA ===== */}
+          <div className="space-y-2.5">
+            {/* Status pills */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {blueIsConfirmedPresent ? (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
+                  <CheckCircle size={12} className="text-emerald-400"/>
+                  <span className="text-xs font-black text-emerald-300 uppercase">Presente registrado</span>
+                  {todayElapsed && <span className="text-[10px] text-emerald-600 ml-1">· {todayElapsed} en servicio</span>}
+                </div>
+              ) : blueHasPendingRequest ? (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+                  <span className="text-xs font-black text-amber-300 uppercase">Solicitud enviada…</span>
+                </div>
+              ) : todayShift ? (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"/>
+                  <span className="text-xs font-black text-slate-400 uppercase">Presente pendiente</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+                  <span className="text-xs font-black text-slate-500 uppercase">Sin turno hoy</span>
+                </div>
+              )}
+              {pendingCheckins > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+                  <AlertTriangle size={11} className="text-amber-400"/>
+                  <span className="text-[10px] font-black text-amber-300">{pendingCheckins} pend. sincronizar</span>
+                </div>
+              )}
+              {swapRequests.filter((r: any) => !['CANCELLED','REJECTED','CANCELADO','RECHAZADO'].includes((r.status || '').toString().toUpperCase())).length > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-950/60 border border-sky-800/50 rounded-full">
+                  <ArrowLeftRight size={11} className="text-sky-400"/>
+                  <span className="text-[10px] font-black text-sky-300">
+                    {swapRequests.filter((r: any) => !['CANCELLED','REJECTED','CANCELADO','RECHAZADO'].includes((r.status || '').toString().toUpperCase())).length} canje(s) pendiente(s)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Quick action buttons */}
+            <div className="flex gap-2 flex-wrap">
+              {portalFeatures.checkIn && blueCanRequest && blueShift && (
+                <button
+                  onClick={() => handleCheckIn(blueShift)}
+                  disabled={checkingShiftId === blueShift.id}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
+                >
+                  <Navigation size={14}/>
+                  {checkingShiftId === blueShift.id ? 'Validando...' : 'Dar Presente'}
+                </button>
+              )}
+              {portalFeatures.checkIn && blueLateCanRequest && !blueIsLateNotified && blueShift && (
+                <button
+                  onClick={() => handleLlegadaTarde(blueShift)}
+                  disabled={checkingShiftId === blueShift.id}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
+                >
+                  <AlertTriangle size={14}/>
+                  {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
+                </button>
+              )}
+              {(portalFeatures.reportAbsence || portalFeatures.requestLicense) && (
+                <button
+                  onClick={() => { setShowAbsenceRequest(v => !v); setShowSwap(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                >
+                  <FileText size={14}/> Novedad
+                </button>
+              )}
+              {portalFeatures.swapShifts && (
+                <button
+                  onClick={() => { setShowSwap(v => !v); setShowAbsenceRequest(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                >
+                  <ArrowLeftRight size={14}/> Canje
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* ===== HERO: PRÓXIMO TURNO ===== */}
           <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 rounded-3xl p-6 text-white shadow-2xl shadow-indigo-900/40 relative overflow-hidden">
             <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full pointer-events-none"/>
@@ -1779,6 +1929,76 @@ export default function EmployeeDashboard() {
               )}
             </div>
           </div>
+
+          {/* ===== HOY + MAÑANA ===== */}
+          {(() => {
+            const tmrw = new Date(now); tmrw.setDate(tmrw.getDate() + 1);
+            const tmrwKey = dateKey(tmrw);
+            const tmrwShift = shiftsByDate[tmrwKey];
+            const tmrwObjective = tmrwShift?.objectiveId ? objectivesMap[tmrwShift.objectiveId] : null;
+            const todayCards = [
+              { label: 'Hoy', shift: todayShiftAny, objective: todayObjective },
+              { label: 'Mañana', shift: tmrwShift, objective: tmrwObjective },
+            ];
+            return (
+              <div className="grid grid-cols-2 gap-3">
+                {todayCards.map(({ label, shift, objective }) => (
+                  <div key={label} className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5">
+                    <p className="text-[9px] font-black uppercase text-slate-500 mb-2 tracking-widest">{label}</p>
+                    {shift ? (
+                      shift.isFranco ? (
+                        <div>
+                          <p className="text-sm font-black text-emerald-400">Franco</p>
+                          <p className="text-[10px] text-slate-600 mt-0.5">Día libre</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-sm font-black text-white truncate leading-tight">
+                            {objective?.name || shift.objectiveName || shift.objectiveId || 'Sin objetivo'}
+                          </p>
+                          <p className="text-[11px] text-indigo-400 font-bold mt-1">
+                            {formatTime(shift.startTime)} – {formatTime(shift.endTime)}
+                          </p>
+                          {objective?.clientName && (
+                            <p className="text-[9px] text-slate-600 truncate mt-0.5">{objective.clientName}</p>
+                          )}
+                          {shift.isPresent && (
+                            <p className="text-[9px] text-emerald-400 font-bold mt-1.5 flex items-center gap-1">
+                              <CheckCircle size={8}/> Presente
+                            </p>
+                          )}
+                        </div>
+                      )
+                    ) : (
+                      <p className="text-xs text-slate-600 font-bold">Sin turno</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* ===== CREDENCIAL ===== */}
+          <button
+            onClick={() => setShowCredencial(v => !v)}
+            className="w-full bg-slate-900 border border-slate-800 hover:border-indigo-800/60 rounded-2xl p-4 text-left transition-all active:scale-[0.99] group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+                {displayName?.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-white truncate leading-tight">{displayName}</p>
+                <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                  {empProfile?.category || 'Guardia'}{empProfile?.fileNumber ? ` · Leg. ${empProfile.fileNumber}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <CreditCard size={16} className="text-slate-500 group-hover:text-yellow-400 transition-colors"/>
+                <span className="text-[9px] font-black text-slate-600 uppercase">Credencial</span>
+              </div>
+            </div>
+          </button>
 
           {/* ===== STATS DEL MES ===== */}
           <div className="grid grid-cols-3 gap-3">
@@ -2202,131 +2422,6 @@ export default function EmployeeDashboard() {
             </div>
           </div>
         )}
-
-        {/* ===== MODAL: TURNOS REALIZADOS ===== */}
-        {showCompletedPanel && (
-          <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-4">
-            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-t-3xl text-white animate-in slide-in-from-bottom-5">
-              <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-3 mb-4"/>
-              <div className="px-5 pb-5">
-                <div className="flex items-center gap-3 mb-3">
-                  <Calendar className="text-indigo-400" size={18}/>
-                  <h2 className="font-black uppercase text-sm flex-1">Turnos Realizados</h2>
-                  <button onClick={() => setShowCompletedPanel(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
-                </div>
-                <div className="flex gap-1 mb-4">
-                  {(['HOY','SEMANA','MES'] as const).map(opt => (
-                    <button key={opt} onClick={() => setCompletedView(opt)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${completedView === opt ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                      {opt === 'HOY' ? 'Hoy' : opt === 'SEMANA' ? 'Semana' : 'Mes'}
-                    </button>
-                  ))}
-                </div>
-                {completedShifts.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">Sin turnos realizados en este período.</p>
-                ) : (
-                  <div className="overflow-x-auto max-h-[60vh]">
-                    <table className="w-full text-[11px] text-slate-300 border-collapse">
-                      <thead><tr className="text-[9px] uppercase text-slate-500 border-b border-slate-800"><th className="py-2 pr-3 text-left">Fecha</th><th className="py-2 pr-3 text-left">Horario</th><th className="py-2 pr-3 text-left">Objetivo</th><th className="py-2 pr-3 text-left">Tiempo</th><th className="py-2 text-left">Est.</th></tr></thead>
-                      <tbody>
-                        {completedShifts.map((shift) => {
-                          const objectiveData = shift.objectiveId ? objectivesMap[shift.objectiveId] : null;
-                          const objectiveLabel = shift.isFranco ? 'Franco' : (objectiveData?.name || shift.objectiveName || shift.clientName || shift.objectiveId || 'Sin objetivo');
-                          // Ingreso: llegó antes o ≤5 min tarde → hora plan. Egreso: ±5 min → hora plan.
-                          const rawStart = shift.checkInTime || shift.realStartTime || shift.startTime;
-                          const rawEnd   = shift.checkOutTime || shift.realEndTime   || shift.endTime;
-                          const clampedStart = clampStart(rawStart, shift.startTime, 5);
-                          const clampedEnd   = clampEnd(rawEnd,     shift.endTime,   5);
-                          const realDuration = shift.isFranco ? '-' : formatDurationRange(clampedStart, clampedEnd);
-                          const rawStatus = shift.status || (shift.isPresent ? 'PRESENT' : 'ASSIGNED');
-                          const isAbsent = shift.isAbsent || rawStatus === 'ABSENT' || rawStatus === 'AUSENTE';
-                          // P = activo ahora (presente y aún no terminó la hora de fin)
-                          // F = finalizado (completado, o la hora de fin ya pasó)
-                          const shiftEndDate = toDate(shift.endTime);
-                          const shiftEnded = shift.isCompleted || (shiftEndDate && shiftEndDate < now);
-                          const statusLetter = isAbsent ? 'A' : (!shiftEnded && shift.isPresent ? 'P' : 'F');
-                          return (
-                            <tr key={shift.id} className="border-b border-slate-800/40 hover:bg-slate-800/20">
-                              <td className="py-2 pr-3">{formatDate(shift.startTime)}</td>
-                              <td className="py-2 pr-3">{shift.isFranco ? 'Franco' : `${formatTime(clampedStart)}-${formatTime(clampedEnd)}`}</td>
-                              <td className="py-2 pr-3 truncate max-w-[120px]">{objectiveLabel}</td>
-                              <td className="py-2 pr-3">{realDuration}</td>
-                              <td className="py-2"><span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${isAbsent ? 'bg-rose-900/40 text-rose-400' : !shiftEnded && shift.isPresent ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>{statusLetter}</span></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ===== MODAL: HISTORIAL PRESENTES ===== */}
-        {showPresentHistory && (
-          <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-4">
-            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-t-3xl text-white animate-in slide-in-from-bottom-5">
-              <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-3 mb-4"/>
-              <div className="px-5 pb-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <CheckCircle className="text-emerald-400" size={18}/>
-                  <h2 className="font-black uppercase text-sm flex-1">Historial de Presentes</h2>
-                  <button onClick={() => setShowPresentHistory(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
-                </div>
-                {presentHistory.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">Sin presentes registrados este mes.</p>
-                ) : (
-                  <div className="overflow-x-auto max-h-[60vh]">
-                    <table className="w-full text-[11px] text-slate-300 border-collapse">
-                      <thead><tr className="text-[9px] uppercase text-slate-500 border-b border-slate-800"><th className="py-2 pr-3 text-left">Fecha</th><th className="py-2 pr-3 text-left">Objetivo</th><th className="py-2 pr-3 text-left">Ingreso</th><th className="py-2 pr-3 text-left">Salida</th><th className="py-2 text-left">Tiempo</th></tr></thead>
-                      <tbody>
-                        {presentHistory.map((shift) => {
-                          const objectiveData = shift.objectiveId ? objectivesMap[shift.objectiveId] : null;
-                          const objectiveLabel = objectiveData?.name || shift.objectiveName || shift.clientName || shift.objectiveId || 'Sin objetivo';
-                          const rawStart2 = shift.checkInTime || shift.realStartTime || shift.startTime;
-                          const rawEnd2   = shift.checkOutTime || shift.realEndTime   || shift.endTime;
-                          const clampedStart2 = clampStart(rawStart2, shift.startTime, 5);
-                          const clampedEnd2   = clampEnd(rawEnd2,     shift.endTime,   5);
-                          const realDuration = formatDurationRange(clampedStart2, clampedEnd2);
-                          return (
-                            <tr key={shift.id} className="border-b border-slate-800/40 hover:bg-slate-800/20">
-                              <td className="py-2 pr-3">{formatDate(shift.startTime)}</td>
-                              <td className="py-2 pr-3 truncate max-w-[100px]">{objectiveLabel}</td>
-                              <td className="py-2 pr-3">{formatTime(clampedStart2)}</td>
-                              <td className="py-2 pr-3">{formatTime(clampedEnd2)}</td>
-                              <td className="py-2">{realDuration}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-          {/* ===== CREDENCIAL DIGITAL ===== */}
-          {showCredencial && empDocIdRef.current && (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <CreditCard size={16} className="text-yellow-400"/>
-                  <p className="text-sm font-black text-white">Mi Credencial Digital</p>
-                </div>
-                <button onClick={() => setShowCredencial(false)} className="text-slate-500 hover:text-slate-300">
-                  <X size={16}/>
-                </button>
-              </div>
-              <CredencialDigital
-                empDocId={empDocIdRef.current}
-                empData={empProfile || {}}
-                empresaNombre={empresaNombre}
-              />
-            </div>
-          )}
 
       </div>
     </AuthGuard>
