@@ -116,7 +116,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
       <div style={{ height: 'env(titlebar-area-height, 0px)', WebkitAppRegion: 'drag' } as React.CSSProperties} />
 
       {/* Topbar row */}
-      <div className="h-14 px-3 flex items-center gap-2 overflow-hidden">
+      <div className="h-14 px-3 flex items-center gap-2 overflow-visible">
         {/* Hamburger — solo en desktop (mobile usa bottom nav) */}
         <button
           onClick={onToggleSidebar}
