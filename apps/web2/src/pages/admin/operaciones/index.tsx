@@ -1132,6 +1132,40 @@ export default function OperacionesPage() {
                             </div>
                         )}
 
+                        {/* ── Panel Estado del Día ── */}
+                        {(() => {
+                            const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                            const cubiertos = logic.stats.activos + logic.stats.retenidos;
+                            const cobertura = total > 0 ? Math.round((cubiertos / total) * 100) : 0;
+                            const cobColor = cobertura >= 80 ? 'bg-emerald-500' : cobertura >= 50 ? 'bg-amber-500' : 'bg-rose-500';
+                            const cobText = cobertura >= 80 ? 'text-emerald-700' : cobertura >= 50 ? 'text-amber-700' : 'text-rose-700';
+                            return (
+                                <div className="mb-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-3 shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Estado del Día</span>
+                                        <span className={`text-lg font-black ${cobText.replace('700','400')} tabular-nums`}>{cobertura}%</span>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
+                                        <div className={`h-full rounded-full transition-all duration-500 ${cobColor}`} style={{ width: `${cobertura}%` }}/>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2 py-1.5 text-center">
+                                            <div className="text-base font-black text-emerald-400 leading-none">{logic.stats.activos}</div>
+                                            <div className="text-[8px] font-black text-emerald-500/70 uppercase mt-0.5">Activos</div>
+                                        </div>
+                                        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-1.5 text-center">
+                                            <div className="text-base font-black text-rose-400 leading-none">{logic.stats.ausentes + logic.stats.vacantes}</div>
+                                            <div className="text-[8px] font-black text-rose-500/70 uppercase mt-0.5">Aus+Vac</div>
+                                        </div>
+                                        <div className="bg-slate-700/50 border border-slate-600 rounded-lg px-2 py-1.5 text-center">
+                                            <div className="text-base font-black text-slate-300 leading-none">{total}</div>
+                                            <div className="text-[8px] font-black text-slate-500 uppercase mt-0.5">Total</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
                         {/* KPIs compactos */}
                         <div className="grid grid-cols-6 gap-0.5 mb-1.5">
                             {[

@@ -1933,19 +1933,37 @@ export default function AnalisisPage() {
           })()}
 
           {/* ── Tabs ────────────────────────────────────────────────────── */}
-          <TabBar
-            tabs={[
-              { id:'capacidad',  label:'Capacidad',  icon:BarChart3  },
-              { id:'guardias',   label:'Guardias',   icon:Users      },
-              { id:'cobertura',  label:'Cobertura',  icon:Target     },
-              { id:'proyeccion', label:'Proyección', icon:TrendingUp },
-              { id:'viabilidad', label:'Viabilidad', icon:Scale       },
-              { id:'art12',      label:'ART.12',     icon:MapPin      },
-              { id:'analitica',  label:'Analítica',  icon:Filter     },
-            ]}
-            active={activeTab}
-            onChange={id => setActiveTab(id as typeof activeTab)}
-          />
+          <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+            {([
+              { id:'capacidad',  label:'Capacidad',  icon:BarChart3,  alert: gapDisplay > 0 },
+              { id:'guardias',   label:'Guardias',   icon:Users,      alert: false },
+              { id:'cobertura',  label:'Cobertura',  icon:Target,     alert: vacancyPct > 20 },
+              { id:'proyeccion', label:'Proyección', icon:TrendingUp, alert: false },
+              { id:'viabilidad', label:'Viabilidad', icon:Scale,      alert: superavitGlobal < 0 },
+              { id:'art12',      label:'ART.12',     icon:MapPin,     alert: false },
+              { id:'analitica',  label:'Analítica',  icon:Filter,     alert: false },
+            ] as Array<{ id: string; label: string; icon: React.ElementType; alert: boolean }>).map(t => {
+              const Icon = t.icon;
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id as typeof activeTab)}
+                  className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all shrink-0 ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200 dark:shadow-indigo-900'
+                      : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 hover:text-indigo-600'
+                  }`}
+                >
+                  <Icon size={13}/>
+                  {t.label}
+                  {t.alert && (
+                    <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${isActive ? 'bg-amber-300' : 'bg-rose-500'} animate-pulse`}/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           {/* ══════════════════════════════════════════════════════════════
               TAB: CAPACIDAD

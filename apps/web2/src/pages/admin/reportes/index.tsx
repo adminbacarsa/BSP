@@ -1153,6 +1153,54 @@ export default function ReportsPage() {
                     </button>
                 </ContentCard>
 
+                {/* ── KPI Resumen Ejecutivo ── */}
+                {(employeeReport.length > 0 || objectiveReport.length > 0) && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
+                        {[
+                            {
+                                label: 'Empleados',
+                                value: employeeReport.length,
+                                sub: `${employeeReport.reduce((a,c)=>a+c.shifts,0)} turnos`,
+                                icon: '👤',
+                                color: 'from-indigo-500 to-indigo-600',
+                            },
+                            {
+                                label: 'Hs. Teóricas',
+                                value: employeeReport.reduce((a,c)=>a+(c.total||0),0).toFixed(1),
+                                sub: 'horas planificadas',
+                                icon: '🕐',
+                                color: 'from-sky-500 to-sky-600',
+                            },
+                            {
+                                label: 'Hs. Reales',
+                                value: employeeReport.reduce((a,c)=>a+(c.horasReales||c.total||0),0).toFixed(1),
+                                sub: 'horas trabajadas',
+                                icon: '✅',
+                                color: 'from-emerald-500 to-emerald-600',
+                            },
+                            {
+                                label: 'Objetivos',
+                                value: objectiveReport.length,
+                                sub: 'en el período',
+                                icon: '🏢',
+                                color: 'from-violet-500 to-violet-600',
+                            },
+                        ].map(kpi => (
+                            <div key={kpi.label} className="relative overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 shadow-sm">
+                                <div className={`absolute inset-0 bg-gradient-to-br ${kpi.color} opacity-5 dark:opacity-10`}/>
+                                <div className="relative flex items-start gap-3">
+                                    <div className="text-2xl leading-none mt-0.5">{kpi.icon}</div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">{kpi.label}</p>
+                                        <p className="text-2xl font-black text-slate-800 dark:text-white leading-tight">{kpi.value}</p>
+                                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{kpi.sub}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 {activeTab === 'EMPLOYEE' && renderEmployeeTable()}
                 {activeTab === 'SHIFTS' && renderShiftsDetailTable()}
                 {activeTab === 'OBJECTIVE' && renderObjectiveTable()}

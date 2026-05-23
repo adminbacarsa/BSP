@@ -11,7 +11,7 @@ import {
   UserCheck, Car, Users, Trash2, Plus, Search, Upload, Download,
   AlertCircle, Lock, Mail, Phone, Eye, EyeOff, Loader2, X, CheckCircle2,
   ArrowRightCircle, ArrowLeftCircle, CalendarDays, Clock, Ban,
-  UserPlus, Truck
+  UserPlus, Truck, AlertTriangle
 } from 'lucide-react';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -909,8 +909,29 @@ function GestionObjetivoScreen({
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6">
-        {/* Stats bar */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        {/* ── Resumen del Servicio ── */}
+        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-4 mb-4 shadow-sm shadow-indigo-200 text-white">
+          <p className="text-[10px] font-black uppercase tracking-wider text-indigo-200 mb-3">Resumen del servicio</p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white/10 rounded-xl p-3 text-center backdrop-blur-sm">
+              <p className="text-2xl font-black leading-none">{personal.length}</p>
+              <p className="text-[10px] font-black text-indigo-200 uppercase mt-1">Autorizados</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-3 text-center backdrop-blur-sm">
+              <p className="text-2xl font-black leading-none text-emerald-300">{accesosHoy}</p>
+              <p className="text-[10px] font-black text-indigo-200 uppercase mt-1">Accesos hoy</p>
+            </div>
+            <div className="bg-white/10 rounded-xl p-3 text-center backdrop-blur-sm cursor-pointer hover:bg-white/20 transition-colors" onClick={() => setActiveTab('agenda')}>
+              <p className="text-2xl font-black leading-none text-violet-200">
+                <CalendarDays size={22} className="inline" />
+              </p>
+              <p className="text-[10px] font-black text-indigo-200 uppercase mt-1">Agenda</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats bar — mantiene compatibilidad visual */}
+        <div className="grid grid-cols-3 gap-3 mb-6 hidden">
           <div className="bg-white border border-slate-200 rounded-2xl p-3 text-center">
             <p className="text-2xl font-black text-indigo-600">{personal.length}</p>
             <p className="text-[10px] font-black text-slate-400 uppercase mt-0.5">Autorizados</p>
@@ -1136,9 +1157,16 @@ function GestionObjetivoScreen({
         {/* ── Tab Accesos ── */}
         {activeTab === 'accesos' && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 mb-2">
-              <p className="text-xs font-black text-slate-500 uppercase">Accesos de hoy</p>
-              <span className="bg-slate-100 text-slate-500 text-[10px] font-black px-2 py-0.5 rounded-full">{accesos.length}</span>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-black text-slate-500 uppercase">Timeline de accesos · hoy</p>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  <ArrowRightCircle size={10}/> {accesos.filter(a=>a.type==='ingreso').length} ingresos
+                </span>
+                <span className="flex items-center gap-1 bg-blue-50 text-blue-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  <ArrowLeftCircle size={10}/> {accesos.filter(a=>a.type==='egreso').length} egresos
+                </span>
+              </div>
             </div>
             {accesos.length === 0 ? (
               <div className="text-center py-12 text-slate-400">
@@ -1146,25 +1174,46 @@ function GestionObjetivoScreen({
                 <p className="text-sm font-bold">Sin accesos registrados hoy</p>
               </div>
             ) : (
-              <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100 bg-white">
-                {accesos.map(a => (
-                  <div key={a.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${a.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
-                      {a.type === 'ingreso' ? <ArrowRightCircle size={16} /> : <ArrowLeftCircle size={16} />}
+              <div className="relative pl-6">
+                {/* Timeline vertical line */}
+                <div className="absolute left-2.5 top-0 bottom-0 w-px bg-slate-200"/>
+                <div className="space-y-3">
+                  {accesos.map((a, idx) => (
+                    <div key={a.id} className="relative flex items-start gap-3">
+                      {/* Timeline dot */}
+                      <div className={`absolute -left-4 w-3 h-3 rounded-full border-2 border-white mt-2 flex-shrink-0 ${
+                        a.autorizado === false ? 'bg-rose-500' : a.type === 'ingreso' ? 'bg-emerald-500' : 'bg-blue-500'
+                      }`}/>
+                      <div className={`flex-1 flex items-center gap-3 bg-white border rounded-2xl px-4 py-3 shadow-sm ${
+                        a.autorizado === false ? 'border-rose-100' : 'border-slate-200'
+                      }`}>
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                          a.autorizado === false ? 'bg-rose-50 text-rose-500' :
+                          a.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'
+                        }`}>
+                          {a.autorizado === false ? <AlertTriangle size={16}/> :
+                           a.type === 'ingreso' ? <ArrowRightCircle size={16} /> : <ArrowLeftCircle size={16} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-800 text-sm truncate">
+                            {a.personaNombre || a.text || a.identificador || 'Sin identificar'}
+                          </p>
+                          <p className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 mt-0.5">
+                            <Clock size={9}/>
+                            {fmtTime(a.createdAt)}
+                            <span className="w-1 h-1 rounded-full bg-slate-300 inline-block"/>
+                            <span className="capitalize">{a.type || 'acceso'}</span>
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-black px-2 py-1 rounded-full flex-shrink-0 ${
+                          a.autorizado === false ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          {a.autorizado === false ? '✕ No auth.' : '✓ Auth.'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-black text-slate-800 text-sm truncate">
-                        {a.personaNombre || a.text || a.identificador || 'Sin identificar'}
-                      </p>
-                      <p className="text-[11px] font-bold text-slate-400">
-                        {fmtTime(a.createdAt)} · {fmtDate(a.createdAt)}
-                      </p>
-                    </div>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full flex-shrink-0 ${a.autorizado === false ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                      {a.autorizado === false ? 'No autorizado' : 'Autorizado'}
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </div>
