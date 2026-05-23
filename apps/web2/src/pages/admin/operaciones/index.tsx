@@ -1071,6 +1071,39 @@ export default function OperacionesPage() {
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
             
+            {/* ── Banda Estado del Día ── */}
+            {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
+                const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                const cubiertos = logic.stats.activos + logic.stats.retenidos;
+                const cobertura = total > 0 ? Math.round((cubiertos / total) * 100) : 0;
+                const barColor = cobertura >= 80 ? 'bg-emerald-500' : cobertura >= 50 ? 'bg-amber-500' : 'bg-rose-500';
+                const pctColor = cobertura >= 80 ? 'text-emerald-600' : cobertura >= 50 ? 'text-amber-600' : 'text-rose-600';
+                return (
+                    <div className="mx-2 mb-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center gap-4 shadow-sm">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Estado del día</span>
+                        <div className="flex items-center gap-3 flex-1">
+                            <span className={`text-xl font-black tabular-nums ${pctColor}`}>{cobertura}%</span>
+                            <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${cobertura}%` }}/>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                            {[
+                                { label: 'Activos', val: logic.stats.activos, cls: 'text-emerald-600' },
+                                { label: 'Vacantes', val: logic.stats.vacantes, cls: 'text-rose-500' },
+                                { label: 'Ausentes', val: logic.stats.ausentes, cls: 'text-rose-700' },
+                                { label: 'Total', val: total, cls: 'text-slate-700' },
+                            ].map(m => (
+                                <div key={m.label} className="text-center">
+                                    <div className={`text-sm font-black leading-none ${m.cls}`}>{m.val}</div>
+                                    <div className="text-[8px] text-slate-400 uppercase mt-0.5">{m.label}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })()}
+
             <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative">
                 {!isExternalMap && (
                     <div className="flex-1 lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
@@ -1131,40 +1164,6 @@ export default function OperacionesPage() {
                                 )}
                             </div>
                         )}
-
-                        {/* ── Panel Estado del Día ── */}
-                        {(() => {
-                            const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                            const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                            const cobertura = total > 0 ? Math.round((cubiertos / total) * 100) : 0;
-                            const cobColor = cobertura >= 80 ? 'bg-emerald-500' : cobertura >= 50 ? 'bg-amber-500' : 'bg-rose-500';
-                            const cobText = cobertura >= 80 ? 'text-emerald-700' : cobertura >= 50 ? 'text-amber-700' : 'text-rose-700';
-                            return (
-                                <div className="mb-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-3 shadow-sm">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Estado del Día</span>
-                                        <span className={`text-lg font-black ${cobText.replace('700','400')} tabular-nums`}>{cobertura}%</span>
-                                    </div>
-                                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden mb-2">
-                                        <div className={`h-full rounded-full transition-all duration-500 ${cobColor}`} style={{ width: `${cobertura}%` }}/>
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2 py-1.5 text-center">
-                                            <div className="text-base font-black text-emerald-400 leading-none">{logic.stats.activos}</div>
-                                            <div className="text-[8px] font-black text-emerald-500/70 uppercase mt-0.5">Activos</div>
-                                        </div>
-                                        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-1.5 text-center">
-                                            <div className="text-base font-black text-rose-400 leading-none">{logic.stats.ausentes + logic.stats.vacantes}</div>
-                                            <div className="text-[8px] font-black text-rose-500/70 uppercase mt-0.5">Aus+Vac</div>
-                                        </div>
-                                        <div className="bg-slate-700/50 border border-slate-600 rounded-lg px-2 py-1.5 text-center">
-                                            <div className="text-base font-black text-slate-300 leading-none">{total}</div>
-                                            <div className="text-[8px] font-black text-slate-500 uppercase mt-0.5">Total</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
 
                         {/* KPIs compactos */}
                         <div className="grid grid-cols-6 gap-0.5 mb-1.5">
