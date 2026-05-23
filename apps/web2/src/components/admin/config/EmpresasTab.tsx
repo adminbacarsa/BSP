@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, IdCard, Image as ImageIcon } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -553,7 +553,7 @@ export default function EmpresasTab() {
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-1">
-            <IdCard size={18} className="text-indigo-600" />
+            <CreditCard size={18} className="text-indigo-600" />
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Credencial de empleado</h3>
           </div>
           <p className="text-xs text-slate-500 font-medium mb-5">
