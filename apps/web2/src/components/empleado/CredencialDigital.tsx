@@ -20,24 +20,39 @@ interface Props {
   empresaNombre?: string;
   empresaLogoUrl?: string;
   templateId?: string;
+  orientation?: 'vertical' | 'horizontal';
+  viewOnly?: boolean;
 }
 
-const TEMAS = [
-  { id: 'marino-oro',   label: 'Marino & Oro',     h1: '#0a1628', h2: '#1e3a5f', accent: '#c8a84b' },
-  { id: 'grafito',      label: 'Grafito',           h1: '#111827', h2: '#1f2937', accent: '#e5e7eb' },
-  { id: 'corporativo',  label: 'Corporativo',       h1: '#0f172a', h2: '#1e3a5f', accent: '#38bdf8' },
-  { id: 'seguridad',    label: 'Seguridad',         h1: '#1a0505', h2: '#7f1d1d', accent: '#fca5a5' },
-  { id: 'institucional',label: 'Institucional',     h1: '#052e16', h2: '#14532d', accent: '#4ade80' },
-  { id: 'elite',        label: 'Elite',             h1: '#1e0050', h2: '#3b0764', accent: '#e879f9' },
-];
+// Derivar paleta desde hue HSL
+function hslToHex(h: number, s: number, l: number): string {
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+function colorsFromHue(h: number) {
+  return {
+    h1: hslToHex(h, 65, 10),
+    h2: hslToHex(h, 55, 20),
+    accent: hslToHex(h, 80, 62),
+  };
+}
 
-export default function CredencialDigital({ empDocId, empData, empresaNombre, empresaLogoUrl, templateId }: Props) {
+export default function CredencialDigital({ empDocId, empData, empresaNombre, empresaLogoUrl, templateId, orientation, viewOnly }: Props) {
   const [fotoSrc, setFotoSrc]             = useState<string | null>(empData.photoUrl || null);
   const [fotoFinal, setFotoFinal]         = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl]         = useState<string>('');
   const [logoEmpresa, setLogoEmpresa]     = useState<string | null>(empresaLogoUrl || null);
-  const initIdx = templateId ? Math.max(0, TEMAS.findIndex(t => t.id === templateId)) : 0;
-  const [temaIdx, setTemaIdx]             = useState(initIdx);
+  const [credHue, setCredHue]             = useState<number>(215);
+  const [credTitulo, setCredTitulo]       = useState<string>('CREDENCIAL DE ACCESO');
+  const [credSubtitulo, setCredSubtitulo] = useState<string>('Personal Autorizado');
+  const [credPie, setCredPie]             = useState<string>('');
+  const [orientacion, setOrientacion]     = useState<'vertical' | 'horizontal'>(orientation || 'vertical');
   const [guardando, setGuardando]         = useState(false);
   const [quitandoFondo, setQuitandoFondo] = useState(false);
   const [progFondo, setProgFondo]         = useState(0);
@@ -56,12 +71,12 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const photoContRef = useRef<HTMLDivElement>(null);
   const dragRef      = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
-  const tema           = TEMAS[temaIdx];
+  const tema           = colorsFromHue(credHue);
   const headerBg       = `linear-gradient(160deg, ${tema.h1} 0%, ${tema.h2} 100%)`;
   const nombre         = [empData.firstName, empData.lastName].filter(Boolean).join(' ');
   const apellidoNombre = [empData.lastName?.toUpperCase(), empData.firstName].filter(Boolean).join(', ');
   const fotoMostrada   = fotoFinal || fotoSrc;
-  const showEditUI     = !credGuardada || modoEdicion;
+  const showEditUI     = !viewOnly && (!credGuardada || modoEdicion);
   const empresaDisplay = empresaLocal || empresaNombre || '';
 
   const setPhotoOff = useCallback((v: { x: number; y: number }) => {
@@ -88,9 +103,12 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           const n = d.name || d.nombre || d.razonSocial || empData.empresaId;
           if (n && !empresaNombre) setEmpresaLocal(n);
           if (d.logoUrl && !empresaLogoUrl) setLogoEmpresa(d.logoUrl);
-          if (d.credencialTemplate) {
-            const idx = TEMAS.findIndex(t => t.id === d.credencialTemplate);
-            if (idx >= 0 && !templateId) setTemaIdx(idx);
+          if (typeof d.credencialHue === 'number') setCredHue(d.credencialHue);
+          if (d.credencialTitulo)    setCredTitulo(d.credencialTitulo);
+          if (d.credencialSubtitulo) setCredSubtitulo(d.credencialSubtitulo);
+          if (d.credencialPie)       setCredPie(d.credencialPie);
+          if (d.credencialOrientacion && !orientation) {
+            setOrientacion(d.credencialOrientacion as 'vertical' | 'horizontal');
           }
         }
       }).catch(() => {});
@@ -425,20 +443,25 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 <img
                   src={logoEmpresa}
                   alt="Logo empresa"
-                  className="w-10 h-10 object-contain rounded-lg"
-                  style={{ background: 'rgba(255,255,255,0.12)', padding: 3 }}
+                  className="h-9 object-contain"
+                  style={{ maxWidth: 110, filter: 'brightness(0) invert(1)' }}
                   onError={() => setLogoEmpresa(null)}
                 />
               ) : (
-                <ShieldCheck size={38} strokeWidth={1.5} style={{ color: tema.accent }}/>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck size={28} strokeWidth={1.5} style={{ color: tema.accent }}/>
+                  <p className="text-white font-black text-sm tracking-wide leading-tight">
+                    {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
+                  </p>
+                </div>
               )}
             </div>
-            <div>
-              <p className="text-white font-black text-sm tracking-wide leading-tight">
-                {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
+            <div className="ml-auto text-right">
+              <p className="text-[8px] tracking-widest uppercase font-bold" style={{ color: `${tema.accent}cc` }}>
+                {credTitulo}
               </p>
-              <p className="text-[9px] tracking-widest uppercase mt-0.5 font-bold" style={{ color: `${tema.accent}cc` }}>
-                Credencial Digital de Identidad
+              <p className="text-[7px] text-white/50 uppercase tracking-wider mt-0.5">
+                {credSubtitulo}
               </p>
             </div>
           </div>
@@ -447,27 +470,46 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         {/* Línea acento */}
         <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}, ${tema.h2})` }}/>
 
-        {/* Foto grande centrada */}
+        {/* Foto grande centrada con efecto pop-out */}
         <div className="relative flex flex-col items-center py-5"
-          style={{ background: `linear-gradient(180deg, ${tema.h1}06 0%, transparent 100%)` }}>
+          style={{ background: `linear-gradient(180deg, ${tema.h1}08 0%, transparent 100%)` }}>
 
-          <div
-            ref={photoContRef}
-            className={`relative shadow-lg ${fotoFinal ? '' : 'overflow-hidden rounded-2xl'}`}
-            style={{
-              width: 160, height: 210,
-              border: fotoFinal ? 'none' : `2.5px solid ${tema.accent}`,
-              borderRadius: fotoFinal ? 0 : 16,
-              background: fotoFinal ? 'transparent' : '#e2e8f0',
-              cursor: showEditUI && fotoMostrada && !fotoFinal ? 'grab' : 'default',
-            }}
-          >
+          {/* Contenedor pop-out: círculo de color + foto encima */}
+          <div className="relative" style={{ width: 170, height: fotoFinal ? 220 : 215 }}>
+            {/* Fondo círculo/elipse cuando hay foto sin fondo */}
+            {fotoFinal && (
+              <div style={{
+                position: 'absolute',
+                bottom: 0, left: '50%', transform: 'translateX(-50%)',
+                width: 140, height: 140,
+                borderRadius: '50%',
+                background: `radial-gradient(ellipse at center, ${tema.h2} 0%, ${tema.h1} 100%)`,
+                border: `3px solid ${tema.accent}`,
+              }}/>
+            )}
+            <div
+              ref={photoContRef}
+              className={`absolute left-1/2 -translate-x-1/2 ${fotoFinal ? '' : 'overflow-hidden rounded-2xl'}`}
+              style={{
+                width: 160,
+                height: fotoFinal ? 220 : 210,
+                bottom: 0,
+                border: fotoFinal ? 'none' : `2.5px solid ${tema.accent}`,
+                borderRadius: fotoFinal ? 0 : 16,
+                background: fotoFinal ? 'transparent' : '#e2e8f0',
+                cursor: showEditUI && fotoMostrada && !fotoFinal ? 'grab' : 'default',
+              }}
+            >
             {fotoMostrada ? (
               <img
                 src={fotoMostrada}
                 alt="Foto"
                 className="w-full h-full object-cover select-none"
-                style={{ objectPosition: `${photoOff.x}% ${photoOff.y}%`, pointerEvents: 'none' }}
+                style={{
+                  objectPosition: fotoFinal ? 'center bottom' : `${photoOff.x}% ${photoOff.y}%`,
+                  objectFit: fotoFinal ? 'contain' : 'cover',
+                  pointerEvents: 'none',
+                }}
                 draggable={false}
               />
             ) : (
@@ -484,7 +526,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 </span>
               </div>
             )}
-          </div>
+            </div>{/* cierra div foto inner */}
+          </div>{/* cierra div pop-out container */}
 
           {/* Botones en modo edición */}
           {showEditUI && (
@@ -577,37 +620,18 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           </p>
         </div>
 
+        {/* Pie de página configurable */}
+        {credPie && (
+          <div className="px-5 pb-2">
+            <p className="text-[8px] text-center font-medium" style={{ color: `${tema.accent}80` }}>
+              {credPie}
+            </p>
+          </div>
+        )}
+
         {/* Banda inferior */}
         <div className="h-2" style={{ background: `linear-gradient(90deg, ${tema.h1}, ${tema.h2})` }}/>
       </div>
-
-      {/* ── Selector de tema ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2">
-        <button onClick={() => setTemaIdx(i => (i - 1 + TEMAS.length) % TEMAS.length)}
-          className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
-          <ChevronLeft size={14}/>
-        </button>
-        <div className="flex-1 flex gap-2 justify-center">
-          {TEMAS.map((t, i) => (
-            <button key={t.id} onClick={() => setTemaIdx(i)}
-              className="w-6 h-6 rounded-full border-2 transition-all"
-              style={{
-                background: `linear-gradient(135deg, ${t.h1}, ${t.h2})`,
-                borderColor: i === temaIdx ? t.accent : 'transparent',
-                transform: i === temaIdx ? 'scale(1.3)' : 'scale(1)',
-              }}
-              title={t.label}
-            />
-          ))}
-        </div>
-        <button onClick={() => setTemaIdx(i => (i + 1) % TEMAS.length)}
-          className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
-          <ChevronRight size={14}/>
-        </button>
-      </div>
-      <p className="text-center text-[9px] text-slate-500 font-bold uppercase tracking-wider -mt-1">
-        {TEMAS[temaIdx].label}
-      </p>
 
       {/* ── Acciones ────────────────────────────────────────────────────── */}
       <div className="flex gap-2">

@@ -81,31 +81,49 @@ export default function EmpresasTab() {
     }
   };
 
-  // Credencial — logo + modelo + color
+  // Credencial — logo + modelo + hue + textos configurables
   const CRED_MODELOS = [
-    { id: 'clasico',    label: 'Clásico',    desc: 'Vertical · foto centrada' },
-    { id: 'horizontal', label: 'Horizontal', desc: 'Apaisado · foto lateral' },
-    { id: 'compacto',   label: 'Compacto',   desc: 'Vertical · más datos' },
+    { id: 'clasico',  label: 'Clásico',  desc: 'Foto circular, QR abajo' },
+    { id: 'moderno',  label: 'Moderno',  desc: 'Foto cuadrada lateral' },
+    { id: 'compacto', label: 'Compacto', desc: 'Foto mini, datos grandes' },
   ];
-  const CRED_COLORES = [
-    { id: 'marino-oro',    label: 'Marino & Oro',   h1: '#0a1628', h2: '#1e3a5f', accent: '#c8a84b' },
-    { id: 'grafito',       label: 'Grafito',         h1: '#111827', h2: '#1f2937', accent: '#e5e7eb' },
-    { id: 'corporativo',   label: 'Corporativo',     h1: '#0f172a', h2: '#1e3a5f', accent: '#38bdf8' },
-    { id: 'seguridad',     label: 'Seguridad',       h1: '#1a0505', h2: '#7f1d1d', accent: '#fca5a5' },
-    { id: 'institucional', label: 'Institucional',   h1: '#052e16', h2: '#14532d', accent: '#4ade80' },
-    { id: 'elite',         label: 'Elite',           h1: '#1e0050', h2: '#3b0764', accent: '#e879f9' },
-  ];
+
+  // Derivar paleta desde hue HSL
+  const hslToHex = (h: number, s: number, l: number): string => {
+    s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+      return Math.round(255 * c).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  };
+  const colorsFromHue = (h: number) => ({
+    h1: hslToHex(h, 65, 10),
+    h2: hslToHex(h, 55, 20),
+    accent: hslToHex(h, 80, 62),
+  });
+
   const logoInputRef = useRef<HTMLInputElement>(null);
-  const [logoPreview, setLogoPreview]   = useState<string | null>((empresa as any)?.logoUrl || null);
-  const [subiendoLogo, setSubiendoLogo] = useState(false);
-  const [modeloCred, setModeloCred]     = useState<string>((empresa as any)?.credencialModelo || 'clasico');
-  const [colorCred, setColorCred]       = useState<string>((empresa as any)?.credencialTemplate || 'marino-oro');
-  const [guardandoTpl, setGuardandoTpl] = useState(false);
+  const [logoPreview, setLogoPreview]         = useState<string | null>((empresa as any)?.logoUrl || null);
+  const [subiendoLogo, setSubiendoLogo]       = useState(false);
+  const [modeloCred, setModeloCred]           = useState<string>((empresa as any)?.credencialModelo || 'clasico');
+  const [credHue, setCredHue]                 = useState<number>((empresa as any)?.credencialHue ?? 215);
+  const [orientacionCred, setOrientacionCred] = useState<'vertical' | 'horizontal'>((empresa as any)?.credencialOrientacion || 'vertical');
+  const [credTitulo, setCredTitulo]           = useState<string>((empresa as any)?.credencialTitulo || 'CREDENCIAL DE ACCESO');
+  const [credSubtitulo, setCredSubtitulo]     = useState<string>((empresa as any)?.credencialSubtitulo || 'Personal Autorizado');
+  const [credPie, setCredPie]                 = useState<string>((empresa as any)?.credencialPie || '');
+  const [guardandoTpl, setGuardandoTpl]       = useState(false);
 
   React.useEffect(() => {
     setLogoPreview((empresa as any)?.logoUrl || null);
     setModeloCred((empresa as any)?.credencialModelo || 'clasico');
-    setColorCred((empresa as any)?.credencialTemplate || 'marino-oro');
+    setCredHue((empresa as any)?.credencialHue ?? 215);
+    setOrientacionCred((empresa as any)?.credencialOrientacion || 'vertical');
+    setCredTitulo((empresa as any)?.credencialTitulo || 'CREDENCIAL DE ACCESO');
+    setCredSubtitulo((empresa as any)?.credencialSubtitulo || 'Personal Autorizado');
+    setCredPie((empresa as any)?.credencialPie || '');
   }, [empresa?.id]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,9 +147,12 @@ export default function EmpresasTab() {
     setGuardandoTpl(true);
     try {
       await guardarEmpresa(empresa.id, {
-        credencialTemplate: colorCred,
         credencialModelo: modeloCred,
-        credencialOrientacion: modeloCred === 'horizontal' ? 'horizontal' : 'vertical',
+        credencialHue: credHue,
+        credencialOrientacion: orientacionCred,
+        credencialTitulo: credTitulo.trim(),
+        credencialSubtitulo: credSubtitulo.trim(),
+        credencialPie: credPie.trim(),
       } as any);
       toast.success('Configuración de credencial guardada');
     } catch { toast.error('Error al guardar'); }
@@ -609,102 +630,212 @@ export default function EmpresasTab() {
             <div>
               <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-4">Template de credencial</p>
 
-              {/* ── 3 modelos grandes ── */}
+              {/* ── Orientación ── */}
+              <div className="flex items-center gap-3 mb-5">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0">Orientación</p>
+                <div className="flex border border-slate-200 rounded-xl overflow-hidden">
+                  {(['vertical', 'horizontal'] as const).map(o => (
+                    <button
+                      key={o}
+                      onClick={() => setOrientacionCred(o)}
+                      className={`px-4 py-1.5 text-[11px] font-black uppercase tracking-wide transition-colors ${
+                        orientacionCred === o
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {o === 'vertical' ? '↕ Vertical' : '↔ Horizontal'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── 3 modelos ── */}
               <div className="grid grid-cols-3 gap-3 mb-5">
                 {CRED_MODELOS.map(modelo => {
-                  const col = CRED_COLORES.find(c => c.id === colorCred) || CRED_COLORES[0];
+                  const col = colorsFromHue(credHue);
                   const selected = modeloCred === modelo.id;
-                  const isH = modelo.id === 'horizontal';
+                  const isH = orientacionCred === 'horizontal';
                   const isCompacto = modelo.id === 'compacto';
+                  const isModerno = modelo.id === 'moderno';
                   return (
                     <button
                       key={modelo.id}
                       onClick={() => setModeloCred(modelo.id)}
                       className={`flex flex-col rounded-2xl overflow-hidden border-2 transition-all duration-200 ${
                         selected
-                          ? 'border-indigo-500 shadow-lg shadow-indigo-100/60 scale-[1.02]'
+                          ? 'border-slate-300 shadow-xl scale-[1.01]'
                           : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
                       }`}
                     >
+                      {/* Mini preview */}
+                      {/* Mini preview — credencial real */}
                       <div
-                        className="w-full relative overflow-hidden bg-slate-50 p-2"
-                        style={{ aspectRatio: isH ? '16/10' : '10/16' }}
+                        className="w-full flex items-center justify-center overflow-hidden"
+                        style={{ height: isH ? 215 : 335, background: '#0d1117' }}
                       >
-                        {isH ? (
-                          <div className="absolute inset-2 rounded-xl overflow-hidden flex flex-col"
-                               style={{ background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
-                            <div className="shrink-0 px-2 py-1.5 flex items-center gap-1.5"
-                                 style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}>
-                              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: col.accent }}/>
-                              <div className="flex-1 h-1 rounded-full" style={{ background: `${col.accent}70` }}/>
+                        {(() => {
+                          const personSVG = (size: number) => (
+                            <svg width={size} height={size} viewBox="0 0 60 70" fill="none">
+                              <circle cx="30" cy="22" r="13" fill={col.accent} opacity="0.85"/>
+                              <ellipse cx="30" cy="60" rx="22" ry="14" fill={col.accent} opacity="0.65"/>
+                            </svg>
+                          );
+                          const qr = (sz: number) => (
+                            <div style={{ width: sz, height: sz, borderRadius: 3, border: `1.5px solid ${col.accent}60`, overflow: 'hidden', flexShrink: 0 }}>
+                              <div style={{ width: '100%', height: '100%', backgroundImage: `repeating-linear-gradient(0deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px),repeating-linear-gradient(90deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px)` }}/>
                             </div>
-                            <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${col.h2}, ${col.accent})` }}/>
-                            <div className="flex flex-1 min-h-0">
-                              <div className="shrink-0 flex items-center justify-center p-1.5" style={{ width: '35%' }}>
-                                <div className="w-full rounded-md" style={{
-                                  aspectRatio: '3/4',
-                                  background: `${col.h1}20`,
-                                  border: `1.5px solid ${col.accent}60`
-                                }}/>
-                              </div>
-                              <div className="flex-1 py-1.5 pr-1.5 flex flex-col justify-between">
-                                <div className="space-y-1">
-                                  <div className="h-1.5 rounded-sm bg-slate-700" style={{ width: '85%' }}/>
-                                  <div className="h-1 rounded-sm bg-slate-300" style={{ width: '55%' }}/>
-                                  <div className="h-0.5 rounded-sm bg-slate-200 mt-1" style={{ width: '70%' }}/>
-                                  <div className="h-0.5 rounded-sm bg-slate-200" style={{ width: '50%' }}/>
+                          );
+                          const barcode = (w: number) => (
+                            <div style={{ flex: 1, height: 22, background: `repeating-linear-gradient(90deg,${col.accent}90 0,${col.accent}90 1.5px,transparent 1.5px,transparent 3.5px,${col.accent}70 3.5px,${col.accent}70 5px,transparent 5px,transparent 6px)`, borderRadius: 2 }}/>
+                          );
+                          const logoEl = (h: number) => logoPreview
+                            ? <img src={logoPreview} style={{ height: h, maxWidth: h*3.5, objectFit: 'contain', filter: 'brightness(0) invert(1)', display: 'block' }} alt=""/>
+                            : <span style={{ fontSize: h-2, color: col.accent, fontWeight: 900, letterSpacing: 1, lineHeight: 1 }}>BACAR</span>;
+                          const campos6 = [['DNI','28.456.789'],['LEGAJO','B-0142'],['ÁREA','Operaciones'],['EMPRESA','Grupo Bacar'],['TURNO','Mañana'],['VIGENCIA','12/2026']];
+
+                          if (isH) return (
+                            /* ─── HORIZONTAL ─── */
+                            <div style={{ width: 310, height: 196, background: col.h1, borderRadius: 8, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex' }}>
+                              {/* col izq */}
+                              <div style={{ width: 82, background: col.h2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 8px', borderRight: `2px solid ${col.accent}` }}>
+                                {logoEl(14)}
+                                <div style={{ width: isCompacto ? 46 : 54, height: isCompacto ? 46 : 54, borderRadius: isCompacto ? 7 : '50%', background: col.h1, border: `2.5px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {personSVG(isCompacto ? 34 : 42)}
                                 </div>
-                                <div className="flex justify-end">
-                                  <div className="w-5 h-5 rounded" style={{ border: `1.5px solid ${col.accent}60`, background: '#f8fafc' }}/>
+                                <div style={{ width: '75%', height: 1, background: `${col.accent}50` }}/>
+                                <div style={{ fontSize: 6.5, color: `${col.accent}cc`, fontWeight: 700, textAlign: 'center', letterSpacing: 0.3 }}>GRUPO BACAR</div>
+                              </div>
+                              {/* col der */}
+                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ background: col.h2, padding: '6px 10px', borderBottom: `1.5px solid ${col.accent}` }}>
+                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 1 }}>CREDENCIAL DE ACCESO</div>
+                                  <div style={{ fontSize: 8.5, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
+                                  <div style={{ fontSize: 7, color: `${col.accent}dd`, fontWeight: 600 }}>Guardia de Seguridad</div>
+                                </div>
+                                <div style={{ padding: '7px 10px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px' }}>
+                                  {campos6.map(([l,v], i) => (
+                                    <div key={i}>
+                                      <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 1.5 }}>{l}</div>
+                                      <div style={{ fontSize: 8, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}20` }}>
+                                  {barcode(100)}
+                                  {qr(28)}
                                 </div>
                               </div>
                             </div>
-                            <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}/>
-                          </div>
-                        ) : (
-                          <div className="absolute inset-2 rounded-xl overflow-hidden flex flex-col"
-                               style={{ background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
-                            <div className="shrink-0 px-2 py-2"
-                                 style={{ background: `linear-gradient(135deg, ${col.h1}, ${col.h2})` }}>
-                              <div className="flex items-center gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-sm" style={{ background: col.accent }}/>
-                                <div className="flex-1 space-y-0.5">
-                                  <div className="h-1 rounded-full" style={{ background: `${col.accent}90`, width: '65%' }}/>
-                                  <div className="h-0.5 rounded-full opacity-50" style={{ background: col.accent, width: '45%' }}/>
+                          );
+
+                          if (!isModerno && !isCompacto) return (
+                            /* ─── VERTICAL CLÁSICO ─── */
+                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ background: col.h2, padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: `2px solid ${col.accent}` }}>
+                                {logoEl(16)}
+                                <div style={{ flex: 1, textAlign: 'right' }}>
+                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 1 }}>CREDENCIAL DE ACCESO</div>
+                                  <div style={{ fontSize: 7.5, color: '#ffffffcc', fontWeight: 600 }}>Personal Autorizado</div>
                                 </div>
                               </div>
+                              <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 14, paddingBottom: 8 }}>
+                                <div style={{ width: 68, height: 68, borderRadius: '50%', background: col.h2, border: `3px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {personSVG(52)}
+                                </div>
+                              </div>
+                              <div style={{ padding: '0 12px 7px', textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#fff', fontWeight: 800, letterSpacing: 0.3 }}>JUAN A. PÉREZ</div>
+                                <div style={{ fontSize: 8.5, color: col.accent, fontWeight: 700, marginTop: 2 }}>GUARDIA DE SEGURIDAD</div>
+                              </div>
+                              <div style={{ height: 1, background: `${col.accent}30`, margin: '0 12px 8px' }}/>
+                              <div style={{ padding: '0 12px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 10px' }}>
+                                {campos6.map(([l,v], i) => (
+                                  <div key={i}>
+                                    <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>{l}</div>
+                                    <div style={{ fontSize: 8.5, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ padding: '6px 12px 5px', display: 'flex', justifyContent: 'flex-end' }}>{qr(30)}</div>
+                              <div style={{ height: 8, background: col.accent }}/>
                             </div>
-                            <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${col.h2}, ${col.accent})` }}/>
-                            <div className="flex justify-center mt-2 mb-1.5">
-                              <div className="rounded-md" style={{
-                                width: isCompacto ? '32%' : '42%',
-                                aspectRatio: '3/4',
-                                background: `${col.h1}15`,
-                                border: `1.5px solid ${col.accent}55`
-                              }}/>
-                            </div>
-                            <div className="px-2 flex-1 space-y-1">
-                              <div className="h-1.5 rounded-sm bg-slate-800" style={{ width: '80%' }}/>
-                              <div className="h-1 rounded-sm bg-slate-300" style={{ width: '55%' }}/>
-                              <div className="grid grid-cols-2 gap-1 mt-1">
-                                <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                {isCompacto && <>
-                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                  <div className="h-0.5 rounded-sm bg-slate-200"/>
-                                </>}
+                          );
+
+                          if (isModerno) return (
+                            /* ─── VERTICAL MODERNO ─── */
+                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ background: `linear-gradient(140deg,${col.h2} 0%,${col.h1} 100%)`, padding: '10px 11px 26px', position: 'relative', borderBottom: `2px solid ${col.accent}` }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {logoEl(15)}
+                                  <div style={{ width: 1, height: 14, background: `${col.accent}50` }}/>
+                                  <div>
+                                    <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 0.8 }}>CREDENCIAL</div>
+                                    <div style={{ fontSize: 7.5, color: '#fff', fontWeight: 700 }}>Personal Autorizado</div>
+                                  </div>
+                                </div>
+                                <div style={{ position: 'absolute', top: 6, right: 11, width: 58, height: 58, borderRadius: '50%', background: col.h1, border: `3px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {personSVG(46)}
+                                </div>
+                              </div>
+                              <div style={{ padding: '8px 11px 5px' }}>
+                                <div style={{ fontSize: 12, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
+                                <div style={{ fontSize: 8.5, color: col.accent, fontWeight: 700, marginTop: 2 }}>Guardia de Seguridad</div>
+                              </div>
+                              <div style={{ padding: '5px 11px', flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                                {[['ÁREA','Operaciones'],['EMPRESA','Grupo Bacar'],['TURNO','Mañana'],['VIGENCIA','12/2026']].map(([l,v],i) => (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                    <div style={{ width: 3, height: 16, background: col.accent, borderRadius: 2, flexShrink: 0 }}/>
+                                    <div>
+                                      <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>{l}</div>
+                                      <div style={{ fontSize: 8.5, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ padding: '5px 11px 6px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}25` }}>
+                                {barcode(100)}
+                                {qr(26)}
                               </div>
                             </div>
-                            <div className="flex justify-center py-1.5">
-                              <div className="w-5 h-5 rounded" style={{ border: `1.5px solid ${col.accent}60`, background: '#f8fafc' }}/>
+                          );
+
+                          /* ─── VERTICAL COMPACTO ─── */
+                          return (
+                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ background: col.h2, padding: '7px 11px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: `2px solid ${col.accent}` }}>
+                                {logoEl(14)}
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700 }}>CREDENCIAL DE ACCESO</div>
+                                  <div style={{ fontSize: 7.5, color: '#fff', fontWeight: 700 }}>GRUPO BACAR</div>
+                                </div>
+                                <div style={{ width: 40, height: 40, borderRadius: 5, background: col.h1, border: `2px solid ${col.accent}`, overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {personSVG(32)}
+                                </div>
+                              </div>
+                              <div style={{ padding: '7px 11px 4px' }}>
+                                <div style={{ fontSize: 11, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
+                                <div style={{ fontSize: 8, color: col.accent, fontWeight: 700, marginTop: 2 }}>Guardia de Seguridad · Nivel 2</div>
+                              </div>
+                              <div style={{ height: 1, background: `${col.accent}25`, margin: '5px 11px' }}/>
+                              <div style={{ padding: '0 11px', flex: 1, display: 'flex', flexDirection: 'column', gap: 5.5 }}>
+                                {[...campos6, ['ACCESO','Nivel 2']].map(([l,v],i) => (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                                    <div style={{ width: 58, fontSize: 6.5, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase', flexShrink: 0 }}>{l}</div>
+                                    <div style={{ fontSize: 8, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ padding: '5px 11px 5px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}20` }}>
+                                {barcode(100)}
+                                {qr(24)}
+                              </div>
+                              <div style={{ height: 7, background: col.accent }}/>
                             </div>
-                            <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${col.h1}, ${col.h2})` }}/>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
-                      <div className={`px-3 py-2.5 flex items-center gap-2 transition-colors ${
+                      <div className={`px-3 py-2 flex items-center gap-2 transition-colors ${
                         selected ? 'bg-indigo-600' : 'bg-white'
                       }`}>
                         <div className="flex-1 text-left">
@@ -722,127 +853,88 @@ export default function EmpresasTab() {
                 })}
               </div>
 
-              {/* ── Combinación de colores ── */}
+              {/* ── Tono de color ── */}
               <div className="mb-5">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2.5">
-                  Combinación de colores — elegí y los modelos se actualizan
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-3">
+                  Tono de color
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {CRED_COLORES.map(col => {
-                    const selected = colorCred === col.id;
-                    return (
-                      <button
-                        key={col.id}
-                        onClick={() => setColorCred(col.id)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 transition-all ${
-                          selected
-                            ? 'border-indigo-500 bg-indigo-50 shadow-sm'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <span className="w-5 h-5 rounded-full shrink-0 shadow-sm" style={{
-                          background: `linear-gradient(135deg, ${col.h1} 30%, ${col.accent} 100%)`
-                        }}/>
-                        <span className={`text-[10px] font-black uppercase tracking-wide ${
-                          selected ? 'text-indigo-700' : 'text-slate-600'
-                        }`}>{col.label}</span>
-                        {selected && <CheckCircle2 size={11} className="text-indigo-600 ml-0.5 shrink-0"/>}
-                      </button>
-                    );
-                  })}
+                <div className="flex items-center gap-3">
+                  {/* Swatch preview */}
+                  <div className="flex gap-1 shrink-0">
+                    {[colorsFromHue(credHue).h1, colorsFromHue(credHue).h2, colorsFromHue(credHue).accent].map((c, i) => (
+                      <div key={i} className="w-6 h-6 rounded-lg border border-white/20 shadow-sm" style={{ background: c }}/>
+                    ))}
+                  </div>
+                  {/* Slider espectro */}
+                  <input
+                    type="range"
+                    min={0}
+                    max={359}
+                    value={credHue}
+                    onChange={e => setCredHue(Number(e.target.value))}
+                    className="flex-1 h-3 rounded-full cursor-pointer appearance-none border-none outline-none"
+                    style={{
+                      background: 'linear-gradient(to right, hsl(0,70%,50%), hsl(30,70%,50%), hsl(60,70%,50%), hsl(120,70%,40%), hsl(180,70%,40%), hsl(210,70%,50%), hsl(240,70%,55%), hsl(270,70%,55%), hsl(300,70%,50%), hsl(330,70%,50%), hsl(360,70%,50%))',
+                    }}
+                  />
+                  <span className="text-[11px] font-mono text-slate-500 w-9 shrink-0 text-right">{credHue}°</span>
                 </div>
               </div>
 
-              {isSuperAdmin && (
-                <button
-                  onClick={handleGuardarTemplate}
-                  disabled={guardandoTpl}
-                  className="flex items-center gap-1.5 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-sm shadow-indigo-200"
-                >
-                  {guardandoTpl ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                  Guardar configuración
-                </button>
-              )}
+              {/* ── Textos de la credencial ── */}
+              <div>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-3">Textos de la credencial</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Título del documento</label>
+                    <input
+                      type="text"
+                      value={credTitulo}
+                      onChange={e => setCredTitulo(e.target.value)}
+                      maxLength={30}
+                      placeholder="CREDENCIAL DE ACCESO"
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Subtítulo / Tagline</label>
+                    <input
+                      type="text"
+                      value={credSubtitulo}
+                      onChange={e => setCredSubtitulo(e.target.value)}
+                      maxLength={30}
+                      placeholder="Personal Autorizado"
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Texto pie de página</label>
+                    <input
+                      type="text"
+                      value={credPie}
+                      onChange={e => setCredPie(e.target.value)}
+                      maxLength={50}
+                      placeholder="Portación obligatoria en planta"
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── Asistente IA ── */}
-      {empresa && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <Bot size={18} className="text-indigo-600" />
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Asistente IA</h3>
-          </div>
-          <p className="text-xs text-slate-500 font-medium mb-5">
-            Habilitá o deshabilitá el globo flotante del asistente COSP para esta empresa.
-          </p>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-bold text-slate-700">
-                {asistentActivo ? 'Asistente activo' : 'Asistente desactivado'}
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {asistentActivo ? 'El globo de chat aparece en todas las pantallas.' : 'El globo no aparece para esta empresa.'}
-              </p>
-            </div>
+            {/* Botón guardar */}
             <button
-              onClick={handleToggleAsistente}
-              disabled={guardandoAsistente || !isSuperAdmin}
-              className={`relative inline-flex h-7 w-13 items-center rounded-full transition-colors focus:outline-none disabled:opacity-60 ${asistentActivo ? 'bg-indigo-600' : 'bg-slate-300'}`}
-              style={{ width: '3.25rem' }}
-              title={!isSuperAdmin ? 'Solo SuperAdmin' : asistentActivo ? 'Desactivar asistente' : 'Activar asistente'}
+              onClick={handleGuardarTemplate}
+              disabled={guardandoTpl}
+              className="flex items-center gap-1.5 px-5 py-2.5 text-white rounded-xl text-xs font-black disabled:opacity-60 transition-colors bg-indigo-600 hover:bg-indigo-700"
             >
-              {guardandoAsistente
-                ? <Loader2 size={12} className="absolute left-1/2 -translate-x-1/2 animate-spin text-white" />
-                : <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${asistentActivo ? 'translate-x-[1.625rem]' : 'translate-x-[0.25rem]'}`} />
-              }
+              {guardandoTpl ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              Guardar configuración
             </button>
           </div>
         </div>
       )}
-
-      {/* ── Migración de datos ── */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <Play size={18} className={migracionCompleta ? 'text-emerald-500' : 'text-amber-500'} />
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-            Migración de datos
-          </h3>
-          {migracionCompleta && (
-            <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-              <CheckCircle2 size={10} /> Completada el {(empresa as any)?.migracionFecha?.slice(0, 10)}
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-slate-500 font-medium mb-4">
-          Ejecutá esta acción una sola vez para migrar todos los datos existentes al esquema multi-empresa. Es una operación segura y reversible — no elimina ningún dato.
-        </p>
-        {progreso && (
-          <div className="mb-3">
-            <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-              <span>Procesando...</span>
-              <span>{progPct}%</span>
-            </div>
-            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${progPct}%` }}/>
-            </div>
-          </div>
-        )}
-        <button
-          onClick={() => { /* migrar */ }}
-          disabled={migracionCompleta}
-          className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <Play size={13} />
-          {migracionCompleta ? 'Migración completada' : 'Iniciar migración'}
-        </button>
-        {progreso?.error && (
-          <p className="text-xs text-rose-500 mt-2">{progreso.error}</p>
-        )}
-      </div>
-
     </div>
   );
 }
+          

@@ -158,7 +158,10 @@ export default function EmployeeDashboard() {
   }, []);
   const [empProfile, setEmpProfile] = useState<{ firstName?: string; lastName?: string; fileNumber?: string; dni?: string; cuil?: string; category?: string; photoUrl?: string; empresaId?: string } | null>(null);
   const [empresaNombre, setEmpresaNombre] = useState<string>('');
+  const [empresaColor, setEmpresaColor] = useState<string>('#6366f1');
   const [showCredencial, setShowCredencial] = useState(false);
+  const [showCredencialVista, setShowCredencialVista] = useState(false);
+  const [empDocIdSt, setEmpDocIdSt] = useState<string | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [objectivesMap, setObjectivesMap] = useState<Record<string, ObjectiveLocation>>({});
@@ -329,6 +332,7 @@ export default function EmployeeDashboard() {
     let empDocId: string | null = null;
     try {
       empDocId = await resolveEmpDocId();
+      if (empDocId) setEmpDocIdSt(empDocId);
     } catch (resolveErr: any) {
       console.error('[dashboard] resolveEmpDocId error:', resolveErr?.code, resolveErr?.message);
       addToast(`Sin acceso al perfil (${resolveErr?.code || 'error'})`, 'error');
@@ -362,7 +366,13 @@ export default function EmployeeDashboard() {
         });
         if (d.empresaId) {
           getDoc(doc(db, 'empresas', d.empresaId))
-            .then(eDoc => { if (eDoc.exists()) setEmpresaNombre(eDoc.data().name || eDoc.data().nombre || ''); })
+            .then(eDoc => {
+              if (eDoc.exists()) {
+                const ed = eDoc.data();
+                setEmpresaNombre(ed.name || ed.nombre || '');
+                if (ed.primaryColor) setEmpresaColor(ed.primaryColor);
+              }
+            })
             .catch(() => {});
         }
       }
@@ -1614,7 +1624,7 @@ export default function EmployeeDashboard() {
         )}
 
         {/* ===== HEADER ===== */}
-        <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+        <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div
@@ -1649,6 +1659,12 @@ export default function EmployeeDashboard() {
               <p className="text-sm font-black text-white leading-tight">{displayName}</p>
             </div>
           </div>
+          {empresaNombre ? (
+            <div className="flex-1 flex flex-col items-center min-w-0">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none">Empresa</p>
+              <p className="text-xs font-black text-white leading-tight truncate max-w-full text-center">{empresaNombre}</p>
+            </div>
+          ) : <div className="flex-1"/>}
           <div className="flex items-center gap-2">
             {notifStatus !== 'enabled' && !!process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY && (
               <button onClick={enableNotifications} disabled={notifBusy} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-indigo-600 text-white disabled:opacity-50 flex items-center gap-1">
@@ -1980,7 +1996,7 @@ export default function EmployeeDashboard() {
 
           {/* ===== CREDENCIAL ===== */}
           <button
-            onClick={() => setShowCredencial(v => !v)}
+            onClick={() => setShowCredencialVista(true)}
             className="w-full bg-slate-900 border border-slate-800 hover:border-indigo-800/60 rounded-2xl p-4 text-left transition-all active:scale-[0.99] group"
           >
             <div className="flex items-center gap-3">
@@ -2004,12 +2020,12 @@ export default function EmployeeDashboard() {
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
               <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Realizados</p>
-              <p className="text-3xl font-black text-white">{monthlyCompleted}</p>
+              <p className="text-3xl font-black" style={{ color: empresaColor }}>{monthlyCompleted}</p>
               <p className="text-[9px] text-slate-600">este mes</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
               <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Horas</p>
-              <p className="text-3xl font-black text-indigo-400">{monthlyHours}</p>
+              <p className="text-3xl font-black" style={{ color: empresaColor }}>{monthlyHours}</p>
               <p className="text-[9px] text-slate-600">este mes</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
@@ -2280,6 +2296,90 @@ export default function EmployeeDashboard() {
 
         </div>
 
+
+        {/* ===== PANEL: REALIZADOS ===== */}
+        {showCompletedPanel && (
+          <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-4">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-t-3xl text-white" style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+              <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-3 mb-4 shrink-0"/>
+              <div className="px-5 pb-2 shrink-0">
+                <div className="flex items-center gap-3 mb-3">
+                  <Calendar className="text-indigo-400" size={18}/>
+                  <h2 className="font-black uppercase text-sm flex-1">Turnos realizados</h2>
+                  <button onClick={() => setShowCompletedPanel(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
+                </div>
+                <div className="flex gap-2 mb-3">
+                  {(['HOY','SEMANA','MES'] as const).map(v => (
+                    <button key={v} onClick={() => setCompletedView(v)}
+                      className="px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all"
+                      style={{ background: completedView === v ? empresaColor : '#1e293b', color: completedView === v ? '#fff' : '#94a3b8' }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-y-auto px-5 pb-6 space-y-2 flex-1">
+                {completedShifts.length === 0 ? (
+                  <p className="text-slate-500 text-sm text-center py-8">Sin turnos realizados en este período</p>
+                ) : completedShifts.map(s => (
+                  <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white truncate">{s.objectiveName || s.objectiveId || 'Sin objetivo'}</p>
+                        <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
+                      </div>
+                      <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/40 shrink-0">
+                        <CheckCircle size={10} className="text-emerald-400"/>
+                        <span className="text-[9px] font-black text-emerald-300 uppercase">Realizado</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== PANEL: PRESENTES ===== */}
+        {showPresentHistory && (
+          <div className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-4">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-t-3xl text-white" style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+              <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-3 mb-4 shrink-0"/>
+              <div className="px-5 pb-2 shrink-0">
+                <div className="flex items-center gap-3 mb-3">
+                  <CheckCircle className="text-emerald-400" size={18}/>
+                  <h2 className="font-black uppercase text-sm flex-1">Historial de presentes</h2>
+                  <button onClick={() => setShowPresentHistory(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
+                </div>
+                <p className="text-[10px] text-slate-500 mb-3">{presentHistory.length} presentes este mes</p>
+              </div>
+              <div className="overflow-y-auto px-5 pb-6 space-y-2 flex-1">
+                {presentHistory.length === 0 ? (
+                  <p className="text-slate-500 text-sm text-center py-8">Sin presentes registrados este mes</p>
+                ) : presentHistory.map(s => (
+                  <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white truncate">{s.objectiveName || s.objectiveId || 'Sin objetivo'}</p>
+                        <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
+                        {s.checkInTime && (
+                          <p className="text-[9px] text-emerald-400 font-bold mt-1">✓ Check-in: {formatTime(s.checkInTime)}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/40 shrink-0">
+                        <CheckCircle size={10} className="text-emerald-400"/>
+                        <span className="text-[9px] font-black text-emerald-300 uppercase">Presente</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ===== BOTTOM NAV ===== */}
         <div className="fixed bottom-0 left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-2 py-2">
           <div className="max-w-2xl mx-auto flex justify-around items-center">
@@ -2301,13 +2401,13 @@ export default function EmployeeDashboard() {
             )}
             <button
               onClick={() => { setShowCompletedPanel(v => !v); setShowAbsenceRequest(false); setShowSwap(false); setShowPresentHistory(false); }}
-              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all ${showCompletedPanel ? 'text-indigo-400 bg-indigo-400/10' : 'text-slate-500 hover:text-slate-300'}`}>
+              className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all" style={{ color: showCompletedPanel ? empresaColor : '#64748b', background: showCompletedPanel ? `${empresaColor}18` : 'transparent' }}>
               <Calendar size={20}/>
               <span className="text-[9px] font-black uppercase">Realizados</span>
             </button>
             <button
               onClick={() => { setShowPresentHistory(v => !v); setShowAbsenceRequest(false); setShowSwap(false); setShowCompletedPanel(false); }}
-              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all ${showPresentHistory ? 'text-emerald-400 bg-emerald-400/10' : 'text-slate-500 hover:text-slate-300'}`}>
+              className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all" style={{ color: showPresentHistory ? empresaColor : '#64748b', background: showPresentHistory ? `${empresaColor}18` : 'transparent' }}>
               <CheckCircle size={20}/>
               <span className="text-[9px] font-black uppercase">Presentes</span>
             </button>
@@ -2424,6 +2524,57 @@ export default function EmployeeDashboard() {
         )}
 
       </div>
+
+      {/* ══ MODAL CREDENCIAL — con edición (ícono header) ══ */}
+      {showCredencial && (
+        <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+          <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
+            <div className="flex items-center gap-2">
+              <CreditCard size={18} className="text-indigo-400"/>
+              <p className="text-white font-black text-base tracking-tight">Mi Credencial</p>
+            </div>
+            <button onClick={() => setShowCredencial(false)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-xl hover:bg-slate-800">
+              <X size={22}/>
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-6">
+            {empDocIdSt && empProfile ? (
+              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ MODAL CREDENCIAL — solo vista (card home) ══ */}
+      {showCredencialVista && (
+        <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+          <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
+            <div className="flex items-center gap-2">
+              <CreditCard size={18} className="text-indigo-400"/>
+              <p className="text-white font-black text-base tracking-tight">Mi Credencial</p>
+            </div>
+            <button onClick={() => setShowCredencialVista(false)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-xl hover:bg-slate-800">
+              <X size={22}/>
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-6">
+            {empDocIdSt && empProfile ? (
+              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly/>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </AuthGuard>
   );
 }
