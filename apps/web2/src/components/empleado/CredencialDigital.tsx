@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Camera, Download, RefreshCw, ShieldCheck, X,
-  Sparkles, ChevronLeft, ChevronRight, Pencil,
-  ChevronUp, ChevronDown,
+  Sparkles, Pencil,
 } from 'lucide-react';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -24,7 +23,6 @@ interface Props {
   viewOnly?: boolean;
 }
 
-// Derivar paleta desde hue HSL
 function hslToHex(h: number, s: number, l: number): string {
   s /= 100; l /= 100;
   const a = s * Math.min(l, 1 - l);
@@ -50,7 +48,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [logoEmpresa, setLogoEmpresa]     = useState<string | null>(empresaLogoUrl || null);
   const [credHue, setCredHue]             = useState<number>(215);
   const [credTitulo, setCredTitulo]       = useState<string>('CREDENCIAL DE ACCESO');
-  const [credSubtitulo, setCredSubtitulo] = useState<string>('Personal Autorizado');
   const [credPie, setCredPie]             = useState<string>('');
   const [orientacion, setOrientacion]     = useState<'vertical' | 'horizontal'>(orientation || 'vertical');
   const [guardando, setGuardando]         = useState(false);
@@ -62,8 +59,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [credGuardada, setCredGuardada]   = useState(false);
   const [modoEdicion, setModoEdicion]     = useState(false);
   const [empresaLocal, setEmpresaLocal]   = useState(empresaNombre || '');
-  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 25 });
-  const photoOffRef                       = useRef({ x: 50, y: 25 });
+  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 20 });
+  const photoOffRef                       = useRef({ x: 50, y: 20 });
+  const [flipped, setFlipped]             = useState(false);
+  const [holoPos, setHoloPos]             = useState({ x: 50, y: 50 });
 
   const videoRef     = useRef<HTMLVideoElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -72,7 +71,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const dragRef      = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
   const tema           = colorsFromHue(credHue);
-  const headerBg       = `linear-gradient(160deg, ${tema.h1} 0%, ${tema.h2} 100%)`;
   const nombre         = [empData.firstName, empData.lastName].filter(Boolean).join(' ');
   const apellidoNombre = [empData.lastName?.toUpperCase(), empData.firstName].filter(Boolean).join(', ');
   const fotoMostrada   = fotoFinal || fotoSrc;
@@ -83,6 +81,14 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     photoOffRef.current = v;
     setPhotoOffState(v);
   }, []);
+
+  const onCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoloPos({
+      x: Math.round(((e.clientX - rect.left) / rect.width) * 100),
+      y: Math.round(((e.clientY - rect.top) / rect.height) * 100),
+    });
+  };
 
   // QR
   useEffect(() => {
@@ -104,12 +110,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           if (n && !empresaNombre) setEmpresaLocal(n);
           if (d.logoUrl && !empresaLogoUrl) setLogoEmpresa(d.logoUrl);
           if (typeof d.credencialHue === 'number') setCredHue(d.credencialHue);
-          if (d.credencialTitulo)    setCredTitulo(d.credencialTitulo);
-          if (d.credencialSubtitulo) setCredSubtitulo(d.credencialSubtitulo);
-          if (d.credencialPie)       setCredPie(d.credencialPie);
-          if (d.credencialOrientacion && !orientation) {
+          if (d.credencialTitulo) setCredTitulo(d.credencialTitulo);
+          if (d.credencialPie) setCredPie(d.credencialPie);
+          if (d.credencialOrientacion && !orientation)
             setOrientacion(d.credencialOrientacion as 'vertical' | 'horizontal');
-          }
         }
       }).catch(() => {});
     if (empresaNombre) setEmpresaLocal(empresaNombre);
@@ -140,17 +144,16 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       }).catch(() => {});
   }, [empDocId]); // eslint-disable-line
 
-  // Sync empresa a credencial pública
+  // Sync empresa
   useEffect(() => {
     if (!empDocId || !empresaLocal) return;
-    setDoc(doc(db, 'credenciales_publicas', empDocId), { empresaNombre: empresaLocal }, { merge: true })
-      .catch(() => {});
+    setDoc(doc(db, 'credenciales_publicas', empDocId), { empresaNombre: empresaLocal }, { merge: true }).catch(() => {});
   }, [empresaLocal, empDocId]);
 
-  // Drag táctil para ajustar foto
+  // Drag táctil foto
   useEffect(() => {
     const el = photoContRef.current;
-    if (!el || !showEditUI || !fotoMostrada || !!fotoFinal) return;
+    if (!el || !showEditUI || !fotoMostrada) return;
     const onStart = (e: TouchEvent) => {
       e.preventDefault();
       dragRef.current = { sx: e.touches[0].clientX, sy: e.touches[0].clientY, ox: photoOffRef.current.x, oy: photoOffRef.current.y };
@@ -175,7 +178,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
     };
-  }, [showEditUI, fotoMostrada, fotoFinal, setPhotoOff]);
+  }, [showEditUI, fotoMostrada, setPhotoOff]);
 
   // Cámara
   const abrirCamara = async () => {
@@ -197,7 +200,17 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     canvas.toBlob(blob => {
       if (!blob) return;
       setCapturedBlob(blob); setFotoSrc(canvas.toDataURL('image/png')); setFotoFinal(null);
-      setPhotoOff({ x: 50, y: 25 }); cerrarCamara();
+      setPhotoOff({ x: 50, y: 20 }); cerrarCamara();
+      setTimeout(() => {
+        setQuitandoFondo(true); setProgFondo(0);
+        import('@imgly/background-removal').then(({ removeBackground }) =>
+          removeBackground(blob, { model: 'isnet_quint8', output: { format: 'image/png' },
+            progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); } })
+          .then(rb => { setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb); })
+          .catch(console.error)
+          .finally(() => { setQuitandoFondo(false); setProgFondo(0); })
+        );
+      }, 200);
     }, 'image/png');
   };
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,13 +218,21 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     const reader = new FileReader();
     reader.onload = ev => {
       const src = ev.target?.result as string; if (!src) return;
-      setFotoSrc(src); setFotoFinal(null); setPhotoOff({ x: 50, y: 25 });
-      fetch(src).then(r => r.blob()).then(setCapturedBlob);
+      setFotoSrc(src); setFotoFinal(null); setPhotoOff({ x: 50, y: 20 });
+      fetch(src).then(r => r.blob()).then(blob => {
+        setCapturedBlob(blob);
+        setQuitandoFondo(true); setProgFondo(0);
+        import('@imgly/background-removal').then(({ removeBackground }) =>
+          removeBackground(blob, { model: 'isnet_quint8', output: { format: 'image/png' },
+            progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); } })
+          .then(rb => { setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb); })
+          .catch(console.error)
+          .finally(() => { setQuitandoFondo(false); setProgFondo(0); })
+        );
+      });
     };
     reader.readAsDataURL(file); e.target.value = '';
   };
-
-  // Quitar fondo
   const quitarFondo = async () => {
     const blob = capturedBlob || (fotoSrc ? await fetch(fotoSrc).then(r => r.blob()) : null);
     if (!blob) return;
@@ -226,8 +247,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     } catch (e) { console.error(e); }
     finally { setQuitandoFondo(false); setProgFondo(0); }
   };
-
-  // Guardar
   const guardarFoto = async () => {
     if (!empDocId) return;
     setGuardando(true);
@@ -256,403 +275,441 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     } catch (err) { console.error(err); }
     finally { setGuardando(false); }
   };
-
-  // Descargar
   const descargar = async () => {
-    const SC = 2, W = 380, PAD = 22;
-    const HH = 100, ACC = 5;
-    const PH = 210, PW = 155; // foto portrait
-    const photoX = Math.round((W - PW) / 2);
-    const photoY = HH + ACC + 18;
-    let dataY = photoY + PH + 20;
+    const SC = 2, W = 340, PAD = 20;
+    const HH = 155, PHOTO_D = 112, PHOTO_X = Math.round((W - PHOTO_D) / 2), PHOTO_Y = 100;
+    let dataY = PHOTO_Y + PHOTO_D + 18;
     const QR = 80;
-
-    // Calcular altura total
-    let dataLines = 2; // nombre + cargo
+    let dataLines = 2;
     if (empData.dni) dataLines++;
     if (empData.cuil) dataLines++;
     if (empData.fileNumber) dataLines++;
-    const H = dataY + (dataLines * 19) + 20 + QR + 20 + 10;
-
+    const H = dataY + (dataLines * 22) + 20 + QR + 28 + 10;
     const cv = document.createElement('canvas');
     cv.width = W * SC; cv.height = H * SC;
     const ctx = cv.getContext('2d')!;
     ctx.scale(SC, SC);
-
-    // Fondo blanco redondeado
     ctx.fillStyle = '#ffffff';
-    roundRect(ctx, 0, 0, W, H, 16); ctx.fill();
-
-    // Header gradiente
+    roundRect(ctx, 0, 0, W, H, 14); ctx.fill();
     const hg = ctx.createLinearGradient(0, 0, W, HH);
     hg.addColorStop(0, tema.h1); hg.addColorStop(1, tema.h2);
     ctx.fillStyle = hg;
     ctx.beginPath();
-    ctx.moveTo(16, 0); ctx.lineTo(W - 16, 0);
-    ctx.quadraticCurveTo(W, 0, W, 16);
-    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 16);
-    ctx.quadraticCurveTo(0, 0, 16, 0);
+    ctx.moveTo(14, 0); ctx.lineTo(W - 14, 0); ctx.quadraticCurveTo(W, 0, W, 14);
+    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 14); ctx.quadraticCurveTo(0, 0, 14, 0);
     ctx.closePath(); ctx.fill();
-
-    // Patrón diagonal sutil en header
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(16, 0); ctx.lineTo(W - 16, 0);
-    ctx.quadraticCurveTo(W, 0, W, 16);
-    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 16);
-    ctx.quadraticCurveTo(0, 0, 16, 0);
-    ctx.closePath(); ctx.clip();
-    ctx.strokeStyle = `${tema.accent}15`;
-    ctx.lineWidth = 1;
-    for (let i = -HH; i < W + HH; i += 12) {
-      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + HH, HH); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Escudo (canvas shapes)
-    const sx = PAD + 2, sy = 18;
+    ctx.fillStyle = tema.accent; ctx.fillRect(0, HH, W, 3);
+    // Logo area
     ctx.fillStyle = tema.accent;
     ctx.beginPath();
-    ctx.moveTo(sx + 14, sy); ctx.lineTo(sx + 28, sy + 6);
-    ctx.lineTo(sx + 28, sy + 16); ctx.quadraticCurveTo(sx + 28, sy + 26, sx + 14, sy + 32);
-    ctx.quadraticCurveTo(sx, sy + 26, sx, sy + 16);
-    ctx.lineTo(sx, sy + 6); ctx.closePath(); ctx.fill();
-    // check en escudo
-    ctx.strokeStyle = tema.h1; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.moveTo(sx + 8, sy + 17); ctx.lineTo(sx + 13, sy + 22); ctx.lineTo(sx + 22, sy + 13); ctx.stroke();
-
-    // Texto empresa
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 15px Arial';
-    ctx.textAlign = 'left';
-    const empText = (empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase();
-    ctx.fillText(empText, PAD + 36, sy + 18);
-    ctx.fillStyle = tema.accent;
-    ctx.font = '8.5px Arial';
-    ctx.fillText('CREDENCIAL DIGITAL DE IDENTIDAD', PAD + 36, sy + 32);
-
-    // Línea de acento
-    ctx.fillStyle = tema.accent;
-    ctx.fillRect(0, HH, W, ACC);
-
-    // Foto
+    ctx.moveTo(PAD + 12, 16); ctx.lineTo(PAD + 24, 22); ctx.lineTo(PAD + 24, 32);
+    ctx.quadraticCurveTo(PAD + 24, 42, PAD + 12, 48); ctx.quadraticCurveTo(PAD, 42, PAD, 32);
+    ctx.lineTo(PAD, 22); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = tema.h1; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(PAD + 6, 33); ctx.lineTo(PAD + 11, 38); ctx.lineTo(PAD + 20, 29); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
+    ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD + 30, 30);
+    ctx.fillStyle = `${tema.accent}cc`; ctx.font = '7px Arial';
+    ctx.fillText(credTitulo, PAD + 30, 42);
+    // Foto circular
     if (fotoMostrada) {
       const img = new Image(); img.crossOrigin = 'anonymous';
       await new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); img.src = fotoMostrada; });
-      if (fotoFinal) {
-        // Sin fondo: sin clip
-        const sc = Math.max(PW / img.naturalWidth, PH / img.naturalHeight);
-        const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
-        const oX = ((photoOff.x / 100) * (rW - PW)) || 0;
-        const oY = ((photoOff.y / 100) * (rH - PH)) || 0;
-        ctx.drawImage(img, photoX - oX, photoY - oY, rW, rH);
-      } else {
-        const sc = Math.max(PW / img.naturalWidth, PH / img.naturalHeight);
-        const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
-        const oX = ((photoOff.x / 100) * Math.max(0, rW - PW));
-        const oY = ((photoOff.y / 100) * Math.max(0, rH - PH));
-        ctx.save();
-        roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.clip();
-        ctx.drawImage(img, photoX - oX, photoY - oY, rW, rH);
-        ctx.restore();
-        // Borde foto
-        ctx.strokeStyle = tema.accent; ctx.lineWidth = 2.5;
-        roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.stroke();
-      }
-    } else {
-      ctx.fillStyle = '#f3f4f6';
-      roundRect(ctx, photoX, photoY, PW, PH, 10); ctx.fill();
+      ctx.save();
+      ctx.beginPath(); ctx.arc(PHOTO_X + PHOTO_D / 2, PHOTO_Y + PHOTO_D / 2, PHOTO_D / 2, 0, Math.PI * 2); ctx.clip();
+      const sc = Math.max(PHOTO_D / img.naturalWidth, PHOTO_D / img.naturalHeight);
+      const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
+      const oX = (photoOff.x / 100) * Math.max(0, rW - PHOTO_D);
+      const oY = (photoOff.y / 100) * Math.max(0, rH - PHOTO_D);
+      ctx.drawImage(img, PHOTO_X - oX, PHOTO_Y - oY, rW, rH);
+      ctx.restore();
     }
-
-    // Separador
-    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(PAD, dataY - 8); ctx.lineTo(W - PAD, dataY - 8); ctx.stroke();
-
-    // Datos
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#111827'; ctx.font = 'bold 14px Arial';
-    ctx.fillText(apellidoNombre || nombre || '—', PAD, dataY + 2);
+    ctx.strokeStyle = tema.accent; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(PHOTO_X + PHOTO_D / 2, PHOTO_Y + PHOTO_D / 2, PHOTO_D / 2 + 2, 0, Math.PI * 2); ctx.stroke();
+    // Nombre + cargo
+    ctx.textAlign = 'center'; ctx.fillStyle = '#111827'; ctx.font = 'bold 15px Arial';
+    ctx.fillText(apellidoNombre || nombre || '—', W / 2, dataY);
     dataY += 16;
-    ctx.fillStyle = '#9ca3af'; ctx.font = 'bold 8.5px Arial';
-    ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, dataY);
-    dataY += 18;
-
-    // Grid de datos 2 columnas
-    const col2 = W / 2 + 5;
-    let col1Y = dataY, col2Y = dataY;
-    const drawField = (label: string, val: string, col: 'l' | 'r') => {
-      const x = col === 'l' ? PAD : col2;
-      const y = col === 'l' ? col1Y : col2Y;
-      ctx.fillStyle = '#9ca3af'; ctx.font = '7.5px Arial';
-      ctx.fillText(label, x, y);
-      ctx.fillStyle = '#1f2937'; ctx.font = 'bold 10px Arial';
-      ctx.fillText(val, x, y + 13);
-      if (col === 'l') col1Y += 30; else col2Y += 30;
+    ctx.fillStyle = tema.accent; ctx.font = 'bold 8px Arial';
+    ctx.fillText((empData.category || 'Vigilador').toUpperCase(), W / 2, dataY);
+    dataY += 16;
+    ctx.textAlign = 'left';
+    const drawRow = (label: string, val: string) => {
+      ctx.fillStyle = tema.accent; ctx.font = 'bold 7px Arial'; ctx.fillText(label, PAD, dataY);
+      ctx.fillStyle = '#1f2937'; ctx.font = 'bold 11px Arial'; ctx.fillText(val, PAD + 44, dataY + 1);
+      ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(PAD, dataY + 6); ctx.lineTo(W - PAD, dataY + 6); ctx.stroke();
+      dataY += 22;
     };
-    if (empData.dni)        drawField('DNI',    empData.dni, 'l');
-    if (empData.cuil)       drawField('CUIL',   empData.cuil, 'r');
-    if (empData.fileNumber) drawField('Legajo', empData.fileNumber, 'l');
-
-    dataY = Math.max(col1Y, col2Y) + 5;
-
-    // QR centrado
+    if (empData.dni)        drawRow('DNI', empData.dni);
+    if (empData.cuil)       drawRow('CUIL', empData.cuil);
+    if (empData.fileNumber) drawRow('Legajo', empData.fileNumber);
     if (qrDataUrl) {
       const qr = new Image();
       await new Promise<void>(res => { qr.onload = () => res(); qr.onerror = () => res(); qr.src = qrDataUrl; });
-      const qrX = Math.round((W - QR) / 2), qrY = dataY + 5;
-      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = tema.accent; ctx.lineWidth = 1.5;
-      roundRect(ctx, qrX - 4, qrY - 4, QR + 8, QR + 8, 6); ctx.fill(); ctx.stroke();
+      const qrX = Math.round((W - QR) / 2), qrY = dataY + 8;
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = `${tema.accent}60`; ctx.lineWidth = 1.5;
+      roundRect(ctx, qrX - 5, qrY - 5, QR + 10, QR + 10, 8); ctx.fill(); ctx.stroke();
       ctx.drawImage(qr, qrX, qrY, QR, QR);
-      ctx.fillStyle = '#9ca3af'; ctx.font = '7px Arial'; ctx.textAlign = 'center';
-      ctx.fillText('ESCANEAR PARA VERIFICAR', W / 2, qrY + QR + 12);
+      ctx.fillStyle = '#9ca3af'; ctx.font = '6.5px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('ESCANEAR PARA VERIFICAR', W / 2, qrY + QR + 13);
     }
-
-    // Banda inferior
     const hg2 = ctx.createLinearGradient(0, 0, W, 0);
     hg2.addColorStop(0, tema.h1); hg2.addColorStop(1, tema.h2);
-    ctx.fillStyle = hg2;
-    ctx.fillRect(0, H - 10, W, 10);
-
+    ctx.fillStyle = hg2; ctx.fillRect(0, H - 8, W, 8);
     const link = document.createElement('a');
     link.download = `credencial_${empData.fileNumber || empDocId}.png`;
     link.href = cv.toDataURL('image/png');
     link.click();
   };
 
-  // ── RENDER ───────────────────────────────────────────────────────────────────
+  // ── RENDER ───────────────────────────────────────────────────────────────
+  // foto recortada sin fondo → mostrar como cutout flotante
+  const esCutout = !!fotoFinal;
+
   return (
     <div className="flex flex-col gap-3">
 
-      {/* ── Tarjeta ─────────────────────────────────────────────────────── */}
-      <div
-        className="relative rounded-3xl overflow-hidden shadow-2xl mx-auto w-full"
-        style={{ maxWidth: 340, background: '#ffffff' }}
-      >
-        {/* Header gradiente */}
-        <div
-          className="px-5 pt-5 pb-6 relative overflow-hidden"
-          style={{ background: headerBg }}
-        >
-          {/* Patrón diagonal sutil */}
-          <div className="absolute inset-0 pointer-events-none" style={{
-            backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}10 0px, ${tema.accent}10 1px, transparent 1px, transparent 12px)`,
+      {/* Gancho superior */}
+      <div className="flex justify-center mb-0.5">
+        <div style={{
+          width: 46, height: 18, borderRadius: '7px 7px 0 0', position: 'relative',
+          background: 'linear-gradient(180deg, #c8d0da 0%, #a0aab6 45%, #7a8698 100%)',
+          boxShadow: '0 3px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+        }}>
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            width: 13, height: 9, borderRadius: 5,
+            background: 'linear-gradient(180deg, #505a66 0%, #3a424e 100%)',
+            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.6)',
           }}/>
-          <div className="relative flex items-center gap-3">
-            <div className="relative flex-shrink-0">
-              {logoEmpresa ? (
-                <img
-                  src={logoEmpresa}
-                  alt="Logo empresa"
-                  className="h-9 object-contain"
-                  style={{ maxWidth: 110, filter: 'brightness(0) invert(1)' }}
-                  onError={() => setLogoEmpresa(null)}
-                />
-              ) : (
-                <div className="flex items-center gap-2">
-                  <ShieldCheck size={28} strokeWidth={1.5} style={{ color: tema.accent }}/>
-                  <p className="text-white font-black text-sm tracking-wide leading-tight">
-                    {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="ml-auto text-right">
-              <p className="text-[8px] tracking-widest uppercase font-bold" style={{ color: `${tema.accent}cc` }}>
-                {credTitulo}
-              </p>
-              <p className="text-[7px] text-white/50 uppercase tracking-wider mt-0.5">
-                {credSubtitulo}
-              </p>
-            </div>
-          </div>
         </div>
-
-        {/* Línea acento */}
-        <div className="h-1.5" style={{ background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}, ${tema.h2})` }}/>
-
-        {/* Foto grande centrada con efecto pop-out */}
-        <div className="relative flex flex-col items-center py-5"
-          style={{ background: `linear-gradient(180deg, ${tema.h1}08 0%, transparent 100%)` }}>
-
-          {/* Contenedor pop-out: círculo de color + foto encima */}
-          <div className="relative" style={{ width: 170, height: fotoFinal ? 220 : 215 }}>
-            {/* Fondo círculo/elipse cuando hay foto sin fondo */}
-            {fotoFinal && (
-              <div style={{
-                position: 'absolute',
-                bottom: 0, left: '50%', transform: 'translateX(-50%)',
-                width: 140, height: 140,
-                borderRadius: '50%',
-                background: `radial-gradient(ellipse at center, ${tema.h2} 0%, ${tema.h1} 100%)`,
-                border: `3px solid ${tema.accent}`,
-              }}/>
-            )}
-            <div
-              ref={photoContRef}
-              className={`absolute left-1/2 -translate-x-1/2 ${fotoFinal ? '' : 'overflow-hidden rounded-2xl'}`}
-              style={{
-                width: 160,
-                height: fotoFinal ? 220 : 210,
-                bottom: 0,
-                border: fotoFinal ? 'none' : `2.5px solid ${tema.accent}`,
-                borderRadius: fotoFinal ? 0 : 16,
-                background: fotoFinal ? 'transparent' : '#e2e8f0',
-                cursor: showEditUI && fotoMostrada && !fotoFinal ? 'grab' : 'default',
-              }}
-            >
-            {fotoMostrada ? (
-              <img
-                src={fotoMostrada}
-                alt="Foto"
-                className="w-full h-full object-cover select-none"
-                style={{
-                  objectPosition: fotoFinal ? 'center bottom' : `${photoOff.x}% ${photoOff.y}%`,
-                  objectFit: fotoFinal ? 'contain' : 'cover',
-                  pointerEvents: 'none',
-                }}
-                draggable={false}
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-2 rounded-2xl">
-                <Camera size={32} className="text-slate-400"/>
-                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Sin foto</p>
-              </div>
-            )}
-
-            {showEditUI && fotoMostrada && !fotoFinal && (
-              <div className="absolute bottom-1.5 left-0 right-0 flex justify-center pointer-events-none">
-                <span className="text-[8px] font-bold bg-black/40 text-white px-2 py-0.5 rounded-full backdrop-blur-sm">
-                  ↕ Arrastrá para ajustar
-                </span>
-              </div>
-            )}
-            </div>{/* cierra div foto inner */}
-          </div>{/* cierra div pop-out container */}
-
-          {/* Botones en modo edición */}
-          {showEditUI && (
-            <div className="flex gap-1.5 mt-3 px-5 w-full">
-              <button
-                onClick={abrirCamara}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wide transition-all active:scale-95"
-                style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
-              >
-                <Camera size={10}/>{fotoMostrada ? 'Cambiar foto' : 'Sacar foto'}
-              </button>
-
-              {fotoSrc && !fotoFinal && (
-                <button
-                  onClick={quitarFondo}
-                  disabled={quitandoFondo}
-                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wide disabled:opacity-60"
-                  style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
-                >
-                  {quitandoFondo
-                    ? <><RefreshCw size={9} className="animate-spin"/>{progFondo}%</>
-                    : <><Sparkles size={9}/>Sin fondo</>}
-                </button>
-              )}
-
-              {fotoMostrada && !fotoFinal && (
-                <div className="flex flex-col gap-0.5">
-                  <button
-                    onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.max(0, photoOffRef.current.y - 8) })}
-                    className="px-2 py-1 rounded-lg"
-                    style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
-                  ><ChevronUp size={10}/></button>
-                  <button
-                    onClick={() => setPhotoOff({ x: photoOffRef.current.x, y: Math.min(100, photoOffRef.current.y + 8) })}
-                    className="px-2 py-1 rounded-lg"
-                    style={{ color: tema.accent, background: `${tema.h1}15`, border: `1px solid ${tema.accent}40` }}
-                  ><ChevronDown size={10}/></button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Separador */}
-        <div className="mx-5 border-t border-gray-100"/>
-
-        {/* Datos */}
-        <div className="px-5 py-3">
-          <p className="font-black text-gray-900 text-[15px] leading-tight">
-            {apellidoNombre || nombre || '—'}
-          </p>
-          <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mt-0.5">
-            {empData.category || 'Vigilador'}
-          </p>
-          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
-            {empData.dni && (
-              <div>
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">DNI</p>
-                <p className="text-sm font-black font-mono text-gray-800">{empData.dni}</p>
-              </div>
-            )}
-            {empData.cuil && (
-              <div>
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">CUIL</p>
-                <p className="text-sm font-black font-mono text-gray-800">{empData.cuil}</p>
-              </div>
-            )}
-            {empData.fileNumber && (
-              <div>
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Legajo</p>
-                <p className="text-sm font-black font-mono text-gray-800">{empData.fileNumber}</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* QR centrado pequeño */}
-        <div className="flex flex-col items-center pb-4">
-          {qrDataUrl ? (
-            <div className="p-1.5 rounded-xl" style={{ border: `1.5px solid ${tema.accent}60` }}>
-              <img src={qrDataUrl} alt="QR" width={72} height={72}/>
-            </div>
-          ) : (
-            <div className="w-20 h-20 rounded-xl bg-gray-50 flex items-center justify-center border border-gray-200">
-              <RefreshCw size={16} className="text-gray-300"/>
-            </div>
-          )}
-          <p className="text-[7px] font-bold uppercase tracking-widest text-gray-300 mt-1">
-            Escanear para verificar
-          </p>
-        </div>
-
-        {/* Pie de página configurable */}
-        {credPie && (
-          <div className="px-5 pb-2">
-            <p className="text-[8px] text-center font-medium" style={{ color: `${tema.accent}80` }}>
-              {credPie}
-            </p>
-          </div>
-        )}
-
-        {/* Banda inferior */}
-        <div className="h-2" style={{ background: `linear-gradient(90deg, ${tema.h1}, ${tema.h2})` }}/>
       </div>
 
-      {/* ── Acciones ────────────────────────────────────────────────────── */}
+      <div className="relative mx-auto" style={{ maxWidth: 334, width: '100%' }}>
+
+        {/* Marco porta-credencial */}
+        <div style={{
+          borderRadius: 18,
+          background: 'linear-gradient(90deg, #7e8c9c 0%, #aab4c0 6%, #c8d0d8 13%, #dce2e8 28%, #e8edf2 50%, #dce2e8 72%, #c8d0d8 87%, #aab4c0 94%, #7e8c9c 100%)',
+          padding: '8px 14px 11px',
+          boxShadow: '0 28px 64px rgba(0,0,0,0.48), 0 4px 16px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.80), inset 0 -2px 0 rgba(0,0,0,0.12)',
+          position: 'relative',
+        }}>
+          {[{ top: 4, left: 5 }, { top: 4, right: 5 }, { bottom: 4, left: 5 }, { bottom: 4, right: 5 }].map((pos, i) => (
+            <div key={i} style={{
+              position: 'absolute', ...pos, width: 7, height: 7, borderRadius: '50%',
+              background: 'radial-gradient(circle at 35% 35%, #ccd4dc, #8090a0)',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.4)',
+            }}/>
+          ))}
+
+          {/* Perspectiva 3D */}
+          <div style={{ perspective: '1200px' }}>
+            <div
+              onMouseMove={onCardMouseMove}
+              style={{
+                position: 'relative', width: '100%', height: 420,
+                transformStyle: 'preserve-3d',
+                transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
+                transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                borderRadius: 12,
+              }}
+            >
+
+              {/* ══ FRENTE ══ */}
+              <div style={{
+                position: 'absolute', inset: 0,
+                backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
+                borderRadius: 12, overflow: 'hidden', background: '#f0f4f8',
+              } as React.CSSProperties}>
+
+                {/* Header degradado */}
+                <div style={{
+                  height: 108,
+                  background: `linear-gradient(135deg, ${tema.h1} 0%, ${tema.h2} 60%, ${tema.accent}28 100%)`,
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  {/* Guilloche */}
+                  <div style={{
+                    position: 'absolute', inset: 0, opacity: 0.06,
+                    backgroundImage: `repeating-linear-gradient(45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 12px),repeating-linear-gradient(-45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 12px)`,
+                  }}/>
+                  {/* Círculos decorativos fondo */}
+                  <div style={{ position: 'absolute', bottom: -40, right: -30, width: 130, height: 130, borderRadius: '50%', background: `${tema.accent}10` }}/>
+                  <div style={{ position: 'absolute', top: -20, right: 90, width: 70, height: 70, borderRadius: '50%', background: `${tema.accent}08` }}/>
+                  {/* Shimmer holográfico */}
+                  <div style={{
+                    position: 'absolute', inset: 0, pointerEvents: 'none',
+                    background: `radial-gradient(ellipse at ${holoPos.x}% ${holoPos.y}%, rgba(255,255,255,0.20) 0%, transparent 55%)`,
+                    transition: 'background 0.08s',
+                  }}/>
+                  {/* Logo + empresa — izquierda, con margen derecho para la foto */}
+                  <div style={{ position: 'absolute', top: 14, left: 16, right: 130, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {logoEmpresa ? (
+                      <img src={logoEmpresa} alt="Logo" style={{ height: 26, maxWidth: 72, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.95 }} onError={() => setLogoEmpresa(null)}/>
+                    ) : (
+                      <div style={{ width: 28, height: 28, borderRadius: 7, background: `${tema.accent}30`, border: `1.5px solid ${tema.accent}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <ShieldCheck size={15} strokeWidth={1.5} style={{ color: tema.accent }}/>
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ color: '#fff', fontSize: 10.5, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
+                      </p>
+                      <p style={{ color: `${tema.accent}cc`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
+                        {credTitulo}
+                      </p>
+                    </div>
+                  </div>
+                  {/* Legajo en header */}
+                  {empData.fileNumber && (
+                    <div style={{ position: 'absolute', bottom: 10, left: 16 }}>
+                      <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontFamily: 'monospace', fontWeight: 700 }}>
+                        N° {empData.fileNumber}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Franja acento */}
+                <div style={{ height: 3, background: `linear-gradient(90deg, ${tema.h1}, ${tema.accent}, ${tema.h1})` }}/>
+
+                {/* Foto circular — anclada al borde derecho, cruza header/body */}
+                <div style={{
+                  position: 'absolute', top: 20, right: 14, zIndex: 20,
+                  width: 108, height: 108,
+                }}>
+                  {/* Anillo exterior — blanco cuando hay cutout, de color si no */}
+                  <div style={{
+                    position: 'absolute', inset: -3, borderRadius: '50%',
+                    background: esCutout
+                      ? 'rgba(255,255,255,0.92)'
+                      : `linear-gradient(135deg, ${tema.accent} 0%, ${tema.h2}80 50%, ${tema.accent} 100%)`,
+                    boxShadow: esCutout
+                      ? '0 6px 28px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,255,255,0.6)'
+                      : `0 6px 22px rgba(0,0,0,0.45), 0 0 0 2px ${tema.h1}60`,
+                  }}/>
+                  {/* Contenedor circular */}
+                  <div
+                    ref={photoContRef}
+                    style={{
+                      width: '100%', height: '100%', borderRadius: '50%',
+                      overflow: 'hidden', position: 'relative',
+                      background: esCutout ? '#f0f4f8' : `${tema.h2}20`,
+                    }}
+                  >
+                    {quitandoFondo && (
+                      <div style={{
+                        position: 'absolute', inset: 0, zIndex: 20,
+                        borderRadius: '50%', background: 'rgba(0,0,0,0.38)',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/>
+                        <p style={{ color: '#fff', fontSize: 8, fontWeight: 900, marginTop: 2 }}>{progFondo}%</p>
+                      </div>
+                    )}
+                    {fotoMostrada ? (
+                      <img
+                        src={fotoMostrada}
+                        alt="Foto"
+                        style={{
+                          width: '100%', height: '100%',
+                          objectFit: 'cover',
+                          objectPosition: `${photoOff.x}% ${photoOff.y}%`,
+                          pointerEvents: 'none', userSelect: 'none',
+                        }}
+                        draggable={false}
+                      />
+                    ) : (
+                      <div style={{
+                        width: '100%', height: '100%', borderRadius: '50%',
+                        border: `2px dashed ${tema.accent}40`,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+                      }}>
+                        <svg viewBox="0 0 60 80" width={42} height={56} style={{ opacity: 0.3 }}>
+                          <circle cx="30" cy="22" r="14" fill={tema.accent}/>
+                          <path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill={tema.accent}/>
+                        </svg>
+                        <p style={{ color: `${tema.accent}70`, fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase' }}>Foto</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body blanco */}
+                <div style={{ padding: '14px 16px 0', position: 'relative' }}>
+                  {/* Nombre + cargo — margen derecho para no pisar la foto */}
+                  <div style={{ paddingRight: 118, marginBottom: 6 }}>
+                    <p style={{ fontSize: 16, fontWeight: 900, color: '#111827', lineHeight: 1.2 }}>
+                      {apellidoNombre || nombre || '—'}
+                    </p>
+                    <p style={{ fontSize: 7.5, fontWeight: 900, color: tema.accent, textTransform: 'uppercase', letterSpacing: '0.12em', marginTop: 3 }}>
+                      {empData.category || 'Vigilador'}
+                    </p>
+                  </div>
+
+                  {/* Separador */}
+                  <div style={{ height: 1, background: `linear-gradient(90deg, ${tema.accent}50, transparent)`, marginBottom: 10 }}/>
+
+                  {/* Datos — full width (ya estamos debajo de la foto) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {(empData.dni || empData.cuil) && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        {empData.dni && (
+                          <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
+                            <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>DNI</p>
+                            <p style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: '#1e293b' }}>{empData.dni}</p>
+                          </div>
+                        )}
+                        {empData.cuil && (
+                          <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
+                            <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>CUIL</p>
+                            <p style={{ fontSize: 11, fontWeight: 900, fontFamily: 'monospace', color: '#1e293b' }}>{empData.cuil}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {credPie && (
+                      <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
+                        <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>Sector</p>
+                        <p style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>{credPie}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fila inferior: chip + QR */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
+                    {/* Chip EMV */}
+                    <div style={{
+                      width: 38, height: 28, borderRadius: 5, flexShrink: 0,
+                      background: 'linear-gradient(135deg, #c6901c 0%, #efc848 26%, #a67010 50%, #f5d86c 72%, #c6901c 100%)',
+                      border: '1px solid #9e6e0e',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.35)',
+                      position: 'relative',
+                    }}>
+                      {[6, 12, 18, 23].map((t, i) => <div key={i} style={{ position: 'absolute', top: t, left: 4, right: 4, height: 1, background: 'rgba(80,44,0,0.35)' }}/>)}
+                      {[8, 14, 20, 26].map((l, i) => <div key={i} style={{ position: 'absolute', top: 3, bottom: 3, left: l, width: 1, background: 'rgba(80,44,0,0.28)' }}/>)}
+                    </div>
+                    {/* Ver QR */}
+                    <button
+                      onClick={() => setFlipped(true)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '5px 11px', borderRadius: 20,
+                        background: `${tema.h1}15`, border: `1px solid ${tema.accent}35`,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {qrDataUrl && <img src={qrDataUrl} alt="" style={{ width: 16, height: 16, opacity: 0.5, borderRadius: 2 }}/>}
+                      <p style={{ color: tema.accent, fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Banda inferior */}
+                <div style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0, height: 7,
+                  background: `linear-gradient(90deg, ${tema.h1}, ${tema.accent}90, ${tema.h2})`,
+                }}/>
+
+                {/* Overlay holográfico */}
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', zIndex: 8,
+                  backgroundImage: `conic-gradient(from ${holoPos.x * 3.6}deg at ${holoPos.x}% ${holoPos.y}%, rgba(255,60,60,0.025), rgba(255,180,40,0.025), rgba(50,255,100,0.025), rgba(40,160,255,0.025), rgba(180,50,255,0.025), rgba(255,60,60,0.025))`,
+                  mixBlendMode: 'overlay' as React.CSSProperties['mixBlendMode'],
+                }}/>
+              </div>
+              {/* ── FIN FRENTE ── */}
+
+              {/* ══ DORSO ══ */}
+              <div style={{
+                position: 'absolute', inset: 0,
+                backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
+                transform: 'rotateY(180deg)', borderRadius: 12, overflow: 'hidden',
+                background: `linear-gradient(158deg, ${tema.h1} 0%, #0c1a28 42%, ${tema.h2}bb 100%)`,
+              } as React.CSSProperties}>
+                <div style={{ position: 'absolute', inset: 0, opacity: 0.05, pointerEvents: 'none', backgroundImage: `repeating-linear-gradient(45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 10px)` }}/>
+                <div style={{ marginTop: 32, height: 44, background: 'linear-gradient(180deg, #050505 0%, #121212 50%, #050505 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)' }}/>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '18px 24px 0', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {logoEmpresa ? (
+                      <img src={logoEmpresa} alt="Logo" style={{ height: 20, maxWidth: 60, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.85 }} onError={() => setLogoEmpresa(null)}/>
+                    ) : <ShieldCheck size={16} strokeWidth={1.5} style={{ color: tema.accent }}/>}
+                    <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 9.5, fontWeight: 900, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                      {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
+                    </p>
+                  </div>
+                  {qrDataUrl ? (
+                    <div style={{ padding: 8, borderRadius: 12, background: '#fff', boxShadow: `0 0 0 2.5px ${tema.accent}55, 0 10px 30px rgba(0,0,0,0.65)` }}>
+                      <img src={qrDataUrl} alt="QR" width={124} height={124}/>
+                    </div>
+                  ) : (
+                    <div style={{ width: 140, height: 140, borderRadius: 12, background: '#1a2940', border: `1px solid ${tema.accent}30`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <RefreshCw size={20} className="animate-spin" style={{ color: tema.accent, opacity: 0.5 }}/>
+                    </div>
+                  )}
+                  <p style={{ color: tema.accent, fontSize: 7, fontWeight: 900, letterSpacing: '0.15em', textTransform: 'uppercase' }}>Escanear para verificar identidad</p>
+                  <div style={{ width: '100%', height: 1, background: `${tema.accent}28` }}/>
+                  <div style={{ textAlign: 'center' }}>
+                    <p style={{ color: 'rgba(255,255,255,0.95)', fontSize: 14, fontWeight: 900, lineHeight: 1.2 }}>{apellidoNombre || nombre || '—'}</p>
+                    <p style={{ color: tema.accent, fontSize: 7.5, fontWeight: 900, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
+                  </div>
+                  <p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 6.5, lineHeight: 1.7, textAlign: 'center', padding: '0 6px' }}>
+                    Esta credencial es propiedad de {empresaDisplay || 'la empresa'}. En caso de encontrarla, devolver a su titular.
+                  </p>
+                </div>
+                <button onClick={() => setFlipped(false)} style={{ position: 'absolute', bottom: 16, right: 14, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', borderRadius: 20, background: `${tema.accent}18`, border: `1px solid ${tema.accent}45`, color: tema.accent, fontSize: 7, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>← Frente</button>
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 7, background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}80, ${tema.h2})` }}/>
+              </div>
+              {/* ── FIN DORSO ── */}
+
+            </div>{/* flipper */}
+          </div>{/* perspectiva */}
+        </div>{/* marco */}
+
+        {/* Botones de foto */}
+        {showEditUI && (
+          <div className="flex gap-2 mt-3 px-1">
+            <button
+              onClick={abrirCamara}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide transition-all active:scale-95"
+              style={{ color: '#fff', background: `linear-gradient(135deg, ${tema.h1}, ${tema.h2})`, boxShadow: `0 4px 14px ${tema.h2}65` }}
+            >
+              <Camera size={13}/> {fotoMostrada ? 'Cambiar foto' : 'Sacar foto'}
+            </button>
+            {fotoMostrada && !fotoFinal && !quitandoFondo && (
+              <button onClick={quitarFondo} className="flex items-center justify-center gap-1 px-3 py-2.5 rounded-xl text-xs font-black uppercase transition-all active:scale-95" style={{ color: tema.accent, background: `${tema.h1}20`, border: `1px solid ${tema.accent}40` }}>
+                <Sparkles size={12}/> Sin fondo
+              </button>
+            )}
+            {quitandoFondo && (
+              <div className="flex items-center gap-1 px-3 py-2.5 rounded-xl text-xs font-black" style={{ color: tema.accent, background: `${tema.h1}20` }}>
+                <RefreshCw size={12} className="animate-spin"/> {progFondo}%
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Acciones */}
       <div className="flex gap-2">
-        {credGuardada && !modoEdicion && (
-          <button onClick={() => setModoEdicion(true)}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-bold hover:bg-slate-700 transition-all active:scale-95">
+        {credGuardada && !modoEdicion && !viewOnly && (
+          <button onClick={() => setModoEdicion(true)} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-bold hover:bg-slate-700 transition-all active:scale-95">
             <Pencil size={14}/> Editar foto
           </button>
         )}
         {showEditUI && (capturedBlob || !credGuardada) && (
-          <button onClick={guardarFoto} disabled={guardando}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black disabled:opacity-50 transition-all active:scale-95 text-white"
-            style={{ background: `linear-gradient(135deg, ${tema.h1}, ${tema.h2})` }}>
+          <button onClick={guardarFoto} disabled={guardando} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black disabled:opacity-50 transition-all active:scale-95 text-white" style={{ background: `linear-gradient(135deg, ${tema.h1}, ${tema.h2})` }}>
             {guardando ? <RefreshCw size={14} className="animate-spin"/> : <ShieldCheck size={14}/>}
             {credGuardada ? 'Guardar' : 'Activar QR'}
           </button>
         )}
-        <button onClick={descargar}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-bold hover:bg-slate-700 transition-all active:scale-95">
-          <Download size={14}/> Descargar
-        </button>
+        {!viewOnly && (
+          <button onClick={descargar} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-bold hover:bg-slate-700 transition-all active:scale-95">
+            <Download size={14}/> Descargar
+          </button>
+        )}
       </div>
 
       <canvas ref={canvasRef} className="hidden"/>
@@ -667,22 +724,42 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           </div>
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
-            <div className="absolute border-[3px] pointer-events-none" style={{
-              width: '60vw', maxWidth: 240, height: '78vw', maxHeight: 320,
-              borderRadius: 16, borderColor: tema.accent,
-              boxShadow: `0 0 0 9999px rgba(0,0,0,0.65)`,
-            }}/>
-            <div className="absolute bottom-28 px-4 py-1.5 rounded-full" style={{ background: `${tema.h1}cc` }}>
-              <p className="text-white text-xs font-bold text-center">Centrá tu rostro · Buena iluminación</p>
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {/* Overlay oscuro — 4 rectángulos alrededor del área guía */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 'calc(50% - 190px)', background: 'rgba(0,0,0,0.72)' }}/>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.72)' }}/>
+              <div style={{ position: 'absolute', top: 'calc(50% - 190px)', bottom: 'calc(50% - 110px)', left: 0, width: 'calc(50% - 118px)', background: 'rgba(0,0,0,0.72)' }}/>
+              <div style={{ position: 'absolute', top: 'calc(50% - 190px)', bottom: 'calc(50% - 110px)', right: 0, width: 'calc(50% - 118px)', background: 'rgba(0,0,0,0.72)' }}/>
+              {/* Guía silueta: cabeza + hombros + busto */}
+              <svg
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+                width="236" height="300" viewBox="0 0 236 300"
+              >
+                {/* Óvalo cabeza */}
+                <ellipse cx="118" cy="82" rx="54" ry="66" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
+                {/* Cuello */}
+                <line x1="94" y1="143" x2="90" y2="166" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.65"/>
+                <line x1="142" y1="143" x2="146" y2="166" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.65"/>
+                {/* Hombros */}
+                <path d="M 90 166 Q 44 178 18 220" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
+                <path d="M 146 166 Q 192 178 218 220" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
+                {/* Línea base busto */}
+                <line x1="18" y1="220" x2="218" y2="220" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="6 4" opacity="0.45"/>
+                {/* Esquinas de encuadre */}
+                <path d="M 0 32 L 0 10 L 26 10" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                <path d="M 236 32 L 236 10 L 210 10" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                <path d="M 0 268 L 0 290 L 26 290" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                <path d="M 236 268 L 236 290 L 210 290" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+              </svg>
+              <div style={{ position: 'absolute', bottom: 152, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+                <div style={{ background: `${tema.h1}dd`, borderRadius: 20, padding: '6px 16px' }}>
+                  <p className="text-white text-[11px] font-bold text-center">Encuadrá hombros y rostro · Mirá a cámara</p>
+                </div>
+              </div>
             </div>
           </div>
           <div className="pb-12 pt-5 flex justify-center" style={{ background: tema.h1 }}>
-            <button onClick={capturarFoto} style={{
-              width: 76, height: 76, background: '#ffffff',
-              border: `4px solid ${tema.accent}`,
-              boxShadow: `0 0 0 8px ${tema.accent}30`,
-              borderRadius: '50%',
-            }} className="active:scale-90 transition-transform"/>
+            <button onClick={capturarFoto} style={{ width: 76, height: 76, background: '#ffffff', border: `4px solid ${tema.accent}`, boxShadow: `0 0 0 8px ${tema.accent}30`, borderRadius: '50%' }} className="active:scale-90 transition-transform"/>
           </div>
         </div>
       )}
