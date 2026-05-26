@@ -13,16 +13,18 @@ export default function Document() {
         <meta name="apple-mobile-web-app-title" content="COSP" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
-        {/* Service Worker */}
-        <script dangerouslySetInnerHTML={{
-          __html: `
-            if ('serviceWorker' in navigator) {
-              window.addEventListener('load', function() {
-                navigator.serviceWorker.register('/sw.js').catch(function() {});
-              });
-            }
-          `
-        }} />
+        {/* Service Worker — solo en producción para no cachear durante desarrollo */}
+        {process.env.NODE_ENV === 'production' && (
+          <script dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js').catch(function() {});
+                });
+              }
+            `
+          }} />
+        )}
       </Head>
       <body>
         <Main />
