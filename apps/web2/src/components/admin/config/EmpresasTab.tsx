@@ -81,12 +81,8 @@ export default function EmpresasTab() {
     }
   };
 
-  // Credencial — logo + modelo + hue + textos configurables
-  const CRED_MODELOS = [
-    { id: 'gradiente',   label: 'Gradiente',    desc: 'Fondo degradado · Foto cuadrada' },
-    { id: 'corporativo', label: 'Corporativo',  desc: 'Header oscuro · Cuerpo claro' },
-    { id: 'premium',     label: 'Premium Dark', desc: 'Tarjeta oscura · Acento violeta' },
-  ];
+  // Credencial — logo + hue + textos configurables (template único)
+  const CRED_MODELOS: never[] = [];
 
   // Derivar paleta desde hue HSL
   const hslToHex = (h: number, s: number, l: number): string => {
@@ -650,8 +646,96 @@ export default function EmpresasTab() {
                 </div>
               </div>
 
-              {/* ── 3 modelos ── */}
-              <div className="grid grid-cols-3 gap-3 mb-5">
+              {/* ── Vista previa del template ── */}
+              <div className="flex justify-center mb-5">
+                {(() => {
+                  const col = colorsFromHue(credHue);
+                  const isH = orientacionCred === 'horizontal';
+                  const bg = '#0b1120';
+                  const person = (sz: number) => (
+                    <svg width={sz} height={sz} viewBox="0 0 60 80" fill="none">
+                      <circle cx="30" cy="22" r="14" fill={col.accent} opacity="0.3"/>
+                      <path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill={col.accent} opacity="0.2"/>
+                    </svg>
+                  );
+                  const logoEl = (h: number) => logoPreview
+                    ? <img src={logoPreview} style={{ height:h, maxWidth:h*3.5, objectFit:'contain', filter:'brightness(0) invert(1)', opacity:0.9, display:'block' }} alt=""/>
+                    : <div style={{ width:h, height:h, borderRadius:3, background:`${col.accent}25`, border:`1px solid ${col.accent}50`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                        <svg width={h*0.6} height={h*0.6} viewBox="0 0 24 24" fill="none" stroke={col.accent} strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                      </div>;
+                  if (isH) return (
+                    <div style={{ width:310, height:196, background:bg, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', display:'flex', overflow:'hidden', position:'relative' }}>
+                      <div style={{ width:'40%', position:'relative', background:col.h2, flexShrink:0, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        {person(70)}
+                        <div style={{ position:'absolute', inset:0, background:'linear-gradient(90deg, transparent 55%, #0b1120 100%)' }}/>
+                        <div style={{ position:'absolute', bottom:0, left:0, right:0, height:'45%', background:'linear-gradient(0deg, rgba(11,17,32,0.92) 0%, transparent 100%)' }}/>
+                        <div style={{ position:'absolute', bottom:8, left:0, right:0, display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+                          {logoEl(12)}
+                          <span style={{ color:'rgba(255,255,255,0.5)', fontSize:4.5, fontWeight:700, letterSpacing:'0.06em' }}>EMPRESA</span>
+                        </div>
+                      </div>
+                      <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'10px 10px 8px' }}>
+                        <p style={{ color:col.accent, fontSize:5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:3 }}>Credencial de acceso</p>
+                        <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2, marginBottom:1 }}>GARCÍA, Juan</p>
+                        <p style={{ color:`${col.accent}cc`, fontSize:5, fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Vigilador</p>
+                        <div style={{ height:0.5, background:`${col.accent}22`, marginBottom:6 }}/>
+                        <div style={{ display:'flex', gap:8 }}>
+                          <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>Legajo</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>#4521</p></div>
+                          <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>DNI</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>28.456.789</p></div>
+                        </div>
+                        <div style={{ height:0.5, background:`${col.accent}22`, margin:'6px 0' }}/>
+                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>Código de verificación</p>
+                        <p style={{ color:'#fff', fontSize:11, fontWeight:800, letterSpacing:'0.2em', fontFamily:'monospace' }}>482 071</p>
+                        <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 7px', borderRadius:12, background:'rgba(255,255,255,0.07)', border:'0.5px solid rgba(255,255,255,0.15)' }}>
+                            <span style={{ color:'rgba(255,255,255,0.55)', fontSize:4.5, fontWeight:700, textTransform:'uppercase' }}>Ver QR</span>
+                          </div>
+                          <p style={{ color:'rgba(255,255,255,0.2)', fontSize:4 }}>Válida 12/2026</p>
+                        </div>
+                      </div>
+                      <div style={{ position:'absolute', top:0, left:0, right:0, height:2.5, background:`linear-gradient(90deg,${col.h2},${col.accent},${col.h2})` }}/>
+                    </div>
+                  );
+                  return (
+                    <div style={{ width:195, height:308, background:bg, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', display:'flex', flexDirection:'column', overflow:'hidden', position:'relative' }}>
+                      <div style={{ padding:'6px 9px', display:'flex', alignItems:'center', gap:5, borderBottom:`0.5px solid ${col.accent}20` }}>
+                        {logoEl(13)}
+                        <div style={{ flex:1 }}>
+                          <p style={{ color:'#fff', fontSize:5.5, fontWeight:800, lineHeight:1 }}>EMPRESA</p>
+                          <p style={{ color:`${col.accent}bb`, fontSize:3.8, fontWeight:700, textTransform:'uppercase' }}>Credencial de acceso</p>
+                        </div>
+                      </div>
+                      <div style={{ flex:'0 0 44%', position:'relative', background:col.h2, display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                        {person(80)}
+                        <div style={{ position:'absolute', bottom:0, left:0, right:0, height:'50%', background:'linear-gradient(0deg, #0b1120 0%, transparent 100%)' }}/>
+                        <div style={{ position:'absolute', bottom:8, left:10, right:10 }}>
+                          <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2 }}>GARCÍA, J.</p>
+                          <p style={{ color:col.accent, fontSize:5, fontWeight:700, textTransform:'uppercase', marginTop:1 }}>Vigilador</p>
+                        </div>
+                      </div>
+                      <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:4 }}>
+                        <div style={{ display:'flex', gap:9 }}>
+                          <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>Legajo</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>#4521</p></div>
+                          <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>DNI</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>28.456.789</p></div>
+                        </div>
+                        <div style={{ height:0.5, background:`${col.accent}22` }}/>
+                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Verificación</p>
+                        <p style={{ color:'#fff', fontSize:11, fontWeight:800, letterSpacing:'0.2em', fontFamily:'monospace' }}>482 071</p>
+                        <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 7px', borderRadius:12, background:'rgba(255,255,255,0.07)', border:'0.5px solid rgba(255,255,255,0.15)' }}>
+                            <span style={{ color:'rgba(255,255,255,0.55)', fontSize:4.5, fontWeight:700, textTransform:'uppercase' }}>Ver QR</span>
+                          </div>
+                          <p style={{ color:'rgba(255,255,255,0.2)', fontSize:4 }}>12/2026</p>
+                        </div>
+                      </div>
+                      <div style={{ position:'absolute', top:0, left:0, right:0, height:2.5, background:`linear-gradient(90deg,${col.h2},${col.accent},${col.h2})` }}/>
+                      <div style={{ position:'absolute', bottom:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${col.h2},${col.accent}80,${col.h2})` }}/>
+                    </div>
+                  );
+                })()}
+              </div>
+              {/* (mapa vacío - mantenido para compatibilidad) */}
+              <div style={{ display: 'none' }}>
                 {CRED_MODELOS.map(modelo => {
                   const col = colorsFromHue(credHue);
                   const selected = modeloCred === modelo.id;
@@ -821,6 +905,198 @@ export default function EmpresasTab() {
                                   </div>
                                 </div>
                                 <div style={{ background:hdrBg, height:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP · Sistema COSP</div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          /* ─────── PHOTO FULL ─────── */
+                          if (modelo.id === 'photo_full') {
+                            const overGrad = 'linear-gradient(to bottom,rgba(0,0,0,0) 25%,rgba(0,0,0,0.65) 58%,rgba(0,0,0,0.92) 100%)';
+                            if (isH) return (
+                              <div style={{ width:310, height:196, background:'#0f0f14', borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.9)', display:'flex', overflow:'hidden' }}>
+                                <div style={{ width:128, position:'relative', overflow:'hidden', background:'#1a1f2e', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                                  {person(80)}
+                                  <div style={{ position:'absolute', inset:0, background:'linear-gradient(to right,rgba(0,0,0,0) 50%,rgba(0,0,0,0.8))' }}/>
+                                  <div style={{ position:'absolute', top:8, left:8, display:'flex', alignItems:'center', gap:4 }}>{logoEl(11)}</div>
+                                  <div style={{ position:'absolute', bottom:10, left:10 }}>
+                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                    <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
+                                  </div>
+                                </div>
+                                <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
+                                  <div style={{ display:'flex', gap:8 }}>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ height:0.5, background:'rgba(255,255,255,0.1)' }}/>
+                                  {verSec(11)}
+                                  <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>Válida 12/2026</div>
+                                    {qrEl(20)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                            return (
+                              <div style={{ width:195, height:308, background:'#0f0f14', borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.9)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                                <div style={{ height:180, position:'relative', background:'#1a1f2e', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                                  {person(100)}
+                                  <div style={{ position:'absolute', inset:0, background:overGrad }}/>
+                                  <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
+                                  <div style={{ position:'absolute', top:8, left:10 }}>{logoEl(12)}</div>
+                                  <div style={{ position:'absolute', bottom:10, left:10 }}>
+                                    <div style={{ fontSize:11, color:'#fff', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                    <div style={{ fontSize:11, color:'#fff', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
+                                    <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:2 }}>VIGILADOR</div>
+                                  </div>
+                                </div>
+                                <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
+                                  <div style={{ display:'flex', gap:9 }}>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>LEGAJO</div><div style={{ fontSize:6.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>DNI</div><div style={{ fontSize:6.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ height:0.5, background:'rgba(255,255,255,0.1)' }}/>
+                                  {verSec(11)}
+                                  <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>Válida 12/2026</div>
+                                    {qrEl(20)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          /* ─────── SPLIT CLEAN ─────── */
+                          if (modelo.id === 'split_clean') {
+                            const leftBg = `linear-gradient(180deg,#111827,#1e3a5f)`;
+                            if (isH) return (
+                              <div style={{ width:310, height:196, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex' }}>
+                                <div style={{ width:104, background:leftBg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:6, padding:'8px', borderRight:`2px solid ${col.accent}` }}>
+                                  {logoEl(12)}{photoSq(56, 78, 4)}
+                                  <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', textAlign:'center' }}>SECURITY CORP</div>
+                                </div>
+                                <div style={{ flex:1, background:'#f8fafc', display:'flex', flexDirection:'column' }}>
+                                  <div style={{ height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
+                                  <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:4 }}>
+                                    <div>
+                                      <div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÍA, Juan</div>
+                                      <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
+                                    </div>
+                                    <div style={{ display:'flex', gap:9 }}>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>#4521</div></div>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
+                                    </div>
+                                    <div style={{ background:'#0f172a', borderRadius:4, padding:'4px 6px' }}>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
+                                      <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:col.accent }}/></div>
+                                    </div>
+                                    <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                      <div style={{ fontSize:3.5, color:'#94a3b8' }}>12/2026</div>{qrEl(22)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                            return (
+                              <div style={{ width:195, height:308, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex' }}>
+                                <div style={{ width:62, background:leftBg, display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'10px 8px', borderRight:`2px solid ${col.accent}` }}>
+                                  {logoEl(12)}{photoSq(42, 62, 4)}
+                                  <div style={{ height:0.5, background:'rgba(255,255,255,0.2)', width:'100%' }}/>
+                                  <div style={{ textAlign:'center' }}><div style={{ fontSize:3.2, color:'rgba(255,255,255,0.4)' }}>LEGAJO</div><div style={{ fontSize:7, fontWeight:900, color:'#fff', fontFamily:'monospace' }}>#4521</div></div>
+                                  <div style={{ textAlign:'center' }}><div style={{ fontSize:3.2, color:'rgba(255,255,255,0.4)' }}>DNI</div><div style={{ fontSize:5, fontWeight:700, color:'rgba(255,255,255,0.8)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                </div>
+                                <div style={{ flex:1, background:'#f8fafc', display:'flex', flexDirection:'column' }}>
+                                  <div style={{ height:4, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
+                                  <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
+                                    <div>
+                                      <div style={{ fontSize:9.5, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:9.5, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
+                                      <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:2 }}>VIGILADOR</div>
+                                    </div>
+                                    <div style={{ height:0.5, background:'#e2e8f0' }}/>
+                                    <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>CUIL</div><div style={{ fontSize:5.5, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>20-28456789-6</div></div>
+                                    <div style={{ background:'#0f172a', borderRadius:5, padding:'5px 7px' }}>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
+                                      <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:col.accent }}/></div>
+                                    </div>
+                                    <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                      <div style={{ fontSize:3.5, color:'#94a3b8' }}>Válida 12/2026</div>{qrEl(22)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          /* ─────── ID OFICIAL ─────── */
+                          if (modelo.id === 'id_oficial') {
+                            const hdrBg2 = `linear-gradient(90deg,#0f172a,#1e293b)`;
+                            const goldBg = 'linear-gradient(90deg,#92400e,#f59e0b,#92400e)';
+                            if (isH) return (
+                              <div style={{ width:310, height:196, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                                <div style={{ background:hdrBg2, padding:'5px 10px', display:'flex', alignItems:'center', gap:6 }}>
+                                  {logoEl(12)}<div style={{ flex:1 }}><div style={{ fontSize:6.5, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:'rgba(255,255,255,0.5)' }}>CREDENCIAL OFICIAL</div></div>
+                                  <div style={{ fontSize:4.5, color:'rgba(255,255,255,0.35)', fontFamily:'monospace' }}>BSP-4521</div>
+                                </div>
+                                <div style={{ height:2.5, background:goldBg }}/>
+                                <div style={{ flex:1, background:'#fafaf8', display:'flex' }}>
+                                  <div style={{ width:74, display:'flex', alignItems:'center', justifyContent:'center', padding:8 }}>{photoSq(56, 74, 4)}</div>
+                                  <div style={{ flex:1, padding:'7px 8px', display:'flex', flexDirection:'column', gap:4 }}>
+                                    <div><div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÍA, Juan</div><div style={{ display:'inline-flex', background:'#0f172a18', borderRadius:3, padding:'1px 4px' }}><div style={{ fontSize:4.5, color:'#0f172a', fontWeight:700 }}>VIGILADOR</div></div></div>
+                                    <div style={{ display:'flex', gap:9 }}>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>#4521</div></div>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>28.456.789</div></div>
+                                    </div>
+                                    <div style={{ background:'#0f172a', borderRadius:4, padding:'4px 6px', border:'0.5px solid rgba(245,158,11,0.35)' }}>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                      <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
+                                      <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'#f59e0b' }}/></div>
+                                    </div>
+                                  </div>
+                                  <div style={{ padding:'7px 8px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', gap:2 }}>
+                                    {qrEl(28)}<div style={{ fontSize:3.5, color:'#94a3b8' }}>12/2026</div>
+                                  </div>
+                                </div>
+                                <div style={{ background:hdrBg2, height:8, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SISTEMA COSP</div>
+                                </div>
+                              </div>
+                            );
+                            return (
+                              <div style={{ width:195, height:308, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                                <div style={{ background:hdrBg2, padding:'7px 10px', display:'flex', alignItems:'center', gap:6 }}>
+                                  {logoEl(14)}<div><div style={{ fontSize:7, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:'rgba(255,255,255,0.5)' }}>CREDENCIAL OFICIAL</div></div>
+                                  <div style={{ marginLeft:'auto', fontSize:5, color:'rgba(255,255,255,0.3)', fontFamily:'monospace' }}>BSP-4521</div>
+                                </div>
+                                <div style={{ height:2.5, background:goldBg }}/>
+                                <div style={{ flex:1, background:'#fafaf8', padding:'8px 10px', position:'relative', display:'flex', flexDirection:'column', gap:5 }}>
+                                  <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
+                                    <div style={{ flex:1 }}>
+                                      <div style={{ fontSize:10, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:10, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
+                                      <div style={{ marginTop:3, display:'inline-flex', background:'#0f172a18', borderRadius:3, padding:'2px 5px' }}><div style={{ fontSize:5, color:'#0f172a', fontWeight:700 }}>VIGILADOR</div></div>
+                                    </div>
+                                    {photoSq(52, 68, 4)}
+                                  </div>
+                                  <div style={{ height:0.5, background:'#e2e8f0' }}/>
+                                  <div style={{ display:'flex', gap:10 }}>
+                                    <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:7, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:7, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ background:'#0f172a', borderRadius:5, padding:'5px 8px', border:'0.5px solid rgba(245,158,11,0.3)' }}>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                    <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.2em' }}>482 071</div>
+                                    <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'#f59e0b' }}/></div>
+                                  </div>
+                                  <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                    {qrEl(26)}<div style={{ fontSize:3.5, color:'#94a3b8' }}>Válida 12/2026</div>
+                                  </div>
+                                </div>
+                                <div style={{ background:hdrBg2, height:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
                                   <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP · Sistema COSP</div>
                                 </div>
                               </div>
