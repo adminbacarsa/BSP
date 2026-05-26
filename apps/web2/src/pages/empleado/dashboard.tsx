@@ -1656,9 +1656,9 @@ export default function EmployeeDashboard() {
                 </div>
               )}
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-[10px] text-slate-500 font-bold leading-none">Portal Empleado</p>
-              <p className="text-sm font-black text-white leading-tight">{displayName}</p>
+              <p className="text-sm font-black text-white leading-tight truncate max-w-[140px]">{displayName}</p>
             </div>
           </div>
           {(empresaNombre || empresaCtx?.name) ? (
@@ -1669,8 +1669,8 @@ export default function EmployeeDashboard() {
           ) : <div className="flex-1"/>}
           <div className="flex items-center gap-2">
             {notifStatus !== 'enabled' && !!process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY && (
-              <button onClick={enableNotifications} disabled={notifBusy} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-indigo-600 text-white disabled:opacity-50 flex items-center gap-1">
-                <BellRing size={12}/> Notif.
+              <button onClick={enableNotifications} disabled={notifBusy} className="p-2 rounded-lg bg-indigo-600 text-white disabled:opacity-50 flex items-center gap-1" title="Activar notificaciones">
+                <BellRing size={16}/>
               </button>
             )}
             <button
@@ -1740,30 +1740,30 @@ export default function EmployeeDashboard() {
           )}
 
           {/* ===== ESTADO DEL DÍA — status + acciones en una sola fila ===== */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none" style={{flexWrap:'nowrap'}}>
             {/* Pill de estado */}
             {blueIsConfirmedPresent ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
                 <CheckCircle size={12} className="text-emerald-400"/>
                 <span className="text-xs font-black text-emerald-300 uppercase">Presente registrado</span>
                 {todayElapsed && <span className="text-[10px] text-emerald-600 ml-1">· {todayElapsed}</span>}
               </div>
             ) : blueHasPendingRequest ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
                 <span className="text-xs font-black text-amber-300 uppercase">Solicitud enviada…</span>
               </div>
             ) : todayShift ? (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"/>
                 <span className="text-xs font-black text-slate-400 uppercase">Presente pendiente</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
                 <span className="text-xs font-black text-slate-500 uppercase">Sin turno hoy</span>
               </div>
             )}
             {pendingCheckins > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
                 <AlertTriangle size={11} className="text-amber-400"/>
                 <span className="text-[10px] font-black text-amber-300">{pendingCheckins} pend.</span>
               </div>
@@ -1774,7 +1774,7 @@ export default function EmployeeDashboard() {
               <button
                 onClick={() => handleCheckIn(blueShift)}
                 disabled={checkingShiftId === blueShift.id}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
               >
                 <Navigation size={14}/>
                 {checkingShiftId === blueShift.id ? 'Validando...' : 'Dar Presente'}
@@ -1784,7 +1784,7 @@ export default function EmployeeDashboard() {
               <button
                 onClick={() => handleLlegadaTarde(blueShift)}
                 disabled={checkingShiftId === blueShift.id}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
+                className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
               >
                 <AlertTriangle size={14}/>
                 {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
@@ -1793,7 +1793,7 @@ export default function EmployeeDashboard() {
             {(portalFeatures.reportAbsence || portalFeatures.requestLicense) && (
               <button
                 onClick={() => { setShowAbsenceRequest(v => !v); setShowSwap(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
               >
                 <FileText size={14}/> Novedad
               </button>
@@ -1801,7 +1801,7 @@ export default function EmployeeDashboard() {
             {portalFeatures.swapShifts && (
               <button
                 onClick={() => { setShowSwap(v => !v); setShowAbsenceRequest(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
               >
                 <ArrowLeftRight size={14}/> Canje
               </button>
@@ -1867,8 +1867,8 @@ export default function EmployeeDashboard() {
                     </span>
                   ) : null}
                   {heroObjective?.address && (
-                    <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100 flex items-center gap-1">
-                      <MapPin size={10}/> {heroObjective.address}
+                    <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100 flex items-center gap-1 max-w-full">
+                      <MapPin size={10} className="shrink-0"/> <span className="truncate">{heroObjective.address}</span>
                     </span>
                   )}
                   {heroShift?.positionName && (
