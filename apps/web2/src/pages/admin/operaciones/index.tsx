@@ -1079,15 +1079,15 @@ export default function OperacionesPage() {
                 const barColor = cobertura >= 80 ? 'bg-emerald-500' : cobertura >= 50 ? 'bg-amber-500' : 'bg-rose-500';
                 const pctColor = cobertura >= 80 ? 'text-emerald-600' : cobertura >= 50 ? 'text-amber-600' : 'text-rose-600';
                 return (
-                    <div className="mx-2 mb-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center gap-4 shadow-sm">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Estado del día</span>
-                        <div className="flex items-center gap-3 flex-1">
+                    <div className="mx-2 mb-2 bg-white border border-slate-200 rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-4 shadow-sm">
+                        <span className="hidden sm:inline text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Estado del día</span>
+                        <div className="flex items-center gap-2 flex-1 min-w-[100px]">
                             <span className={`text-xl font-black tabular-nums ${pctColor}`}>{cobertura}%</span>
                             <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
                                 <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${cobertura}%` }}/>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                             {[
                                 { label: 'Activos', val: logic.stats.activos, cls: 'text-emerald-600' },
                                 { label: 'Vacantes', val: logic.stats.vacantes, cls: 'text-rose-500' },
@@ -1104,9 +1104,9 @@ export default function OperacionesPage() {
                 );
             })()}
 
-            <div className="h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative">
+            <div className="h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative">
                 {!isExternalMap && (
-                    <div className="flex-1 lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
+                    <div className="flex-1 max-h-[38%] lg:max-h-none lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
                         <OperacionesMap
                             center={[-31.4201, -64.1888]} 
                             allObjectives={logic.filteredObjectives} 

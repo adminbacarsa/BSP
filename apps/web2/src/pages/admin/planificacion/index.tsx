@@ -3957,7 +3957,7 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out ${selectedClient ? 'h-full p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out ${selectedClient ? 'h-full p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
                 <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
@@ -4584,7 +4584,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
 
-                <div className="rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
                         onClick={() => setShowActivityModal(true)}

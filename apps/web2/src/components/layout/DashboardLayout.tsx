@@ -71,7 +71,7 @@ function BottomNav() {
 }
 
 // ─── TOPBAR ──────────────────────────────────────────────────────────────────
-function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: boolean; onToggleSidebar: () => void }) {
+function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSidebarOpen: boolean; onToggleSidebar: () => void; onLogout: () => void }) {
   const router = useRouter();
   const { user, assignedClientId, isSuperAdmin, allEmpresas, userRole: authUserRole } = useAuth();
   const { empresa, empresas, switchEmpresa, empresaId } = useEmpresa();
@@ -202,6 +202,17 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar }: { isSidebarOpen: bo
               <span>OFF</span>
             </span>
           )}
+
+          {/* Logout — solo en mobile (el sidebar está oculto) */}
+          <button
+            onClick={onLogout}
+            aria-label="Cerrar Sesión"
+            title="Cerrar Sesión"
+            className="lg:hidden p-2 rounded-lg transition-colors shrink-0 hover:bg-white/10 active:opacity-60"
+            style={{ color: 'var(--topbar-text)', opacity: 0.75 }}
+          >
+            <LogOut size={18} />
+          </button>
         </div>
       </div>
     </div>
@@ -448,7 +459,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             className={`absolute top-0 left-0 right-0 z-40 transition-transform duration-200 ease-out shadow-2xl ${topbarVisible ? 'translate-y-0' : '-translate-y-full'}`}
             onMouseLeave={() => setTopbarVisible(false)}
           >
-            <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} />
+            <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           </div>
           <div className={`absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${topbarVisible ? 'opacity-0' : 'opacity-60'}`}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
@@ -457,7 +468,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         </div>
       ) : (
         <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16 min-w-0">
-          <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} />
+          <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           {/* pb-20 en mobile para dejar espacio al bottom nav */}
           <main className="p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 overflow-x-hidden">
             {children}
