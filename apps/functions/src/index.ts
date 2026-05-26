@@ -903,7 +903,20 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
 // =========================================================
 import * as nodemailer from 'nodemailer';
 
-function buildPortalEmailHtml(resetLink: string): string {
+function buildPortalEmailHtml(resetLink: string, activationLink?: string): string {
+  const activationBlock = activationLink ? `
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
+            <p style="color:#1e293b;font-size:15px;font-weight:bold;margin:0 0 8px;">📱 Activá tu dispositivo</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 16px;">Para poder marcar presencia, abrí este email <strong>desde tu celular</strong> y tocá el botón de abajo. Esto vincula tu dispositivo a tu cuenta.</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 8px;">
+              <tr>
+                <td style="background:#0f766e;border-radius:8px;">
+                  <a href="${activationLink}" target="_blank" style="display:inline-block;padding:12px 28px;color:#fff;font-size:14px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR MI DISPOSITIVO</a>
+                </td>
+              </tr>
+            </table>
+            <p style="color:#94a3b8;font-size:11px;text-align:center;margin:0 0 4px;">Este enlace expira en 48 horas y es de un solo uso.</p>` : '';
+
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -929,8 +942,9 @@ function buildPortalEmailHtml(resetLink: string): string {
               </tr>
             </table>
             <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.</p>
+            ${activationBlock}
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.</p>
             <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
               <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
             </p>
@@ -948,7 +962,13 @@ function buildPortalEmailHtml(resetLink: string): string {
 </html>`;
 }
 
-function buildPortalEmailText(resetLink: string): string {
+function buildPortalEmailText(resetLink: string, activationLink?: string): string {
+  const activationSection = activationLink ? `
+
+📱 ACTIVAR DISPOSITIVO (abrí desde tu celular):
+${activationLink}
+Este enlace expira en 48 horas y es de un solo uso.` : '';
+
   return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Empleados de COSP.
 
 Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
@@ -956,8 +976,9 @@ Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
 ${resetLink}
 
 Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.
+${activationSection}
 
-Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
+Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.
 
 Saludos,
 Equipo Operativo - Bacar sa. Seguridad Privada`;
@@ -1052,13 +1073,27 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         url: 'https://comtroldata.web.app/empleado/dashboard',
       });
 
+      // Generar token de activación de dispositivo (UUID, expira 48h)
+      const crypto = await import('crypto');
+      const activationToken = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      await db.collection('device_activations').doc(activationToken).set({
+        employeeId: empId,
+        uid,
+        email,
+        expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+        used: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
+
       // Enviar email — solo se marca como enviado si el envío fue exitoso
       await transporter.sendMail({
         from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
         to: email,
         subject: 'Acceso al Portal de Empleados - COSP',
-        html: buildPortalEmailHtml(resetLink),
-        text: buildPortalEmailText(resetLink),
+        html: buildPortalEmailHtml(resetLink, activationLink),
+        text: buildPortalEmailText(resetLink, activationLink),
       });
 
       // Limpiar uid de cualquier otro documento que ya lo tenga (evita duplicados)
@@ -1096,7 +1131,59 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 });
 
 // =========================================================
-// 14. ACCESO AL PORTAL DE CLIENTES
+// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vía email)
+// =========================================================
+
+export const activateDevice = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
+  }
+  const { token, deviceInfo } = data as { token: string; deviceInfo?: Record<string, string> };
+  if (!token) {
+    throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
+  }
+
+  const db = admin.firestore();
+  const tokenRef = db.collection('device_activations').doc(token);
+  const tokenDoc = await tokenRef.get();
+
+  if (!tokenDoc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Token de activación inválido.');
+  }
+
+  const td = tokenDoc.data()!;
+
+  if (td.used) {
+    throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado.');
+  }
+
+  if (td.expiresAt.toDate() < new Date()) {
+    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activación expiró. Pedí uno nuevo al administrador.');
+  }
+
+  if (td.uid !== context.auth.uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
+  }
+
+  // Marcar token como usado
+  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
+
+  // Guardar dispositivo verificado
+  const deviceRef = db.collection('device_tokens').doc();
+  await deviceRef.set({
+    uid: context.auth.uid,
+    employeeId: td.employeeId,
+    verified: true,
+    source: 'email_link',
+    activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    deviceInfo: deviceInfo || {},
+  });
+
+  return { success: true, employeeId: td.employeeId };
+});
+
+// =========================================================
+// 15. ACCESO AL PORTAL DE CLIENTES
 // =========================================================
 
 function buildClientPortalEmailHtml(resetLink: string, clientName: string): string {
