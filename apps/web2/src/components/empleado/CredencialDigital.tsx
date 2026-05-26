@@ -340,8 +340,9 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   };
   const descargar = async () => {
     const SC = 2;
-    const CARD_W = 420, CARD_H = 500;
+    const CARD_W = 420;
     const isH = orientacion === 'horizontal';
+    const CARD_H = isH ? 500 : 620;
 
     const cv = document.createElement('canvas');
     cv.width = CARD_W * SC; cv.height = CARD_H * SC;
@@ -399,11 +400,23 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       return h;
     };
 
-    const drawVerCode = (x: number, startY: number, textDark = false): number => {
+    const drawVerCode = (x: number, startY: number, textDark = false, compact = false): number => {
       let y = startY;
       ctx.fillStyle = textDark ? '#64748b' : 'rgba(255,255,255,0.4)';
       ctx.font = '700 7px Arial'; ctx.textAlign = 'left';
       ctx.fillText('CÓDIGO DE VERIFICACIÓN', x, y); y += 12;
+      if (compact) {
+        ctx.fillStyle = textDark ? '#0f172a' : '#ffffff';
+        ctx.font = '800 16px monospace'; ctx.fillText(verCode, x, y);
+        const barX = x + 105;
+        ctx.fillStyle = textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)';
+        rr(barX, y - 10, 42, 2, 1); ctx.fill();
+        const fw = 42 * (verPct / 100);
+        if (fw > 0) { ctx.fillStyle = textDark ? tema.accent : 'rgba(255,255,255,0.38)'; rr(barX, y - 10, fw, 2, 1); ctx.fill(); }
+        ctx.fillStyle = textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)'; ctx.font = '7px Arial';
+        ctx.fillText(`0:${verRemaining.toString().padStart(2, '0')}`, barX + 48, y - 4);
+        return y + 10;
+      }
       ctx.fillStyle = textDark ? '#0f172a' : '#ffffff';
       ctx.font = '800 22px monospace'; ctx.fillText(verCode, x, y); y += 10;
       ctx.fillStyle = textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)';
@@ -476,24 +489,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
         ctx.fillText('Válida 12/2026', CARD_W - 18, FY + 16); ctx.textAlign = 'left';
       } else {
-        const PW = 120, PH = 160, PAD = 16;
+        const PW = 148, PH = 230, PAD = 16;
         const TR = CARD_W - PW - 10;
         let y = 15;
-        const lw = await drawLogo(PAD, y, 22);
-        ctx.fillStyle = '#fff'; ctx.font = '900 11px Arial'; ctx.textAlign = 'left';
-        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase().substring(0, 24), PAD + lw + 8, y + 10);
+        const lw = await drawLogo(PAD, y, 24);
+        ctx.fillStyle = '#fff'; ctx.font = '900 12px Arial'; ctx.textAlign = 'left';
+        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase().substring(0, 22), PAD + lw + 8, y + 11);
         ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '700 7px Arial';
-        ctx.fillText(credTitulo.toUpperCase(), PAD + lw + 8, y + 22); y += 37;
+        ctx.fillText(credTitulo.toUpperCase(), PAD + lw + 8, y + 23); y += 40;
         ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 12;
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 17px Arial'; ctx.fillText(apellidoNombre || nombre || '—', PAD, y); y += 18;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 14;
+        ctx.fillStyle = '#fff'; ctx.font = '900 21px Arial'; ctx.fillText(apellidoNombre || nombre || '—', PAD, y); y += 20;
         ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = 'bold 8px Arial';
-        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, y); y += 14;
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, y); y += 16;
         y = drawFields(PAD, y, TR);
         ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 10;
-        drawVerCode(PAD, y);
-        const FOOTER_Y = CARD_H - 36;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 12;
+        drawVerCode(PAD, y, false, true);
+        const FOOTER_Y = CARD_H - 40;
         drawChip(PAD, FOOTER_Y);
         ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
         if (empData.fileNumber) ctx.fillText(`BSP-${empData.fileNumber}`, TR, FOOTER_Y + 10);
@@ -502,7 +515,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         const bGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
         bGrad.addColorStop(0, `${tema.accent}70`); bGrad.addColorStop(0.5, 'rgba(255,255,255,0.35)'); bGrad.addColorStop(1, `${tema.accent}70`);
         ctx.fillStyle = bGrad; ctx.fillRect(0, CARD_H - 4, CARD_W, 4); ctx.restore();
-        await drawPhoto(CARD_W - PW, 65, PW, Math.min(PH, CARD_H - 65 - 55), 6);
+        const photoStartY = 65;
+        await drawPhoto(CARD_W - PW, photoStartY, PW - 6, Math.min(PH, CARD_H - photoStartY - 45), 7);
       }
       ctx.restore();
     }
@@ -547,27 +561,29 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         ctx.fillStyle = '#94a3b8'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
         ctx.fillText('Válida 12/2026', CARD_W - PAD, CARD_H - 18); ctx.textAlign = 'left';
       } else {
-        const PW = 90, PH = 110;
-        let y = HDR_H + 3 + 14;
-        ctx.fillStyle = '#0f172a'; ctx.font = '900 16px Arial'; ctx.textAlign = 'left';
-        ctx.fillText(apellidoNombre || nombre || '—', PAD, y); y += 14;
+        const PW = 118, PH = 152;
+        const photoX = PAD, photoY = HDR_H + 3 + 16;
+        await drawPhoto(photoX, photoY, PW, PH, 8);
+        const NX = photoX + PW + 14;
+        let y = HDR_H + 3 + 20;
+        ctx.fillStyle = '#0f172a'; ctx.font = '900 20px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(apellidoNombre || nombre || '—', NX, y); y += 18;
         ctx.fillStyle = tema.accent; ctx.font = '700 8px Arial';
-        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, y); y += 12;
-        await drawPhoto(CARD_W - PW - PAD, HDR_H + 3 + 10, PW, PH, 8);
-        const TR = CARD_W - PW - PAD - 10;
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), NX, y); y += 16;
+        y = drawFields(NX, y, CARD_W - PAD, true);
+        let bodyY = photoY + PH + 14;
         ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(TR, y); ctx.stroke(); y += 10;
-        y = drawFields(PAD, y, TR, true);
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CARD_W, y); ctx.stroke(); y += 10;
-        const vbH = 62;
-        ctx.save(); rr(PAD, y, CARD_W - PAD * 2, vbH, 8);
+        ctx.beginPath(); ctx.moveTo(PAD, bodyY); ctx.lineTo(CARD_W - PAD, bodyY); ctx.stroke(); bodyY += 12;
+        const vbH = 44;
+        ctx.save(); rr(PAD, bodyY, CARD_W - PAD * 2, vbH, 8);
         const vbG = ctx.createLinearGradient(PAD, 0, CARD_W - PAD, 0);
         vbG.addColorStop(0, hdr1); vbG.addColorStop(1, hdr2);
         ctx.fillStyle = vbG; ctx.fill(); ctx.restore();
-        drawVerCode(PAD + 10, y + 12); y += vbH + 12;
+        drawVerCode(PAD + 10, bodyY + 12, false, true); bodyY += vbH + 12;
+        drawChip(PAD, bodyY);
         ctx.fillStyle = '#94a3b8'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
-        if (empData.fileNumber) ctx.fillText(`BSP-${empData.fileNumber}`, CARD_W - PAD, y);
-        ctx.fillText('Válida 12/2026', CARD_W - PAD, y + 12); ctx.textAlign = 'left';
+        if (empData.fileNumber) ctx.fillText(`BSP-${empData.fileNumber}`, CARD_W - PAD, bodyY + 10);
+        ctx.fillText('Válida 12/2026', CARD_W - PAD, bodyY + 20); ctx.textAlign = 'left';
       }
       const fGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
       fGrad.addColorStop(0, hdr1); fGrad.addColorStop(1, hdr2);
@@ -627,29 +643,29 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         aG.addColorStop(0, purp); aG.addColorStop(1, tema.accent);
         ctx.fillStyle = aG; ctx.fillRect(0, 0, 4, CARD_H);
         let y = 14;
-        const lw = await drawLogo(PAD_L, y, 22);
-        ctx.fillStyle = purp; ctx.font = '900 10px Arial'; ctx.textAlign = 'left';
-        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD_L + lw + 8, y + 8);
+        const lw = await drawLogo(PAD_L, y, 24);
+        ctx.fillStyle = purp; ctx.font = '900 11px Arial'; ctx.textAlign = 'left';
+        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD_L + lw + 8, y + 9);
         ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '7px Arial';
-        ctx.fillText(credTitulo, PAD_L + lw + 8, y + 19); y += 36;
+        ctx.fillText(credTitulo, PAD_L + lw + 8, y + 20); y += 40;
         ctx.strokeStyle = `${purp}22`; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 14;
-        const PW = 88, PH = 108;
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 16;
+        const PW = 130, PH = 168;
         ctx.save(); ctx.strokeStyle = `${purp}40`; ctx.lineWidth = 0.8;
         const pcx = PAD_L + PW / 2, pcy = y + PH / 2;
         ctx.translate(pcx, pcy); ctx.rotate(4 * Math.PI / 180); ctx.translate(-pcx, -pcy);
-        rr(PAD_L - 5, y - 5, PW + 10, PH + 10, 8); ctx.stroke(); ctx.restore();
-        await drawPhoto(PAD_L, y, PW, PH, 6);
-        const NX = PAD_L + PW + 12;
-        ctx.fillStyle = '#fff'; ctx.font = '900 14px Arial'; ctx.textAlign = 'left';
-        ctx.fillText(apellidoNombre || nombre || '—', NX, y + 16);
+        rr(PAD_L - 5, y - 5, PW + 10, PH + 10, 9); ctx.stroke(); ctx.restore();
+        await drawPhoto(PAD_L, y, PW, PH, 7);
+        const NX = PAD_L + PW + 14;
+        ctx.fillStyle = '#fff'; ctx.font = '900 21px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(apellidoNombre || nombre || '—', NX, y + 22);
         ctx.fillStyle = purp; ctx.font = '700 8px Arial';
-        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), NX, y + 30);
-        drawFields(NX, y + 44, CARD_W - PAD); y += PH + 12;
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), NX, y + 36);
+        drawFields(NX, y + 50, CARD_W - PAD); y += PH + 14;
         ctx.strokeStyle = `${purp}22`; ctx.lineWidth = 0.5;
         ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 12;
-        y = drawVerCode(PAD_L, y);
-        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 12;
+        y = drawVerCode(PAD_L, y, false, true);
+        ctx.beginPath(); ctx.moveTo(PAD_L, y + 4); ctx.lineTo(CARD_W - PAD, y + 4); ctx.stroke(); y += 16;
         drawChip(PAD_L, y);
         ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
         ctx.fillText('Válida 12/2026', CARD_W - PAD, y + 16); ctx.textAlign = 'left';
@@ -709,7 +725,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             <div
               onMouseMove={onCardMouseMove}
               style={{
-                position: 'relative', width: '100%', height: 500,
+                position: 'relative', width: '100%', height: orientacion === 'horizontal' ? 500 : 620,
                 transformStyle: 'preserve-3d',
                 transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
                 transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
@@ -735,19 +751,33 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                     {credPie && <div><p style={{ color: dark ? '#64748b' : 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Sector</p><p style={{ color: dark ? '#1e293b' : 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700 }}>{credPie}</p></div>}
                   </div>
                 );
-                const verSection = (textDark = false) => (
+                const verSection = (textDark = false, compact = false) => (
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: compact ? 3 : 4 }}>
                       <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="4" stroke={textDark ? '#64748b' : 'rgba(255,255,255,0.4)'} strokeWidth="1"/><path d="M5 3v2.5l1.5 1" stroke={textDark ? '#64748b' : 'rgba(255,255,255,0.4)'} strokeWidth="1" strokeLinecap="round"/></svg>
                       <p style={{ color: textDark ? '#64748b' : 'rgba(255,255,255,0.4)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Código de verificación</p>
                     </div>
-                    <p style={{ color: textDark ? '#0f172a' : '#fff', fontSize: 22, fontWeight: 800, letterSpacing: '0.28em', fontFamily: 'monospace', lineHeight: 1, marginBottom: 5 }}>{verCode}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <p style={{ color: textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)', fontSize: 7.5 }}>Se actualiza en <span style={{ color: textDark ? '#475569' : 'rgba(255,255,255,0.62)', fontWeight: 700 }}>0:{verRemaining.toString().padStart(2, '0')}</span></p>
-                      <div style={{ flex: 1, maxWidth: 52, height: 2, background: textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${verPct}%`, background: textDark ? tema.accent : 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                    {compact ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <p style={{ color: textDark ? '#0f172a' : '#fff', fontSize: 16, fontWeight: 800, letterSpacing: '0.25em', fontFamily: 'monospace', lineHeight: 1 }}>{verCode}</p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div style={{ width: 42, height: 2, background: textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${verPct}%`, background: textDark ? tema.accent : 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                          </div>
+                          <p style={{ color: textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)', fontSize: 7 }}>0:{verRemaining.toString().padStart(2, '0')}</p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <>
+                        <p style={{ color: textDark ? '#0f172a' : '#fff', fontSize: 22, fontWeight: 800, letterSpacing: '0.28em', fontFamily: 'monospace', lineHeight: 1, marginBottom: 5 }}>{verCode}</p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <p style={{ color: textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)', fontSize: 7.5 }}>Se actualiza en <span style={{ color: textDark ? '#475569' : 'rgba(255,255,255,0.62)', fontWeight: 700 }}>0:{verRemaining.toString().padStart(2, '0')}</span></p>
+                          <div style={{ flex: 1, maxWidth: 52, height: 2, background: textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${verPct}%`, background: textDark ? tema.accent : 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
                 const chipEl = () => (
@@ -820,39 +850,39 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                     </div>
                   );
                   // vertical gradiente
-                  const PHOTO_W = 120, PHOTO_H = 160;
+                  const PHOTO_W = 148, PHOTO_H = 230;
                   return (
                     <div style={cardStyle as React.CSSProperties}>
                       {holoOverlay()}
                       {/* Header */}
                       <div style={{ padding: '15px 16px 12px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.18)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {logoEl(22)}
+                          {logoEl(24)}
                           <div style={{ minWidth: 0 }}>
-                            <p style={{ color: '#fff', fontSize: 11, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
+                            <p style={{ color: '#fff', fontSize: 12, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
                             <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>{credTitulo}</p>
                           </div>
                         </div>
                       </div>
                       {/* Datos empleado */}
-                      <div style={{ padding: '12px 16px 10px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
-                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, lineHeight: 1.25, marginBottom: 3 }}>{apellidoNombre || nombre || '—'}</p>
-                        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>{empData.category || 'Vigilador'}</p>
+                      <div style={{ padding: '14px 16px 12px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                        <p style={{ color: '#fff', fontSize: 21, fontWeight: 900, lineHeight: 1.2, marginBottom: 5 }}>{apellidoNombre || nombre || '—'}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 14 }}>{empData.category || 'Vigilador'}</p>
                         {dataFields()}
                       </div>
                       {/* Código verificación */}
-                      <div style={{ padding: '10px 16px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
-                        {verSection()}
+                      <div style={{ padding: '12px 16px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                        {verSection(false, true)}
                       </div>
                       {/* Pie */}
-                      <div style={{ padding: '10px 16px', paddingRight: PHOTO_W + 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ padding: '14px 16px', paddingRight: PHOTO_W + 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
                         {chipEl()}{qrBtn()}<p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 7, textAlign: 'right', lineHeight: 1.5 }}>{empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026</p>
                       </div>
                       {/* Banda inferior */}
                       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, borderRadius: '0 0 12px 12px', background: `linear-gradient(90deg,${tema.accent}70,rgba(255,255,255,0.35),${tema.accent}70)` }}/>
-                      {/* Foto cuadrada en zona derecha */}
+                      {/* Foto zona derecha - vertical completa */}
                       <div style={{ position: 'absolute', top: 0, right: 0, width: PHOTO_W, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 10px 12px 0', pointerEvents: 'none', zIndex: 20 }}>
-                        {photoArea(PHOTO_W - 10, PHOTO_H, 6)}
+                        {photoArea(PHOTO_W - 10, PHOTO_H, 7)}
                       </div>
                     </div>
                   );
@@ -902,24 +932,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                     <div style={baseCard as React.CSSProperties}>
                       {/* Header */}
                       <div style={{ background: hdrBg, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {logoEl(26)}<div><p style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: tema.accent, fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{credTitulo}</p></div>
+                        {logoEl(26)}<div><p style={{ color: '#fff', fontSize: 12, fontWeight: 900 }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: tema.accent, fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{credTitulo}</p></div>
                       </div>
                       <div style={{ height: 3, background: `linear-gradient(90deg,${tema.accent},${tema.h2})` }}/>
                       {/* Body */}
-                      <div style={{ flex: 1, background: '#f8fafc', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                          <div style={{ flex: 1 }}>
-                            <p style={{ color: '#0f172a', fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>{apellidoNombre || nombre || '—'}</p>
-                            <p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
+                      <div style={{ flex: 1, background: '#f8fafc', padding: '16px 16px 14px', display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden' }}>
+                        {/* Foto + nombre en fila */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                          {photoArea(118, 152, 8)}
+                          <div style={{ flex: 1, paddingTop: 4 }}>
+                            <p style={{ color: '#0f172a', fontSize: 20, fontWeight: 900, lineHeight: 1.2, marginBottom: 5 }}>{apellidoNombre || nombre || '—'}</p>
+                            <p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>{empData.category || 'Vigilador'}</p>
+                            {dataFields(true)}
                           </div>
-                          {photoArea(90, 110, 8)}
                         </div>
                         <div style={{ height: 0.5, background: '#e2e8f0' }}/>
-                        {dataFields(true)}
-                        <div style={{ height: 0.5, background: '#e2e8f0' }}/>
-                        <div style={{ background: hdrBg, borderRadius: 8, padding: '8px 12px' }}>{verSection()}</div>
-                        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          {qrBtn()}<p style={{ color: '#94a3b8', fontSize: 7, textAlign: 'right' }}>{empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026</p>
+                        <div style={{ background: hdrBg, borderRadius: 8, padding: '9px 12px' }}>{verSection(false, true)}</div>
+                        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
+                          {chipEl()}{qrBtn()}<p style={{ color: '#94a3b8', fontSize: 7, textAlign: 'right' }}>{empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026</p>
                         </div>
                       </div>
                       <div style={{ background: hdrBg, height: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -976,28 +1006,28 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                       <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: `linear-gradient(180deg,${purp},${tema.accent})`, zIndex: 1 }}/>
                       <div style={{ position: 'absolute', inset: 0, opacity: 0.04, backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '12px 12px' }}/>
                       {/* Header */}
-                      <div style={{ padding: '14px 14px 12px 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: `0.5px solid ${purp}22` }}>
-                        {logoEl(22)}<div style={{ flex: 1 }}><p style={{ color: purp, fontSize: 10, fontWeight: 900, letterSpacing: '0.04em' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7 }}>{credTitulo}</p></div>
+                      <div style={{ padding: '14px 14px 12px 18px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: `0.5px solid ${purp}22` }}>
+                        {logoEl(24)}<div style={{ flex: 1 }}><p style={{ color: purp, fontSize: 11, fontWeight: 900, letterSpacing: '0.04em' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7 }}>{credTitulo}</p></div>
                         <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }}/>
                       </div>
                       {/* Foto + nombre */}
-                      <div style={{ padding: '14px 14px 10px 16px', display: 'flex', alignItems: 'flex-start', gap: 12, borderBottom: `0.5px solid ${purp}22` }}>
-                        <div style={{ position: 'relative' }}>
-                          <div style={{ position: 'absolute', inset: -5, border: `0.8px solid ${purp}40`, borderRadius: 8, transform: 'rotate(4deg)' }}/>
-                          {photoArea(88, 108, 6)}
+                      <div style={{ padding: '16px 14px 14px 18px', display: 'flex', alignItems: 'flex-start', gap: 14, borderBottom: `0.5px solid ${purp}22` }}>
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <div style={{ position: 'absolute', inset: -5, border: `0.8px solid ${purp}40`, borderRadius: 9, transform: 'rotate(4deg)' }}/>
+                          {photoArea(130, 168, 7)}
                         </div>
-                        <div style={{ flex: 1 }}>
-                          <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.25, marginBottom: 4 }}>{apellidoNombre || nombre || '—'}</p>
-                          <p style={{ color: purp, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>{empData.category || 'Vigilador'}</p>
+                        <div style={{ flex: 1, paddingTop: 4 }}>
+                          <p style={{ color: '#fff', fontSize: 21, fontWeight: 900, lineHeight: 1.2, marginBottom: 6 }}>{apellidoNombre || nombre || '—'}</p>
+                          <p style={{ color: purp, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{empData.category || 'Vigilador'}</p>
                           {dataFields()}
                         </div>
                       </div>
-                      {/* Verificación */}
-                      <div style={{ padding: '12px 14px 10px 16px', borderBottom: `0.5px solid ${purp}22` }}>
-                        {verSection()}
+                      {/* Verificación compacta */}
+                      <div style={{ padding: '12px 14px 11px 18px', borderBottom: `0.5px solid ${purp}22` }}>
+                        {verSection(false, true)}
                       </div>
                       {/* Pie */}
-                      <div style={{ padding: '10px 14px 10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
+                      <div style={{ padding: '14px 14px 14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
                         {chipEl()}{qrBtn()}<p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 7 }}>Válida 12/2026</p>
                       </div>
                     </div>
