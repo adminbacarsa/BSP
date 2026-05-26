@@ -1616,9 +1616,18 @@ export default function EmployeeDashboard() {
                   </div>
                 )}
               </div>
-              {notifStatus === 'enabled' && (
-                <div className="pt-4 flex justify-end">
-                  <button onClick={disableNotifications} disabled={notifBusy} title="Desactivar notificaciones" className="text-sky-300/70 disabled:opacity-50"><BellRing size={16}/></button>
+              {!!process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY && (
+                <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-500 font-bold uppercase">Notificaciones push</span>
+                  {notifStatus === 'enabled' ? (
+                    <button onClick={disableNotifications} disabled={notifBusy} className="text-[11px] font-black text-sky-400 disabled:opacity-50 flex items-center gap-1">
+                      <BellRing size={13}/> Activadas · Desactivar
+                    </button>
+                  ) : (
+                    <button onClick={enableNotifications} disabled={notifBusy} className="text-[11px] font-black text-indigo-400 disabled:opacity-50 flex items-center gap-1">
+                      <BellRing size={13}/> Activar push
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1658,7 +1667,14 @@ export default function EmployeeDashboard() {
             </div>
             <div className="min-w-0">
               <p className="text-[10px] text-slate-500 font-bold leading-none">Portal Empleado</p>
-              <p className="text-sm font-black text-white leading-tight truncate max-w-[140px]">{displayName}</p>
+              {empProfile?.lastName || empProfile?.firstName ? (
+                <>
+                  <p className="text-sm font-black text-white leading-tight truncate max-w-[140px] uppercase">{empProfile.lastName}</p>
+                  <p className="text-[11px] font-bold text-slate-300 leading-tight truncate max-w-[140px]">{empProfile.firstName}</p>
+                </>
+              ) : (
+                <p className="text-sm font-black text-white leading-tight truncate max-w-[140px]">{displayName}</p>
+              )}
             </div>
           </div>
           {(empresaNombre || empresaCtx?.name) ? (
@@ -1668,11 +1684,6 @@ export default function EmployeeDashboard() {
             </div>
           ) : <div className="flex-1"/>}
           <div className="flex items-center gap-2">
-            {notifStatus !== 'enabled' && !!process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY && (
-              <button onClick={enableNotifications} disabled={notifBusy} className="p-2 rounded-lg bg-indigo-600 text-white disabled:opacity-50 flex items-center gap-1" title="Activar notificaciones">
-                <BellRing size={16}/>
-              </button>
-            )}
             <button
               onClick={() => setShowCredencial(v => !v)}
               className="relative p-2 text-slate-400 hover:text-yellow-400 transition-colors"
@@ -1683,6 +1694,11 @@ export default function EmployeeDashboard() {
             <button onClick={() => setShowNotifications(true)} className="relative p-2 text-slate-400 hover:text-white transition-colors">
               <Bell size={20}/>
               {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full animate-pulse"/>}
+              {notifStatus !== 'enabled' && !!process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY && (
+                <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-indigo-500 rounded-full flex items-center justify-center">
+                  <BellRing size={8} className="text-white"/>
+                </span>
+              )}
             </button>
           </div>
         </div>
