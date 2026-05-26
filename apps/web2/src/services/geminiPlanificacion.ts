@@ -43,9 +43,13 @@ export interface PlannerContext {
   autoCycles?: unknown[];
 }
 
+/** Servidor: timeoutSeconds 180 — cliente un poco más para recibir deadline-exceeded. */
+const PLANNING_GEMINI_CALLABLE_TIMEOUT_MS = 195_000;
+
 const optimizePlanningGeminiCallable = httpsCallable<{ context: PlannerContext; empresaId?: string }, GeminiRespuesta>(
   functions,
   'optimizePlanningGemini',
+  { timeout: PLANNING_GEMINI_CALLABLE_TIMEOUT_MS },
 );
 
 export async function optimizarConGemini(context: PlannerContext, empresaId?: string): Promise<GeminiRespuesta> {

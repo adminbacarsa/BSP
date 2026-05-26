@@ -51,7 +51,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, convertExtraCycleFrancosToRet } from './demandDrivenSchedule';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -211,6 +211,11 @@ export interface V2EngineContext {
      * Si el puesto tiene una sola banda (ej. RO) no tiene efecto.
      */
     rotateShifts?: boolean;
+    /**
+     * Índice de día global (desde ancla fija) del día 1 del mes.
+     * Permite péndulo M→T→N→T continuo mes a mes sin reiniciar en día 1.
+     */
+    monthStartGlobalDayIndex?: number;
     /**
      * Horas por código custom (RO, RON, etc.) según definición del SLA activo.
      * Fallback para `shiftHours` cuando el código no está en SHIFT_HRS_DEFAULT ni
@@ -1195,6 +1200,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const dayIndexMap: Map<string, number> = new Map(
         ctx.daysInMonth.map((d, i) => [ctx.getDateKey(d), i])
     );
+    const monthStartGlobalDayIndex = ctx.monthStartGlobalDayIndex ?? (() => {
+        const d0 = ctx.daysInMonth[0];
+        if (!d0) return 0;
+        const ANCHOR = new Date(2020, 0, 1);
+        return Math.round((d0.getTime() - ANCHOR.getTime()) / 86_400_000);
+    })();
     /**
      * Banda esperada para un empleado en un día dado.
      * - rotateShifts=true: rotación por bloque de ciclo CCT (6+2, 4+2…): mismo turno
@@ -1212,9 +1223,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const eCycleLen = empCycleLen[empId] ?? cycleLen;
             const eCL = empCL_map[empId] ?? cL;
             const offset = empGroupIdx[empId] ?? 0;
-            const cycleSlot = (di + offset) % eCycleLen;
+            const absDay = monthStartGlobalDayIndex + di;
+            const cycleSlot = (absDay + offset) % eCycleLen;
             if (cycleSlot >= eCL) return null;
-            const blockNum = Math.floor((di + offset) / eCycleLen);
+            const blockNum = Math.floor((absDay + offset) / eCycleLen);
             if (ring.length >= 3) {
                 const period = 2 * (ring.length - 1);
                 const pos = (slot + blockNum) % period;
@@ -1279,7 +1291,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empIds.forEach((empId, idx) => { empGroupIdx[empId] = idx; empPrimaryShift[empId] = null; });
             return;
         }
-        // Asignación de turno primario por índice.
+        // Rotativo: slot = fase inicial del péndulo (0→M, 1→T, 2→N) escalonada por guardia.
+        // Sin rotativo: banda fija todo el mes por índice.
         empIds.forEach((empId, idx) => {
             const code = shiftCodes[idx % shiftCodes.length];
             empPrimaryShift[empId] = code;
@@ -1392,6 +1405,32 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         });
     }
 
+    // Rotativo 24hs: fases M/T/N y offsets de ciclo balanceados en toda la dotación
+    // (4 guardias por banda/día entre las que trabajan), no por puesto aislado.
+    if (ctx.rotateShifts !== false && shouldUseDemandDrivenScheduling(ctx)) {
+        const rotEmpIds: string[] = [];
+        for (const pos of ctx.positions) {
+            if (isCustomCoverPosition(pos)) continue;
+            const cov = String(pos.coverageType || '').toLowerCase();
+            if (cov !== '24hs' && cov !== '24' && cov !== '24h') continue;
+            for (const empId of positionGroups[pos.positionName] || []) {
+                if (!rotEmpIds.includes(empId)) rotEmpIds.push(empId);
+            }
+        }
+        const ring = rotEmpIds.length > 0
+            ? (shiftRingByPosition[empAssignedTo[rotEmpIds[0]] || ''] || ['M', 'T', 'N'])
+            : ['M', 'T', 'N'];
+        const ringLen = Math.max(1, ring.length);
+        rotEmpIds.forEach((empId, i) => {
+            const slot = i % ringLen;
+            empRotationSlot[empId] = slot;
+            empPrimaryShift[empId] = ring[slot] ?? ring[0];
+            empGroupIdx[empId] = i % cycleLen;
+            empCycleLen[empId] = cycleLen;
+            empCL_map[empId] = cL;
+        });
+    }
+
     // ── PASO 3: Días "de trabajo" del ciclo por empleado ────────────────
     //  - Asignado a puesto que NO opera todos los días de la semana (ej. EN L-V, RON L-V):
     //    días de trabajo = días en que el puesto opera. S/D que el puesto no opera → F automático.
@@ -1435,7 +1474,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
             ctx.daysInMonth.forEach((day, di) => {
-                const slot = (di + offset) % eCycleLen;
+                const absDay = monthStartGlobalDayIndex + di;
+                const slot = (absDay + offset) % eCycleLen;
                 if (slot < eCL) set.add(ctx.getDateKey(day));
             });
         }
@@ -1766,6 +1806,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             passesAgreementRest,
             empMeta,
             isCustomCoverPosition,
+            expectedShiftForDay,
         });
     }
 
@@ -2270,25 +2311,28 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     stats.suvicoWeekBillableOver48 = suvicoWeekBillableOver48;
 
     if (useDemandDriven && dayDemandsFromFill.length > 0) {
-        fillDemandGapsBeforeFrancos(
-            {
-                ctx,
-                positionGroups,
-                cycleWorkDays,
-                customCoverEmps,
-                limitedEmpIds,
-                assignments,
-                stats,
-                runtime,
-                cutoffDay,
-                shiftHoursH,
-                writeAssignment,
-                passesAgreementRest,
-                empMeta,
-                isCustomCoverPosition,
-            },
-            dayDemandsFromFill,
-        );
+        const gapFillParams = {
+            ctx,
+            positionGroups,
+            cycleWorkDays,
+            customCoverEmps,
+            limitedEmpIds,
+            assignments,
+            stats,
+            runtime,
+            cutoffDay,
+            shiftHoursH,
+            writeAssignment,
+            passesAgreementRest,
+            empMeta,
+            isCustomCoverPosition,
+            expectedShiftForDay,
+        };
+        fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
+        if (ctx.rotateShifts !== false) {
+            alignAssignmentsToPendulum(assignments, ctx, expectedShiftForDay, isCustomCoverPosition, passesAgreementRest);
+            fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
+        }
     }
 
     // Días sobrantes:
@@ -2365,6 +2409,30 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
+    convertExtraCycleFrancosToRet(assignments, runtime, limitedEmpIds);
+
+    if (useDemandDriven && dayDemandsFromFill.length > 0 && ctx.rotateShifts !== false) {
+        fillDemandGapsBeforeFrancos(
+            {
+                ctx,
+                positionGroups,
+                cycleWorkDays,
+                customCoverEmps,
+                limitedEmpIds,
+                assignments,
+                stats,
+                runtime,
+                cutoffDay,
+                shiftHoursH,
+                writeAssignment,
+                passesAgreementRest,
+                empMeta,
+                isCustomCoverPosition,
+                expectedShiftForDay,
+            },
+            dayDemandsFromFill,
+        );
+    }
 
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)
     for (const emp of ctx.employees) {

@@ -13,6 +13,8 @@ import {
     type V2PositionDef,
     type V2ShiftDef,
 } from './autoScheduleEngineV2';
+import { SUVICO_POLICY } from './suvicoPolicy';
+import { addDaysStr, forbiddenNightToMorningWithoutBreak, forbiddenNightToNonNightWithoutBreak } from './restBetweenShifts';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
@@ -45,6 +47,71 @@ export interface DemandDrivenFillParams {
     passesAgreementRest: (empId: string, dateStr: string, code: string, start: string | undefined, hrs: number) => boolean;
     empMeta: Record<string, { priorityScore: number }>;
     isCustomCoverPosition: (pos: V2PositionDef) => boolean;
+    expectedShiftForDay?: (empId: string, dateStr: string, posName: string) => string | null;
+}
+
+interface TryFillOptions {
+    candidatePool?: string[];
+    ignoreFixedShift?: boolean;
+    preferRemainingBudget?: boolean;
+}
+
+const normBand = (c: string | null | undefined) => String(c || '').toUpperCase();
+
+function bandMatchesExpected(expected: string | null | undefined, code: string): boolean {
+    if (!expected) return false;
+    const e = normBand(expected);
+    const c = normBand(code);
+    if (e === c) return true;
+    if ((e === 'M' && c === 'D12') || (e === 'D12' && c === 'M')) return true;
+    if ((e === 'N' && c === 'N12') || (e === 'N12' && c === 'N')) return true;
+    return false;
+}
+
+function isAvailableForSlot(
+    empId: string,
+    dateStr: string,
+    code: string,
+    params: DemandDrivenFillParams,
+    pool: string[],
+    fixedShift: Record<string, string>,
+): boolean {
+    const { customCoverEmps, runtime, ctx, cycleWorkDays } = params;
+    if (!pool.includes(empId)) return false;
+    if (customCoverEmps.has(empId)) return false;
+    if (runtime[empId].assignedDays.has(dateStr)) return false;
+    if (ctx.absences[empId]?.has(dateStr)) return false;
+    if (!cycleWorkDays[empId]?.has(dateStr)) return false;
+    const fx = fixedShift[empId];
+    if (fx && normBand(fx) !== normBand(code)) return false;
+    return true;
+}
+
+function sortCandidates(
+    ids: string[],
+    params: DemandDrivenFillParams,
+    code: string,
+    inCurrent: boolean,
+    options?: TryFillOptions,
+): string[] {
+    const { runtime, limitedEmpIds, empMeta } = params;
+    const c = normBand(code);
+    return [...ids].sort((a, b) => {
+        const la = normBand(runtime[a].lastShiftCode);
+        const lb = normBand(runtime[b].lastShiftCode);
+        const contA = la === c ? 1 : 0;
+        const contB = lb === c ? 1 : 0;
+        if (contA !== contB) return contB - contA;
+        if (options?.preferRemainingBudget) {
+            const remA = HARD_MAX_HOURS - cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
+            const remB = HARD_MAX_HOURS - cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
+            if (remA !== remB) return remB - remA;
+        }
+        const ha = cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
+        const hb = cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
+        if (ha !== hb) return ha - hb;
+        return (empMeta[b]?.priorityScore ?? 0) - (empMeta[a]?.priorityScore ?? 0);
+    });
 }
 
 function cctUsed(
@@ -107,12 +174,6 @@ function global24hsEmployeePool(params: DemandDrivenFillParams): string[] {
     return ids;
 }
 
-interface TryFillOptions {
-    candidatePool?: string[];
-    ignoreFixedShift?: boolean;
-    preferRemainingBudget?: boolean;
-}
-
 function tryFillOneSlot(
     params: DemandDrivenFillParams,
     pos: V2PositionDef,
@@ -125,33 +186,31 @@ function tryFillOneSlot(
     const {
         ctx, positionGroups, cycleWorkDays, customCoverEmps, limitedEmpIds,
         runtime, shiftHoursH, writeAssignment, passesAgreementRest, empMeta,
+        expectedShiftForDay,
     } = params;
 
     const pool = options?.candidatePool ?? (positionGroups[pos.positionName] || []);
     const fixedShift = options?.ignoreFixedShift ? {} : (ctx.defaultShiftByEmp || {});
     const authorized = ctx.authorizedOver200Ids;
+    const rotate = ctx.rotateShifts !== false && !!expectedShiftForDay;
 
-    const candidates = pool
-        .filter(empId => {
-            if (customCoverEmps.has(empId)) return false;
-            if (runtime[empId].assignedDays.has(dateStr)) return false;
-            if (ctx.absences[empId]?.has(dateStr)) return false;
-            if (!cycleWorkDays[empId]?.has(dateStr)) return false;
-            const fx = fixedShift[empId];
-            if (fx && String(fx).toUpperCase() !== code) return false;
-            return true;
-        })
-        .sort((a, b) => {
-            if (options?.preferRemainingBudget) {
-                const remA = HARD_MAX_HOURS - cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
-                const remB = HARD_MAX_HOURS - cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
-                if (remA !== remB) return remB - remA;
-            }
-            const ha = cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
-            const hb = cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
-            if (ha !== hb) return ha - hb;
-            return (empMeta[b]?.priorityScore ?? 0) - (empMeta[a]?.priorityScore ?? 0);
-        });
+    const available = pool.filter(empId =>
+        isAvailableForSlot(empId, dateStr, code, params, pool, fixedShift),
+    );
+
+    let candidates: string[];
+    if (rotate) {
+        const pendulum = available.filter(empId =>
+            bandMatchesExpected(expectedShiftForDay!(empId, dateStr, pos.positionName), code),
+        );
+        const fallback = available.filter(empId => !pendulum.includes(empId));
+        candidates = [
+            ...sortCandidates(pendulum, params, code, inCurrent, options),
+            ...sortCandidates(fallback, params, code, inCurrent, options),
+        ];
+    } else {
+        candidates = sortCandidates(available, params, code, inCurrent, options);
+    }
 
     const sh = shiftDefForCode(pos, dayLetter, code, ctx.autoCycles, shiftHoursH);
     const sHrs = shiftHoursH(sh);
@@ -165,6 +224,137 @@ function tryFillOneSlot(
         if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
         writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
         return true;
+    }
+    return false;
+}
+
+/** Convierte un RET del mismo día en turno facturable si cumple descanso (cierra huecos SLA). */
+function tryPromoteRetToSlot(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    dateStr: string,
+    dayLetter: string,
+    code: string,
+    inCurrent: boolean,
+): boolean {
+    const {
+        assignments, runtime, limitedEmpIds, shiftHoursH, passesAgreementRest,
+        stats, ctx,
+    } = params;
+    const authorized = ctx.authorizedOver200Ids;
+    const sh = shiftDefForCode(pos, dayLetter, code, ctx.autoCycles, shiftHoursH);
+    const sHrs = shiftHoursH(sh);
+    const sStart = sh.startTime || DEFAULT_START[code] || '07:00';
+    const sEnd = sh.endTime;
+
+    const retIds = global24hsEmployeePool(params).filter(empId => {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
+        return a && String(a.code || '').toUpperCase() === 'RET';
+    });
+    const candidates = sortCandidates(retIds, params, code, inCurrent, { preferRemainingBudget: true });
+
+    for (const empId of candidates) {
+        if (!authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
+            continue;
+        }
+        if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
+
+        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr)!;
+        const st = runtime[empId];
+        const wkKey = isoWeekKeyFromDateStr(dateStr);
+        st.weekHours[wkKey] = (st.weekHours[wkKey] || 0) + sHrs;
+        if (inCurrent) {
+            st.cycleCurrentUsed += sHrs;
+            stats.employeeCycleHours.current[empId] = st.cycleCurrentUsed;
+        } else {
+            st.cycleNextUsed += sHrs;
+            stats.employeeCycleHours.next[empId] = st.cycleNextUsed;
+        }
+        st.monthHours += sHrs;
+        stats.employeeMonthlyHours[empId] = st.monthHours;
+        st.lastWorkDate = dateStr;
+        st.lastShiftCode = code;
+        st.lastShiftStart = parseHourFromTime(sStart);
+        st.lastShiftHours = sHrs;
+
+        a.positionName = pos.positionName;
+        a.code = code;
+        a.name = sh.name || code;
+        a.hours = sHrs;
+        a.startTime = sStart;
+        if (sEnd) a.endTime = sEnd;
+        a.isReten = false;
+        a.isFranco = false;
+
+        stats.totalBillableHours += sHrs;
+        return true;
+    }
+    return false;
+}
+
+function parseHourFromTime(s: string | undefined): number | null {
+    if (!s) return null;
+    const m = String(s).match(/(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    return Number(m[1]) + Number(m[2]) / 60;
+}
+
+/** Reasigna a otro puesto/banda el mismo día si cierra un hueco SLA sin romper descanso. */
+function tryReassignWorkerToGap(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    dateStr: string,
+    dayLetter: string,
+    code: string,
+    inCurrent: boolean,
+): boolean {
+    const {
+        assignments, passesAgreementRest, shiftHoursH, ctx, isCustomCoverPosition,
+    } = params;
+    const sh = shiftDefForCode(pos, dayLetter, code, ctx.autoCycles, shiftHoursH);
+    const sHrs = shiftHoursH(sh);
+    const sStart = sh.startTime || DEFAULT_START[code] || '07:00';
+    const sEnd = sh.endTime;
+    const targetCode = normBand(code);
+
+    const dayWork = assignments.filter(a =>
+        a.dateStr === dateStr &&
+        (a.hours ?? 0) > 0 &&
+        !a.isFranco &&
+        a.positionName &&
+        normBand(a.code) !== targetCode,
+    );
+
+    for (const donor of dayWork) {
+        const donorPos = ctx.positions.find(p => p.positionName === donor.positionName);
+        if (!donorPos || isCustomCoverPosition(donorPos)) continue;
+        if (!passesAgreementRest(donor.empId, dateStr, targetCode, sStart, sHrs)) continue;
+
+        const saved = { ...donor };
+        donor.positionName = pos.positionName;
+        donor.code = targetCode;
+        donor.name = sh.name || targetCode;
+        donor.hours = sHrs;
+        donor.startTime = sStart;
+        if (sEnd) donor.endTime = sEnd;
+
+        const donorCode = normBand(saved.code);
+        const donorSh = shiftDefForCode(donorPos, dayLetter, donorCode, ctx.autoCycles, shiftHoursH);
+        const dHrs = shiftHoursH(donorSh);
+        const dStart = donorSh.startTime || DEFAULT_START[donorCode] || '07:00';
+
+        if (
+            tryPromoteRetToSlot(params, donorPos, dateStr, dayLetter, donorCode, inCurrent)
+            || tryFillOneSlot(params, donorPos, dateStr, dayLetter, donorCode, inCurrent, {
+                candidatePool: global24hsEmployeePool(params),
+                ignoreFixedShift: true,
+                preferRemainingBudget: true,
+            })
+        ) {
+            return true;
+        }
+
+        Object.assign(donor, saved);
     }
     return false;
 }
@@ -224,12 +414,23 @@ export function fillDemandGapsBeforeFrancos(
                     if (needed <= 0) continue;
                     let have = countAssigned(params.assignments, day.dateStr, pd.positionName, code);
                     while (have < needed) {
-                        if (!tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                             candidatePool: pool,
                             ignoreFixedShift: ignoreFixed,
                             preferRemainingBudget: pass >= 1,
-                        })) break;
-                        have++;
+                        })) {
+                            have++;
+                            continue;
+                        }
+                        if (tryPromoteRetToSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            continue;
+                        }
+                        if (tryReassignWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            continue;
+                        }
+                        break;
                     }
                 }
             }
@@ -301,7 +502,7 @@ function recordUncovered(
 
 /** Paso 3: llenar huecos SLA día × puesto × banda. */
 export function fillScheduleFromDemand(params: DemandDrivenFillParams): ObjectiveDayDemand[] {
-    const { ctx, stats, isCustomCoverPosition } = params;
+    const { ctx, isCustomCoverPosition } = params;
 
     const days = ctx.daysInMonth.map(d => {
         const dateStr = ctx.getDateKey(d);
@@ -315,8 +516,29 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
         (pos, letter) => positionIsActiveOn(pos, letter),
     );
 
-    // Cronológico: llenar desde el día 1 evita que el tope CCT del mes se agote
-    // en días finales y deje la primera semana en F (0/4 cobertura).
+    if (ctx.rotateShifts !== false && params.expectedShiftForDay) {
+        fillScheduleFromPendulum(params, dayDemands, isCustomCoverPosition);
+    } else {
+        fillScheduleDemandDriven(params, dayDemands, isCustomCoverPosition);
+    }
+    recomputeUncoveredStats(params, dayDemands);
+    return dayDemands;
+}
+
+/** Rotativo: empareja guardias a su banda del bloque CCT (6+2) antes de rescate SLA. */
+function fillScheduleFromPendulum(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+    isCustomCoverPosition: (pos: V2PositionDef) => boolean,
+): void {
+    const { ctx, expectedShiftForDay } = params;
+    if (!expectedShiftForDay) {
+        fillScheduleDemandDriven(params, dayDemands, isCustomCoverPosition);
+        return;
+    }
+
+    const refPos = ctx.positions.find(p => !isCustomCoverPosition(p));
+    const refPosName = refPos?.positionName || '';
     const sortedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
     for (const day of sortedDays) {
@@ -333,7 +555,81 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
             rotPositions.some(pd => (pd.bandSlots[code] || 0) > 0),
         );
 
-        // Banda primero (4M global, luego 4T, luego 4N) → reparte mejor la dotación.
+        type SlotRef = { pos: V2PositionDef; code: string; filled: boolean };
+        const openSlots: SlotRef[] = [];
+        for (const pd of rotPositions) {
+            const pos = ctx.positions.find(p => p.positionName === pd.positionName)!;
+            for (const code of bandOrder) {
+                const needed = pd.bandSlots[code] || 0;
+                for (let n = 0; n < needed; n++) {
+                    openSlots.push({ pos, code, filled: false });
+                }
+            }
+        }
+
+        const globalPool = global24hsEmployeePool(params);
+        const workersByBand: Record<string, string[]> = {};
+        for (const code of bandOrder) workersByBand[code] = [];
+
+        for (const empId of globalPool) {
+            if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
+            if (!params.cycleWorkDays[empId]?.has(day.dateStr)) continue;
+            if (ctx.absences[empId]?.has(day.dateStr)) continue;
+            const exp = expectedShiftForDay(empId, day.dateStr, refPosName);
+            if (!exp) continue;
+            const bc = normBand(exp);
+            if (workersByBand[bc]) workersByBand[bc].push(empId);
+        }
+
+        for (const code of bandOrder) {
+            const pending = sortCandidates(workersByBand[code] || [], params, code, inCurrent);
+            for (const empId of pending) {
+                if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
+                const slot = openSlots.find(s => !s.filled && s.code === code);
+                if (!slot) break;
+                if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                    candidatePool: [empId],
+                    ignoreFixedShift: true,
+                })) {
+                    slot.filled = true;
+                }
+            }
+        }
+
+        for (const slot of openSlots.filter(s => !s.filled)) {
+            if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, slot.code, inCurrent, {
+                candidatePool: globalPool.filter(id => !params.runtime[id].assignedDays.has(day.dateStr)),
+                ignoreFixedShift: true,
+                preferRemainingBudget: true,
+            })) {
+                slot.filled = true;
+            }
+        }
+    }
+}
+
+function fillScheduleDemandDriven(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+    isCustomCoverPosition: (pos: V2PositionDef) => boolean,
+): void {
+    const { ctx } = params;
+    const sortedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+
+    for (const day of sortedDays) {
+        if (day.totalPaxUnits <= 0) continue;
+        const dayNum = parseInt(day.dateStr.split('-')[2], 10);
+        const inCurrent = dayNum <= params.cutoffDay;
+
+        const rotPositions = day.positions.filter(pd => {
+            const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+            return pos && !isCustomCoverPosition(pos);
+        });
+
+        const bandOrder = ['M', 'T', 'N', 'D12', 'N12'].filter(code =>
+            rotPositions.some(pd => (pd.bandSlots[code] || 0) > 0),
+        );
+
         for (const code of bandOrder) {
             for (const posDemand of rotPositions) {
                 const needed = posDemand.bandSlots[code] || 0;
@@ -341,6 +637,24 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
                 const pos = ctx.positions.find(p => p.positionName === posDemand.positionName)!;
                 let filled = 0;
                 while (filled < needed) {
+                    const rotate = ctx.rotateShifts !== false && params.expectedShiftForDay;
+                    if (rotate) {
+                        const globalPool = global24hsEmployeePool(params);
+                        const pendulumPool = globalPool.filter(empId =>
+                            isAvailableForSlot(empId, day.dateStr, code, params, globalPool, {})
+                            && bandMatchesExpected(
+                                params.expectedShiftForDay!(empId, day.dateStr, pos.positionName),
+                                code,
+                            ),
+                        );
+                        if (pendulumPool.length > 0 && tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                            candidatePool: pendulumPool,
+                            ignoreFixedShift: true,
+                        })) {
+                            filled++;
+                            continue;
+                        }
+                    }
                     if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                         filled++;
                     } else {
@@ -350,7 +664,6 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
             }
         }
 
-        // Segundo pase mismo día: huecos que quedaron por descanso/CCT (+ rescate global).
         for (const code of bandOrder) {
             for (const posDemand of rotPositions) {
                 const needed = posDemand.bandSlots[code] || 0;
@@ -400,9 +713,6 @@ export function fillScheduleFromDemand(params: DemandDrivenFillParams): Objectiv
             }
         }
     }
-
-    recomputeUncoveredStats(params, dayDemands);
-    return dayDemands;
 }
 
 export function shouldUseDemandDrivenScheduling(ctx: V2EngineContext): boolean {
@@ -412,4 +722,299 @@ export function shouldUseDemandDrivenScheduling(ctx: V2EngineContext): boolean {
         return cov === '24hs' || cov === '24' || cov === '24h';
     });
     return has24;
+}
+
+/** Intercambia turno/puesto entre dos filas del mismo día sin cambiar cobertura por banda. */
+function swapWorkAssignmentFields(a: V2Assignment, b: V2Assignment): void {
+    const tmp = {
+        positionName: a.positionName,
+        code: a.code,
+        name: a.name,
+        hours: a.hours,
+        startTime: a.startTime,
+        endTime: a.endTime,
+    };
+    a.positionName = b.positionName;
+    a.code = b.code;
+    a.name = b.name;
+    a.hours = b.hours;
+    a.startTime = b.startTime;
+    a.endTime = b.endTime;
+    b.positionName = tmp.positionName;
+    b.code = tmp.code;
+    b.name = tmp.name;
+    b.hours = tmp.hours;
+    b.startTime = tmp.startTime;
+    b.endTime = tmp.endTime;
+}
+
+/** Tras demand-driven: alinear filas al péndulo CCT sin romper slots SLA del día. */
+export function alignAssignmentsToPendulum(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    expectedShiftForDay: (empId: string, dateStr: string, posName: string) => string | null,
+    isCustomCoverPosition: (pos: V2PositionDef) => boolean,
+    passesAgreementRest?: (empId: string, dateStr: string, code: string, start: string | undefined, hrs: number) => boolean,
+): void {
+    if (ctx.rotateShifts === false) return;
+
+    const matches = (empId: string, dateStr: string, posName: string, code: string) => {
+        const exp = expectedShiftForDay(empId, dateStr, posName);
+        if (!exp) return true;
+        return bandMatchesExpected(exp, code);
+    };
+
+    const workIndicesForDay = (dateStr: string): number[] => {
+        const idx: number[] = [];
+        for (let i = 0; i < assignments.length; i++) {
+            const a = assignments[i];
+            if (a.dateStr !== dateStr || (a.hours ?? 0) <= 0 || a.isFranco) continue;
+            const pos = ctx.positions.find(p => p.positionName === a.positionName);
+            if (!pos || isCustomCoverPosition(pos)) continue;
+            idx.push(i);
+        }
+        return idx;
+    };
+
+    const prevWorkCode = (empId: string, dateStr: string): string | null => {
+        const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === dateStr);
+        for (let j = di - 1; j >= 0; j--) {
+            const ds = ctx.getDateKey(ctx.daysInMonth[j]);
+            const a = assignments.find(x => x.empId === empId && x.dateStr === ds);
+            if (!a) continue;
+            if ((a.hours ?? 0) <= 0 || a.isFranco) return null;
+            return normBand(a.code);
+        }
+        return null;
+    };
+
+    const rowScore = (empId: string, dateStr: string, posName: string, code: string): number => {
+        let s = matches(empId, dateStr, posName, code) ? 3 : 0;
+        const prev = prevWorkCode(empId, dateStr);
+        if (prev && prev === normBand(code)) s += 2;
+        return s;
+    };
+
+    const swapPreservesRest = (ai: V2Assignment, aj: V2Assignment, dateStr: string): boolean => {
+        if (!passesAgreementRest) return true;
+        const aiHrs = Number(ai.hours) || 8;
+        const ajHrs = Number(aj.hours) || 8;
+        return passesAgreementRest(ai.empId, dateStr, String(ai.code), ai.startTime, aiHrs)
+            && passesAgreementRest(aj.empId, dateStr, String(aj.code), aj.startTime, ajHrs);
+    };
+
+    for (let pass = 0; pass < 24; pass++) {
+        let improved = false;
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const workIdx = workIndicesForDay(dateStr);
+            for (let i = 0; i < workIdx.length; i++) {
+                for (let j = i + 1; j < workIdx.length; j++) {
+                    const ai = assignments[workIdx[i]];
+                    const aj = assignments[workIdx[j]];
+                    const before = rowScore(ai.empId, dateStr, ai.positionName, ai.code)
+                        + rowScore(aj.empId, dateStr, aj.positionName, aj.code);
+                    swapWorkAssignmentFields(ai, aj);
+                    const after = rowScore(ai.empId, dateStr, ai.positionName, ai.code)
+                        + rowScore(aj.empId, dateStr, aj.positionName, aj.code);
+                    if (after > before && swapPreservesRest(ai, aj, dateStr)) {
+                        improved = true;
+                    } else {
+                        swapWorkAssignmentFields(ai, aj);
+                    }
+                }
+            }
+        }
+        if (!improved) break;
+    }
+}
+
+/** Saltos de banda dentro de una racha laboral (sin franco intermedio). */
+export function countWorkStreakBandJumps(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    empId: string,
+): number {
+    let jumps = 0;
+    let streakCode = '';
+    for (const day of ctx.daysInMonth) {
+        const dateStr = ctx.getDateKey(day);
+        const a = assignments.find(x =>
+            x.empId === empId && x.dateStr === dateStr && (x.hours ?? 0) > 0,
+        );
+        const code = a ? normBand(a.code) : 'F';
+        if (code === 'F') {
+            streakCode = '';
+            continue;
+        }
+        if (!streakCode) {
+            streakCode = code;
+        } else if (code !== streakCode) {
+            jumps++;
+            streakCode = code;
+        }
+    }
+    return jumps;
+}
+
+function isoWeekKeyFromDateStr(dateStr: string): string {
+    const d = new Date(`${dateStr}T12:00:00`);
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = (t.getUTCDay() + 6) % 7;
+    t.setUTCDate(t.getUTCDate() - dayNum + 3);
+    const firstThursday = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const weekNum = 1 + Math.round(((t.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+    return `${t.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
+const STREAK_BREAK_FOR_NM = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+
+function walkPrevWorkBand(assignments: V2Assignment[], empId: string, fromDateStr: string): string | null {
+    let d = addDaysStr(fromDateStr, -1);
+    for (let i = 0; i < 40; i++) {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === d);
+        if (!a) return null;
+        const c = String(a.code || '').toUpperCase();
+        if (STREAK_BREAK_FOR_NM.has(c) || a.isFranco) return null;
+        if ((a.hours ?? 0) > 0) return c;
+        d = addDaysStr(d, -1);
+    }
+    return null;
+}
+
+function walkNextWorkBand(assignments: V2Assignment[], empId: string, fromDateStr: string): string | null {
+    let d = fromDateStr;
+    for (let i = 0; i < 40; i++) {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === d);
+        if (!a) return null;
+        const c = String(a.code || '').toUpperCase();
+        if (STREAK_BREAK_FOR_NM.has(c) || a.isFranco) return null;
+        if ((a.hours ?? 0) > 0) return c;
+        d = addDaysStr(d, 1);
+    }
+    return null;
+}
+
+function francoProtectsAfterNightBlock(
+    assignments: V2Assignment[],
+    empId: string,
+    francoDateStr: string,
+): boolean {
+    const prev = walkPrevWorkBand(assignments, empId, francoDateStr);
+    const next = walkNextWorkBand(assignments, empId, addDaysStr(francoDateStr, 1));
+    return forbiddenNightToNonNightWithoutBreak(prev || '', next || '');
+}
+
+/** Transiciones N/N12 → T/M/D12… en días laborales consecutivos (sin F/FF/FP/FT entre medias). */
+export function countForbiddenNightToNonNightTransitions(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+): number {
+    let count = 0;
+    for (const emp of ctx.employees) {
+        for (let di = 1; di < ctx.daysInMonth.length; di++) {
+            const prevDs = ctx.getDateKey(ctx.daysInMonth[di - 1]);
+            const curDs = ctx.getDateKey(ctx.daysInMonth[di]);
+            const prevA = assignments.find(x => x.empId === emp.id && x.dateStr === prevDs);
+            const curA = assignments.find(x => x.empId === emp.id && x.dateStr === curDs);
+            const prevCode = prevA && (prevA.hours ?? 0) > 0 && !prevA.isFranco
+                ? String(prevA.code).toUpperCase() : '';
+            const curCode = curA && (curA.hours ?? 0) > 0 && !curA.isFranco
+                ? String(curA.code).toUpperCase() : '';
+            if (forbiddenNightToNonNightWithoutBreak(prevCode, curCode)) count++;
+        }
+    }
+    return count;
+}
+
+/** @deprecated Usar countForbiddenNightToNonNightTransitions */
+export const countForbiddenNightToMorningTransitions = countForbiddenNightToNonNightTransitions;
+
+/**
+ * Corrige N→T/M/… sin franco (p. ej. tras swap del péndulo): intenta intercambiar el
+ * turno conflictivo con otro guardia del mismo día que sí cumpla descanso.
+ */
+export function repairForbiddenAfterNightTransitions(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    passesAgreementRest: (empId: string, dateStr: string, code: string, start: string | undefined, hrs: number) => boolean,
+): number {
+    const NIGHT = new Set(['N', 'N12']);
+    let fixed = 0;
+
+    for (const emp of ctx.employees) {
+        for (let di = 1; di < ctx.daysInMonth.length; di++) {
+            const prevDs = ctx.getDateKey(ctx.daysInMonth[di - 1]);
+            const curDs = ctx.getDateKey(ctx.daysInMonth[di]);
+            const curA = assignments.find(x =>
+                x.empId === emp.id && x.dateStr === curDs && (x.hours ?? 0) > 0 && !x.isFranco,
+            );
+            if (!curA) continue;
+            const prevA = assignments.find(x =>
+                x.empId === emp.id && x.dateStr === prevDs && (x.hours ?? 0) > 0 && !x.isFranco,
+            );
+            if (!prevA) continue;
+            const pc = String(prevA.code).toUpperCase();
+            const nc = String(curA.code).toUpperCase();
+            if (!NIGHT.has(pc) || NIGHT.has(nc)) continue;
+
+            const dayPeers = assignments.filter(x =>
+                x.dateStr === curDs &&
+                (x.hours ?? 0) > 0 &&
+                !x.isFranco &&
+                x.positionName &&
+                x.empId !== emp.id,
+            );
+
+            let repaired = false;
+            for (const peer of dayPeers) {
+                swapWorkAssignmentFields(curA, peer);
+                const curHrs = Number(curA.hours) || 8;
+                const peerHrs = Number(peer.hours) || 8;
+                const ok = passesAgreementRest(curA.empId, curDs, String(curA.code), curA.startTime, curHrs)
+                    && passesAgreementRest(peer.empId, curDs, String(peer.code), peer.startTime, peerHrs);
+                if (ok) {
+                    fixed++;
+                    repaired = true;
+                    break;
+                }
+                swapWorkAssignmentFields(curA, peer);
+            }
+            if (!repaired) {
+                continue;
+            }
+        }
+    }
+    return fixed;
+}
+
+/**
+ * Francos de ciclo en semanas bajo 48h facturables → RET (stand-by).
+ * Si la semana no llega al tope, no hace falta franco legal extra: queda disponible.
+ */
+export function convertExtraCycleFrancosToRet(
+    assignments: V2Assignment[],
+    runtime: DemandDrivenFillParams['runtime'],
+    limitedEmpIds: Set<string>,
+): void {
+    const defaultCap = SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_DEFAULT;
+    const limitedCap = SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_LIMITED_POSITION;
+
+    for (const a of assignments) {
+        if (String(a.code || '').toUpperCase() !== 'F') continue;
+        if (!a.isFranco && (a.hours ?? 0) > 0) continue;
+        const st = runtime[a.empId];
+        if (!st) continue;
+        const wk = isoWeekKeyFromDateStr(a.dateStr);
+        const weekBillable = st.weekHours[wk] ?? 0;
+        const cap = limitedEmpIds.has(a.empId) ? limitedCap : defaultCap;
+        if (weekBillable >= cap - 1e-6) continue;
+        if (francoProtectsAfterNightBlock(assignments, a.empId, a.dateStr)) continue;
+
+        a.code = 'RET';
+        a.name = 'Retén';
+        a.hours = 0;
+        a.isFranco = false;
+        a.isReten = true;
+    }
 }

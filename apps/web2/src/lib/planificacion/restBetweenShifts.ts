@@ -20,6 +20,48 @@ const DEFAULT_LONG_REST = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
  */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
 
+const NIGHT_BANDS = new Set(['N', 'N12']);
+const MORNING_BANDS = new Set(['M', 'D12']);
+
+/** N/N12 → M/D12 en días laborales consecutivos (sin F/FF/FP/FT entre medias). */
+export const forbiddenNightToMorningWithoutBreak = (prevCode: string, nextCode: string): boolean => {
+    const p = String(prevCode || '').toUpperCase();
+    const n = String(nextCode || '').toUpperCase();
+    return NIGHT_BANDS.has(p) && MORNING_BANDS.has(n);
+};
+
+/** N/N12 → cualquier banda distinta (T/M/D12…) sin franco real intermedio. */
+export const forbiddenNightToNonNightWithoutBreak = (prevCode: string, nextCode: string): boolean => {
+    const p = String(prevCode || '').toUpperCase();
+    const n = String(nextCode || '').toUpperCase();
+    return NIGHT_BANDS.has(p) && !!n && !NIGHT_BANDS.has(n);
+};
+
+/**
+ * Hacia atrás desde el día anterior al propuesto: si aparece N/N12 antes de un
+ * franco real (F/FF/FP/FT), un turno distinto de noche ese día estaría prohibido.
+ * RET y días vacíos se saltan (no son descanso legal).
+ */
+export const nightBlocksNonNightWithoutFranco = (
+    empId: string,
+    targetDateStr: string,
+    getShift: (eid: string, ds: string) => any | null,
+): boolean => {
+    let d = addDaysStr(targetDateStr, -1);
+    for (let i = 0; i < 40; i++) {
+        const sh = getShift(empId, d);
+        if (!sh || sh.isDeleted) return false;
+        const code = String(sh.code || sh.type || '').toUpperCase();
+        if (STREAK_BREAK_CODES.has(code)) return false;
+        if (isWorkShift(sh)) return NIGHT_BANDS.has(code);
+        d = addDaysStr(d, -1);
+    }
+    return false;
+};
+
+/** @deprecated Usar nightBlocksNonNightWithoutFranco */
+export const nightBlocksMorningWithoutFranco = nightBlocksNonNightWithoutFranco;
+
 const HOURS_BY_CODE: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8,
     /** Encargada/Admin típico L–V (9 h); el SLA puede traer otras horas en la celda. */
@@ -274,6 +316,11 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
     };
     const seNew = getShiftStartEndAbs(p.targetDateStr, proposedShift);
     if (!seNew) return null;
+
+    const newCode = String(p.proposed.code || '').toUpperCase();
+    if (!NIGHT_BANDS.has(newCode) && nightBlocksNonNightWithoutFranco(p.empId, p.targetDateStr, p.getShift)) {
+        return 'Tras noche (N/N12) debe haber franco (F/FF/FP/FT) antes del siguiente turno (mín. 12h de descanso).';
+    }
 
     const prev = findPrevWorkBoundary(p.empId, p.targetDateStr, p.getShift);
     if (prev) {

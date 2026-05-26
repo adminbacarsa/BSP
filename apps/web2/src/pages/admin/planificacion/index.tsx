@@ -2842,6 +2842,7 @@ export default function PlanificacionPage() {
         stats: import('@/lib/planificacion/autoScheduleEngineV2').V2GenerateStats,
         newChanges: Record<string, any>,
         force = false,
+        partOfGenerate = false,
     ) => {
         if (!selectedObjective || (!autoV2RunGemini && !force)) {
             return { assignments: finalAssignments, changes: newChanges, coverage };
@@ -2851,7 +2852,11 @@ export default function PlanificacionPage() {
         }
         setAutoV2GeminiLoading(true);
         try {
-            await bumpAutoV2Progress(92, 'Ajuste fino IA (Gemini)…');
+            if (partOfGenerate) {
+                await bumpAutoV2Progress(92, 'Ajuste fino IA (Gemini)…');
+            } else {
+                setAutoV2Progress({ pct: 8, label: 'Ajuste fino IA (Gemini)…' });
+            }
             const y = currentDate.getFullYear();
             const m = currentDate.getMonth();
             const mes = `${y}-${String(m + 1).padStart(2, '0')}`;
@@ -2896,10 +2901,21 @@ export default function PlanificacionPage() {
             return { assignments, changes, coverage: coverageAfter };
         } catch (e: any) {
             console.error('[planningAgentGemini]', e);
-            toast.error(e?.message || 'Error en ajuste fino IA');
+            const msg = String(e?.message || e?.code || '');
+            if (/deadline-exceeded|timeout|timed out/i.test(msg)) {
+                toast.error(
+                    'Ajuste fino IA: tiempo agotado (~3 min). Se mantiene el cronograma ya generado. Podés desactivar Gemini y re-generar.',
+                    { duration: 10000 },
+                );
+            } else {
+                toast.error(msg || 'Error en ajuste fino IA');
+            }
             return { assignments: finalAssignments, changes: newChanges, coverage };
         } finally {
             setAutoV2GeminiLoading(false);
+            if (!partOfGenerate) {
+                setAutoV2Progress(null);
+            }
         }
     };
 
@@ -3194,6 +3210,8 @@ export default function PlanificacionPage() {
                 verifyCtx,
                 gen.stats,
                 newChanges,
+                false,
+                true,
             );
             finalAssignments = geminiOut.assignments;
             coverage = geminiOut.coverage;
@@ -5937,8 +5955,8 @@ export default function PlanificacionPage() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Turnos rotativos por bloque CCT
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">6+2: MMMMMMFF→TTTTTTFF→NNNNNNFF… · 4+2: MMMMFF→…</span>
+                                                Turnos rotativos (péndulo CCT)
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">6+2: bloques M→T→N→T por guardia · continúa mes a mes · OFF = banda fija</span>
                                             </span>
                                             <button type="button" onClick={() => setAutoRotateShifts(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoRotateShifts ? 'bg-emerald-500' : 'bg-slate-300'}`}>
@@ -6251,7 +6269,15 @@ export default function PlanificacionPage() {
                                                 <Wand2 size={14}/> Generar
                                             </button>
                                         )}
-                                        <button type="button" onClick={() => setShowAutoV2Modal(false)} disabled={autoV2Loading || autoV2Generating}
+                                        <button type="button"
+                                            onClick={() => {
+                                                if (autoV2GeminiLoading) {
+                                                    setAutoV2GeminiLoading(false);
+                                                    setAutoV2Progress(null);
+                                                }
+                                                setShowAutoV2Modal(false);
+                                            }}
+                                            disabled={autoV2Loading || autoV2Generating}
                                             className="px-5 py-2 rounded-xl text-sm font-black text-slate-600 bg-slate-200 hover:bg-slate-300 transition-colors disabled:opacity-50">
                                             Cerrar
                                         </button>
