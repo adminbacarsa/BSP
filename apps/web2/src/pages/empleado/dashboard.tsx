@@ -2531,7 +2531,6 @@ export default function EmployeeDashboard() {
           <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
             <div className="flex items-center gap-2">
               <CreditCard size={18} className="text-indigo-400"/>
-              <p className="text-white font-black text-base tracking-tight">Mi Credencial</p>
             </div>
             <button onClick={() => setShowCredencial(false)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-xl hover:bg-slate-800">
               <X size={22}/>
@@ -2556,7 +2555,6 @@ export default function EmployeeDashboard() {
           <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ background: '#0f172a', borderBottom: '1px solid #1e293b' }}>
             <div className="flex items-center gap-2">
               <CreditCard size={18} className="text-indigo-400"/>
-              <p className="text-white font-black text-base tracking-tight">Mi Credencial</p>
             </div>
             <button onClick={() => setShowCredencialVista(false)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-xl hover:bg-slate-800">
               <X size={22}/>
