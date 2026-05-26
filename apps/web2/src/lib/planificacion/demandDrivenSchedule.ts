@@ -203,11 +203,7 @@ function tryFillOneSlot(
         const pendulum = available.filter(empId =>
             bandMatchesExpected(expectedShiftForDay!(empId, dateStr, pos.positionName), code),
         );
-        const fallback = available.filter(empId => !pendulum.includes(empId));
-        candidates = [
-            ...sortCandidates(pendulum, params, code, inCurrent, options),
-            ...sortCandidates(fallback, params, code, inCurrent, options),
-        ];
+        candidates = sortCandidates(pendulum, params, code, inCurrent, options);
     } else {
         candidates = sortCandidates(available, params, code, inCurrent, options);
     }
@@ -422,13 +418,15 @@ export function fillDemandGapsBeforeFrancos(
                             have++;
                             continue;
                         }
-                        if (tryPromoteRetToSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
-                            have++;
-                            continue;
-                        }
-                        if (tryReassignWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
-                            have++;
-                            continue;
+                        if (ctx.rotateShifts === false) {
+                            if (tryPromoteRetToSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                                have++;
+                                continue;
+                            }
+                            if (tryReassignWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                                have++;
+                                continue;
+                            }
                         }
                         break;
                     }
@@ -531,7 +529,7 @@ function fillScheduleFromPendulum(
     dayDemands: ObjectiveDayDemand[],
     isCustomCoverPosition: (pos: V2PositionDef) => boolean,
 ): void {
-    const { ctx, expectedShiftForDay } = params;
+    const { ctx, expectedShiftForDay, passesAgreementRest, shiftHoursH } = params;
     if (!expectedShiftForDay) {
         fillScheduleDemandDriven(params, dayDemands, isCustomCoverPosition);
         return;
@@ -578,31 +576,51 @@ function fillScheduleFromPendulum(
             const exp = expectedShiftForDay(empId, day.dateStr, refPosName);
             if (!exp) continue;
             const bc = normBand(exp);
-            if (workersByBand[bc]) workersByBand[bc].push(empId);
+            if (!workersByBand[bc]) continue;
+            const sh = shiftDefForCode(refPos!, day.dayLetter, bc, ctx.autoCycles, shiftHoursH);
+            const sHrs = shiftHoursH(sh);
+            const sStart = sh.startTime || DEFAULT_START[bc] || '07:00';
+            if (!passesAgreementRest(empId, day.dateStr, bc, sStart, sHrs)) continue;
+            workersByBand[bc].push(empId);
         }
 
         for (const code of bandOrder) {
             const pending = sortCandidates(workersByBand[code] || [], params, code, inCurrent);
-            for (const empId of pending) {
-                if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
-                const slot = openSlots.find(s => !s.filled && s.code === code);
-                if (!slot) break;
-                if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, code, inCurrent, {
-                    candidatePool: [empId],
-                    ignoreFixedShift: true,
-                })) {
-                    slot.filled = true;
+            for (const slot of openSlots.filter(s => !s.filled && s.code === code)) {
+                for (const empId of pending) {
+                    if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
+                    if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        candidatePool: [empId],
+                        ignoreFixedShift: true,
+                    })) {
+                        slot.filled = true;
+                        break;
+                    }
                 }
             }
         }
 
         for (const slot of openSlots.filter(s => !s.filled)) {
-            if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, slot.code, inCurrent, {
-                candidatePool: globalPool.filter(id => !params.runtime[id].assignedDays.has(day.dateStr)),
-                ignoreFixedShift: true,
-                preferRemainingBudget: true,
-            })) {
-                slot.filled = true;
+            const phasePool = globalPool.filter(empId => {
+                if (params.runtime[empId].assignedDays.has(day.dateStr)) return false;
+                if (!params.cycleWorkDays[empId]?.has(day.dateStr)) return false;
+                if (ctx.absences[empId]?.has(day.dateStr)) return false;
+                const exp = expectedShiftForDay(empId, day.dateStr, slot.pos.positionName);
+                return bandMatchesExpected(exp, slot.code);
+            });
+            const sorted = sortCandidates(phasePool, params, slot.code, inCurrent, { preferRemainingBudget: true });
+            for (const empId of sorted) {
+                const sh = shiftDefForCode(slot.pos, day.dayLetter, slot.code, ctx.autoCycles, shiftHoursH);
+                const sHrs = shiftHoursH(sh);
+                const sStart = sh.startTime || DEFAULT_START[slot.code] || '07:00';
+                if (!passesAgreementRest(empId, day.dateStr, slot.code, sStart, sHrs)) continue;
+                if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, slot.code, inCurrent, {
+                    candidatePool: [empId],
+                    ignoreFixedShift: true,
+                })) {
+                    slot.filled = true;
+                    break;
+                }
             }
         }
     }
@@ -989,14 +1007,43 @@ export function repairForbiddenAfterNightTransitions(
 }
 
 /**
+ * Rotativo ON: restaurar F en días de descanso del ciclo (expected=null).
+ * Convierte RET→F para que se vean bloques 6+2 limpios, no tablero de retén.
+ */
+export function restoreRotativeCycleFrancos(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    expectedShiftForDay: (empId: string, dateStr: string, posName: string) => string | null,
+    defaultPosByEmp: Record<string, string | null | undefined>,
+): void {
+    if (ctx.rotateShifts === false) return;
+    for (const a of assignments) {
+        if (String(a.code || '').toUpperCase() !== 'RET') continue;
+        const posName = defaultPosByEmp[a.empId] || a.positionName || ctx.positions[0]?.positionName || '';
+        const exp = expectedShiftForDay(a.empId, a.dateStr, posName);
+        if (exp) continue;
+        a.code = 'F';
+        a.name = 'Franco';
+        a.hours = 0;
+        a.startTime = '00:00';
+        a.isFranco = true;
+        a.isReten = false;
+        a.positionName = '';
+    }
+}
+
+/**
  * Francos de ciclo en semanas bajo 48h facturables → RET (stand-by).
  * Si la semana no llega al tope, no hace falta franco legal extra: queda disponible.
+ * NO aplica con rotativo ON: los FF del 6+2 deben quedar en verde (F).
  */
 export function convertExtraCycleFrancosToRet(
     assignments: V2Assignment[],
     runtime: DemandDrivenFillParams['runtime'],
     limitedEmpIds: Set<string>,
+    rotateShifts?: boolean,
 ): void {
+    if (rotateShifts !== false) return;
     const defaultCap = SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_DEFAULT;
     const limitedCap = SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_LIMITED_POSITION;
 

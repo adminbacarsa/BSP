@@ -64,14 +64,17 @@ for (const day of daysInMonth) {
 if (current && current !== 'F') bandsByBlock.push(`${current}x${blockLen}`);
 
 let totalJumps = 0;
+let totalRet = 0;
 for (const emp of employees) {
     totalJumps += countWorkStreakBandJumps(gen.assignments, baseCtx, emp.id);
+    totalRet += gen.assignments.filter(a => a.empId === emp.id && String(a.code).toUpperCase() === 'RET').length;
 }
 
 console.log('Esquema:', picked.cycles.join(', '), `(cL=${cL})`);
 console.log('Secuencia e0 (bloques):', bandsByBlock.join(' → '));
 console.log('Hs:', Math.round(gen.stats.totalBillableHours), 'uncovered:', gen.stats.uncoveredSlots);
 console.log('Saltos de banda mid-racha (todos):', totalJumps);
+console.log('Celdas RET (todas):', totalRet);
 
 const nmViolations = countForbiddenNightToNonNightTransitions(gen.assignments, baseCtx);
 console.log('Transiciones N→(T/M/…) sin franco:', nmViolations);

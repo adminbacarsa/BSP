@@ -51,7 +51,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, convertExtraCycleFrancosToRet } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, convertExtraCycleFrancosToRet, restoreRotativeCycleFrancos } from './demandDrivenSchedule';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -2329,10 +2329,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             expectedShiftForDay,
         };
         fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
-        if (ctx.rotateShifts !== false) {
-            alignAssignmentsToPendulum(assignments, ctx, expectedShiftForDay, isCustomCoverPosition, passesAgreementRest);
-            fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
-        }
     }
 
     // Días sobrantes:
@@ -2380,7 +2376,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const is24hsAssigned = !!assignedPos
                 && !isCustomCoverPosition(assignedPos)
                 && ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every(l => positionIsActiveOn(assignedPos, l));
-            if (!useDemandDriven && is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
+            if (is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
                 const dayShifts = effectiveShiftsForPositionDay(assignedPos!, dayLetter, ctx.autoCycles);
                 const primary = expectedShiftForDay(emp.id, dateStr, assignedPosName!);
                 const sh = primary
@@ -2391,8 +2387,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
+            const rotative = ctx.rotateShifts !== false;
             const fallbackCode = isWorkDayInCycle
-                ? (isPostStreakShortCycle ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F'))
+                ? (isPostStreakShortCycle ? 'F' : (rotative ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F')))
                 : 'F';
             assignments.push({
                 empId: emp.id,
@@ -2409,7 +2406,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
-    convertExtraCycleFrancosToRet(assignments, runtime, limitedEmpIds);
+    convertExtraCycleFrancosToRet(assignments, runtime, limitedEmpIds, ctx.rotateShifts);
+    restoreRotativeCycleFrancos(assignments, ctx, expectedShiftForDay, defaultPos);
 
     if (useDemandDriven && dayDemandsFromFill.length > 0 && ctx.rotateShifts !== false) {
         fillDemandGapsBeforeFrancos(

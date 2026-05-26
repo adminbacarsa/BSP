@@ -22,6 +22,14 @@ const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', '
 
 const NIGHT_BANDS = new Set(['N', 'N12']);
 const MORNING_BANDS = new Set(['M', 'D12']);
+const EVENING_BANDS = new Set(['T']);
+
+/** T → M/D12 al día siguiente: ~8h de descanso (< 12h mín.). */
+export const forbiddenEveningToMorningWithoutBreak = (prevCode: string, nextCode: string): boolean => {
+    const p = String(prevCode || '').toUpperCase();
+    const n = String(nextCode || '').toUpperCase();
+    return EVENING_BANDS.has(p) && MORNING_BANDS.has(n);
+};
 
 /** N/N12 → M/D12 en días laborales consecutivos (sin F/FF/FP/FT entre medias). */
 export const forbiddenNightToMorningWithoutBreak = (prevCode: string, nextCode: string): boolean => {
@@ -320,6 +328,14 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
     const newCode = String(p.proposed.code || '').toUpperCase();
     if (!NIGHT_BANDS.has(newCode) && nightBlocksNonNightWithoutFranco(p.empId, p.targetDateStr, p.getShift)) {
         return 'Tras noche (N/N12) debe haber franco (F/FF/FP/FT) antes del siguiente turno (mín. 12h de descanso).';
+    }
+
+    const prevCal = p.getShift(p.empId, addDaysStr(p.targetDateStr, -1));
+    if (prevCal && isWorkShift(prevCal)) {
+        const prevCode = String(prevCal.code || prevCal.type || '').toUpperCase();
+        if (forbiddenEveningToMorningWithoutBreak(prevCode, newCode)) {
+            return 'T→M consecutivo prohibido: mínimo 12h de descanso entre tarde y mañana del día siguiente.';
+        }
     }
 
     const prev = findPrevWorkBoundary(p.empId, p.targetDateStr, p.getShift);
