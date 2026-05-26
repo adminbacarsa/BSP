@@ -31,9 +31,14 @@ function run(cmd, env = {}) {
   }
 }
 
-// Build con USE_EMULATOR=false inyectado solo en este proceso
-// .env.local NO se modifica — el dev server en :3000 sigue igual
-run('npm --prefix apps/web2 run build', { NEXT_PUBLIC_USE_EMULATOR: 'false' });
+// Build con USE_EMULATOR=false y NEXT_DIST_DIR=.next-prod:
+// - .next/ (dev server) NO se toca — localhost:3000 sigue corriendo
+// - .next-prod/ recibe los artefactos de producción (webpack cache, etc.)
+// - apps/web2/out/ sigue siendo el directorio de export estático para Firebase
+run('npm --prefix apps/web2 run build', {
+  NEXT_PUBLIC_USE_EMULATOR: 'false',
+  NEXT_DIST_DIR: '.next-prod',
+});
 
 // Deploy selectivo según flags
 const targets = ['hosting'];

@@ -9,6 +9,7 @@ build/
 .next/
 out/
 **/.next/
+**/.next-prod/
 **/out/
 _pdfgen/
 apps/web2/out_local_backup/

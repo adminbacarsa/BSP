@@ -44,6 +44,7 @@ fs.writeFileSync(path.join(__dirname, 'public', 'manifest.json'), JSON.stringify
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   pageExtensions: ['tsx', 'ts'],
   output: 'export',
   trailingSlash: true,
