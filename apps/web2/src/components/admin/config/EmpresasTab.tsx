@@ -83,9 +83,9 @@ export default function EmpresasTab() {
 
   // Credencial — logo + modelo + hue + textos configurables
   const CRED_MODELOS = [
-    { id: 'clasico',  label: 'Clásico',  desc: 'Foto circular, QR abajo' },
-    { id: 'moderno',  label: 'Moderno',  desc: 'Foto cuadrada lateral' },
-    { id: 'compacto', label: 'Compacto', desc: 'Foto mini, datos grandes' },
+    { id: 'gradiente',   label: 'Gradiente',    desc: 'Fondo degradado · Foto cuadrada' },
+    { id: 'corporativo', label: 'Corporativo',  desc: 'Header oscuro · Cuerpo claro' },
+    { id: 'premium',     label: 'Premium Dark', desc: 'Tarjeta oscura · Acento violeta' },
   ];
 
   // Derivar paleta desde hue HSL
@@ -656,8 +656,6 @@ export default function EmpresasTab() {
                   const col = colorsFromHue(credHue);
                   const selected = modeloCred === modelo.id;
                   const isH = orientacionCred === 'horizontal';
-                  const isCompacto = modelo.id === 'compacto';
-                  const isModerno = modelo.id === 'moderno';
                   return (
                     <button
                       key={modelo.id}
@@ -668,169 +666,220 @@ export default function EmpresasTab() {
                           : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
                       }`}
                     >
-                      {/* Mini preview */}
-                      {/* Mini preview — credencial real */}
                       <div
                         className="w-full flex items-center justify-center overflow-hidden"
                         style={{ height: isH ? 215 : 335, background: '#0d1117' }}
                       >
                         {(() => {
-                          const personSVG = (size: number) => (
-                            <svg width={size} height={size} viewBox="0 0 60 70" fill="none">
+                          const person = (sz: number) => (
+                            <svg width={sz} height={sz} viewBox="0 0 60 70" fill="none">
                               <circle cx="30" cy="22" r="13" fill={col.accent} opacity="0.85"/>
                               <ellipse cx="30" cy="60" rx="22" ry="14" fill={col.accent} opacity="0.65"/>
                             </svg>
                           );
-                          const qr = (sz: number) => (
-                            <div style={{ width: sz, height: sz, borderRadius: 3, border: `1.5px solid ${col.accent}60`, overflow: 'hidden', flexShrink: 0 }}>
-                              <div style={{ width: '100%', height: '100%', backgroundImage: `repeating-linear-gradient(0deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px),repeating-linear-gradient(90deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px)` }}/>
+                          const photoSq = (w: number, h: number, r = 4) => (
+                            <div style={{ width:w, height:h, borderRadius:r, background:col.h2, border:`1.5px solid ${col.accent}55`, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                              {person(Math.round(Math.min(w,h)*0.75))}
                             </div>
-                          );
-                          const barcode = (w: number) => (
-                            <div style={{ flex: 1, height: 22, background: `repeating-linear-gradient(90deg,${col.accent}90 0,${col.accent}90 1.5px,transparent 1.5px,transparent 3.5px,${col.accent}70 3.5px,${col.accent}70 5px,transparent 5px,transparent 6px)`, borderRadius: 2 }}/>
                           );
                           const logoEl = (h: number) => logoPreview
-                            ? <img src={logoPreview} style={{ height: h, maxWidth: h*3.5, objectFit: 'contain', filter: 'brightness(0) invert(1)', display: 'block' }} alt=""/>
-                            : <span style={{ fontSize: h-2, color: col.accent, fontWeight: 900, letterSpacing: 1, lineHeight: 1 }}>BACAR</span>;
-                          const campos6 = [['DNI','28.456.789'],['LEGAJO','B-0142'],['ÁREA','Operaciones'],['EMPRESA','Grupo Bacar'],['TURNO','Mañana'],['VIGENCIA','12/2026']];
-
-                          if (isH) return (
-                            /* ─── HORIZONTAL ─── */
-                            <div style={{ width: 310, height: 196, background: col.h1, borderRadius: 8, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex' }}>
-                              {/* col izq */}
-                              <div style={{ width: 82, background: col.h2, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 8px', borderRight: `2px solid ${col.accent}` }}>
-                                {logoEl(14)}
-                                <div style={{ width: isCompacto ? 46 : 54, height: isCompacto ? 46 : 54, borderRadius: isCompacto ? 7 : '50%', background: col.h1, border: `2.5px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {personSVG(isCompacto ? 34 : 42)}
-                                </div>
-                                <div style={{ width: '75%', height: 1, background: `${col.accent}50` }}/>
-                                <div style={{ fontSize: 6.5, color: `${col.accent}cc`, fontWeight: 700, textAlign: 'center', letterSpacing: 0.3 }}>GRUPO BACAR</div>
-                              </div>
-                              {/* col der */}
-                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                <div style={{ background: col.h2, padding: '6px 10px', borderBottom: `1.5px solid ${col.accent}` }}>
-                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 1 }}>CREDENCIAL DE ACCESO</div>
-                                  <div style={{ fontSize: 8.5, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
-                                  <div style={{ fontSize: 7, color: `${col.accent}dd`, fontWeight: 600 }}>Guardia de Seguridad</div>
-                                </div>
-                                <div style={{ padding: '7px 10px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px' }}>
-                                  {campos6.map(([l,v], i) => (
-                                    <div key={i}>
-                                      <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 1.5 }}>{l}</div>
-                                      <div style={{ fontSize: 8, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}20` }}>
-                                  {barcode(100)}
-                                  {qr(28)}
-                                </div>
+                            ? <img src={logoPreview} style={{ height:h, maxWidth:h*3.5, objectFit:'contain', filter:'brightness(0) invert(1)', display:'block' }} alt=""/>
+                            : <span style={{ fontSize:h-2, color:col.accent, fontWeight:900, letterSpacing:1, lineHeight:1 }}>BACAR</span>;
+                          const verSec = (fs = 13) => (
+                            <div>
+                              <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', marginBottom:2, letterSpacing:0.5 }}>CÓDIGO DE VERIFICACIÓN</div>
+                              <div style={{ fontSize:fs, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
+                              <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.14)', borderRadius:1, overflow:'hidden' }}>
+                                <div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/>
                               </div>
                             </div>
                           );
-
-                          if (!isModerno && !isCompacto) return (
-                            /* ─── VERTICAL CLÁSICO ─── */
-                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
-                              <div style={{ background: col.h2, padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: `2px solid ${col.accent}` }}>
-                                {logoEl(16)}
-                                <div style={{ flex: 1, textAlign: 'right' }}>
-                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 1 }}>CREDENCIAL DE ACCESO</div>
-                                  <div style={{ fontSize: 7.5, color: '#ffffffcc', fontWeight: 600 }}>Personal Autorizado</div>
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 14, paddingBottom: 8 }}>
-                                <div style={{ width: 68, height: 68, borderRadius: '50%', background: col.h2, border: `3px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {personSVG(52)}
-                                </div>
-                              </div>
-                              <div style={{ padding: '0 12px 7px', textAlign: 'center' }}>
-                                <div style={{ fontSize: 12, color: '#fff', fontWeight: 800, letterSpacing: 0.3 }}>JUAN A. PÉREZ</div>
-                                <div style={{ fontSize: 8.5, color: col.accent, fontWeight: 700, marginTop: 2 }}>GUARDIA DE SEGURIDAD</div>
-                              </div>
-                              <div style={{ height: 1, background: `${col.accent}30`, margin: '0 12px 8px' }}/>
-                              <div style={{ padding: '0 12px', flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 10px' }}>
-                                {campos6.map(([l,v], i) => (
-                                  <div key={i}>
-                                    <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 }}>{l}</div>
-                                    <div style={{ fontSize: 8.5, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div style={{ padding: '6px 12px 5px', display: 'flex', justifyContent: 'flex-end' }}>{qr(30)}</div>
-                              <div style={{ height: 8, background: col.accent }}/>
+                          const qrEl = (sz: number) => (
+                            <div style={{ width:sz, height:sz, borderRadius:3, border:`1.5px solid ${col.accent}60`, overflow:'hidden', flexShrink:0 }}>
+                              <div style={{ width:'100%', height:'100%', backgroundImage:`repeating-linear-gradient(0deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px),repeating-linear-gradient(90deg,${col.accent}80 0,${col.accent}80 2px,transparent 2px,transparent 4px)` }}/>
                             </div>
                           );
+                          const chip = () => <div style={{ width:16, height:11, borderRadius:2, background:'linear-gradient(135deg,#c6901c,#efc848,#a67010)', border:'0.5px solid #9a6a08' }}/>;
 
-                          if (isModerno) return (
-                            /* ─── VERTICAL MODERNO ─── */
-                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
-                              <div style={{ background: `linear-gradient(140deg,${col.h2} 0%,${col.h1} 100%)`, padding: '10px 11px 26px', position: 'relative', borderBottom: `2px solid ${col.accent}` }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  {logoEl(15)}
-                                  <div style={{ width: 1, height: 14, background: `${col.accent}50` }}/>
+                          /* ─────── GRADIENTE ─────── */
+                          if (modelo.id === 'gradiente') {
+                            const bg = `linear-gradient(160deg,${col.h1} 0%,${col.h2} 55%,${hslToHex(credHue,50,28)} 100%)`;
+                            if (isH) return (
+                              <div style={{ width:310, height:196, background:bg, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', display:'flex', overflow:'hidden', position:'relative' }}>
+                                <div style={{ width:88, background:col.h2, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:7, padding:'10px 8px', borderRight:`1px solid ${col.accent}35` }}>
+                                  {logoEl(13)}{photoSq(58, 78, 5)}
+                                </div>
+                                <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'8px 10px', gap:5 }}>
                                   <div>
-                                    <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700, letterSpacing: 0.8 }}>CREDENCIAL</div>
-                                    <div style={{ fontSize: 7.5, color: '#fff', fontWeight: 700 }}>Personal Autorizado</div>
+                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                    <div style={{ fontSize:5, color:'rgba(255,255,255,0.45)', fontWeight:700, marginBottom:3 }}>VIGILADOR</div>
+                                  </div>
+                                  <div style={{ height:0.5, background:'rgba(255,255,255,0.15)' }}/>
+                                  <div style={{ display:'flex', gap:10 }}>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ height:0.5, background:'rgba(255,255,255,0.15)' }}/>
+                                  {verSec(12)}
+                                  <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                                    {chip()}
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>Válida 12/2026</div>
                                   </div>
                                 </div>
-                                <div style={{ position: 'absolute', top: 6, right: 11, width: 58, height: 58, borderRadius: '50%', background: col.h1, border: `3px solid ${col.accent}`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {personSVG(46)}
+                                <div style={{ position:'absolute', bottom:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${col.accent}70,rgba(255,255,255,0.35),${col.accent}70)` }}/>
+                              </div>
+                            );
+                            return (
+                              <div style={{ width:195, height:308, background:bg, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', display:'flex', flexDirection:'column', position:'relative', overflow:'hidden' }}>
+                                <div style={{ padding:'7px 9px 6px', paddingRight:54, borderBottom:'0.5px solid rgba(255,255,255,0.18)', display:'flex', alignItems:'center', gap:5 }}>
+                                  {logoEl(13)}<div style={{ fontSize:5.5, color:'#fff', fontWeight:900 }}>SECURITY CORP</div>
                                 </div>
+                                <div style={{ padding:'5px 9px', paddingRight:54, borderBottom:'0.5px solid rgba(255,255,255,0.13)' }}>
+                                  <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                  <div style={{ fontSize:5, color:'rgba(255,255,255,0.45)', fontWeight:700, marginBottom:5 }}>VIGILADOR</div>
+                                  <div style={{ display:'flex', gap:9 }}>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.33)' }}>LEGAJO</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.82)', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.33)' }}>DNI</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.82)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                </div>
+                                <div style={{ padding:'5px 9px', paddingRight:54, borderBottom:'0.5px solid rgba(255,255,255,0.13)' }}>
+                                  {verSec(13)}
+                                </div>
+                                <div style={{ position:'absolute', top:0, right:0, width:50, bottom:16, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  {photoSq(42, 62, 4)}
+                                </div>
+                                <div style={{ marginTop:'auto', padding:'4px 9px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                                  {chip()}<div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>Válida 12/2026</div>
+                                </div>
+                                <div style={{ height:3, background:`linear-gradient(90deg,${col.accent}70,rgba(255,255,255,0.35),${col.accent}70)` }}/>
                               </div>
-                              <div style={{ padding: '8px 11px 5px' }}>
-                                <div style={{ fontSize: 12, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
-                                <div style={{ fontSize: 8.5, color: col.accent, fontWeight: 700, marginTop: 2 }}>Guardia de Seguridad</div>
-                              </div>
-                              <div style={{ padding: '5px 11px', flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                                {[['ÁREA','Operaciones'],['EMPRESA','Grupo Bacar'],['TURNO','Mañana'],['VIGENCIA','12/2026']].map(([l,v],i) => (
-                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                    <div style={{ width: 3, height: 16, background: col.accent, borderRadius: 2, flexShrink: 0 }}/>
+                            );
+                          }
+
+                          /* ─────── CORPORATIVO ─────── */
+                          if (modelo.id === 'corporativo') {
+                            const hdrBg = `linear-gradient(90deg,#111827,#1e3a5f)`;
+                            if (isH) return (
+                              <div style={{ width:310, height:196, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                                <div style={{ background:hdrBg, padding:'5px 10px', display:'flex', alignItems:'center', gap:6 }}>
+                                  {logoEl(12)}<div style={{ flex:1 }}><div style={{ fontSize:6.5, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:col.accent }}>CREDENCIAL DE EMPLEADO</div></div>
+                                </div>
+                                <div style={{ height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
+                                <div style={{ flex:1, background:'#f8fafc', display:'flex' }}>
+                                  <div style={{ width:75, display:'flex', alignItems:'center', justifyContent:'center', padding:'8px 8px' }}>{photoSq(56, 75, 5)}</div>
+                                  <div style={{ flex:1, padding:'7px 8px 6px', display:'flex', flexDirection:'column', gap:4 }}>
                                     <div>
-                                      <div style={{ fontSize: 6, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>{l}</div>
-                                      <div style={{ fontSize: 8.5, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
+                                      <div style={{ fontSize:8.5, color:'#111827', fontWeight:900 }}>GARCÍA, Juan</div>
+                                      <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
+                                    </div>
+                                    <div style={{ display:'flex', gap:9 }}>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>#4521</div></div>
+                                      <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
+                                    </div>
+                                    <div style={{ background:hdrBg, borderRadius:4, padding:'4px 6px' }}>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:10, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
+                                      <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/></div>
                                     </div>
                                   </div>
-                                ))}
+                                  <div style={{ padding:'7px 8px 6px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', gap:2 }}>
+                                    {qrEl(30)}<div style={{ fontSize:3.5, color:'#94a3b8' }}>12/2026</div>
+                                  </div>
+                                </div>
+                                <div style={{ background:hdrBg, height:8, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SISTEMA COSP</div>
+                                </div>
                               </div>
-                              <div style={{ padding: '5px 11px 6px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}25` }}>
-                                {barcode(100)}
-                                {qr(26)}
+                            );
+                            return (
+                              <div style={{ width:195, height:308, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+                                <div style={{ background:hdrBg, padding:'7px 10px', display:'flex', alignItems:'center', gap:7 }}>
+                                  {logoEl(14)}<div><div style={{ fontSize:7, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:col.accent }}>IDENTIFICACIÓN PERSONAL</div></div>
+                                </div>
+                                <div style={{ height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
+                                <div style={{ flex:1, background:'#f8fafc', padding:'8px 10px', display:'flex', flexDirection:'column', gap:6 }}>
+                                  <div style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
+                                    <div style={{ flex:1 }}>
+                                      <div style={{ fontSize:9.5, color:'#111827', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:9.5, color:'#111827', fontWeight:900, lineHeight:1.2 }}>Juan Carlos</div>
+                                      <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:3 }}>VIGILADOR</div>
+                                    </div>
+                                    {photoSq(52, 66, 5)}
+                                  </div>
+                                  <div style={{ height:0.5, background:'#e2e8f0' }}/>
+                                  <div style={{ display:'flex', gap:10 }}>
+                                    <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:7, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:7, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ background:hdrBg, borderRadius:5, padding:'5px 7px' }}>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                    <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.2em' }}>482 071</div>
+                                    <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/></div>
+                                  </div>
+                                  <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                                    {qrEl(32)}<div><div style={{ fontSize:4, color:'#94a3b8' }}>Válida hasta</div><div style={{ fontSize:6.5, fontWeight:700, color:'#1e293b' }}>12/2026</div></div>
+                                  </div>
+                                </div>
+                                <div style={{ background:hdrBg, height:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP · Sistema COSP</div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          /* ─────── PREMIUM DARK ─────── */
+                          const darkBg = '#0d1117', purp = '#6366f1';
+                          if (isH) return (
+                            <div style={{ width:310, height:196, background:darkBg, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.9)', overflow:'hidden', display:'flex', position:'relative' }}>
+                              <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${purp},${col.accent})` }}/>
+                              <div style={{ width:86, paddingTop:8, display:'flex', flexDirection:'column', alignItems:'center', gap:7, borderRight:`0.5px solid ${purp}30` }}>
+                                {logoEl(13)}
+                                <div style={{ width:56, height:70, border:`1.5px solid ${purp}70`, borderRadius:5, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', background:'#1a1f2e' }}>{person(46)}</div>
+                                <div style={{ fontSize:4, color:'rgba(255,255,255,0.25)', textAlign:'center' }}>SECURITY CORP</div>
+                              </div>
+                              <div style={{ flex:1, paddingTop:8, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
+                                <div><div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div><div style={{ fontSize:5, color:purp, fontWeight:700 }}>VIGILADOR SENIOR</div></div>
+                                <div style={{ background:'rgba(255,255,255,0.05)', borderRadius:4, padding:'4px 6px', border:`0.5px solid ${purp}25` }}>
+                                  <div style={{ display:'flex', gap:9, marginBottom:3 }}>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>LEGAJO</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
+                                    <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>DNI</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
+                                  </div>
+                                  <div style={{ height:0.5, background:`${purp}25`, margin:'2px 0' }}/>
+                                  <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                  <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
+                                  <div style={{ marginTop:2, height:1.5, width:28, background:'rgba(255,255,255,0.12)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:`${purp}80` }}/></div>
+                                </div>
+                                <div style={{ marginTop:'auto', fontSize:4, color:'rgba(255,255,255,0.25)' }}>Válida 12/2026</div>
                               </div>
                             </div>
                           );
-
-                          /* ─── VERTICAL COMPACTO ─── */
                           return (
-                            <div style={{ width: 195, height: 308, background: col.h1, borderRadius: 10, overflow: 'hidden', boxShadow: '0 6px 28px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}>
-                              <div style={{ background: col.h2, padding: '7px 11px', display: 'flex', alignItems: 'center', gap: 7, borderBottom: `2px solid ${col.accent}` }}>
-                                {logoEl(14)}
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 6.5, color: col.accent, fontWeight: 700 }}>CREDENCIAL DE ACCESO</div>
-                                  <div style={{ fontSize: 7.5, color: '#fff', fontWeight: 700 }}>GRUPO BACAR</div>
+                            <div style={{ width:195, height:308, background:darkBg, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.9)', overflow:'hidden', display:'flex', flexDirection:'column', position:'relative' }}>
+                              <div style={{ position:'absolute', top:0, left:0, bottom:0, width:4, background:`linear-gradient(180deg,${purp},${col.accent})`, zIndex:1 }}/>
+                              <div style={{ padding:'7px 9px 7px 12px', display:'flex', alignItems:'center', gap:6 }}>
+                                {logoEl(12)}<div><div style={{ fontSize:5.5, color:purp, fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:3.8, color:'rgba(255,255,255,0.3)' }}>PERSONAL DE SEGURIDAD</div></div>
+                                <div style={{ marginLeft:'auto', width:5, height:5, borderRadius:'50%', background:'#22c55e', boxShadow:'0 0 5px #22c55e' }}/>
+                              </div>
+                              <div style={{ display:'flex', justifyContent:'center', padding:'5px 0 6px' }}>
+                                <div style={{ position:'relative', width:60, height:74, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                  <div style={{ position:'absolute', inset:0, border:`0.8px solid ${purp}35`, borderRadius:5, transform:'rotate(4deg)' }}/>
+                                  <div style={{ width:52, height:66, border:`1.5px solid ${purp}70`, borderRadius:4, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', background:'#1a1f2e' }}>{person(44)}</div>
                                 </div>
-                                <div style={{ width: 40, height: 40, borderRadius: 5, background: col.h1, border: `2px solid ${col.accent}`, overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  {personSVG(32)}
+                              </div>
+                              <div style={{ margin:'0 9px 0 12px', background:'rgba(255,255,255,0.05)', borderRadius:6, padding:'6px 8px', border:`0.5px solid ${purp}25`, flex:1 }}>
+                                <div style={{ fontSize:9, color:'#fff', fontWeight:900, marginBottom:1 }}>GARCÍA, Juan</div>
+                                <div style={{ fontSize:5, color:purp, fontWeight:700, marginBottom:5 }}>VIGILADOR SENIOR</div>
+                                <div style={{ display:'flex', gap:10, marginBottom:4 }}>
+                                  <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
+                                  <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
                                 </div>
+                                <div style={{ height:0.5, background:`${purp}25`, marginBottom:4 }}/>
+                                <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
+                                <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.12)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:`${purp}80` }}/></div>
+                                <div style={{ marginTop:'auto', paddingTop:6, fontSize:3.5, color:'rgba(255,255,255,0.22)' }}>Válida 12/2026</div>
                               </div>
-                              <div style={{ padding: '7px 11px 4px' }}>
-                                <div style={{ fontSize: 11, color: '#fff', fontWeight: 800 }}>JUAN A. PÉREZ</div>
-                                <div style={{ fontSize: 8, color: col.accent, fontWeight: 700, marginTop: 2 }}>Guardia de Seguridad · Nivel 2</div>
-                              </div>
-                              <div style={{ height: 1, background: `${col.accent}25`, margin: '5px 11px' }}/>
-                              <div style={{ padding: '0 11px', flex: 1, display: 'flex', flexDirection: 'column', gap: 5.5 }}>
-                                {[...campos6, ['ACCESO','Nivel 2']].map(([l,v],i) => (
-                                  <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                                    <div style={{ width: 58, fontSize: 6.5, color: `${col.accent}bb`, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase', flexShrink: 0 }}>{l}</div>
-                                    <div style={{ fontSize: 8, color: '#ffffffcc', fontWeight: 600 }}>{v}</div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div style={{ padding: '5px 11px 5px', display: 'flex', alignItems: 'center', gap: 6, borderTop: `1px solid ${col.accent}20` }}>
-                                {barcode(100)}
-                                {qr(24)}
-                              </div>
-                              <div style={{ height: 7, background: col.accent }}/>
+                              <div style={{ height:10 }}/>
                             </div>
                           );
                         })()}

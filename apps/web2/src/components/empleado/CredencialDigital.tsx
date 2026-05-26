@@ -63,6 +63,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const photoOffRef                       = useRef({ x: 50, y: 20 });
   const [flipped, setFlipped]             = useState(false);
   const [holoPos, setHoloPos]             = useState({ x: 50, y: 50 });
+  const [credModelo, setCredModelo]       = useState<string>('gradiente');
   const [verCode, setVerCode]             = useState('--- ---');
   const [verRemaining, setVerRemaining]   = useState(60);
   const [verPct, setVerPct]               = useState(100);
@@ -138,6 +139,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           if (d.credencialPie) setCredPie(d.credencialPie);
           if (d.credencialOrientacion && !orientation)
             setOrientacion(d.credencialOrientacion as 'vertical' | 'horizontal');
+          if (d.credencialModelo) setCredModelo(d.credencialModelo);
         }
       }).catch(() => {});
     if (empresaNombre) setEmpresaLocal(empresaNombre);
@@ -337,87 +339,324 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     finally { setGuardando(false); }
   };
   const descargar = async () => {
-    const SC = 2, W = 340, PAD = 20;
-    const HH = 155, PHOTO_D = 112, PHOTO_X = Math.round((W - PHOTO_D) / 2), PHOTO_Y = 100;
-    let dataY = PHOTO_Y + PHOTO_D + 18;
-    const QR = 80;
-    let dataLines = 2;
-    if (empData.dni) dataLines++;
-    if (empData.cuil) dataLines++;
-    if (empData.fileNumber) dataLines++;
-    const H = dataY + (dataLines * 22) + 20 + QR + 28 + 10;
+    const SC = 2;
+    const CARD_W = 420, CARD_H = 500;
+    const isH = orientacion === 'horizontal';
+
     const cv = document.createElement('canvas');
-    cv.width = W * SC; cv.height = H * SC;
+    cv.width = CARD_W * SC; cv.height = CARD_H * SC;
     const ctx = cv.getContext('2d')!;
     ctx.scale(SC, SC);
-    ctx.fillStyle = '#ffffff';
-    roundRect(ctx, 0, 0, W, H, 14); ctx.fill();
-    const hg = ctx.createLinearGradient(0, 0, W, HH);
-    hg.addColorStop(0, tema.h1); hg.addColorStop(1, tema.h2);
-    ctx.fillStyle = hg;
-    ctx.beginPath();
-    ctx.moveTo(14, 0); ctx.lineTo(W - 14, 0); ctx.quadraticCurveTo(W, 0, W, 14);
-    ctx.lineTo(W, HH); ctx.lineTo(0, HH); ctx.lineTo(0, 14); ctx.quadraticCurveTo(0, 0, 14, 0);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = tema.accent; ctx.fillRect(0, HH, W, 3);
-    // Logo area
-    ctx.fillStyle = tema.accent;
-    ctx.beginPath();
-    ctx.moveTo(PAD + 12, 16); ctx.lineTo(PAD + 24, 22); ctx.lineTo(PAD + 24, 32);
-    ctx.quadraticCurveTo(PAD + 24, 42, PAD + 12, 48); ctx.quadraticCurveTo(PAD, 42, PAD, 32);
-    ctx.lineTo(PAD, 22); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = tema.h1; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(PAD + 6, 33); ctx.lineTo(PAD + 11, 38); ctx.lineTo(PAD + 20, 29); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
-    ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD + 30, 30);
-    ctx.fillStyle = `${tema.accent}cc`; ctx.font = '7px Arial';
-    ctx.fillText(credTitulo, PAD + 30, 42);
-    // Foto circular
-    if (fotoMostrada) {
+
+    // ── helpers canvas ───────────────────────────────────────────────────────
+    const rr = (x: number, y: number, w: number, h: number, r: number) =>
+      roundRect(ctx, x, y, w, h, r);
+
+    const loadImg = (src: string) => new Promise<HTMLImageElement>(res => {
       const img = new Image(); img.crossOrigin = 'anonymous';
-      await new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); img.src = fotoMostrada; });
-      ctx.save();
-      ctx.beginPath(); ctx.arc(PHOTO_X + PHOTO_D / 2, PHOTO_Y + PHOTO_D / 2, PHOTO_D / 2, 0, Math.PI * 2); ctx.clip();
-      const sc = Math.max(PHOTO_D / img.naturalWidth, PHOTO_D / img.naturalHeight);
-      const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
-      const oX = (photoOff.x / 100) * Math.max(0, rW - PHOTO_D);
-      const oY = (photoOff.y / 100) * Math.max(0, rH - PHOTO_D);
-      ctx.drawImage(img, PHOTO_X - oX, PHOTO_Y - oY, rW, rH);
+      img.onload = () => res(img); img.onerror = () => res(img); img.src = src;
+    });
+
+    const drawPhoto = async (x: number, y: number, w: number, h: number, rad = 6) => {
+      if (!fotoMostrada) return;
+      const img = await loadImg(fotoMostrada);
+      ctx.save(); rr(x, y, w, h, rad); ctx.clip();
+      if (!!fotoFinal) {
+        const aspect = img.naturalWidth / img.naturalHeight;
+        let dw = w, dh = h;
+        if (aspect > w / h) dh = w / aspect; else dw = h * aspect;
+        const dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
+        ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 12;
+        ctx.drawImage(img, dx, dy, dw, dh);
+        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } else {
+        const sc = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+        const rW = img.naturalWidth * sc, rH = img.naturalHeight * sc;
+        const oX = (photoOff.x / 100) * Math.max(0, rW - w);
+        const oY = (photoOff.y / 100) * Math.max(0, rH - h);
+        ctx.drawImage(img, x - oX, y - oY, rW, rH);
+      }
+      ctx.restore();
+    };
+
+    const drawLogo = async (x: number, y: number, h: number): Promise<number> => {
+      if (logoEmpresa) {
+        const img = await loadImg(logoEmpresa);
+        const lw = Math.min(h * 3.5, img.naturalWidth * (h / img.naturalHeight));
+        ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = 0.9;
+        ctx.drawImage(img, x, y, lw, h); ctx.restore();
+        return lw;
+      }
+      ctx.fillStyle = `${tema.accent}25`; rr(x, y, h, h, 4); ctx.fill();
+      ctx.strokeStyle = tema.accent; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x + h * 0.5, y + 2); ctx.lineTo(x + h - 2, y + h * 0.25);
+      ctx.lineTo(x + h - 2, y + h * 0.65);
+      ctx.quadraticCurveTo(x + h * 0.5, y + h - 1, x + h * 0.5, y + h - 1);
+      ctx.quadraticCurveTo(x + 2, y + h * 0.65, x + 2, y + h * 0.65);
+      ctx.lineTo(x + 2, y + h * 0.25); ctx.closePath(); ctx.stroke();
+      return h;
+    };
+
+    const drawVerCode = (x: number, startY: number, textDark = false): number => {
+      let y = startY;
+      ctx.fillStyle = textDark ? '#64748b' : 'rgba(255,255,255,0.4)';
+      ctx.font = '700 7px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('CÓDIGO DE VERIFICACIÓN', x, y); y += 12;
+      ctx.fillStyle = textDark ? '#0f172a' : '#ffffff';
+      ctx.font = '800 22px monospace'; ctx.fillText(verCode, x, y); y += 10;
+      ctx.fillStyle = textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)';
+      rr(x, y, 52, 2, 1); ctx.fill();
+      const fw = 52 * (verPct / 100);
+      if (fw > 0) { ctx.fillStyle = textDark ? tema.accent : 'rgba(255,255,255,0.38)'; rr(x, y, fw, 2, 1); ctx.fill(); }
+      ctx.fillStyle = textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)'; ctx.font = '7.5px Arial';
+      ctx.fillText(`Se actualiza en 0:${verRemaining.toString().padStart(2, '0')}`, x + 58, y + 2);
+      return y + 14;
+    };
+
+    const drawFields = (x: number, startY: number, maxRight: number, textDark = false): number => {
+      const flds: { label: string; val: string }[] = [];
+      if (empData.fileNumber) flds.push({ label: 'Legajo', val: `#${empData.fileNumber}` });
+      if (empData.dni)        flds.push({ label: 'DNI',    val: empData.dni });
+      if (empData.cuil)       flds.push({ label: 'CUIL',   val: empData.cuil });
+      if (credPie)            flds.push({ label: 'Sector', val: credPie });
+      let fx = x, y = startY;
+      for (const f of flds) {
+        ctx.fillStyle = textDark ? '#64748b' : 'rgba(255,255,255,0.38)';
+        ctx.font = '7px Arial'; ctx.textAlign = 'left'; ctx.fillText(f.label.toUpperCase(), fx, y);
+        ctx.fillStyle = textDark ? '#1e293b' : 'rgba(255,255,255,0.82)';
+        ctx.font = 'bold 11px monospace'; ctx.fillText(f.val, fx, y + 11);
+        fx += 65;
+        if (fx + 50 > maxRight) { fx = x; y += 26; }
+      }
+      return y + (flds.length > 0 ? 20 : 0);
+    };
+
+    const drawChip = (x: number, y: number) => {
+      const g = ctx.createLinearGradient(x, y, x + 32, y + 23);
+      g.addColorStop(0, '#c6901c'); g.addColorStop(0.26, '#efc848');
+      g.addColorStop(0.5, '#a67010'); g.addColorStop(0.72, '#f5d86c'); g.addColorStop(1, '#c6901c');
+      ctx.fillStyle = g; rr(x, y, 32, 23, 4); ctx.fill();
+      ctx.strokeStyle = '#9e6e0e'; ctx.lineWidth = 1; rr(x, y, 32, 23, 4); ctx.stroke();
+      ctx.strokeStyle = 'rgba(80,44,0,0.28)'; ctx.lineWidth = 0.8;
+      for (const t of [5, 10, 16, 20]) { ctx.beginPath(); ctx.moveTo(x + 3, y + t); ctx.lineTo(x + 29, y + t); ctx.stroke(); }
+    };
+
+    // ── TEMPLATE: GRADIENTE ─────────────────────────────────────────────────
+    if (credModelo === 'gradiente') {
+      ctx.save(); rr(0, 0, CARD_W, CARD_H, 12); ctx.clip();
+      const bg = ctx.createLinearGradient(CARD_W * 0.35, 0, 0, CARD_H);
+      bg.addColorStop(0, tema.h1); bg.addColorStop(0.55, tema.h2); bg.addColorStop(1, hslToHex(credHue, 50, 28));
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, CARD_W, CARD_H);
+      ctx.save(); ctx.globalAlpha = 0.018; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+      for (let xi = -CARD_H; xi < CARD_W + CARD_H; xi += 8) { ctx.beginPath(); ctx.moveTo(xi, 0); ctx.lineTo(xi + CARD_H, CARD_H); ctx.stroke(); }
+      ctx.restore();
+
+      if (isH) {
+        const LC = 130;
+        ctx.fillStyle = `${tema.h2}88`; ctx.fillRect(0, 0, LC, CARD_H);
+        ctx.strokeStyle = `${tema.accent}30`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(LC, 0); ctx.lineTo(LC, CARD_H); ctx.stroke();
+        await drawLogo(LC / 2 - 11, 16, 20);
+        await drawPhoto((LC - 90) / 2, (CARD_H - 110) / 2, 90, 110, 6);
+        const RX = LC + 18; let y = 16;
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '700 7px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(credTitulo.toUpperCase(), RX, y); y += 14;
+        ctx.fillStyle = '#fff'; ctx.font = '900 17px Arial'; ctx.fillText(apellidoNombre || nombre || '—', RX, y); y += 14;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '700 8px Arial';
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), RX, y); y += 16;
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(RX, y); ctx.lineTo(CARD_W - 18, y); ctx.stroke(); y += 10;
+        y = drawFields(RX, y, CARD_W - 18);
+        ctx.beginPath(); ctx.moveTo(RX, y); ctx.lineTo(CARD_W - 18, y); ctx.stroke(); y += 10;
+        drawVerCode(RX, y);
+        const FY = CARD_H - 40;
+        drawChip(RX, FY);
+        ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        ctx.fillText('Válida 12/2026', CARD_W - 18, FY + 16); ctx.textAlign = 'left';
+      } else {
+        const PW = 120, PH = 160, PAD = 16;
+        const TR = CARD_W - PW - 10;
+        let y = 15;
+        const lw = await drawLogo(PAD, y, 22);
+        ctx.fillStyle = '#fff'; ctx.font = '900 11px Arial'; ctx.textAlign = 'left';
+        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase().substring(0, 24), PAD + lw + 8, y + 10);
+        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '700 7px Arial';
+        ctx.fillText(credTitulo.toUpperCase(), PAD + lw + 8, y + 22); y += 37;
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 12;
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 17px Arial'; ctx.fillText(apellidoNombre || nombre || '—', PAD, y); y += 18;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = 'bold 8px Arial';
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, y); y += 14;
+        y = drawFields(PAD, y, TR);
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TR, y); ctx.stroke(); y += 10;
+        drawVerCode(PAD, y);
+        const FOOTER_Y = CARD_H - 36;
+        drawChip(PAD, FOOTER_Y);
+        ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        if (empData.fileNumber) ctx.fillText(`BSP-${empData.fileNumber}`, TR, FOOTER_Y + 10);
+        ctx.fillText('Válida 12/2026', TR, FOOTER_Y + 20); ctx.textAlign = 'left';
+        ctx.save(); rr(0, CARD_H - 4, CARD_W, 4, 0); ctx.clip();
+        const bGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
+        bGrad.addColorStop(0, `${tema.accent}70`); bGrad.addColorStop(0.5, 'rgba(255,255,255,0.35)'); bGrad.addColorStop(1, `${tema.accent}70`);
+        ctx.fillStyle = bGrad; ctx.fillRect(0, CARD_H - 4, CARD_W, 4); ctx.restore();
+        await drawPhoto(CARD_W - PW, 65, PW, Math.min(PH, CARD_H - 65 - 55), 6);
+      }
       ctx.restore();
     }
-    ctx.strokeStyle = tema.accent; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(PHOTO_X + PHOTO_D / 2, PHOTO_Y + PHOTO_D / 2, PHOTO_D / 2 + 2, 0, Math.PI * 2); ctx.stroke();
-    // Nombre + cargo
-    ctx.textAlign = 'center'; ctx.fillStyle = '#111827'; ctx.font = 'bold 15px Arial';
-    ctx.fillText(apellidoNombre || nombre || '—', W / 2, dataY);
-    dataY += 16;
-    ctx.fillStyle = tema.accent; ctx.font = 'bold 8px Arial';
-    ctx.fillText((empData.category || 'Vigilador').toUpperCase(), W / 2, dataY);
-    dataY += 16;
-    ctx.textAlign = 'left';
-    const drawRow = (label: string, val: string) => {
-      ctx.fillStyle = tema.accent; ctx.font = 'bold 7px Arial'; ctx.fillText(label, PAD, dataY);
-      ctx.fillStyle = '#1f2937'; ctx.font = 'bold 11px Arial'; ctx.fillText(val, PAD + 44, dataY + 1);
-      ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(PAD, dataY + 6); ctx.lineTo(W - PAD, dataY + 6); ctx.stroke();
-      dataY += 22;
-    };
-    if (empData.dni)        drawRow('DNI', empData.dni);
-    if (empData.cuil)       drawRow('CUIL', empData.cuil);
-    if (empData.fileNumber) drawRow('Legajo', empData.fileNumber);
-    if (qrDataUrl) {
-      const qr = new Image();
-      await new Promise<void>(res => { qr.onload = () => res(); qr.onerror = () => res(); qr.src = qrDataUrl; });
-      const qrX = Math.round((W - QR) / 2), qrY = dataY + 8;
-      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = `${tema.accent}60`; ctx.lineWidth = 1.5;
-      roundRect(ctx, qrX - 5, qrY - 5, QR + 10, QR + 10, 8); ctx.fill(); ctx.stroke();
-      ctx.drawImage(qr, qrX, qrY, QR, QR);
-      ctx.fillStyle = '#9ca3af'; ctx.font = '6.5px Arial'; ctx.textAlign = 'center';
-      ctx.fillText('ESCANEAR PARA VERIFICAR', W / 2, qrY + QR + 13);
+
+    // ── TEMPLATE: CORPORATIVO ────────────────────────────────────────────────
+    else if (credModelo === 'corporativo') {
+      const hdr1 = '#111827', hdr2 = '#1e3a5f', PAD = 16;
+      ctx.save(); rr(0, 0, CARD_W, CARD_H, 12); ctx.clip();
+      const HDR_H = isH ? 52 : 58;
+      const hdrGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
+      hdrGrad.addColorStop(0, hdr1); hdrGrad.addColorStop(1, hdr2);
+      ctx.fillStyle = hdrGrad; ctx.fillRect(0, 0, CARD_W, HDR_H);
+      const accGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
+      accGrad.addColorStop(0, tema.accent); accGrad.addColorStop(1, tema.h2);
+      ctx.fillStyle = accGrad; ctx.fillRect(0, HDR_H, CARD_W, 3);
+      const lw = await drawLogo(PAD, HDR_H / 2 - 13, 26);
+      ctx.fillStyle = '#fff'; ctx.font = '900 11px Arial'; ctx.textAlign = 'left';
+      ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD + lw + 10, HDR_H / 2 - 2);
+      ctx.fillStyle = tema.accent; ctx.font = '700 8px Arial';
+      ctx.fillText(credTitulo.toUpperCase(), PAD + lw + 10, HDR_H / 2 + 10);
+      ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, HDR_H + 3, CARD_W, CARD_H - HDR_H - 3 - 12);
+
+      if (isH) {
+        const PW = 112, PH = 140;
+        const photoY = HDR_H + 3 + (CARD_H - HDR_H - 3 - 12 - PH) / 2;
+        await drawPhoto(PAD, photoY, PW, PH, 8);
+        const RX = PAD + PW + 14; let y = HDR_H + 3 + 14;
+        ctx.fillStyle = '#0f172a'; ctx.font = '900 17px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(apellidoNombre || nombre || '—', RX, y); y += 14;
+        ctx.fillStyle = tema.accent; ctx.font = '700 8px Arial';
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), RX, y); y += 14;
+        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(RX, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 10;
+        y = drawFields(RX, y, CARD_W - PAD, true);
+        ctx.beginPath(); ctx.moveTo(RX, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 10;
+        const vbH = 58;
+        ctx.save(); rr(RX, y, CARD_W - RX - PAD, vbH, 8);
+        const vbG = ctx.createLinearGradient(RX, 0, CARD_W, 0);
+        vbG.addColorStop(0, hdr1); vbG.addColorStop(1, hdr2);
+        ctx.fillStyle = vbG; ctx.fill(); ctx.restore();
+        drawVerCode(RX + 10, y + 12);
+        ctx.fillStyle = '#94a3b8'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        ctx.fillText('Válida 12/2026', CARD_W - PAD, CARD_H - 18); ctx.textAlign = 'left';
+      } else {
+        const PW = 90, PH = 110;
+        let y = HDR_H + 3 + 14;
+        ctx.fillStyle = '#0f172a'; ctx.font = '900 16px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(apellidoNombre || nombre || '—', PAD, y); y += 14;
+        ctx.fillStyle = tema.accent; ctx.font = '700 8px Arial';
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), PAD, y); y += 12;
+        await drawPhoto(CARD_W - PW - PAD, HDR_H + 3 + 10, PW, PH, 8);
+        const TR = CARD_W - PW - PAD - 10;
+        ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(TR, y); ctx.stroke(); y += 10;
+        y = drawFields(PAD, y, TR, true);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CARD_W, y); ctx.stroke(); y += 10;
+        const vbH = 62;
+        ctx.save(); rr(PAD, y, CARD_W - PAD * 2, vbH, 8);
+        const vbG = ctx.createLinearGradient(PAD, 0, CARD_W - PAD, 0);
+        vbG.addColorStop(0, hdr1); vbG.addColorStop(1, hdr2);
+        ctx.fillStyle = vbG; ctx.fill(); ctx.restore();
+        drawVerCode(PAD + 10, y + 12); y += vbH + 12;
+        ctx.fillStyle = '#94a3b8'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        if (empData.fileNumber) ctx.fillText(`BSP-${empData.fileNumber}`, CARD_W - PAD, y);
+        ctx.fillText('Válida 12/2026', CARD_W - PAD, y + 12); ctx.textAlign = 'left';
+      }
+      const fGrad = ctx.createLinearGradient(0, 0, CARD_W, 0);
+      fGrad.addColorStop(0, hdr1); fGrad.addColorStop(1, hdr2);
+      ctx.fillStyle = fGrad; ctx.fillRect(0, CARD_H - 12, CARD_W, 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '7px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('SISTEMA COSP', CARD_W / 2, CARD_H - 4); ctx.textAlign = 'left';
+      ctx.restore();
     }
-    const hg2 = ctx.createLinearGradient(0, 0, W, 0);
-    hg2.addColorStop(0, tema.h1); hg2.addColorStop(1, tema.h2);
-    ctx.fillStyle = hg2; ctx.fillRect(0, H - 8, W, 8);
+
+    // ── TEMPLATE: PREMIUM DARK ───────────────────────────────────────────────
+    else {
+      const purp = '#6366f1', PAD = 16;
+      ctx.save(); rr(0, 0, CARD_W, CARD_H, 12); ctx.clip();
+      ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, CARD_W, CARD_H);
+      ctx.save(); ctx.globalAlpha = 0.04;
+      for (let gx = 7; gx < CARD_W; gx += 14) {
+        for (let gy = 7; gy < CARD_H; gy += 14) { ctx.beginPath(); ctx.arc(gx, gy, 0.8, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); }
+      }
+      ctx.restore();
+
+      if (isH) {
+        const LC = 140;
+        const aG = ctx.createLinearGradient(0, 0, CARD_W, 0);
+        aG.addColorStop(0, purp); aG.addColorStop(1, tema.accent);
+        ctx.fillStyle = aG; ctx.fillRect(0, 0, CARD_W, 3);
+        ctx.strokeStyle = `${purp}30`; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(LC, 3); ctx.lineTo(LC, CARD_H); ctx.stroke();
+        await drawLogo(LC / 2 - 11, 14, 22);
+        const PW = 100, PH = 120;
+        const pX = (LC - PW) / 2, pY = (CARD_H - PH) / 2 + 8;
+        ctx.save(); ctx.strokeStyle = `${purp}35`; ctx.lineWidth = 0.8;
+        const pcx = pX + PW / 2, pcy = pY + PH / 2;
+        ctx.translate(pcx, pcy); ctx.rotate(3 * Math.PI / 180); ctx.translate(-pcx, -pcy);
+        rr(pX - 4, pY - 4, PW + 8, PH + 8, 8); ctx.stroke(); ctx.restore();
+        await drawPhoto(pX, pY, PW, PH, 6);
+        ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '7px Arial'; ctx.textAlign = 'center';
+        ctx.fillText((empresaDisplay || '').toUpperCase(), LC / 2, CARD_H - 14); ctx.textAlign = 'left';
+        const RX = LC + 18; let y = 14;
+        ctx.fillStyle = '#fff'; ctx.font = '900 17px Arial'; ctx.fillText(apellidoNombre || nombre || '—', RX, y); y += 14;
+        ctx.fillStyle = purp; ctx.font = '700 8px Arial'; ctx.fillText((empData.category || 'Vigilador').toUpperCase(), RX, y); y += 16;
+        const dpH = 58;
+        ctx.save(); rr(RX, y, CARD_W - RX - PAD, dpH, 8);
+        ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
+        ctx.strokeStyle = `${purp}25`; ctx.lineWidth = 0.5; ctx.stroke(); ctx.restore();
+        drawFields(RX + 8, y + 10, CARD_W - PAD - 8); y += dpH + 8;
+        const vpH = 60;
+        ctx.save(); rr(RX, y, CARD_W - RX - PAD, vpH, 8);
+        ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fill();
+        ctx.strokeStyle = `${purp}20`; ctx.lineWidth = 0.5; ctx.stroke(); ctx.restore();
+        drawVerCode(RX + 8, y + 12); y += vpH + 10;
+        drawChip(RX, y);
+        ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        ctx.fillText('Válida 12/2026', CARD_W - PAD, y + 16); ctx.textAlign = 'left';
+      } else {
+        const PAD_L = PAD + 4;
+        const aG = ctx.createLinearGradient(0, 0, 0, CARD_H);
+        aG.addColorStop(0, purp); aG.addColorStop(1, tema.accent);
+        ctx.fillStyle = aG; ctx.fillRect(0, 0, 4, CARD_H);
+        let y = 14;
+        const lw = await drawLogo(PAD_L, y, 22);
+        ctx.fillStyle = purp; ctx.font = '900 10px Arial'; ctx.textAlign = 'left';
+        ctx.fillText((empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase(), PAD_L + lw + 8, y + 8);
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '7px Arial';
+        ctx.fillText(credTitulo, PAD_L + lw + 8, y + 19); y += 36;
+        ctx.strokeStyle = `${purp}22`; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 14;
+        const PW = 88, PH = 108;
+        ctx.save(); ctx.strokeStyle = `${purp}40`; ctx.lineWidth = 0.8;
+        const pcx = PAD_L + PW / 2, pcy = y + PH / 2;
+        ctx.translate(pcx, pcy); ctx.rotate(4 * Math.PI / 180); ctx.translate(-pcx, -pcy);
+        rr(PAD_L - 5, y - 5, PW + 10, PH + 10, 8); ctx.stroke(); ctx.restore();
+        await drawPhoto(PAD_L, y, PW, PH, 6);
+        const NX = PAD_L + PW + 12;
+        ctx.fillStyle = '#fff'; ctx.font = '900 14px Arial'; ctx.textAlign = 'left';
+        ctx.fillText(apellidoNombre || nombre || '—', NX, y + 16);
+        ctx.fillStyle = purp; ctx.font = '700 8px Arial';
+        ctx.fillText((empData.category || 'Vigilador').toUpperCase(), NX, y + 30);
+        drawFields(NX, y + 44, CARD_W - PAD); y += PH + 12;
+        ctx.strokeStyle = `${purp}22`; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 12;
+        y = drawVerCode(PAD_L, y);
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(CARD_W - PAD, y); ctx.stroke(); y += 12;
+        drawChip(PAD_L, y);
+        ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
+        ctx.fillText('Válida 12/2026', CARD_W - PAD, y + 16); ctx.textAlign = 'left';
+      }
+      ctx.restore();
+    }
+
     const link = document.createElement('a');
     link.download = `credencial_${empData.fileNumber || empDocId}.png`;
     link.href = cv.toDataURL('image/png');
@@ -479,178 +718,292 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             >
 
               {/* ══ FRENTE ══ */}
-              <div style={{
-                position: 'absolute', inset: 0,
-                backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-                borderRadius: 12, overflow: 'visible',
-                background: `linear-gradient(160deg, ${tema.h1} 0%, ${tema.h2} 55%, ${hslToHex(credHue, 50, 28)} 100%)`,
-              } as React.CSSProperties}>
-
-                {/* Textura sutil */}
-                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden',
-                  backgroundImage: `repeating-linear-gradient(45deg,rgba(255,255,255,0.018) 0px,rgba(255,255,255,0.018) 1px,transparent 1px,transparent 8px)` }}/>
-
-                {/* Shimmer holográfico */}
-                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden',
-                  background: `radial-gradient(ellipse at ${holoPos.x}% ${holoPos.y}%, rgba(255,255,255,0.13) 0%, transparent 55%)`,
-                  transition: 'background 0.08s' }}/>
-
-                {/* HEADER: logo + empresa */}
-                <div style={{ padding: '15px 16px 12px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.18)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {logoEmpresa ? (
-                      <img src={logoEmpresa} alt="Logo" style={{ height: 22, maxWidth: 56, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.9 }} onError={() => setLogoEmpresa(null)}/>
-                    ) : (
-                      <div style={{ width: 22, height: 22, borderRadius: 5, background: `${tema.accent}25`, border: `1.5px solid ${tema.accent}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <ShieldCheck size={12} strokeWidth={1.5} style={{ color: tema.accent }}/>
-                      </div>
-                    )}
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ color: '#fff', fontSize: 11, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
-                      </p>
-                      <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                        {credTitulo}
-                      </p>
-                    </div>
+              {(() => {
+                // ── helpers compartidos ──────────────────────────────────────
+                const logoEl = (h: number) => logoEmpresa ? (
+                  <img src={logoEmpresa} alt="Logo" style={{ height: h, maxWidth: h * 3.5, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.9 }} onError={() => setLogoEmpresa(null)}/>
+                ) : (
+                  <div style={{ width: h, height: h, borderRadius: 4, background: `${tema.accent}25`, border: `1.5px solid ${tema.accent}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <ShieldCheck size={h * 0.55} strokeWidth={1.5} style={{ color: tema.accent }}/>
                   </div>
-                </div>
-
-                {/* DATOS EMPLEADO */}
-                <div style={{ padding: '12px 16px 10px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
-                  <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, lineHeight: 1.25, marginBottom: 3 }}>
-                    {apellidoNombre || nombre || '—'}
-                  </p>
-                  <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
-                    {empData.category || 'Vigilador'}
-                  </p>
+                );
+                const dataFields = (dark = false, accent = tema.accent) => (
                   <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                    {empData.fileNumber && (
-                      <div>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Legajo</p>
-                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>#{empData.fileNumber}</p>
-                      </div>
-                    )}
-                    {empData.dni && (
-                      <div>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>DNI</p>
-                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.dni}</p>
-                      </div>
-                    )}
-                    {empData.cuil && (
-                      <div>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>CUIL</p>
-                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
-                      </div>
-                    )}
-                    {credPie && (
-                      <div>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Sector</p>
-                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700 }}>{credPie}</p>
-                      </div>
-                    )}
+                    {empData.fileNumber && <div><p style={{ color: dark ? '#64748b' : 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Legajo</p><p style={{ color: dark ? '#1e293b' : 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>#{empData.fileNumber}</p></div>}
+                    {empData.dni && <div><p style={{ color: dark ? '#64748b' : 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>DNI</p><p style={{ color: dark ? '#1e293b' : 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.dni}</p></div>}
+                    {empData.cuil && <div><p style={{ color: dark ? '#64748b' : 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>CUIL</p><p style={{ color: dark ? '#1e293b' : 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p></div>}
+                    {credPie && <div><p style={{ color: dark ? '#64748b' : 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Sector</p><p style={{ color: dark ? '#1e293b' : 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700 }}>{credPie}</p></div>}
                   </div>
-                </div>
-
-                {/* CÓDIGO DE VERIFICACIÓN */}
-                <div style={{ padding: '10px 16px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 5 }}>
-                    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
-                      <circle cx="5" cy="5" r="4" stroke="rgba(255,255,255,0.4)" strokeWidth="1"/>
-                      <path d="M5 3v2.5l1.5 1" stroke="rgba(255,255,255,0.4)" strokeWidth="1" strokeLinecap="round"/>
-                    </svg>
-                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                      Código de verificación
-                    </p>
-                  </div>
-                  <p style={{ color: '#fff', fontSize: 24, fontWeight: 800, letterSpacing: '0.28em', fontFamily: 'monospace', lineHeight: 1, marginBottom: 6 }}>
-                    {verCode}
-                  </p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <p style={{ color: 'rgba(255,255,255,0.33)', fontSize: 7.5 }}>
-                      Se actualiza en{' '}
-                      <span style={{ color: 'rgba(255,255,255,0.62)', fontWeight: 700 }}>0:{verRemaining.toString().padStart(2, '0')}</span>
-                    </p>
-                    <div style={{ flex: 1, maxWidth: 52, height: 2, background: 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${verPct}%`, background: 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                );
+                const verSection = (textDark = false) => (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                      <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="4" stroke={textDark ? '#64748b' : 'rgba(255,255,255,0.4)'} strokeWidth="1"/><path d="M5 3v2.5l1.5 1" stroke={textDark ? '#64748b' : 'rgba(255,255,255,0.4)'} strokeWidth="1" strokeLinecap="round"/></svg>
+                      <p style={{ color: textDark ? '#64748b' : 'rgba(255,255,255,0.4)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Código de verificación</p>
+                    </div>
+                    <p style={{ color: textDark ? '#0f172a' : '#fff', fontSize: 22, fontWeight: 800, letterSpacing: '0.28em', fontFamily: 'monospace', lineHeight: 1, marginBottom: 5 }}>{verCode}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <p style={{ color: textDark ? '#94a3b8' : 'rgba(255,255,255,0.33)', fontSize: 7.5 }}>Se actualiza en <span style={{ color: textDark ? '#475569' : 'rgba(255,255,255,0.62)', fontWeight: 700 }}>0:{verRemaining.toString().padStart(2, '0')}</span></p>
+                      <div style={{ flex: 1, maxWidth: 52, height: 2, background: textDark ? '#e2e8f0' : 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${verPct}%`, background: textDark ? tema.accent : 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                {/* PIE: chip + QR + validez */}
-                <div style={{ padding: '10px 16px', paddingRight: 130, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{
-                    width: 32, height: 23, borderRadius: 4, flexShrink: 0,
-                    background: 'linear-gradient(135deg,#c6901c 0%,#efc848 26%,#a67010 50%,#f5d86c 72%,#c6901c 100%)',
-                    border: '1px solid #9e6e0e',
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28)',
-                    position: 'relative',
-                  }}>
+                );
+                const chipEl = () => (
+                  <div style={{ width: 32, height: 23, borderRadius: 4, flexShrink: 0, background: 'linear-gradient(135deg,#c6901c 0%,#efc848 26%,#a67010 50%,#f5d86c 72%,#c6901c 100%)', border: '1px solid #9e6e0e', boxShadow: '0 2px 5px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28)', position: 'relative' }}>
                     {[5, 10, 16, 20].map((t, i) => <div key={i} style={{ position: 'absolute', top: t, left: 3, right: 3, height: 1, background: 'rgba(80,44,0,0.28)' }}/>)}
                   </div>
-                  <button
-                    onClick={() => setFlipped(true)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5,
-                      padding: '5px 11px', borderRadius: 20,
-                      background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.22)',
-                      cursor: 'pointer',
-                    }}
-                  >
+                );
+                const qrBtn = (dark = false) => (
+                  <button onClick={() => setFlipped(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 20, background: dark ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.1)', border: `1px solid ${dark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.22)'}`, cursor: 'pointer' }}>
                     {qrDataUrl && <img src={qrDataUrl} alt="" style={{ width: 14, height: 14, opacity: 0.65, borderRadius: 2 }}/>}
-                    <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
+                    <p style={{ color: dark ? '#475569' : 'rgba(255,255,255,0.65)', fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
                   </button>
-                  <p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 7, textAlign: 'right', lineHeight: 1.5 }}>
-                    {empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026
-                  </p>
-                </div>
+                );
+                const photoArea = (width: number, height: number, borderRadius = 6) => (
+                  <div ref={photoContRef} style={{ width, height, borderRadius, overflow: 'hidden', flexShrink: 0, position: 'relative', pointerEvents: showEditUI ? 'auto' : 'none' }}>
+                    {quitandoFondo && (
+                      <div style={{ position: 'absolute', inset: 0, zIndex: 2, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                        <RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p>
+                      </div>
+                    )}
+                    {fotoMostrada ? (
+                      <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', pointerEvents: 'none', userSelect: 'none' }}/>
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', background: `${tema.h2}80`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg viewBox="0 0 60 80" width={width * 0.55} height={height * 0.55}><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.25)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.25)"/></svg>
+                      </div>
+                    )}
+                  </div>
+                );
+                const holoOverlay = () => (
+                  <>
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden', backgroundImage: `repeating-linear-gradient(45deg,rgba(255,255,255,0.018) 0px,rgba(255,255,255,0.018) 1px,transparent 1px,transparent 8px)` }}/>
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden', background: `radial-gradient(ellipse at ${holoPos.x}% ${holoPos.y}%, rgba(255,255,255,0.13) 0%, transparent 55%)`, transition: 'background 0.08s' }}/>
+                    <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', zIndex: 8, overflow: 'hidden', backgroundImage: `conic-gradient(from ${holoPos.x * 3.6}deg at ${holoPos.x}% ${holoPos.y}%, rgba(255,60,60,0.025),rgba(255,180,40,0.025),rgba(50,255,100,0.025),rgba(40,160,255,0.025),rgba(180,50,255,0.025),rgba(255,60,60,0.025))`, mixBlendMode: 'overlay' as React.CSSProperties['mixBlendMode'] }}/>
+                  </>
+                );
 
-                {/* Banda inferior decorativa */}
-                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, borderRadius: '0 0 12px 12px',
-                  background: `linear-gradient(90deg,${tema.accent}70,rgba(255,255,255,0.35),${tema.accent}70)` }}/>
+                // ── TEMPLATE: GRADIENTE ──────────────────────────────────────
+                if (credModelo === 'gradiente') {
+                  const isH = orientacion === 'horizontal';
+                  const cardStyle: React.CSSProperties = {
+                    position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
+                    borderRadius: 12, overflow: 'hidden',
+                    background: `linear-gradient(${isH ? '135deg' : '160deg'}, ${tema.h1} 0%, ${tema.h2} 55%, ${hslToHex(credHue, 50, 28)} 100%)`,
+                  };
+                  if (isH) return (
+                    <div style={cardStyle as React.CSSProperties}>
+                      {holoOverlay()}
+                      <div style={{ display: 'flex', height: '100%' }}>
+                        {/* Col izq: logo + foto */}
+                        <div style={{ width: 130, background: `${tema.h2}88`, borderRight: `1px solid ${tema.accent}30`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '16px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{logoEl(20)}</div>
+                          {photoArea(90, 110, 6)}
+                        </div>
+                        {/* Col der: datos */}
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 18px' }}>
+                          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 2 }}>{credTitulo}</p>
+                          <p style={{ color: '#fff', fontSize: 18, fontWeight: 900, lineHeight: 1.2, marginBottom: 2 }}>{apellidoNombre || nombre || '—'}</p>
+                          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>{empData.category || 'Vigilador'}</p>
+                          <div style={{ height: 0.5, background: 'rgba(255,255,255,0.15)', marginBottom: 10 }}/>
+                          {dataFields()}
+                          <div style={{ height: 0.5, background: 'rgba(255,255,255,0.15)', margin: '10px 0' }}/>
+                          {verSection()}
+                          <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10 }}>
+                            {chipEl()}{qrBtn()}<p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 7 }}>Válida 12/2026</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${tema.accent}70,rgba(255,255,255,0.35),${tema.accent}70)` }}/>
+                    </div>
+                  );
+                  // vertical gradiente
+                  const PHOTO_W = 120, PHOTO_H = 160;
+                  return (
+                    <div style={cardStyle as React.CSSProperties}>
+                      {holoOverlay()}
+                      {/* Header */}
+                      <div style={{ padding: '15px 16px 12px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.18)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {logoEl(22)}
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ color: '#fff', fontSize: 11, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
+                            <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>{credTitulo}</p>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Datos empleado */}
+                      <div style={{ padding: '12px 16px 10px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, lineHeight: 1.25, marginBottom: 3 }}>{apellidoNombre || nombre || '—'}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>{empData.category || 'Vigilador'}</p>
+                        {dataFields()}
+                      </div>
+                      {/* Código verificación */}
+                      <div style={{ padding: '10px 16px', paddingRight: PHOTO_W + 10, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                        {verSection()}
+                      </div>
+                      {/* Pie */}
+                      <div style={{ padding: '10px 16px', paddingRight: PHOTO_W + 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {chipEl()}{qrBtn()}<p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 7, textAlign: 'right', lineHeight: 1.5 }}>{empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026</p>
+                      </div>
+                      {/* Banda inferior */}
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, borderRadius: '0 0 12px 12px', background: `linear-gradient(90deg,${tema.accent}70,rgba(255,255,255,0.35),${tema.accent}70)` }}/>
+                      {/* Foto cuadrada en zona derecha */}
+                      <div style={{ position: 'absolute', top: 0, right: 0, width: PHOTO_W, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 10px 12px 0', pointerEvents: 'none', zIndex: 20 }}>
+                        {photoArea(PHOTO_W - 10, PHOTO_H, 6)}
+                      </div>
+                    </div>
+                  );
+                }
 
-                {/* FOTO — sin marco ni círculo, desborda borde derecho */}
-                <div style={{ position: 'absolute', bottom: 0, right: -14, zIndex: 20, width: 128, height: 320, pointerEvents: 'none' }}>
-                  {quitandoFondo && (
-                    <div style={{ position: 'absolute', inset: 0, zIndex: 21, background: 'rgba(0,0,0,0.45)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                      <RefreshCw size={18} className="animate-spin" style={{ color: tema.accent }}/>
-                      <p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p>
+                // ── TEMPLATE: CORPORATIVO ────────────────────────────────────
+                if (credModelo === 'corporativo') {
+                  const isH = orientacion === 'horizontal';
+                  const hdrBg = `linear-gradient(90deg,#111827,#1e3a5f)`;
+                  const baseCard: React.CSSProperties = {
+                    position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
+                    borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+                  };
+                  if (isH) return (
+                    <div style={baseCard as React.CSSProperties}>
+                      {/* Header strip */}
+                      <div style={{ background: hdrBg, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {logoEl(24)}<div><p style={{ color: '#fff', fontSize: 12, fontWeight: 900 }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{credTitulo}</p></div>
+                      </div>
+                      <div style={{ height: 3, background: `linear-gradient(90deg,${tema.accent},${tema.h2})` }}/>
+                      {/* Body */}
+                      <div style={{ flex: 1, background: '#f8fafc', display: 'flex', overflow: 'hidden' }}>
+                        <div style={{ width: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
+                          {photoArea(112, 140, 8)}
+                        </div>
+                        <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div>
+                            <p style={{ color: '#0f172a', fontSize: 18, fontWeight: 900, lineHeight: 1.2 }}>{apellidoNombre || nombre || '—'}</p>
+                            <p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{empData.category || 'Vigilador'}</p>
+                          </div>
+                          <div style={{ height: 0.5, background: '#e2e8f0' }}/>
+                          {dataFields(true)}
+                          <div style={{ height: 0.5, background: '#e2e8f0' }}/>
+                          <div style={{ background: hdrBg, borderRadius: 8, padding: '8px 12px' }}>{verSection()}</div>
+                        </div>
+                        <div style={{ padding: '14px 14px 14px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                          {qrBtn()}<p style={{ color: '#94a3b8', fontSize: 7 }}>Válida 12/2026</p>
+                        </div>
+                      </div>
+                      {/* Footer */}
+                      <div style={{ background: hdrBg, height: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Sistema COSP</p>
+                      </div>
                     </div>
-                  )}
-                  {fotoMostrada ? (
-                    <div
-                      ref={photoContRef}
-                      style={{ width: '100%', height: '100%', overflow: 'hidden', pointerEvents: showEditUI ? 'auto' : 'none' }}
-                    >
-                      <img
-                        src={fotoMostrada}
-                        alt="Foto"
-                        style={{
-                          width: '100%', height: '100%',
-                          objectFit: esCutout ? 'contain' : 'cover',
-                          objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`,
-                          filter: esCutout ? 'drop-shadow(0 6px 22px rgba(0,0,0,0.7)) drop-shadow(0 2px 8px rgba(0,0,0,0.45))' : 'none',
-                          pointerEvents: 'none', userSelect: 'none',
-                        }}
-                        draggable={false}
-                      />
+                  );
+                  return (
+                    <div style={baseCard as React.CSSProperties}>
+                      {/* Header */}
+                      <div style={{ background: hdrBg, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {logoEl(26)}<div><p style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: tema.accent, fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{credTitulo}</p></div>
+                      </div>
+                      <div style={{ height: 3, background: `linear-gradient(90deg,${tema.accent},${tema.h2})` }}/>
+                      {/* Body */}
+                      <div style={{ flex: 1, background: '#f8fafc', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                          <div style={{ flex: 1 }}>
+                            <p style={{ color: '#0f172a', fontSize: 16, fontWeight: 900, lineHeight: 1.25 }}>{apellidoNombre || nombre || '—'}</p>
+                            <p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
+                          </div>
+                          {photoArea(90, 110, 8)}
+                        </div>
+                        <div style={{ height: 0.5, background: '#e2e8f0' }}/>
+                        {dataFields(true)}
+                        <div style={{ height: 0.5, background: '#e2e8f0' }}/>
+                        <div style={{ background: hdrBg, borderRadius: 8, padding: '8px 12px' }}>{verSection()}</div>
+                        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          {qrBtn()}<p style={{ color: '#94a3b8', fontSize: 7, textAlign: 'right' }}>{empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026</p>
+                        </div>
+                      </div>
+                      <div style={{ background: hdrBg, height: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Sistema COSP</p>
+                      </div>
                     </div>
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 10, opacity: 0.18 }}>
-                      <svg viewBox="0 0 60 80" width={72} height={96}>
-                        <circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.9)"/>
-                        <path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.9)"/>
-                      </svg>
-                    </div>
-                  )}
-                </div>
+                  );
+                }
 
-                {/* Overlay holográfico */}
-                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', zIndex: 8, overflow: 'hidden',
-                  backgroundImage: `conic-gradient(from ${holoPos.x * 3.6}deg at ${holoPos.x}% ${holoPos.y}%, rgba(255,60,60,0.025),rgba(255,180,40,0.025),rgba(50,255,100,0.025),rgba(40,160,255,0.025),rgba(180,50,255,0.025),rgba(255,60,60,0.025))`,
-                  mixBlendMode: 'overlay' as React.CSSProperties['mixBlendMode'] }}/>
-              </div>
+                // ── TEMPLATE: PREMIUM DARK ───────────────────────────────────
+                {
+                  const purp = '#6366f1';
+                  const isH = orientacion === 'horizontal';
+                  const baseCard: React.CSSProperties = {
+                    position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
+                    borderRadius: 12, overflow: 'hidden', background: '#0d1117', display: 'flex', flexDirection: isH ? 'row' : 'column',
+                  };
+                  if (isH) return (
+                    <div style={baseCard as React.CSSProperties}>
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${purp},${tema.accent})`, zIndex: 1 }}/>
+                      <div style={{ position: 'absolute', inset: 0, opacity: 0.04, backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '14px 14px' }}/>
+                      {/* Foto izq */}
+                      <div style={{ width: 140, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '16px 12px', borderRight: `0.5px solid ${purp}30` }}>
+                        {logoEl(22)}
+                        <div style={{ position: 'relative', width: 100, height: 120 }}>
+                          <div style={{ position: 'absolute', inset: -4, border: `0.8px solid ${purp}35`, borderRadius: 8, transform: 'rotate(3deg)' }}/>
+                          {photoArea(100, 120, 6)}
+                        </div>
+                        <p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 7, textAlign: 'center', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{empresaDisplay}</p>
+                      </div>
+                      {/* Datos der */}
+                      <div style={{ flex: 1, padding: '18px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div>
+                          <p style={{ color: '#fff', fontSize: 17, fontWeight: 900, lineHeight: 1.2 }}>{apellidoNombre || nombre || '—'}</p>
+                          <p style={{ color: purp, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{empData.category || 'Vigilador'}</p>
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: '10px 12px', border: `0.5px solid ${purp}25` }}>
+                          {dataFields()}
+                        </div>
+                        <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: '10px 12px', border: `0.5px solid ${purp}20` }}>
+                          {verSection()}
+                        </div>
+                        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          {chipEl()}
+                          <p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 7 }}>Válida 12/2026</p>
+                          {qrBtn()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <div style={baseCard as React.CSSProperties}>
+                      {/* Acento izq */}
+                      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: `linear-gradient(180deg,${purp},${tema.accent})`, zIndex: 1 }}/>
+                      <div style={{ position: 'absolute', inset: 0, opacity: 0.04, backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '12px 12px' }}/>
+                      {/* Header */}
+                      <div style={{ padding: '14px 14px 12px 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: `0.5px solid ${purp}22` }}>
+                        {logoEl(22)}<div style={{ flex: 1 }}><p style={{ color: purp, fontSize: 10, fontWeight: 900, letterSpacing: '0.04em' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p><p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7 }}>{credTitulo}</p></div>
+                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }}/>
+                      </div>
+                      {/* Foto + nombre */}
+                      <div style={{ padding: '14px 14px 10px 16px', display: 'flex', alignItems: 'flex-start', gap: 12, borderBottom: `0.5px solid ${purp}22` }}>
+                        <div style={{ position: 'relative' }}>
+                          <div style={{ position: 'absolute', inset: -5, border: `0.8px solid ${purp}40`, borderRadius: 8, transform: 'rotate(4deg)' }}/>
+                          {photoArea(88, 108, 6)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.25, marginBottom: 4 }}>{apellidoNombre || nombre || '—'}</p>
+                          <p style={{ color: purp, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>{empData.category || 'Vigilador'}</p>
+                          {dataFields()}
+                        </div>
+                      </div>
+                      {/* Verificación */}
+                      <div style={{ padding: '12px 14px 10px 16px', borderBottom: `0.5px solid ${purp}22` }}>
+                        {verSection()}
+                      </div>
+                      {/* Pie */}
+                      <div style={{ padding: '10px 14px 10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
+                        {chipEl()}{qrBtn()}<p style={{ color: 'rgba(255,255,255,0.22)', fontSize: 7 }}>Válida 12/2026</p>
+                      </div>
+                    </div>
+                  );
+                }
+              })()}
               {/* ── FIN FRENTE ── */}
 
               {/* ══ DORSO ══ */}
@@ -756,37 +1109,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {/* Máscara carnet: SVG full-screen con recorte oval — tipo foto DNI */}
-              <svg
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-                viewBox="0 0 100 100" preserveAspectRatio="none"
-              >
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
                   <mask id="carnet-mask">
                     <rect x="0" y="0" width="100" height="100" fill="white"/>
                     <ellipse cx="50" cy="46" rx="36" ry="44" fill="black"/>
                   </mask>
                 </defs>
-                {/* Overlay oscuro con agujero oval */}
                 <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.72)" mask="url(#carnet-mask)"/>
               </svg>
-              {/* Borde del óvalo + esquinas en SVG separado con proporciones reales */}
-              <svg
-                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -54%)', pointerEvents: 'none' }}
-                width="230" height="280" viewBox="0 0 230 280"
-              >
-                {/* Óvalo guía */}
+              <svg style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -54%)', pointerEvents: 'none' }} width="230" height="280" viewBox="0 0 230 280">
                 <ellipse cx="115" cy="128" rx="112" ry="125" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeDasharray="12 6"/>
-                {/* Línea de ojos */}
                 <line x1="0" y1="85" x2="40" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
                 <line x1="190" y1="85" x2="230" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
-                {/* Esquinas */}
                 <path d="M 0 36 L 0 8 L 30 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M 230 36 L 230 8 L 200 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M 0 244 L 0 272 L 30 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M 230 244 L 230 272 L 200 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              {/* Instrucción */}
               {countdown === null && (
                 <div style={{ position: 'absolute', bottom: 148, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
                   <div style={{ background: `${tema.h1}ee`, borderRadius: 20, padding: '7px 18px' }}>
@@ -794,7 +1134,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   </div>
                 </div>
               )}
-              {/* Countdown overlay */}
               {countdown !== null && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}>
                   <p style={{ fontSize: 140, fontWeight: 900, color: '#fff', lineHeight: 1, textShadow: `0 0 40px ${tema.accent}, 0 4px 16px rgba(0,0,0,0.8)` }}>
