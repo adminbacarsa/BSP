@@ -63,6 +63,9 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const photoOffRef                       = useRef({ x: 50, y: 20 });
   const [flipped, setFlipped]             = useState(false);
   const [holoPos, setHoloPos]             = useState({ x: 50, y: 50 });
+  const [verCode, setVerCode]             = useState('--- ---');
+  const [verRemaining, setVerRemaining]   = useState(30);
+  const [verPct, setVerPct]               = useState(100);
 
   const videoRef     = useRef<HTMLVideoElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -89,6 +92,25 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       y: Math.round(((e.clientY - rect.top) / rect.height) * 100),
     });
   };
+
+  // Código de verificación TOTP-like (rota cada 30s)
+  useEffect(() => {
+    const tick = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const w   = Math.floor(now / 30);
+      const rem = 30 - (now % 30);
+      let h = 5381;
+      const s = empDocId + ':' + w;
+      for (let i = 0; i < s.length; i++) { h = ((h << 5) + h) ^ s.charCodeAt(i); }
+      const n = (Math.abs(h) % 1000000).toString().padStart(6, '0');
+      setVerCode(n.slice(0, 3) + ' ' + n.slice(3));
+      setVerRemaining(rem);
+      setVerPct((rem / 30) * 100);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [empDocId]);
 
   // QR
   useEffect(() => {
@@ -421,204 +443,174 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
               <div style={{
                 position: 'absolute', inset: 0,
                 backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-                borderRadius: 12, overflow: 'hidden', background: '#f0f4f8',
+                borderRadius: 12, overflow: 'visible',
+                background: `linear-gradient(160deg, ${tema.h1} 0%, ${tema.h2} 55%, ${hslToHex(credHue, 50, 28)} 100%)`,
               } as React.CSSProperties}>
 
-                {/* Header degradado */}
-                <div style={{
-                  height: 108,
-                  background: `linear-gradient(135deg, ${tema.h1} 0%, ${tema.h2} 60%, ${tema.accent}28 100%)`,
-                  position: 'relative', overflow: 'hidden',
-                }}>
-                  {/* Guilloche */}
-                  <div style={{
-                    position: 'absolute', inset: 0, opacity: 0.06,
-                    backgroundImage: `repeating-linear-gradient(45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 12px),repeating-linear-gradient(-45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 12px)`,
-                  }}/>
-                  {/* Círculos decorativos fondo */}
-                  <div style={{ position: 'absolute', bottom: -40, right: -30, width: 130, height: 130, borderRadius: '50%', background: `${tema.accent}10` }}/>
-                  <div style={{ position: 'absolute', top: -20, right: 90, width: 70, height: 70, borderRadius: '50%', background: `${tema.accent}08` }}/>
-                  {/* Shimmer holográfico */}
-                  <div style={{
-                    position: 'absolute', inset: 0, pointerEvents: 'none',
-                    background: `radial-gradient(ellipse at ${holoPos.x}% ${holoPos.y}%, rgba(255,255,255,0.20) 0%, transparent 55%)`,
-                    transition: 'background 0.08s',
-                  }}/>
-                  {/* Logo + empresa — izquierda, con margen derecho para la foto */}
-                  <div style={{ position: 'absolute', top: 14, left: 16, right: 130, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* Textura sutil */}
+                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden',
+                  backgroundImage: `repeating-linear-gradient(45deg,rgba(255,255,255,0.018) 0px,rgba(255,255,255,0.018) 1px,transparent 1px,transparent 8px)` }}/>
+
+                {/* Shimmer holográfico */}
+                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', overflow: 'hidden',
+                  background: `radial-gradient(ellipse at ${holoPos.x}% ${holoPos.y}%, rgba(255,255,255,0.13) 0%, transparent 55%)`,
+                  transition: 'background 0.08s' }}/>
+
+                {/* HEADER: logo + empresa */}
+                <div style={{ padding: '15px 16px 12px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.18)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {logoEmpresa ? (
-                      <img src={logoEmpresa} alt="Logo" style={{ height: 26, maxWidth: 72, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.95 }} onError={() => setLogoEmpresa(null)}/>
+                      <img src={logoEmpresa} alt="Logo" style={{ height: 22, maxWidth: 56, objectFit: 'contain', filter: 'brightness(0) invert(1)', opacity: 0.9 }} onError={() => setLogoEmpresa(null)}/>
                     ) : (
-                      <div style={{ width: 28, height: 28, borderRadius: 7, background: `${tema.accent}30`, border: `1.5px solid ${tema.accent}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <ShieldCheck size={15} strokeWidth={1.5} style={{ color: tema.accent }}/>
+                      <div style={{ width: 22, height: 22, borderRadius: 5, background: `${tema.accent}25`, border: `1.5px solid ${tema.accent}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <ShieldCheck size={12} strokeWidth={1.5} style={{ color: tema.accent }}/>
                       </div>
                     )}
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ color: '#fff', fontSize: 10.5, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <p style={{ color: '#fff', fontSize: 11, fontWeight: 900, letterSpacing: '0.03em', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}
                       </p>
-                      <p style={{ color: `${tema.accent}cc`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.14em' }}>
+                      <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
                         {credTitulo}
                       </p>
                     </div>
                   </div>
-                  {/* Legajo en header */}
-                  {empData.fileNumber && (
-                    <div style={{ position: 'absolute', bottom: 10, left: 16 }}>
-                      <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontFamily: 'monospace', fontWeight: 700 }}>
-                        N° {empData.fileNumber}
-                      </p>
-                    </div>
-                  )}
                 </div>
 
-                {/* Franja acento */}
-                <div style={{ height: 3, background: `linear-gradient(90deg, ${tema.h1}, ${tema.accent}, ${tema.h1})` }}/>
-
-                {/* Foto circular — anclada al borde derecho, cruza header/body */}
-                <div style={{
-                  position: 'absolute', top: 20, right: 14, zIndex: 20,
-                  width: 108, height: 108,
-                }}>
-                  {/* Anillo exterior — blanco cuando hay cutout, de color si no */}
-                  <div style={{
-                    position: 'absolute', inset: -3, borderRadius: '50%',
-                    background: esCutout
-                      ? 'rgba(255,255,255,0.92)'
-                      : `linear-gradient(135deg, ${tema.accent} 0%, ${tema.h2}80 50%, ${tema.accent} 100%)`,
-                    boxShadow: esCutout
-                      ? '0 6px 28px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,255,255,0.6)'
-                      : `0 6px 22px rgba(0,0,0,0.45), 0 0 0 2px ${tema.h1}60`,
-                  }}/>
-                  {/* Contenedor circular */}
-                  <div
-                    ref={photoContRef}
-                    style={{
-                      width: '100%', height: '100%', borderRadius: '50%',
-                      overflow: 'hidden', position: 'relative',
-                      background: esCutout ? '#f0f4f8' : `${tema.h2}20`,
-                    }}
-                  >
-                    {quitandoFondo && (
-                      <div style={{
-                        position: 'absolute', inset: 0, zIndex: 20,
-                        borderRadius: '50%', background: 'rgba(0,0,0,0.38)',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/>
-                        <p style={{ color: '#fff', fontSize: 8, fontWeight: 900, marginTop: 2 }}>{progFondo}%</p>
+                {/* DATOS EMPLEADO */}
+                <div style={{ padding: '12px 16px 10px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                  <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, lineHeight: 1.25, marginBottom: 3 }}>
+                    {apellidoNombre || nombre || '—'}
+                  </p>
+                  <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
+                    {empData.category || 'Vigilador'}
+                  </p>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                    {empData.fileNumber && (
+                      <div>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Legajo</p>
+                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>#{empData.fileNumber}</p>
                       </div>
                     )}
-                    {fotoMostrada ? (
+                    {empData.dni && (
+                      <div>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>DNI</p>
+                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.dni}</p>
+                      </div>
+                    )}
+                    {empData.cuil && (
+                      <div>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>CUIL</p>
+                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
+                      </div>
+                    )}
+                    {credPie && (
+                      <div>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Sector</p>
+                        <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, fontWeight: 700 }}>{credPie}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* CÓDIGO DE VERIFICACIÓN */}
+                <div style={{ padding: '10px 16px', paddingRight: 130, borderBottom: '0.5px solid rgba(255,255,255,0.14)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 5 }}>
+                    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+                      <circle cx="5" cy="5" r="4" stroke="rgba(255,255,255,0.4)" strokeWidth="1"/>
+                      <path d="M5 3v2.5l1.5 1" stroke="rgba(255,255,255,0.4)" strokeWidth="1" strokeLinecap="round"/>
+                    </svg>
+                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Código de verificación
+                    </p>
+                  </div>
+                  <p style={{ color: '#fff', fontSize: 24, fontWeight: 800, letterSpacing: '0.28em', fontFamily: 'monospace', lineHeight: 1, marginBottom: 6 }}>
+                    {verCode}
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <p style={{ color: 'rgba(255,255,255,0.33)', fontSize: 7.5 }}>
+                      Se actualiza en{' '}
+                      <span style={{ color: 'rgba(255,255,255,0.62)', fontWeight: 700 }}>0:{verRemaining.toString().padStart(2, '0')}</span>
+                    </p>
+                    <div style={{ flex: 1, maxWidth: 52, height: 2, background: 'rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${verPct}%`, background: 'rgba(255,255,255,0.38)', borderRadius: 1, transition: 'width 1s linear' }}/>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PIE: chip + QR + validez */}
+                <div style={{ padding: '10px 16px', paddingRight: 130, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{
+                    width: 32, height: 23, borderRadius: 4, flexShrink: 0,
+                    background: 'linear-gradient(135deg,#c6901c 0%,#efc848 26%,#a67010 50%,#f5d86c 72%,#c6901c 100%)',
+                    border: '1px solid #9e6e0e',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28)',
+                    position: 'relative',
+                  }}>
+                    {[5, 10, 16, 20].map((t, i) => <div key={i} style={{ position: 'absolute', top: t, left: 3, right: 3, height: 1, background: 'rgba(80,44,0,0.28)' }}/>)}
+                  </div>
+                  <button
+                    onClick={() => setFlipped(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '5px 11px', borderRadius: 20,
+                      background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.22)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {qrDataUrl && <img src={qrDataUrl} alt="" style={{ width: 14, height: 14, opacity: 0.65, borderRadius: 2 }}/>}
+                    <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
+                  </button>
+                  <p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 7, textAlign: 'right', lineHeight: 1.5 }}>
+                    {empData.fileNumber ? `BSP-${empData.fileNumber}` : ''}<br/>Válida 12/2026
+                  </p>
+                </div>
+
+                {/* Banda inferior decorativa */}
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, borderRadius: '0 0 12px 12px',
+                  background: `linear-gradient(90deg,${tema.accent}70,rgba(255,255,255,0.35),${tema.accent}70)` }}/>
+
+                {/* FOTO — sin marco ni círculo, desborda borde derecho */}
+                <div style={{ position: 'absolute', bottom: 0, right: -14, zIndex: 20, width: 128, height: 320, pointerEvents: 'none' }}>
+                  {quitandoFondo && (
+                    <div style={{ position: 'absolute', inset: 0, zIndex: 21, background: 'rgba(0,0,0,0.45)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                      <RefreshCw size={18} className="animate-spin" style={{ color: tema.accent }}/>
+                      <p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p>
+                    </div>
+                  )}
+                  {fotoMostrada ? (
+                    <div
+                      ref={photoContRef}
+                      style={{ width: '100%', height: '100%', overflow: 'hidden', pointerEvents: showEditUI ? 'auto' : 'none' }}
+                    >
                       <img
                         src={fotoMostrada}
                         alt="Foto"
                         style={{
                           width: '100%', height: '100%',
-                          objectFit: 'cover',
-                          objectPosition: `${photoOff.x}% ${photoOff.y}%`,
+                          objectFit: esCutout ? 'contain' : 'cover',
+                          objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`,
+                          filter: esCutout ? 'drop-shadow(0 6px 22px rgba(0,0,0,0.7)) drop-shadow(0 2px 8px rgba(0,0,0,0.45))' : 'none',
                           pointerEvents: 'none', userSelect: 'none',
                         }}
                         draggable={false}
                       />
-                    ) : (
-                      <div style={{
-                        width: '100%', height: '100%', borderRadius: '50%',
-                        border: `2px dashed ${tema.accent}40`,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-                      }}>
-                        <svg viewBox="0 0 60 80" width={42} height={56} style={{ opacity: 0.3 }}>
-                          <circle cx="30" cy="22" r="14" fill={tema.accent}/>
-                          <path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill={tema.accent}/>
-                        </svg>
-                        <p style={{ color: `${tema.accent}70`, fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase' }}>Foto</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Body blanco */}
-                <div style={{ padding: '14px 16px 0', position: 'relative' }}>
-                  {/* Nombre + cargo — margen derecho para no pisar la foto */}
-                  <div style={{ paddingRight: 118, marginBottom: 6 }}>
-                    <p style={{ fontSize: 16, fontWeight: 900, color: '#111827', lineHeight: 1.2 }}>
-                      {apellidoNombre || nombre || '—'}
-                    </p>
-                    <p style={{ fontSize: 7.5, fontWeight: 900, color: tema.accent, textTransform: 'uppercase', letterSpacing: '0.12em', marginTop: 3 }}>
-                      {empData.category || 'Vigilador'}
-                    </p>
-                  </div>
-
-                  {/* Separador */}
-                  <div style={{ height: 1, background: `linear-gradient(90deg, ${tema.accent}50, transparent)`, marginBottom: 10 }}/>
-
-                  {/* Datos — full width (ya estamos debajo de la foto) */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {(empData.dni || empData.cuil) && (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        {empData.dni && (
-                          <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
-                            <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>DNI</p>
-                            <p style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: '#1e293b' }}>{empData.dni}</p>
-                          </div>
-                        )}
-                        {empData.cuil && (
-                          <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
-                            <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>CUIL</p>
-                            <p style={{ fontSize: 11, fontWeight: 900, fontFamily: 'monospace', color: '#1e293b' }}>{empData.cuil}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {credPie && (
-                      <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 4 }}>
-                        <p style={{ fontSize: 6.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: tema.accent, marginBottom: 1 }}>Sector</p>
-                        <p style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>{credPie}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Fila inferior: chip + QR */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
-                    {/* Chip EMV */}
-                    <div style={{
-                      width: 38, height: 28, borderRadius: 5, flexShrink: 0,
-                      background: 'linear-gradient(135deg, #c6901c 0%, #efc848 26%, #a67010 50%, #f5d86c 72%, #c6901c 100%)',
-                      border: '1px solid #9e6e0e',
-                      boxShadow: '0 2px 6px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.35)',
-                      position: 'relative',
-                    }}>
-                      {[6, 12, 18, 23].map((t, i) => <div key={i} style={{ position: 'absolute', top: t, left: 4, right: 4, height: 1, background: 'rgba(80,44,0,0.35)' }}/>)}
-                      {[8, 14, 20, 26].map((l, i) => <div key={i} style={{ position: 'absolute', top: 3, bottom: 3, left: l, width: 1, background: 'rgba(80,44,0,0.28)' }}/>)}
                     </div>
-                    {/* Ver QR */}
-                    <button
-                      onClick={() => setFlipped(true)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '5px 11px', borderRadius: 20,
-                        background: `${tema.h1}15`, border: `1px solid ${tema.accent}35`,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {qrDataUrl && <img src={qrDataUrl} alt="" style={{ width: 16, height: 16, opacity: 0.5, borderRadius: 2 }}/>}
-                      <p style={{ color: tema.accent, fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
-                    </button>
-                  </div>
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 10, opacity: 0.18 }}>
+                      <svg viewBox="0 0 60 80" width={72} height={96}>
+                        <circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.9)"/>
+                        <path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.9)"/>
+                      </svg>
+                    </div>
+                  )}
                 </div>
-
-                {/* Banda inferior */}
-                <div style={{
-                  position: 'absolute', bottom: 0, left: 0, right: 0, height: 7,
-                  background: `linear-gradient(90deg, ${tema.h1}, ${tema.accent}90, ${tema.h2})`,
-                }}/>
 
                 {/* Overlay holográfico */}
-                <div style={{
-                  position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', zIndex: 8,
-                  backgroundImage: `conic-gradient(from ${holoPos.x * 3.6}deg at ${holoPos.x}% ${holoPos.y}%, rgba(255,60,60,0.025), rgba(255,180,40,0.025), rgba(50,255,100,0.025), rgba(40,160,255,0.025), rgba(180,50,255,0.025), rgba(255,60,60,0.025))`,
-                  mixBlendMode: 'overlay' as React.CSSProperties['mixBlendMode'],
-                }}/>
+                <div style={{ position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none', zIndex: 8, overflow: 'hidden',
+                  backgroundImage: `conic-gradient(from ${holoPos.x * 3.6}deg at ${holoPos.x}% ${holoPos.y}%, rgba(255,60,60,0.025),rgba(255,180,40,0.025),rgba(50,255,100,0.025),rgba(40,160,255,0.025),rgba(180,50,255,0.025),rgba(255,60,60,0.025))`,
+                  mixBlendMode: 'overlay' as React.CSSProperties['mixBlendMode'] }}/>
               </div>
               {/* ── FIN FRENTE ── */}
 
