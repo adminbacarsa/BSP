@@ -1756,30 +1756,30 @@ export default function EmployeeDashboard() {
           )}
 
           {/* ===== ESTADO DEL DÍA — status + acciones en una sola fila ===== */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none" style={{flexWrap:'nowrap'}}>
+          <div className="flex items-center gap-1.5 flex-nowrap">
             {/* Pill de estado */}
             {blueIsConfirmedPresent ? (
-              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
                 <CheckCircle size={12} className="text-emerald-400"/>
                 <span className="text-xs font-black text-emerald-300 uppercase">Presente registrado</span>
                 {todayElapsed && <span className="text-[10px] text-emerald-600 ml-1">· {todayElapsed}</span>}
               </div>
             ) : blueHasPendingRequest ? (
-              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-amber-950/60 border border-amber-800/50 rounded-full">
                 <span className="text-xs font-black text-amber-300 uppercase">Solicitud enviada…</span>
               </div>
             ) : todayShift ? (
-              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-full">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"/>
                 <span className="text-xs font-black text-slate-400 uppercase">Presente pendiente</span>
               </div>
             ) : (
-              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-full">
                 <span className="text-xs font-black text-slate-500 uppercase">Sin turno hoy</span>
               </div>
             )}
             {pendingCheckins > 0 && (
-              <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-amber-950/60 border border-amber-800/50 rounded-full">
                 <AlertTriangle size={11} className="text-amber-400"/>
                 <span className="text-[10px] font-black text-amber-300">{pendingCheckins} pend.</span>
               </div>
@@ -1790,7 +1790,7 @@ export default function EmployeeDashboard() {
               <button
                 onClick={() => handleCheckIn(blueShift)}
                 disabled={checkingShiftId === blueShift.id}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
+                className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[11px] uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
               >
                 <Navigation size={14}/>
                 {checkingShiftId === blueShift.id ? 'Validando...' : 'Dar Presente'}
@@ -1800,7 +1800,7 @@ export default function EmployeeDashboard() {
               <button
                 onClick={() => handleLlegadaTarde(blueShift)}
                 disabled={checkingShiftId === blueShift.id}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
+                className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-[11px] uppercase transition-all active:scale-95 disabled:opacity-60"
               >
                 <AlertTriangle size={14}/>
                 {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
@@ -1809,7 +1809,7 @@ export default function EmployeeDashboard() {
             {(portalFeatures.reportAbsence || portalFeatures.requestLicense) && (
               <button
                 onClick={() => { setShowAbsenceRequest(v => !v); setShowSwap(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-[11px] uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
               >
                 <FileText size={14}/> Novedad
               </button>
@@ -1817,7 +1817,7 @@ export default function EmployeeDashboard() {
             {portalFeatures.swapShifts && (
               <button
                 onClick={() => { setShowSwap(v => !v); setShowAbsenceRequest(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl font-black text-[11px] uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
               >
                 <ArrowLeftRight size={14}/> Canje
               </button>
@@ -2010,23 +2010,10 @@ export default function EmployeeDashboard() {
           {/* ===== CREDENCIAL ===== */}
           <button
             onClick={() => setShowCredencialVista(true)}
-            className="w-full bg-slate-900 border border-slate-800 hover:border-indigo-800/60 rounded-2xl p-4 text-left transition-all active:scale-[0.99] group"
+            className="w-full bg-slate-900 border border-slate-800 hover:border-yellow-700/60 rounded-2xl px-4 py-3 transition-all active:scale-[0.99] group flex items-center justify-center gap-2"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-black text-sm shrink-0">
-                {displayName?.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-black text-white truncate leading-tight">{displayName}</p>
-                <p className="text-[10px] text-slate-500 font-bold mt-0.5">
-                  {empProfile?.category || 'Guardia'}{empProfile?.fileNumber ? ` · Leg. ${empProfile.fileNumber}` : ''}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <CreditCard size={16} className="text-slate-500 group-hover:text-yellow-400 transition-colors"/>
-                <span className="text-[9px] font-black text-slate-600 uppercase">Credencial</span>
-              </div>
-            </div>
+            <CreditCard size={16} className="text-slate-400 group-hover:text-yellow-400 transition-colors shrink-0"/>
+            <span className="text-xs font-black text-slate-400 group-hover:text-yellow-400 uppercase transition-colors">Ver credencial</span>
           </button>
 
           {/* ===== STATS DEL MES ===== */}
