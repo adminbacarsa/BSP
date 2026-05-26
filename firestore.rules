@@ -251,11 +251,7 @@ service cloud.firestore {
     }
 
     match /empresas/{empresaId} {
-      allow read: if isAdmin() || (
-        request.auth != null &&
-        empleadoAuthDocExists() &&
-        empleadoAuthDocEmpresaId() == empresaId
-      );
+      allow read: if isAdmin() || isEmployeeClaim();
       allow write: if isSuperAdmin();
     }
 

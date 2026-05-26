@@ -108,7 +108,8 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
         setLoadingEmpresa(false);
       },
       () => {
-        setEmpresa({ id: empresaId, name: empresaId });
+        const fallbackName = empresaId === 'bacarsa' ? 'Bacar SA' : empresaId;
+        setEmpresa({ id: empresaId, name: fallbackName });
         setLoadingEmpresa(false);
       }
     );
