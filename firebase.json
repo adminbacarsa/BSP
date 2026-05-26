@@ -52,6 +52,13 @@
       {
         "source": "**/*.html",
         "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        "source": "**",
+        "headers": [
+          { "key": "Cross-Origin-Opener-Policy",  "value": "same-origin" },
+          { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" }
+        ]
       }
     ]
   }

@@ -756,26 +756,35 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {/* Overlay oscuro — alrededor del óvalo carnet */}
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 'calc(50% - 200px)', background: 'rgba(0,0,0,0.75)' }}/>
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 'calc(50% - 140px)', background: 'rgba(0,0,0,0.75)' }}/>
-              <div style={{ position: 'absolute', top: 'calc(50% - 200px)', bottom: 'calc(50% - 140px)', left: 0, width: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.75)' }}/>
-              <div style={{ position: 'absolute', top: 'calc(50% - 200px)', bottom: 'calc(50% - 140px)', right: 0, width: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.75)' }}/>
-              {/* Máscara carnet: óvalo cabeza+cuello tipo DNI/pasaporte */}
+              {/* Máscara carnet: SVG full-screen con recorte oval — tipo foto DNI */}
               <svg
-                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
-                width="220" height="340" viewBox="0 0 220 340"
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+                viewBox="0 0 100 100" preserveAspectRatio="none"
               >
-                {/* Óvalo principal — cabeza + cuello */}
-                <ellipse cx="110" cy="155" rx="108" ry="138" fill="rgba(0,0,0,0)" stroke={tema.accent} strokeWidth="2.5" strokeDasharray="10 5" opacity="0.95"/>
-                {/* Línea central horizontal de encuadre (ojos) */}
-                <line x1="2" y1="100" x2="50" y2="100" stroke={tema.accent} strokeWidth="1" strokeDasharray="4 4" opacity="0.4"/>
-                <line x1="170" y1="100" x2="218" y2="100" stroke={tema.accent} strokeWidth="1" strokeDasharray="4 4" opacity="0.4"/>
-                {/* Esquinas de encuadre */}
-                <path d="M 0 40 L 0 10 L 32 10" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 220 40 L 220 10 L 188 10" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 0 300 L 0 330 L 32 330" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 220 300 L 220 330 L 188 330" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <defs>
+                  <mask id="carnet-mask">
+                    <rect x="0" y="0" width="100" height="100" fill="white"/>
+                    <ellipse cx="50" cy="46" rx="36" ry="44" fill="black"/>
+                  </mask>
+                </defs>
+                {/* Overlay oscuro con agujero oval */}
+                <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.72)" mask="url(#carnet-mask)"/>
+              </svg>
+              {/* Borde del óvalo + esquinas en SVG separado con proporciones reales */}
+              <svg
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -54%)', pointerEvents: 'none' }}
+                width="230" height="280" viewBox="0 0 230 280"
+              >
+                {/* Óvalo guía */}
+                <ellipse cx="115" cy="128" rx="112" ry="125" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeDasharray="12 6"/>
+                {/* Línea de ojos */}
+                <line x1="0" y1="85" x2="40" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
+                <line x1="190" y1="85" x2="230" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
+                {/* Esquinas */}
+                <path d="M 0 36 L 0 8 L 30 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 230 36 L 230 8 L 200 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 0 244 L 0 272 L 30 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 230 244 L 230 272 L 200 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
               {/* Instrucción */}
               {countdown === null && (

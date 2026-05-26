@@ -44,6 +44,19 @@ fs.writeFileSync(path.join(__dirname, 'public', 'manifest.json'), JSON.stringify
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // COOP/COEP: habilitan SharedArrayBuffer → onnxruntime-web → bg removal (@imgly)
+  // En `next dev` aplica automáticamente. En prod: firebase.json tiene los mismos headers.
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy',  value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+    ];
+  },
   distDir: process.env.NEXT_DIST_DIR || '.next',
   pageExtensions: ['tsx', 'ts'],
   output: 'export',
