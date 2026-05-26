@@ -64,8 +64,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [flipped, setFlipped]             = useState(false);
   const [holoPos, setHoloPos]             = useState({ x: 50, y: 50 });
   const [verCode, setVerCode]             = useState('--- ---');
-  const [verRemaining, setVerRemaining]   = useState(30);
+  const [verRemaining, setVerRemaining]   = useState(60);
   const [verPct, setVerPct]               = useState(100);
+  const [countdown, setCountdown]         = useState<number | null>(null);
+  const countdownRef                      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const videoRef     = useRef<HTMLVideoElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -97,15 +99,15 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   useEffect(() => {
     const tick = () => {
       const now = Math.floor(Date.now() / 1000);
-      const w   = Math.floor(now / 30);
-      const rem = 30 - (now % 30);
+      const w   = Math.floor(now / 60);
+      const rem = 60 - (now % 60);
       let h = 5381;
       const s = empDocId + ':' + w;
       for (let i = 0; i < s.length; i++) { h = ((h << 5) + h) ^ s.charCodeAt(i); }
       const n = (Math.abs(h) % 1000000).toString().padStart(6, '0');
       setVerCode(n.slice(0, 3) + ' ' + n.slice(3));
       setVerRemaining(rem);
-      setVerPct((rem / 30) * 100);
+      setVerPct((rem / 60) * 100);
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -255,8 +257,29 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     };
     reader.readAsDataURL(file); e.target.value = '';
   };
+  // Obtiene blob de una URL (fallback canvas para URLs de Firebase Storage)
+  const getBlobFromUrl = async (url: string): Promise<Blob | null> => {
+    try {
+      const r = await fetch(url, { mode: 'cors' });
+      if (r.ok) return await r.blob();
+    } catch { /* intentamos con canvas */ }
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(); img.src = url; });
+      const cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      cv.getContext('2d')!.drawImage(img, 0, 0);
+      return await new Promise<Blob | null>(res => cv.toBlob(b => res(b), 'image/png'));
+    } catch { return null; }
+  };
   const quitarFondo = async () => {
-    const blob = capturedBlob || (fotoSrc ? await fetch(fotoSrc).then(r => r.blob()) : null);
+    let blob = capturedBlob;
+    if (!blob) {
+      const src = fotoFinal || fotoSrc;
+      if (!src) return;
+      blob = await getBlobFromUrl(src);
+    }
     if (!blob) return;
     setQuitandoFondo(true); setProgFondo(0);
     try {
@@ -266,8 +289,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); },
       });
       setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error('BG removal error:', e); }
     finally { setQuitandoFondo(false); setProgFondo(0); }
+  };
+  const iniciarContador = () => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    setCountdown(3);
+    let c = 3;
+    countdownRef.current = setInterval(() => {
+      c--;
+      if (c > 0) {
+        setCountdown(c);
+      } else {
+        clearInterval(countdownRef.current!);
+        countdownRef.current = null;
+        setCountdown(null);
+        capturarFoto();
+      }
+    }, 1000);
   };
   const guardarFoto = async () => {
     if (!empDocId) return;
@@ -408,7 +447,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
         </div>
       </div>
 
-      <div className="relative mx-auto" style={{ maxWidth: 334, width: '100%' }}>
+      <div className="relative mx-auto" style={{ maxWidth: 420, width: '100%' }}>
 
         {/* Marco porta-credencial */}
         <div style={{
@@ -431,7 +470,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             <div
               onMouseMove={onCardMouseMove}
               style={{
-                position: 'relative', width: '100%', height: 420,
+                position: 'relative', width: '100%', height: 500,
                 transformStyle: 'preserve-3d',
                 transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
                 transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
@@ -717,41 +756,52 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {/* Overlay oscuro — 4 rectángulos alrededor del área guía */}
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 'calc(50% - 190px)', background: 'rgba(0,0,0,0.72)' }}/>
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.72)' }}/>
-              <div style={{ position: 'absolute', top: 'calc(50% - 190px)', bottom: 'calc(50% - 110px)', left: 0, width: 'calc(50% - 118px)', background: 'rgba(0,0,0,0.72)' }}/>
-              <div style={{ position: 'absolute', top: 'calc(50% - 190px)', bottom: 'calc(50% - 110px)', right: 0, width: 'calc(50% - 118px)', background: 'rgba(0,0,0,0.72)' }}/>
-              {/* Guía silueta: cabeza + hombros + busto */}
+              {/* Overlay oscuro — alrededor del óvalo carnet */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 'calc(50% - 200px)', background: 'rgba(0,0,0,0.75)' }}/>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 'calc(50% - 140px)', background: 'rgba(0,0,0,0.75)' }}/>
+              <div style={{ position: 'absolute', top: 'calc(50% - 200px)', bottom: 'calc(50% - 140px)', left: 0, width: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.75)' }}/>
+              <div style={{ position: 'absolute', top: 'calc(50% - 200px)', bottom: 'calc(50% - 140px)', right: 0, width: 'calc(50% - 110px)', background: 'rgba(0,0,0,0.75)' }}/>
+              {/* Máscara carnet: óvalo cabeza+cuello tipo DNI/pasaporte */}
               <svg
                 style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
-                width="236" height="300" viewBox="0 0 236 300"
+                width="220" height="340" viewBox="0 0 220 340"
               >
-                {/* Óvalo cabeza */}
-                <ellipse cx="118" cy="82" rx="54" ry="66" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
-                {/* Cuello */}
-                <line x1="94" y1="143" x2="90" y2="166" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.65"/>
-                <line x1="142" y1="143" x2="146" y2="166" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.65"/>
-                {/* Hombros */}
-                <path d="M 90 166 Q 44 178 18 220" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
-                <path d="M 146 166 Q 192 178 218 220" fill="none" stroke={tema.accent} strokeWidth="2" strokeDasharray="8 4" opacity="0.9"/>
-                {/* Línea base busto */}
-                <line x1="18" y1="220" x2="218" y2="220" stroke={tema.accent} strokeWidth="1.5" strokeDasharray="6 4" opacity="0.45"/>
+                {/* Óvalo principal — cabeza + cuello */}
+                <ellipse cx="110" cy="155" rx="108" ry="138" fill="rgba(0,0,0,0)" stroke={tema.accent} strokeWidth="2.5" strokeDasharray="10 5" opacity="0.95"/>
+                {/* Línea central horizontal de encuadre (ojos) */}
+                <line x1="2" y1="100" x2="50" y2="100" stroke={tema.accent} strokeWidth="1" strokeDasharray="4 4" opacity="0.4"/>
+                <line x1="170" y1="100" x2="218" y2="100" stroke={tema.accent} strokeWidth="1" strokeDasharray="4 4" opacity="0.4"/>
                 {/* Esquinas de encuadre */}
-                <path d="M 0 32 L 0 10 L 26 10" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
-                <path d="M 236 32 L 236 10 L 210 10" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
-                <path d="M 0 268 L 0 290 L 26 290" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
-                <path d="M 236 268 L 236 290 L 210 290" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                <path d="M 0 40 L 0 10 L 32 10" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 220 40 L 220 10 L 188 10" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 0 300 L 0 330 L 32 330" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 220 300 L 220 330 L 188 330" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              <div style={{ position: 'absolute', bottom: 152, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
-                <div style={{ background: `${tema.h1}dd`, borderRadius: 20, padding: '6px 16px' }}>
-                  <p className="text-white text-[11px] font-bold text-center">Encuadrá hombros y rostro · Mirá a cámara</p>
+              {/* Instrucción */}
+              {countdown === null && (
+                <div style={{ position: 'absolute', bottom: 148, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+                  <div style={{ background: `${tema.h1}ee`, borderRadius: 20, padding: '7px 18px' }}>
+                    <p className="text-white text-[11px] font-bold text-center">Encuadrá el rostro · Mirá a cámara</p>
+                  </div>
                 </div>
-              </div>
+              )}
+              {/* Countdown overlay */}
+              {countdown !== null && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}>
+                  <p style={{ fontSize: 140, fontWeight: 900, color: '#fff', lineHeight: 1, textShadow: `0 0 40px ${tema.accent}, 0 4px 16px rgba(0,0,0,0.8)` }}>
+                    {countdown}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
           <div className="pb-12 pt-5 flex justify-center" style={{ background: tema.h1 }}>
-            <button onClick={capturarFoto} style={{ width: 76, height: 76, background: '#ffffff', border: `4px solid ${tema.accent}`, boxShadow: `0 0 0 8px ${tema.accent}30`, borderRadius: '50%' }} className="active:scale-90 transition-transform"/>
+            <button
+              onClick={countdown === null ? iniciarContador : undefined}
+              disabled={countdown !== null}
+              style={{ width: 76, height: 76, background: '#ffffff', border: `4px solid ${tema.accent}`, boxShadow: `0 0 0 8px ${tema.accent}30`, borderRadius: '50%', opacity: countdown !== null ? 0.5 : 1 }}
+              className="active:scale-90 transition-transform"
+            />
           </div>
         </div>
       )}
