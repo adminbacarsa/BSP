@@ -3,6 +3,7 @@ import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
+import { useRouter } from 'next/router';
 import { ToastProvider } from '@/context/ToastContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { EmpresaProvider } from '@/context/EmpresaContext';
@@ -16,6 +17,8 @@ const AssistantFloatingBubble = dynamic(
 );
 
 export default function App({ Component, pageProps }: AppProps) {
+  const router = useRouter();
+  const showAssistant = !router.pathname.startsWith('/empleado') && !router.pathname.startsWith('/cliente') && !router.pathname.startsWith('/objetivo');
   useEffect(() => {
     initTheme();
     applyCompanyThemeFromStorage();
@@ -41,7 +44,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
         <Component {...pageProps} />
-        <AssistantFloatingBubble />
+        {showAssistant && <AssistantFloatingBubble />}
       </ToastProvider>
       </EmpresaProvider>
     </AuthProvider>

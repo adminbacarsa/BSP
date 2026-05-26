@@ -11,6 +11,7 @@ import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 type Shift = {
@@ -147,6 +148,7 @@ const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => 
 
 export default function EmployeeDashboard() {
   const { addToast } = useToast();
+  const { empresa: empresaCtx } = useEmpresa();
   const [isOnline, setIsOnline] = useState(true);
   useEffect(() => {
     setIsOnline(navigator.onLine);
@@ -1659,10 +1661,10 @@ export default function EmployeeDashboard() {
               <p className="text-sm font-black text-white leading-tight">{displayName}</p>
             </div>
           </div>
-          {empresaNombre ? (
+          {(empresaNombre || empresaCtx?.name) ? (
             <div className="flex-1 flex flex-col items-center min-w-0">
               <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none">Empresa</p>
-              <p className="text-xs font-black text-white leading-tight truncate max-w-full text-center">{empresaNombre}</p>
+              <p className="text-xs font-black text-white leading-tight truncate max-w-full text-center">{empresaNombre || empresaCtx?.name}</p>
             </div>
           ) : <div className="flex-1"/>}
           <div className="flex items-center gap-2">
@@ -1737,85 +1739,73 @@ export default function EmployeeDashboard() {
             </div>
           )}
 
-          {/* ===== ESTADO DEL DÍA ===== */}
-          <div className="space-y-2.5">
-            {/* Status pills */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {blueIsConfirmedPresent ? (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
-                  <CheckCircle size={12} className="text-emerald-400"/>
-                  <span className="text-xs font-black text-emerald-300 uppercase">Presente registrado</span>
-                  {todayElapsed && <span className="text-[10px] text-emerald-600 ml-1">· {todayElapsed} en servicio</span>}
-                </div>
-              ) : blueHasPendingRequest ? (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
-                  <span className="text-xs font-black text-amber-300 uppercase">Solicitud enviada…</span>
-                </div>
-              ) : todayShift ? (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"/>
-                  <span className="text-xs font-black text-slate-400 uppercase">Presente pendiente</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
-                  <span className="text-xs font-black text-slate-500 uppercase">Sin turno hoy</span>
-                </div>
-              )}
-              {pendingCheckins > 0 && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
-                  <AlertTriangle size={11} className="text-amber-400"/>
-                  <span className="text-[10px] font-black text-amber-300">{pendingCheckins} pend. sincronizar</span>
-                </div>
-              )}
-              {swapRequests.filter((r: any) => !['CANCELLED','REJECTED','CANCELADO','RECHAZADO'].includes((r.status || '').toString().toUpperCase())).length > 0 && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-950/60 border border-sky-800/50 rounded-full">
-                  <ArrowLeftRight size={11} className="text-sky-400"/>
-                  <span className="text-[10px] font-black text-sky-300">
-                    {swapRequests.filter((r: any) => !['CANCELLED','REJECTED','CANCELADO','RECHAZADO'].includes((r.status || '').toString().toUpperCase())).length} canje(s) pendiente(s)
-                  </span>
-                </div>
-              )}
-            </div>
+          {/* ===== ESTADO DEL DÍA — status + acciones en una sola fila ===== */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Pill de estado */}
+            {blueIsConfirmedPresent ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 border border-emerald-800/50 rounded-full">
+                <CheckCircle size={12} className="text-emerald-400"/>
+                <span className="text-xs font-black text-emerald-300 uppercase">Presente registrado</span>
+                {todayElapsed && <span className="text-[10px] text-emerald-600 ml-1">· {todayElapsed}</span>}
+              </div>
+            ) : blueHasPendingRequest ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+                <span className="text-xs font-black text-amber-300 uppercase">Solicitud enviada…</span>
+              </div>
+            ) : todayShift ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"/>
+                <span className="text-xs font-black text-slate-400 uppercase">Presente pendiente</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-full">
+                <span className="text-xs font-black text-slate-500 uppercase">Sin turno hoy</span>
+              </div>
+            )}
+            {pendingCheckins > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/60 border border-amber-800/50 rounded-full">
+                <AlertTriangle size={11} className="text-amber-400"/>
+                <span className="text-[10px] font-black text-amber-300">{pendingCheckins} pend.</span>
+              </div>
+            )}
 
-            {/* Quick action buttons */}
-            <div className="flex gap-2 flex-wrap">
-              {portalFeatures.checkIn && blueCanRequest && blueShift && (
-                <button
-                  onClick={() => handleCheckIn(blueShift)}
-                  disabled={checkingShiftId === blueShift.id}
-                  className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
-                >
-                  <Navigation size={14}/>
-                  {checkingShiftId === blueShift.id ? 'Validando...' : 'Dar Presente'}
-                </button>
-              )}
-              {portalFeatures.checkIn && blueLateCanRequest && !blueIsLateNotified && blueShift && (
-                <button
-                  onClick={() => handleLlegadaTarde(blueShift)}
-                  disabled={checkingShiftId === blueShift.id}
-                  className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
-                >
-                  <AlertTriangle size={14}/>
-                  {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
-                </button>
-              )}
-              {(portalFeatures.reportAbsence || portalFeatures.requestLicense) && (
-                <button
-                  onClick={() => { setShowAbsenceRequest(v => !v); setShowSwap(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-                >
-                  <FileText size={14}/> Novedad
-                </button>
-              )}
-              {portalFeatures.swapShifts && (
-                <button
-                  onClick={() => { setShowSwap(v => !v); setShowAbsenceRequest(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-                >
-                  <ArrowLeftRight size={14}/> Canje
-                </button>
-              )}
-            </div>
+            {/* Botones de acción — en la misma fila */}
+            {portalFeatures.checkIn && blueCanRequest && blueShift && (
+              <button
+                onClick={() => handleCheckIn(blueShift)}
+                disabled={checkingShiftId === blueShift.id}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60 shadow-lg shadow-indigo-900/40"
+              >
+                <Navigation size={14}/>
+                {checkingShiftId === blueShift.id ? 'Validando...' : 'Dar Presente'}
+              </button>
+            )}
+            {portalFeatures.checkIn && blueLateCanRequest && !blueIsLateNotified && blueShift && (
+              <button
+                onClick={() => handleLlegadaTarde(blueShift)}
+                disabled={checkingShiftId === blueShift.id}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black text-xs uppercase transition-all active:scale-95 disabled:opacity-60"
+              >
+                <AlertTriangle size={14}/>
+                {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
+              </button>
+            )}
+            {(portalFeatures.reportAbsence || portalFeatures.requestLicense) && (
+              <button
+                onClick={() => { setShowAbsenceRequest(v => !v); setShowSwap(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
+                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showAbsenceRequest ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+              >
+                <FileText size={14}/> Novedad
+              </button>
+            )}
+            {portalFeatures.swapShifts && (
+              <button
+                onClick={() => { setShowSwap(v => !v); setShowAbsenceRequest(false); setShowCompletedPanel(false); setShowPresentHistory(false); }}
+                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all active:scale-95 border ${showSwap ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+              >
+                <ArrowLeftRight size={14}/> Canje
+              </button>
+            )}
           </div>
 
           {/* ===== HERO: PRÓXIMO TURNO ===== */}
@@ -1823,7 +1813,14 @@ export default function EmployeeDashboard() {
             <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full pointer-events-none"/>
             <div className="absolute -bottom-10 -left-4 w-32 h-32 bg-white/5 rounded-full pointer-events-none"/>
             <div className="relative">
-              <p className="text-[10px] font-black uppercase text-indigo-200 tracking-widest">Próximo Turno</p>
+              <div className="flex items-center justify-between mb-0.5">
+                <p className="text-[10px] font-black uppercase text-indigo-200 tracking-widest">Próximo Turno</p>
+                {empresaNombre ? (
+                  <span className="flex items-center gap-1 px-2.5 py-1 bg-white/10 rounded-full text-[10px] font-black text-indigo-100 border border-white/10 max-w-[160px] truncate">
+                    🏢 {empresaNombre}
+                  </span>
+                ) : null}
+              </div>
               <p className="text-3xl font-black mt-1 leading-none">
                 {todayShiftAny ? 'HOY' : nextShift ? (() => {
                   const d = toDate(nextShift.startTime);
