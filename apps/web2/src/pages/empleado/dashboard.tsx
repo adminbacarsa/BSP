@@ -1664,7 +1664,7 @@ export default function EmployeeDashboard() {
           {(empresaNombre || empresaCtx?.name) ? (
             <div className="flex-1 flex flex-col items-center min-w-0">
               <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 leading-none">Empresa</p>
-              <p className="text-xs font-black text-white leading-tight truncate max-w-full text-center">{empresaNombre || empresaCtx?.name}</p>
+              <p className="text-xs font-black text-white leading-tight truncate max-w-full text-center uppercase">{empresaNombre || empresaCtx?.name}</p>
             </div>
           ) : <div className="flex-1"/>}
           <div className="flex items-center gap-2">
