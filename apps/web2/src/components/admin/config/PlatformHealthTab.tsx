@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   Activity, CheckCircle, XCircle, AlertCircle, Loader2,
   Database, Zap, Mail, HardDrive, Bell, Bot, Clock, Server,
-  BarChart3, RefreshCw, Shield,
+  BarChart3, RefreshCw, Shield, Download, Copy, Check,
 } from 'lucide-react';
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
@@ -105,6 +105,8 @@ export default function PlatformHealthTab() {
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [overallOk, setOverallOk] = useState<boolean | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [rawReport, setRawReport] = useState<object | null>(null);
 
   function updateCheck(label: string, patch: Partial<CheckResult>) {
     setChecks(prev => prev.map(c => c.label === label ? { ...c, ...patch } : c));
@@ -226,8 +228,48 @@ export default function PlatformHealthTab() {
       setOverallOk(false);
     }
 
-    setLastRun(new Date().toLocaleString('es-AR'));
+    const ts = new Date().toLocaleString('es-AR');
+    setLastRun(ts);
     setRunning(false);
+
+    // Construir reporte exportable con los checks finales
+    setChecks(prev => {
+      const report = {
+        generatedAt: new Date().toISOString(),
+        environment: USE_EMULATOR ? 'emulator' : 'production',
+        summary: {
+          ok: prev.filter(c => c.status === 'ok').length,
+          warn: prev.filter(c => c.status === 'warn').length,
+          error: prev.filter(c => c.status === 'error').length,
+        },
+        checks: prev.map(({ label, group, status, detail, latencyMs }) => ({
+          group, label, status,
+          ...(latencyMs !== undefined ? { latencyMs } : {}),
+          ...(detail ? { detail } : {}),
+        })),
+      };
+      setRawReport(report);
+      return prev;
+    });
+  }
+
+  function downloadJson() {
+    if (!rawReport) return;
+    const blob = new Blob([JSON.stringify(rawReport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cosp-health-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyJson() {
+    if (!rawReport) return;
+    navigator.clipboard.writeText(JSON.stringify(rawReport, null, 2)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   }
 
   const okCount  = checks.filter(c => c.status === 'ok').length;
@@ -244,15 +286,35 @@ export default function PlatformHealthTab() {
             Verificación de conectividad, APIs externas y estado de servicios
           </p>
         </div>
-        <button
-          onClick={runChecks}
-          disabled={running}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-all active:scale-95"
-        >
-          {running
-            ? <><Loader2 size={15} className="animate-spin" /> Verificando...</>
-            : <><RefreshCw size={15} /> Ejecutar diagnóstico</>}
-        </button>
+        <div className="flex items-center gap-2">
+          {rawReport && (
+            <>
+              <button
+                onClick={copyJson}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-sm text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all active:scale-95"
+                title="Copiar JSON al portapapeles"
+              >
+                {copied ? <><Check size={14} className="text-emerald-400" /> Copiado</> : <><Copy size={14} /> Copiar JSON</>}
+              </button>
+              <button
+                onClick={downloadJson}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-sm text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all active:scale-95"
+                title="Descargar reporte JSON"
+              >
+                <Download size={14} /> Descargar
+              </button>
+            </>
+          )}
+          <button
+            onClick={runChecks}
+            disabled={running}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-all active:scale-95"
+          >
+            {running
+              ? <><Loader2 size={15} className="animate-spin" /> Verificando...</>
+              : <><RefreshCw size={15} /> Ejecutar diagnóstico</>}
+          </button>
+        </div>
       </div>
 
       {/* Resumen */}
@@ -267,6 +329,26 @@ export default function PlatformHealthTab() {
               {okCount} OK · {warnCount} advertencias · {errCount} errores · Último chequeo: {lastRun}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* JSON de problemas (solo si hay errores/warns) */}
+      {rawReport && (errCount > 0 || warnCount > 0) && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+              Reporte de problemas · {errCount} error(es) · {warnCount} advertencia(s)
+            </p>
+            <button onClick={copyJson} className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+              {copied ? <><Check size={11}/> Copiado</> : <><Copy size={11}/> Copiar</>}
+            </button>
+          </div>
+          <pre className="text-[11px] text-slate-300 p-4 overflow-x-auto leading-relaxed max-h-64 overflow-y-auto">
+            {JSON.stringify({
+              ...(rawReport as any),
+              checks: (rawReport as any).checks?.filter((c: any) => c.status === 'error' || c.status === 'warn'),
+            }, null, 2)}
+          </pre>
         </div>
       )}
 
