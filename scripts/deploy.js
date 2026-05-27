@@ -45,6 +45,6 @@ const targets = ['hosting'];
 if (withFunctions) targets.push('functions');
 if (withRules)     targets.push('firestore:rules');
 
-run(`firebase deploy --only ${targets.join(',')}`);
+run(`firebase deploy --only "${targets.join(',')}" --force`);
 
 console.log('\n✅ Deploy OK — el dev server y los emuladores siguen corriendo sin cambios.');
