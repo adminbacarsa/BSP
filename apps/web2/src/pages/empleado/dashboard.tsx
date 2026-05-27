@@ -1568,10 +1568,24 @@ export default function EmployeeDashboard() {
         </div>
       )}
       {deviceVerified === false && (
-        <div className="sticky top-0 z-40 flex items-center gap-3 bg-teal-950 border-b border-teal-800 px-4 py-2.5">
-          <svg className="w-4 h-4 flex-shrink-0 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-          <p className="text-teal-300 text-xs flex-1">Dispositivo no verificado — revisá el mail de alta y tocá <strong>Activar mi dispositivo</strong></p>
-          <button onClick={() => router.push('/empleado/activar/')} className="shrink-0 text-[10px] font-black uppercase text-teal-300 border border-teal-700 rounded-lg px-2 py-1 hover:bg-teal-900 transition-colors">Ver</button>
+        <div className="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-20 h-20 rounded-full bg-rose-900/30 flex items-center justify-center mb-6">
+            <svg className="w-10 h-10 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+          </div>
+          <h1 className="text-white font-black text-xl mb-2">Dispositivo no autorizado</h1>
+          <p className="text-slate-400 text-sm max-w-xs mb-8">Este celular no está registrado para tu cuenta. Solo podés acceder desde el dispositivo que activaste con el mail de alta.</p>
+          <button
+            onClick={() => router.push('/empleado/activar/')}
+            className="w-full max-w-xs bg-teal-600 hover:bg-teal-500 text-white font-bold py-3 rounded-xl transition-colors mb-3"
+          >
+            Activar este dispositivo
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-slate-500 text-sm hover:text-slate-300 transition-colors"
+          >
+            Cerrar sesión
+          </button>
         </div>
       )}
       <div className="min-h-screen bg-slate-950 pb-28">
@@ -2550,4 +2564,3 @@ export default function EmployeeDashboard() {
     </AuthGuard>
   );
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
