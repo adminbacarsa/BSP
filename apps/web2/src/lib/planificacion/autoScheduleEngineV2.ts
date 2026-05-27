@@ -24,8 +24,8 @@
  * Reglas duras del generador (`generateScheduleV2`):
  *   - Matching primero: cada empleado se asigna a UN puesto del mes, priorizando
  *     puesto fijo (defaultPositionByEmp), cercanía y bajo ausentismo. Si sobra gente
- *     (capacidad ociosa) los empleados restantes quedan IDLE: mes entero en RET/F,
- *     sin turnos salpicados.
+ *     (capacidad ociosa) los excedentes quedan sin turnos facturables; uno puede
+ *     designarse RET (stand-by para otro objetivo), el resto F en días de ciclo.
  *   - Banda fija: en puestos con varios códigos (M/T/N o D12/N12), cada
  *     empleado queda TODO el mes en la misma banda que le corresponde por su slot
  *     en el grupo (E1→M, E2→T, E3→N…). No hay rotación entre ciclos.
@@ -34,7 +34,9 @@
  *       · Puesto 24/7 / empleado idle → ciclo genérico (4+2, 6+1, etc.) con offset
  *         desfasado por índice del grupo para que los francos no caigan a la vez.
  *     NUNCA se asigna un turno en un día que el ciclo del empleado marca como franco.
- *     Días libres del ciclo → F. Días de trabajo sin turno asignado → RET (horas tácitas).
+ *     Días libres del ciclo → F (descanso legal 6+2, mín. 35 h entre turnos).
+ *     RET ≠ F: solo el guardia sobrante designado (1 por objetivo) lleva RET en días
+ *     laborables del ciclo sin turno; el resto queda en F o sin celda.
  *
  * El módulo es puro: no conoce React ni Firestore. Recibe el contexto ya armado
  * por el componente y devuelve un objeto con métricas + diagnóstico.
@@ -51,7 +53,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, convertExtraCycleFrancosToRet, restoreRotativeCycleFrancos } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, recomputeUncoveredStats, repairForbiddenAfterNightTransitions } from './demandDrivenSchedule';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -693,7 +695,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
     if (idleCount > 0) {
         warnings.push(
             `Capacidad ociosa: con ${peopleAvailable} personas disponibles y ${peopleNeededFinal} necesarias para el ciclo ${cycleKey}, sobran ~${idleCount}. ` +
-            `Estos empleados van a quedar en RET / Franco todo el mes (no se les van a salpicar turnos sueltos).`
+            `Estos empleados van a quedar sin turnos facturables (como mucho 1 en RET stand-by; el resto en Franco).`
         );
     }
     if (offerHours < effectiveTargetHours) {
@@ -1226,14 +1228,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const absDay = monthStartGlobalDayIndex + di;
             const cycleSlot = (absDay + offset) % eCycleLen;
             if (cycleSlot >= eCL) return null;
-            const blockNum = Math.floor((absDay + offset) / eCycleLen);
+            const cycleStartAbs = absDay + offset - cycleSlot;
+            const pendulumBlock = Math.floor(cycleStartAbs / eCycleLen);
             if (ring.length >= 3) {
                 const period = 2 * (ring.length - 1);
-                const pos = (slot + blockNum) % period;
+                const pos = (slot + pendulumBlock) % period;
                 const idx = pos < ring.length ? pos : period - pos;
                 return ring[idx];
             }
-            return ring[(slot + blockNum) % ring.length];
+            return ring[(slot + pendulumBlock) % ring.length];
         }
         // Banda fija: el empleado trabaja el mismo turno todo el mes.
         return ring[slot % ring.length];
@@ -1405,30 +1408,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         });
     }
 
-    // Rotativo 24hs: fases M/T/N y offsets de ciclo balanceados en toda la dotación
-    // (4 guardias por banda/día entre las que trabajan), no por puesto aislado.
+    // Rotativo 24hs demand-driven: slot de péndulo desfasado +1 respecto al stagger del
+    // cuarteto (cuando descansa el stagger-0, los otros tres cubren M/T/N).
     if (ctx.rotateShifts !== false && shouldUseDemandDrivenScheduling(ctx)) {
-        const rotEmpIds: string[] = [];
         for (const pos of ctx.positions) {
             if (isCustomCoverPosition(pos)) continue;
             const cov = String(pos.coverageType || '').toLowerCase();
             if (cov !== '24hs' && cov !== '24' && cov !== '24h') continue;
-            for (const empId of positionGroups[pos.positionName] || []) {
-                if (!rotEmpIds.includes(empId)) rotEmpIds.push(empId);
-            }
+            const group = positionGroups[pos.positionName] || [];
+            const ring = shiftRingByPosition[pos.positionName] || ['M', 'T', 'N'];
+            const ringLen = Math.max(1, ring.length);
+            group.forEach((empId, idxInGroup) => {
+                const staggerIdx = ctx.demandDrivenStaggerByEmp?.[empId] ?? idxInGroup;
+                const slot = ringLen > 1 ? (staggerIdx + 1) % ringLen : 0;
+                empRotationSlot[empId] = slot;
+                empPrimaryShift[empId] = ring[slot] ?? ring[0];
+            });
         }
-        const ring = rotEmpIds.length > 0
-            ? (shiftRingByPosition[empAssignedTo[rotEmpIds[0]] || ''] || ['M', 'T', 'N'])
-            : ['M', 'T', 'N'];
-        const ringLen = Math.max(1, ring.length);
-        rotEmpIds.forEach((empId, i) => {
-            const slot = i % ringLen;
-            empRotationSlot[empId] = slot;
-            empPrimaryShift[empId] = ring[slot] ?? ring[0];
-            empGroupIdx[empId] = i % cycleLen;
-            empCycleLen[empId] = cycleLen;
-            empCL_map[empId] = cL;
-        });
     }
 
     // ── PASO 3: Días "de trabajo" del ciclo por empleado ────────────────
@@ -1727,6 +1723,14 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (!cycleWorkDays[empId]?.has(dateStr)) return false;
         const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
         if (primary && primary !== sCode) return false;
+        const slotQty = Math.max(1, Number(pos.qty) || 1);
+        const slotFilled = assignments.filter(a =>
+            a.dateStr === dateStr &&
+            a.positionName === pos.positionName &&
+            String(a.code || '').toUpperCase() === sCode &&
+            (a.hours ?? 0) > 0,
+        ).length;
+        if (slotFilled >= slotQty) return false;
         const sHrs = shiftHoursH(sh);
         const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
         const sEnd = sh.endTime || undefined;
@@ -1787,6 +1791,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     const useDemandDriven = shouldUseDemandDrivenScheduling(ctx);
+    // Rotativo ON → demand-driven + péndulo. Rotativo OFF → loop clásico banda fija (abajo).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let dayDemandsFromFill: any[] = [];
     if (useDemandDriven) {
@@ -1807,7 +1812,26 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empMeta,
             isCustomCoverPosition,
             expectedShiftForDay,
+            retDesignateSet,
         });
+        fillDemandGapsBeforeFrancos({
+            ctx,
+            positionGroups,
+            cycleWorkDays,
+            customCoverEmps,
+            limitedEmpIds,
+            assignments,
+            stats,
+            runtime,
+            cutoffDay,
+            shiftHoursH,
+            writeAssignment,
+            passesAgreementRest,
+            empMeta,
+            isCustomCoverPosition,
+            expectedShiftForDay,
+            retDesignateSet,
+        }, dayDemandsFromFill);
     }
 
     // ── GENERACIÓN clásica (banda fija por empleado) ──────────────────────────
@@ -2175,9 +2199,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     } // fin !useDemandDriven
 
     // ── CIERRE SLA: total facturable = horas vendidas (imperativo operativo) ──
+    // Con demand-driven + rotativo la cobertura es por slot M/T/N; no forzar horas sueltas.
     {
         const slaTarget = Math.round(Math.max(0, ctx.slaVendidas || contractedH || 0));
-        if (slaTarget > 0) {
+        if (slaTarget > 0 && !(useDemandDriven && ctx.rotateShifts !== false)) {
             let deficit = slaTarget - stats.totalBillableHours;
             let guard = 0;
             while (deficit > 0.5 && guard++ < 1200) {
@@ -2327,19 +2352,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empMeta,
             isCustomCoverPosition,
             expectedShiftForDay,
+            retDesignateSet,
         };
         fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
     }
 
     // Días sobrantes:
-    //   - Empleado IDLE (sin puesto asignado por capacidad ociosa): TODO el mes en RET o F,
-    //     según ciclo. Nunca se mezcla con un turno facturable, así queda evidente que
-    //     ese empleado está en stand-by todo el mes.
-    //   - Empleado asignado a un puesto:
-    //       · Día de franco del ciclo → F.
-    //       · Día de trabajo del ciclo sin turno asignado → RET (el 2° pase ya cubrió
-    //         lo que el descanso permitía; el resto es stand-by real).
-    //   - Empleado ocioso (sin puesto) o en día no operativo del puesto limitado → F.
+    //   · Día de franco del ciclo (6+2) → F siempre (descanso legal, no RET).
+    //   · Día laborable del ciclo sin turno → RET solo si está en retDesignateSet
+    //     (único guardia sobrante del objetivo); el resto → F.
+    //   · Día no operativo del puesto limitado → F.
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
         const ownerPosName = defaultPos[emp.id];
@@ -2387,9 +2409,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
-            const rotative = ctx.rotateShifts !== false;
             const fallbackCode = isWorkDayInCycle
-                ? (isPostStreakShortCycle ? 'F' : (rotative ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F')))
+                ? (isPostStreakShortCycle ? 'F' : (retDesignateSet.has(emp.id) ? 'RET' : 'F'))
                 : 'F';
             assignments.push({
                 empId: emp.id,
@@ -2406,30 +2427,39 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
-    convertExtraCycleFrancosToRet(assignments, runtime, limitedEmpIds, ctx.rotateShifts);
     restoreRotativeCycleFrancos(assignments, ctx, expectedShiftForDay, defaultPos);
 
     if (useDemandDriven && dayDemandsFromFill.length > 0 && ctx.rotateShifts !== false) {
-        fillDemandGapsBeforeFrancos(
-            {
-                ctx,
-                positionGroups,
-                cycleWorkDays,
-                customCoverEmps,
-                limitedEmpIds,
-                assignments,
-                stats,
-                runtime,
-                cutoffDay,
-                shiftHoursH,
-                writeAssignment,
-                passesAgreementRest,
-                empMeta,
-                isCustomCoverPosition,
-                expectedShiftForDay,
-            },
-            dayDemandsFromFill,
+        const gapFillFinal = {
+            ctx,
+            positionGroups,
+            cycleWorkDays,
+            customCoverEmps,
+            limitedEmpIds,
+            assignments,
+            stats,
+            runtime,
+            cutoffDay,
+            shiftHoursH,
+            writeAssignment,
+            passesAgreementRest,
+            empMeta,
+            isCustomCoverPosition,
+            expectedShiftForDay,
+            empAssignedTo,
+            retDesignateSet,
+        };
+        fillDemandGapsBeforeFrancos(gapFillFinal, dayDemandsFromFill);
+        alignAssignmentsToPendulum(
+            assignments, ctx, expectedShiftForDay, isCustomCoverPosition, passesAgreementRest,
         );
+        for (let repairPass = 0; repairPass < 3; repairPass++) {
+            repairForbiddenAfterNightTransitions(assignments, ctx, passesAgreementRest);
+            fillDemandGapsBeforeFrancos(gapFillFinal, dayDemandsFromFill);
+            if ((stats.uncoveredSlots ?? 0) <= 0) break;
+        }
+        ensureRotativeCellsAssigned(gapFillFinal);
+        recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
     }
 
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)
