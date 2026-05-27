@@ -11,6 +11,7 @@ export declare const manageSystemUsers: functions.HttpsFunction & functions.Runn
 export declare const manageAbsences: functions.HttpsFunction & functions.Runnable<any>;
 export declare const managePatterns: functions.HttpsFunction & functions.Runnable<any>;
 export declare const manageAgreements: functions.HttpsFunction & functions.Runnable<any>;
+export declare const platformHealthCheck: functions.HttpsFunction & functions.Runnable<any>;
 export declare const checkSystemHealth: functions.HttpsFunction & functions.Runnable<any>;
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
@@ -21,6 +22,7 @@ export declare const requestCheckIn: functions.HttpsFunction & functions.Runnabl
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
+export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';

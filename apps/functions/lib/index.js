@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -373,6 +373,118 @@ exports.manageAgreements = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
+exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+    }
+    const db = admin.firestore();
+    const results = {};
+    const t0 = Date.now();
+    try {
+        const snap = await db.collection('empresas').limit(1).get();
+        results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leída(s)` };
+    }
+    catch (e) {
+        results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
+    }
+    const geminiKey = process.env.GEMINI_API_KEY || '';
+    if (!geminiKey) {
+        results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
+    }
+    else {
+        const tg = Date.now();
+        try {
+            const { GoogleGenerativeAI } = await Promise.resolve().then(() => require('@google/generative-ai'));
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            await model.generateContent({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }] });
+            results.gemini = { ok: true, latencyMs: Date.now() - tg, detail: 'Respuesta OK' };
+        }
+        catch (e) {
+            results.gemini = { ok: false, latencyMs: Date.now() - tg, detail: e.message?.slice(0, 120) };
+        }
+    }
+    const gmailUser = process.env.GMAIL_USER || '';
+    const gmailPass = process.env.GMAIL_PASS || '';
+    if (!gmailUser || !gmailPass) {
+        results.gmail = { ok: false, detail: 'GMAIL_USER / GMAIL_PASS no configurados' };
+    }
+    else {
+        const tm = Date.now();
+        try {
+            const nodemailerMod = await Promise.resolve().then(() => require('nodemailer'));
+            const transporter = nodemailerMod.createTransport({ service: 'gmail', auth: { user: gmailUser, pass: gmailPass } });
+            await transporter.verify();
+            results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: gmailUser };
+        }
+        catch (e) {
+            results.gmail = { ok: false, latencyMs: Date.now() - tm, detail: e.message?.slice(0, 120) };
+        }
+    }
+    const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
+    if (!driveFolderId) {
+        results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
+    }
+    else {
+        try {
+            const snap = await db.collection('system_backups').orderBy('createdAt', 'desc').limit(1).get();
+            if (!snap.empty) {
+                const last = snap.docs[0].data();
+                const ts = last.createdAt?.toDate?.()?.toISOString?.() ?? 'desconocido';
+                results.drive = { ok: true, detail: `Último backup: ${ts}` };
+            }
+            else {
+                results.drive = { ok: true, detail: 'Sin backups registrados aún' };
+            }
+        }
+        catch (e) {
+            results.drive = { ok: false, detail: e.message?.slice(0, 120) };
+        }
+    }
+    try {
+        const tokSnap = await db.collection('device_tokens').limit(1).get();
+        results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? '≥1' : '0'}` };
+    }
+    catch (e) {
+        results.fcm = { ok: false, detail: e.message };
+    }
+    const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
+    const jobStatus = {};
+    for (const job of scheduledJobs) {
+        try {
+            const snap = await db.collection('scheduled_job_logs').doc(job).get();
+            if (snap.exists) {
+                const d = snap.data();
+                const ts = d.lastRunAt?.toDate?.()?.toISOString?.() ?? null;
+                jobStatus[job] = ts ?? 'sin registro';
+            }
+            else {
+                jobStatus[job] = 'sin registro';
+            }
+        }
+        catch {
+            jobStatus[job] = 'error';
+        }
+    }
+    results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
+    try {
+        const [empSnap, sysSnap, empActivos] = await Promise.all([
+            db.collection('empresas').get(),
+            db.collection('system_users').get(),
+            db.collection('empleados').where('active', '==', true).get(),
+        ]);
+        results.data = {
+            ok: true,
+            detail: `Empresas: ${empSnap.size} · Admins: ${sysSnap.size} · Empleados activos: ${empActivos.size}`,
+        };
+    }
+    catch (e) {
+        results.data = { ok: false, detail: e.message };
+    }
+    const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+    results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'Producción (Firebase)' };
+    return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
+});
 exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
@@ -717,7 +829,19 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
     }
 });
 const nodemailer = require("nodemailer");
-function buildPortalEmailHtml(resetLink) {
+function buildPortalEmailHtml(resetLink, activationLink) {
+    const activationBlock = activationLink ? `
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
+            <p style="color:#1e293b;font-size:15px;font-weight:bold;margin:0 0 8px;">📱 Activá tu dispositivo</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 16px;">Para poder marcar presencia, abrí este email <strong>desde tu celular</strong> y tocá el botón de abajo. Esto vincula tu dispositivo a tu cuenta.</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 8px;">
+              <tr>
+                <td style="background:#0f766e;border-radius:8px;">
+                  <a href="${activationLink}" target="_blank" style="display:inline-block;padding:12px 28px;color:#fff;font-size:14px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR MI DISPOSITIVO</a>
+                </td>
+              </tr>
+            </table>
+            <p style="color:#94a3b8;font-size:11px;text-align:center;margin:0 0 4px;">Este enlace expira en 48 horas y es de un solo uso.</p>` : '';
     return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -743,8 +867,9 @@ function buildPortalEmailHtml(resetLink) {
               </tr>
             </table>
             <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.</p>
+            ${activationBlock}
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.</p>
             <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
               <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
             </p>
@@ -761,7 +886,12 @@ function buildPortalEmailHtml(resetLink) {
 </body>
 </html>`;
 }
-function buildPortalEmailText(resetLink) {
+function buildPortalEmailText(resetLink, activationLink) {
+    const activationSection = activationLink ? `
+
+📱 ACTIVAR DISPOSITIVO (abrí desde tu celular):
+${activationLink}
+Este enlace expira en 48 horas y es de un solo uso.` : '';
     return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Empleados de COSP.
 
 Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
@@ -769,8 +899,9 @@ Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
 ${resetLink}
 
 Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.
+${activationSection}
 
-Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
+Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.
 
 Saludos,
 Equipo Operativo - Bacar sa. Seguridad Privada`;
@@ -845,12 +976,24 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
             const resetLink = await admin.auth().generatePasswordResetLink(email, {
                 url: 'https://comtroldata.web.app/empleado/dashboard',
             });
+            const crypto = await Promise.resolve().then(() => require('crypto'));
+            const activationToken = crypto.randomUUID();
+            const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+            await db.collection('device_activations').doc(activationToken).set({
+                employeeId: empId,
+                uid,
+                email,
+                expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+                used: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
             await transporter.sendMail({
                 from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
                 to: email,
                 subject: 'Acceso al Portal de Empleados - COSP',
-                html: buildPortalEmailHtml(resetLink),
-                text: buildPortalEmailText(resetLink),
+                html: buildPortalEmailHtml(resetLink, activationLink),
+                text: buildPortalEmailText(resetLink, activationLink),
             });
             const staleSnap = await db.collection('empleados')
                 .where('uid', '==', uid)
@@ -881,6 +1024,42 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
         }
     }
     return { success: true, results };
+});
+exports.activateDevice = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
+    }
+    const { token, deviceInfo } = data;
+    if (!token) {
+        throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
+    }
+    const db = admin.firestore();
+    const tokenRef = db.collection('device_activations').doc(token);
+    const tokenDoc = await tokenRef.get();
+    if (!tokenDoc.exists) {
+        throw new functions.https.HttpsError('not-found', 'Token de activación inválido.');
+    }
+    const td = tokenDoc.data();
+    if (td.used) {
+        throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado.');
+    }
+    if (td.expiresAt.toDate() < new Date()) {
+        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activación expiró. Pedí uno nuevo al administrador.');
+    }
+    if (td.uid !== context.auth.uid) {
+        throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
+    }
+    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
+    const deviceRef = db.collection('device_tokens').doc();
+    await deviceRef.set({
+        uid: context.auth.uid,
+        employeeId: td.employeeId,
+        verified: true,
+        source: 'email_link',
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        deviceInfo: deviceInfo || {},
+    });
+    return { success: true, employeeId: td.employeeId };
 });
 function buildClientPortalEmailHtml(resetLink, clientName) {
     return `<!DOCTYPE html>
