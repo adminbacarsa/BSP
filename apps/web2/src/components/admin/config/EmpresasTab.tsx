@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+﻿import React, { useState, useRef } from 'react';
 import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -13,8 +13,8 @@ function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
   const code = err instanceof FirebaseError ? err.code : '';
   if (code === 'permission-denied') {
     return isSuperAdmin
-      ? 'Permiso denegado en Firestore. Cerrá sesión y volvé a entrar, o ejecutá sync de claims (Config → Usuarios).'
-      : 'Solo SuperAdmin puede crear o modificar empresas. Pedí acceso a un SuperAdmin.';
+      ? 'Permiso denegado en Firestore. CerrÃ¡ sesiÃ³n y volvÃ© a entrar, o ejecutÃ¡ sync de claims (Config â†’ Usuarios).'
+      : 'Solo SuperAdmin puede crear o modificar empresas. PedÃ­ acceso a un SuperAdmin.';
   }
   return err instanceof Error ? err.message : 'Error al guardar';
 }
@@ -28,7 +28,7 @@ export default function EmpresasTab() {
   const [showNueva, setShowNueva] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
-  // Formulario edición empresa activa
+  // Formulario ediciÃ³n empresa activa
   const [editForm, setEditForm] = useState({ name: '', cuit: '', direccion: '' });
   const [guardandoEdit, setGuardandoEdit] = useState(false);
 
@@ -81,7 +81,7 @@ export default function EmpresasTab() {
     }
   };
 
-  // Credencial — logo + hue + textos configurables (template único)
+  // Credencial â€” logo + hue + textos configurables (template Ãºnico)
   const CRED_MODELOS: never[] = [];
 
   // Derivar paleta desde hue HSL
@@ -150,7 +150,7 @@ export default function EmpresasTab() {
         credencialSubtitulo: credSubtitulo.trim(),
         credencialPie: credPie.trim(),
       } as any);
-      toast.success('Configuración de credencial guardada');
+      toast.success('ConfiguraciÃ³n de credencial guardada');
     } catch { toast.error('Error al guardar'); }
     finally { setGuardandoTpl(false); }
   };
@@ -186,7 +186,7 @@ export default function EmpresasTab() {
     finally { setToggling(null); }
   };
 
-  // Modal eliminación
+  // Modal eliminaciÃ³n
   type DeleteStep = 'idle' | 'confirm1' | 'confirm2' | 'deleting';
   const [deleteTarget, setDeleteTarget] = useState<typeof empresas[0] | null>(null);
   const [deleteStep, setDeleteStep] = useState<DeleteStep>('idle');
@@ -206,7 +206,7 @@ export default function EmpresasTab() {
     setDeleteStep('deleting');
     try {
       // Cambiar empresa activa ANTES de borrar para que el listener se desuscriba
-      // antes de recibir la notificación de eliminación (evita la auto-recreación).
+      // antes de recibir la notificaciÃ³n de eliminaciÃ³n (evita la auto-recreaciÃ³n).
       if (empresaId === deleteTarget.id) switchEmpresa('bacarsa');
       await eliminarEmpresaYDatos(deleteTarget.id, p => setDeleteProgreso(p));
       toast.success(`Empresa "${deleteTarget.name}" y todos sus datos eliminados`);
@@ -217,7 +217,7 @@ export default function EmpresasTab() {
     }
   };
 
-  // Migración
+  // MigraciÃ³n
   const [progreso, setProgreso] = useState<ProgresoMigracion | null>(null);
   const [migrando, setMigrando] = useState(false);
 
@@ -231,7 +231,7 @@ export default function EmpresasTab() {
   const sourceOptions = empresas.filter((e) => e.id !== empresaId && e.active !== false);
   const copySourceEmpresa = empresas.find((e) => e.id === copySourceId);
 
-  // Mantener origen válido al cambiar empresa destino (evita origen === destino tras switch en topbar)
+  // Mantener origen vÃ¡lido al cambiar empresa destino (evita origen === destino tras switch en topbar)
   React.useEffect(() => {
     if (sourceOptions.length === 0) {
       if (copySourceId) setCopySourceId('');
@@ -250,15 +250,15 @@ export default function EmpresasTab() {
   const handleCopyEmpresaData = async () => {
     if (!empresaId || !copySourceId) return;
     if (copySourceId.toLowerCase() === empresaId.toLowerCase()) {
-      toast.error('Elegí una empresa origen distinta al destino.');
+      toast.error('ElegÃ­ una empresa origen distinta al destino.');
       return;
     }
     if (copyConfirmInput.trim() !== empresaId) {
-      toast.error(`Escribí el ID destino: ${empresaId}`);
+      toast.error(`EscribÃ­ el ID destino: ${empresaId}`);
       return;
     }
     setCopyRunning(true);
-    setCopyProgress({ phase: 'Iniciando…', docsCopied: 0, docsDeleted: 0 });
+    setCopyProgress({ phase: 'Iniciandoâ€¦', docsCopied: 0, docsDeleted: 0 });
     const jobId = `migrate_${Date.now()}`;
     try {
       await auth.currentUser?.getIdToken(true);
@@ -281,7 +281,7 @@ export default function EmpresasTab() {
         setCopyProgress({
           phase: d.isComplete
             ? 'Completado'
-            : `Copiando (${next}/${totalCollections || '?'})…`,
+            : `Copiando (${next}/${totalCollections || '?'})â€¦`,
           docsCopied,
           docsDeleted,
         });
@@ -300,11 +300,11 @@ export default function EmpresasTab() {
     }
   };
 
-  // ── Crear nueva empresa ─────────────────────────────────────────────────────
+  // â”€â”€ Crear nueva empresa â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCrearEmpresa = async () => {
     if (!form.name.trim()) return toast.error('El nombre es obligatorio');
     const id = form.name.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    if (!id) return toast.error('Nombre inválido');
+    if (!id) return toast.error('Nombre invÃ¡lido');
     setGuardando(true);
     try {
       await guardarEmpresa(id, { name: form.name.trim(), cuit: form.cuit, direccion: form.direccion, plan: form.plan });
@@ -318,15 +318,15 @@ export default function EmpresasTab() {
     }
   };
 
-  // ── Migración ───────────────────────────────────────────────────────────────
+  // â”€â”€ MigraciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleMigrar = async () => {
-    if (!confirm(`¿Migrar todos los datos existentes a la empresa "${empresa?.name}" (${empresaId})?\n\nEsto agrega el campo empresaId a todos los documentos sin él. Es una operación segura y no elimina datos.`)) return;
+    if (!confirm(`Â¿Migrar todos los datos existentes a la empresa "${empresa?.name}" (${empresaId})?\n\nEsto agrega el campo empresaId a todos los documentos sin Ã©l. Es una operaciÃ³n segura y no elimina datos.`)) return;
     setMigrando(true);
     setProgreso(null);
     try {
       await migrarEmpresa(empresaId, p => setProgreso(p));
     } catch {
-      // El error ya está en progreso.error
+      // El error ya estÃ¡ en progreso.error
     } finally {
       setMigrando(false);
     }
@@ -340,7 +340,7 @@ export default function EmpresasTab() {
   return (
     <div className="space-y-6">
 
-      {/* ── Lista de empresas (solo superadmin) ── */}
+      {/* â”€â”€ Lista de empresas (solo superadmin) â”€â”€ */}
       {isSuperAdmin && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
@@ -369,7 +369,7 @@ export default function EmpresasTab() {
           {/* Lista */}
           <div className="space-y-2 mb-4">
             {empresas.length === 0 && (
-              <p className="text-sm text-slate-400 font-medium py-4 text-center">Sin empresas registradas aún</p>
+              <p className="text-sm text-slate-400 font-medium py-4 text-center">Sin empresas registradas aÃºn</p>
             )}
             {empresas
               .filter(e => mostrarInactivas || e.active !== false)
@@ -402,7 +402,7 @@ export default function EmpresasTab() {
                   {e.active === false && (
                     <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Inactiva</span>
                   )}
-                  {/* Toggle activo/inactivo — bloqueado si es la empresa activa */}
+                  {/* Toggle activo/inactivo â€” bloqueado si es la empresa activa */}
                   {e.id !== empresaId && (
                     <button onClick={() => handleToggleActivo(e)} disabled={toggling === e.id}
                       title={e.active === false ? 'Reactivar empresa' : 'Desactivar empresa'}
@@ -410,7 +410,7 @@ export default function EmpresasTab() {
                       {toggling === e.id ? <Loader2 size={14} className="animate-spin" /> : e.active === false ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
                   )}
-                  {/* Eliminar — bloqueado solo si es la empresa activa */}
+                  {/* Eliminar â€” bloqueado solo si es la empresa activa */}
                   {e.id !== empresaId && (
                     <button onClick={() => abrirEliminar(e)}
                       title="Eliminar empresa y todos sus datos"
@@ -441,7 +441,7 @@ export default function EmpresasTab() {
                     placeholder="30-00000000-0" />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección</label>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">DirecciÃ³n</label>
                   <input value={form.direccion} onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-400"
                     placeholder="Calle 123, Ciudad" />
@@ -459,7 +459,7 @@ export default function EmpresasTab() {
         </div>
       )}
 
-      {/* ── Datos de empresa activa ── */}
+      {/* â”€â”€ Datos de empresa activa â”€â”€ */}
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-1">
@@ -468,7 +468,7 @@ export default function EmpresasTab() {
           </div>
           <p className="text-xs text-slate-500 font-medium mb-5">
             {isSuperAdmin
-              ? 'Editá el nombre y los datos de la empresa activa.'
+              ? 'EditÃ¡ el nombre y los datos de la empresa activa.'
               : 'Solo lectura: los cambios de empresa las hace un SuperAdmin.'}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -491,7 +491,7 @@ export default function EmpresasTab() {
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Dirección</label>
+              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">DirecciÃ³n</label>
               <input
                 value={editForm.direccion}
                 onChange={e => setEditForm(f => ({ ...f, direccion: e.target.value }))}
@@ -514,7 +514,7 @@ export default function EmpresasTab() {
         </div>
       )}
 
-      {/* ── Color de empresa ── */}
+      {/* â”€â”€ Color de empresa â”€â”€ */}
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-1">
@@ -522,7 +522,7 @@ export default function EmpresasTab() {
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Color de empresa</h3>
           </div>
           <p className="text-xs text-slate-500 font-medium mb-5">
-            El sidebar y los elementos de navegación adoptarán este color para la empresa activa.
+            El sidebar y los elementos de navegaciÃ³n adoptarÃ¡n este color para la empresa activa.
           </p>
 
           <div className="flex flex-wrap items-center gap-3 mb-5">
@@ -566,7 +566,7 @@ export default function EmpresasTab() {
             </div>
             <div>
               <p className="text-sm font-black" style={{ color: colorForm }}>{empresa.name || empresa.id}</p>
-              <p className="text-[11px] text-slate-400">Sidebar y navegación en este color</p>
+              <p className="text-[11px] text-slate-400">Sidebar y navegaciÃ³n en este color</p>
             </div>
             <div className="ml-auto flex gap-1">
               <div className="w-3 h-6 rounded" style={{ backgroundColor: colorForm }} />
@@ -577,7 +577,7 @@ export default function EmpresasTab() {
         </div>
       )}
 
-      {/* ── Credencial de empleado ── */}
+      {/* â”€â”€ Credencial de empleado â”€â”€ */}
       {empresa && (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-1">
@@ -616,7 +616,7 @@ export default function EmpresasTab() {
                     {subiendoLogo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                     {logoPreview ? 'Reemplazar logo' : 'Subir logo'}
                   </button>
-                  <p className="text-[10px] text-slate-400">PNG o SVG con fondo transparente · Recomendado 200×200px</p>
+                  <p className="text-[10px] text-slate-400">PNG o SVG con fondo transparente Â· Recomendado 200Ã—200px</p>
                 </div>
                 <input ref={logoInputRef} type="file" accept="image/png,image/svg+xml,image/webp" className="hidden" onChange={handleLogoUpload} />
               </div>
@@ -626,9 +626,9 @@ export default function EmpresasTab() {
             <div>
               <p className="text-xs font-black text-slate-600 uppercase tracking-wide mb-4">Template de credencial</p>
 
-              {/* ── Orientación ── */}
+              {/* â”€â”€ OrientaciÃ³n â”€â”€ */}
               <div className="flex items-center gap-3 mb-5">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0">Orientación</p>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider shrink-0">OrientaciÃ³n</p>
                 <div className="flex border border-slate-200 rounded-xl overflow-hidden">
                   {(['vertical', 'horizontal'] as const).map(o => (
                     <button
@@ -640,13 +640,13 @@ export default function EmpresasTab() {
                           : 'bg-white text-slate-500 hover:bg-slate-50'
                       }`}
                     >
-                      {o === 'vertical' ? '↕ Vertical' : '↔ Horizontal'}
+                      {o === 'vertical' ? 'â†• Vertical' : 'â†” Horizontal'}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* ── Vista previa del template ── */}
+              {/* â”€â”€ Vista previa del template â”€â”€ */}
               <div className="flex justify-center mb-5">
                 {(() => {
                   const col = colorsFromHue(credHue);
@@ -676,7 +676,7 @@ export default function EmpresasTab() {
                       </div>
                       <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'10px 10px 8px' }}>
                         <p style={{ color:col.accent, fontSize:5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:3 }}>Credencial de acceso</p>
-                        <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2, marginBottom:1 }}>GARCÍA, Juan</p>
+                        <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2, marginBottom:1 }}>GARCÃA, Juan</p>
                         <p style={{ color:`${col.accent}cc`, fontSize:5, fontWeight:700, textTransform:'uppercase', marginBottom:6 }}>Vigilador</p>
                         <div style={{ height:0.5, background:`${col.accent}22`, marginBottom:6 }}/>
                         <div style={{ display:'flex', gap:8 }}>
@@ -684,13 +684,13 @@ export default function EmpresasTab() {
                           <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>DNI</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>28.456.789</p></div>
                         </div>
                         <div style={{ height:0.5, background:`${col.accent}22`, margin:'6px 0' }}/>
-                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>Código de verificación</p>
+                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:2 }}>CÃ³digo de verificaciÃ³n</p>
                         <p style={{ color:'#fff', fontSize:11, fontWeight:800, letterSpacing:'0.2em', fontFamily:'monospace' }}>482 071</p>
                         <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 7px', borderRadius:12, background:'rgba(255,255,255,0.07)', border:'0.5px solid rgba(255,255,255,0.15)' }}>
                             <span style={{ color:'rgba(255,255,255,0.55)', fontSize:4.5, fontWeight:700, textTransform:'uppercase' }}>Ver QR</span>
                           </div>
-                          <p style={{ color:'rgba(255,255,255,0.2)', fontSize:4 }}>Válida 12/2026</p>
+                          <p style={{ color:'rgba(255,255,255,0.2)', fontSize:4 }}>VÃ¡lida 12/2026</p>
                         </div>
                       </div>
                       <div style={{ position:'absolute', top:0, left:0, right:0, height:2.5, background:`linear-gradient(90deg,${col.h2},${col.accent},${col.h2})` }}/>
@@ -709,7 +709,7 @@ export default function EmpresasTab() {
                         {person(80)}
                         <div style={{ position:'absolute', bottom:0, left:0, right:0, height:'50%', background:'linear-gradient(0deg, #0b1120 0%, transparent 100%)' }}/>
                         <div style={{ position:'absolute', bottom:8, left:10, right:10 }}>
-                          <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2 }}>GARCÍA, J.</p>
+                          <p style={{ color:'#fff', fontSize:11, fontWeight:800, lineHeight:1.2 }}>GARCÃA, J.</p>
                           <p style={{ color:col.accent, fontSize:5, fontWeight:700, textTransform:'uppercase', marginTop:1 }}>Vigilador</p>
                         </div>
                       </div>
@@ -719,7 +719,7 @@ export default function EmpresasTab() {
                           <div><p style={{ color:'rgba(255,255,255,0.35)', fontSize:3.5, textTransform:'uppercase' }}>DNI</p><p style={{ color:'rgba(255,255,255,0.85)', fontSize:6, fontWeight:700, fontFamily:'monospace' }}>28.456.789</p></div>
                         </div>
                         <div style={{ height:0.5, background:`${col.accent}22` }}/>
-                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Verificación</p>
+                        <p style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', textTransform:'uppercase', letterSpacing:'0.06em' }}>VerificaciÃ³n</p>
                         <p style={{ color:'#fff', fontSize:11, fontWeight:800, letterSpacing:'0.2em', fontFamily:'monospace' }}>482 071</p>
                         <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 7px', borderRadius:12, background:'rgba(255,255,255,0.07)', border:'0.5px solid rgba(255,255,255,0.15)' }}>
@@ -734,7 +734,7 @@ export default function EmpresasTab() {
                   );
                 })()}
               </div>
-              {/* (mapa vacío - mantenido para compatibilidad) */}
+              {/* (mapa vacÃ­o - mantenido para compatibilidad) */}
               <div style={{ display: 'none' }}>
                 {CRED_MODELOS.map(modelo => {
                   const col = colorsFromHue(credHue);
@@ -771,7 +771,7 @@ export default function EmpresasTab() {
                             : <span style={{ fontSize:h-2, color:col.accent, fontWeight:900, letterSpacing:1, lineHeight:1 }}>BACAR</span>;
                           const verSec = (fs = 13) => (
                             <div>
-                              <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', marginBottom:2, letterSpacing:0.5 }}>CÓDIGO DE VERIFICACIÓN</div>
+                              <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.38)', marginBottom:2, letterSpacing:0.5 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                               <div style={{ fontSize:fs, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
                               <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.14)', borderRadius:1, overflow:'hidden' }}>
                                 <div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/>
@@ -785,7 +785,7 @@ export default function EmpresasTab() {
                           );
                           const chip = () => <div style={{ width:16, height:11, borderRadius:2, background:'linear-gradient(135deg,#c6901c,#efc848,#a67010)', border:'0.5px solid #9a6a08' }}/>;
 
-                          /* ─────── GRADIENTE ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ GRADIENTE â”€â”€â”€â”€â”€â”€â”€ */
                           if (modelo.id === 'gradiente') {
                             const bg = `linear-gradient(160deg,${col.h1} 0%,${col.h2} 55%,${hslToHex(credHue,50,28)} 100%)`;
                             if (isH) return (
@@ -795,7 +795,7 @@ export default function EmpresasTab() {
                                 </div>
                                 <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'8px 10px', gap:5 }}>
                                   <div>
-                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÃA, Juan</div>
                                     <div style={{ fontSize:5, color:'rgba(255,255,255,0.45)', fontWeight:700, marginBottom:3 }}>VIGILADOR</div>
                                   </div>
                                   <div style={{ height:0.5, background:'rgba(255,255,255,0.15)' }}/>
@@ -807,7 +807,7 @@ export default function EmpresasTab() {
                                   {verSec(12)}
                                   <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                                     {chip()}
-                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>Válida 12/2026</div>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>VÃ¡lida 12/2026</div>
                                   </div>
                                 </div>
                                 <div style={{ position:'absolute', bottom:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${col.accent}70,rgba(255,255,255,0.35),${col.accent}70)` }}/>
@@ -819,7 +819,7 @@ export default function EmpresasTab() {
                                   {logoEl(13)}<div style={{ fontSize:5.5, color:'#fff', fontWeight:900 }}>SECURITY CORP</div>
                                 </div>
                                 <div style={{ padding:'5px 9px', paddingRight:54, borderBottom:'0.5px solid rgba(255,255,255,0.13)' }}>
-                                  <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                  <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÃA, Juan</div>
                                   <div style={{ fontSize:5, color:'rgba(255,255,255,0.45)', fontWeight:700, marginBottom:5 }}>VIGILADOR</div>
                                   <div style={{ display:'flex', gap:9 }}>
                                     <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.33)' }}>LEGAJO</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.82)', fontFamily:'monospace' }}>#4521</div></div>
@@ -833,14 +833,14 @@ export default function EmpresasTab() {
                                   {photoSq(42, 62, 4)}
                                 </div>
                                 <div style={{ marginTop:'auto', padding:'4px 9px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                                  {chip()}<div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>Válida 12/2026</div>
+                                  {chip()}<div style={{ fontSize:3.5, color:'rgba(255,255,255,0.28)' }}>VÃ¡lida 12/2026</div>
                                 </div>
                                 <div style={{ height:3, background:`linear-gradient(90deg,${col.accent}70,rgba(255,255,255,0.35),${col.accent}70)` }}/>
                               </div>
                             );
                           }
 
-                          /* ─────── CORPORATIVO ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ CORPORATIVO â”€â”€â”€â”€â”€â”€â”€ */
                           if (modelo.id === 'corporativo') {
                             const hdrBg = `linear-gradient(90deg,#111827,#1e3a5f)`;
                             if (isH) return (
@@ -853,7 +853,7 @@ export default function EmpresasTab() {
                                   <div style={{ width:75, display:'flex', alignItems:'center', justifyContent:'center', padding:'8px 8px' }}>{photoSq(56, 75, 5)}</div>
                                   <div style={{ flex:1, padding:'7px 8px 6px', display:'flex', flexDirection:'column', gap:4 }}>
                                     <div>
-                                      <div style={{ fontSize:8.5, color:'#111827', fontWeight:900 }}>GARCÍA, Juan</div>
+                                      <div style={{ fontSize:8.5, color:'#111827', fontWeight:900 }}>GARCÃA, Juan</div>
                                       <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
                                     </div>
                                     <div style={{ display:'flex', gap:9 }}>
@@ -861,7 +861,7 @@ export default function EmpresasTab() {
                                       <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
                                     </div>
                                     <div style={{ background:hdrBg, borderRadius:4, padding:'4px 6px' }}>
-                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:1.5 }}>VERIFICACIÃ“N</div>
                                       <div style={{ fontSize:10, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
                                       <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/></div>
                                     </div>
@@ -878,13 +878,13 @@ export default function EmpresasTab() {
                             return (
                               <div style={{ width:195, height:308, borderRadius:10, boxShadow:'0 6px 28px rgba(0,0,0,0.7)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
                                 <div style={{ background:hdrBg, padding:'7px 10px', display:'flex', alignItems:'center', gap:7 }}>
-                                  {logoEl(14)}<div><div style={{ fontSize:7, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:col.accent }}>IDENTIFICACIÓN PERSONAL</div></div>
+                                  {logoEl(14)}<div><div style={{ fontSize:7, color:'#fff', fontWeight:900 }}>SECURITY CORP</div><div style={{ fontSize:4, color:col.accent }}>IDENTIFICACIÃ“N PERSONAL</div></div>
                                 </div>
                                 <div style={{ height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
                                 <div style={{ flex:1, background:'#f8fafc', padding:'8px 10px', display:'flex', flexDirection:'column', gap:6 }}>
                                   <div style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
                                     <div style={{ flex:1 }}>
-                                      <div style={{ fontSize:9.5, color:'#111827', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:9.5, color:'#111827', fontWeight:900, lineHeight:1.2 }}>GARCÃA</div>
                                       <div style={{ fontSize:9.5, color:'#111827', fontWeight:900, lineHeight:1.2 }}>Juan Carlos</div>
                                       <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:3 }}>VIGILADOR</div>
                                     </div>
@@ -896,22 +896,22 @@ export default function EmpresasTab() {
                                     <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:7, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
                                   </div>
                                   <div style={{ background:hdrBg, borderRadius:5, padding:'5px 7px' }}>
-                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.45)', marginBottom:2 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                                     <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.2em' }}>482 071</div>
                                     <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'rgba(255,255,255,0.45)' }}/></div>
                                   </div>
                                   <div style={{ marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                                    {qrEl(32)}<div><div style={{ fontSize:4, color:'#94a3b8' }}>Válida hasta</div><div style={{ fontSize:6.5, fontWeight:700, color:'#1e293b' }}>12/2026</div></div>
+                                    {qrEl(32)}<div><div style={{ fontSize:4, color:'#94a3b8' }}>VÃ¡lida hasta</div><div style={{ fontSize:6.5, fontWeight:700, color:'#1e293b' }}>12/2026</div></div>
                                   </div>
                                 </div>
                                 <div style={{ background:hdrBg, height:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP · Sistema COSP</div>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP Â· Sistema COSP</div>
                                 </div>
                               </div>
                             );
                           }
 
-                          /* ─────── PHOTO FULL ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ PHOTO FULL â”€â”€â”€â”€â”€â”€â”€ */
                           if (modelo.id === 'photo_full') {
                             const overGrad = 'linear-gradient(to bottom,rgba(0,0,0,0) 25%,rgba(0,0,0,0.65) 58%,rgba(0,0,0,0.92) 100%)';
                             if (isH) return (
@@ -921,7 +921,7 @@ export default function EmpresasTab() {
                                   <div style={{ position:'absolute', inset:0, background:'linear-gradient(to right,rgba(0,0,0,0) 50%,rgba(0,0,0,0.8))' }}/>
                                   <div style={{ position:'absolute', top:8, left:8, display:'flex', alignItems:'center', gap:4 }}>{logoEl(11)}</div>
                                   <div style={{ position:'absolute', bottom:10, left:10 }}>
-                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div>
+                                    <div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÃA, Juan</div>
                                     <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
                                   </div>
                                 </div>
@@ -933,7 +933,7 @@ export default function EmpresasTab() {
                                   <div style={{ height:0.5, background:'rgba(255,255,255,0.1)' }}/>
                                   {verSec(11)}
                                   <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>Válida 12/2026</div>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>VÃ¡lida 12/2026</div>
                                     {qrEl(20)}
                                   </div>
                                 </div>
@@ -947,7 +947,7 @@ export default function EmpresasTab() {
                                   <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
                                   <div style={{ position:'absolute', top:8, left:10 }}>{logoEl(12)}</div>
                                   <div style={{ position:'absolute', bottom:10, left:10 }}>
-                                    <div style={{ fontSize:11, color:'#fff', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                    <div style={{ fontSize:11, color:'#fff', fontWeight:900, lineHeight:1.2 }}>GARCÃA</div>
                                     <div style={{ fontSize:11, color:'#fff', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
                                     <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:2 }}>VIGILADOR</div>
                                   </div>
@@ -960,7 +960,7 @@ export default function EmpresasTab() {
                                   <div style={{ height:0.5, background:'rgba(255,255,255,0.1)' }}/>
                                   {verSec(11)}
                                   <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>Válida 12/2026</div>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>VÃ¡lida 12/2026</div>
                                     {qrEl(20)}
                                   </div>
                                 </div>
@@ -968,7 +968,7 @@ export default function EmpresasTab() {
                             );
                           }
 
-                          /* ─────── SPLIT CLEAN ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ SPLIT CLEAN â”€â”€â”€â”€â”€â”€â”€ */
                           if (modelo.id === 'split_clean') {
                             const leftBg = `linear-gradient(180deg,#111827,#1e3a5f)`;
                             if (isH) return (
@@ -981,7 +981,7 @@ export default function EmpresasTab() {
                                   <div style={{ height:3, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
                                   <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:4 }}>
                                     <div>
-                                      <div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÍA, Juan</div>
+                                      <div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÃA, Juan</div>
                                       <div style={{ fontSize:5, color:col.accent, fontWeight:700 }}>VIGILADOR</div>
                                     </div>
                                     <div style={{ display:'flex', gap:9 }}>
@@ -989,7 +989,7 @@ export default function EmpresasTab() {
                                       <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>28.456.789</div></div>
                                     </div>
                                     <div style={{ background:'#0f172a', borderRadius:4, padding:'4px 6px' }}>
-                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÃ“N</div>
                                       <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
                                       <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:col.accent }}/></div>
                                     </div>
@@ -1012,19 +1012,19 @@ export default function EmpresasTab() {
                                   <div style={{ height:4, background:`linear-gradient(90deg,${col.accent},${col.h2})` }}/>
                                   <div style={{ flex:1, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
                                     <div>
-                                      <div style={{ fontSize:9.5, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:9.5, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÃA</div>
                                       <div style={{ fontSize:9.5, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
                                       <div style={{ fontSize:5, color:col.accent, fontWeight:700, marginTop:2 }}>VIGILADOR</div>
                                     </div>
                                     <div style={{ height:0.5, background:'#e2e8f0' }}/>
                                     <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>CUIL</div><div style={{ fontSize:5.5, fontWeight:700, color:'#1e293b', fontFamily:'monospace' }}>20-28456789-6</div></div>
                                     <div style={{ background:'#0f172a', borderRadius:5, padding:'5px 7px' }}>
-                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÓN</div>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>VERIFICACIÃ“N</div>
                                       <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
                                       <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:col.accent }}/></div>
                                     </div>
                                     <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                                      <div style={{ fontSize:3.5, color:'#94a3b8' }}>Válida 12/2026</div>{qrEl(22)}
+                                      <div style={{ fontSize:3.5, color:'#94a3b8' }}>VÃ¡lida 12/2026</div>{qrEl(22)}
                                     </div>
                                   </div>
                                 </div>
@@ -1032,7 +1032,7 @@ export default function EmpresasTab() {
                             );
                           }
 
-                          /* ─────── ID OFICIAL ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ ID OFICIAL â”€â”€â”€â”€â”€â”€â”€ */
                           if (modelo.id === 'id_oficial') {
                             const hdrBg2 = `linear-gradient(90deg,#0f172a,#1e293b)`;
                             const goldBg = 'linear-gradient(90deg,#92400e,#f59e0b,#92400e)';
@@ -1046,13 +1046,13 @@ export default function EmpresasTab() {
                                 <div style={{ flex:1, background:'#fafaf8', display:'flex' }}>
                                   <div style={{ width:74, display:'flex', alignItems:'center', justifyContent:'center', padding:8 }}>{photoSq(56, 74, 4)}</div>
                                   <div style={{ flex:1, padding:'7px 8px', display:'flex', flexDirection:'column', gap:4 }}>
-                                    <div><div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÍA, Juan</div><div style={{ display:'inline-flex', background:'#0f172a18', borderRadius:3, padding:'1px 4px' }}><div style={{ fontSize:4.5, color:'#0f172a', fontWeight:700 }}>VIGILADOR</div></div></div>
+                                    <div><div style={{ fontSize:9, color:'#0f172a', fontWeight:900 }}>GARCÃA, Juan</div><div style={{ display:'inline-flex', background:'#0f172a18', borderRadius:3, padding:'1px 4px' }}><div style={{ fontSize:4.5, color:'#0f172a', fontWeight:700 }}>VIGILADOR</div></div></div>
                                     <div style={{ display:'flex', gap:9 }}>
                                       <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>#4521</div></div>
                                       <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>28.456.789</div></div>
                                     </div>
                                     <div style={{ background:'#0f172a', borderRadius:4, padding:'4px 6px', border:'0.5px solid rgba(245,158,11,0.35)' }}>
-                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                      <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:1.5 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                                       <div style={{ fontSize:11, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.15em' }}>482 071</div>
                                       <div style={{ marginTop:2, height:1.5, width:26, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'#f59e0b' }}/></div>
                                     </div>
@@ -1076,7 +1076,7 @@ export default function EmpresasTab() {
                                 <div style={{ flex:1, background:'#fafaf8', padding:'8px 10px', position:'relative', display:'flex', flexDirection:'column', gap:5 }}>
                                   <div style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
                                     <div style={{ flex:1 }}>
-                                      <div style={{ fontSize:10, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÍA</div>
+                                      <div style={{ fontSize:10, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>GARCÃA</div>
                                       <div style={{ fontSize:10, color:'#0f172a', fontWeight:900, lineHeight:1.2 }}>Juan C.</div>
                                       <div style={{ marginTop:3, display:'inline-flex', background:'#0f172a18', borderRadius:3, padding:'2px 5px' }}><div style={{ fontSize:5, color:'#0f172a', fontWeight:700 }}>VIGILADOR</div></div>
                                     </div>
@@ -1088,22 +1088,22 @@ export default function EmpresasTab() {
                                     <div><div style={{ fontSize:3.5, color:'#94a3b8' }}>DNI</div><div style={{ fontSize:7, fontWeight:700, color:'#0f172a', fontFamily:'monospace' }}>28.456.789</div></div>
                                   </div>
                                   <div style={{ background:'#0f172a', borderRadius:5, padding:'5px 8px', border:'0.5px solid rgba(245,158,11,0.3)' }}>
-                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                    <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.4)', marginBottom:2 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                                     <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.2em' }}>482 071</div>
                                     <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.15)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:'#f59e0b' }}/></div>
                                   </div>
                                   <div style={{ marginTop:'auto', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                                    {qrEl(26)}<div style={{ fontSize:3.5, color:'#94a3b8' }}>Válida 12/2026</div>
+                                    {qrEl(26)}<div style={{ fontSize:3.5, color:'#94a3b8' }}>VÃ¡lida 12/2026</div>
                                   </div>
                                 </div>
                                 <div style={{ background:hdrBg2, height:10, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP · Sistema COSP</div>
+                                  <div style={{ fontSize:4, color:'rgba(255,255,255,0.3)' }}>SECURITY CORP Â· Sistema COSP</div>
                                 </div>
                               </div>
                             );
                           }
 
-                          /* ─────── PREMIUM DARK ─────── */
+                          /* â”€â”€â”€â”€â”€â”€â”€ PREMIUM DARK â”€â”€â”€â”€â”€â”€â”€ */
                           const darkBg = '#0d1117', purp = '#6366f1';
                           if (isH) return (
                             <div style={{ width:310, height:196, background:darkBg, borderRadius:8, boxShadow:'0 6px 28px rgba(0,0,0,0.9)', overflow:'hidden', display:'flex', position:'relative' }}>
@@ -1114,18 +1114,18 @@ export default function EmpresasTab() {
                                 <div style={{ fontSize:4, color:'rgba(255,255,255,0.25)', textAlign:'center' }}>SECURITY CORP</div>
                               </div>
                               <div style={{ flex:1, paddingTop:8, padding:'8px 10px', display:'flex', flexDirection:'column', gap:5 }}>
-                                <div><div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÍA, Juan</div><div style={{ fontSize:5, color:purp, fontWeight:700 }}>VIGILADOR SENIOR</div></div>
+                                <div><div style={{ fontSize:9, color:'#fff', fontWeight:900 }}>GARCÃA, Juan</div><div style={{ fontSize:5, color:purp, fontWeight:700 }}>VIGILADOR SENIOR</div></div>
                                 <div style={{ background:'rgba(255,255,255,0.05)', borderRadius:4, padding:'4px 6px', border:`0.5px solid ${purp}25` }}>
                                   <div style={{ display:'flex', gap:9, marginBottom:3 }}>
                                     <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>LEGAJO</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
                                     <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>DNI</div><div style={{ fontSize:5.5, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
                                   </div>
                                   <div style={{ height:0.5, background:`${purp}25`, margin:'2px 0' }}/>
-                                  <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                  <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                                   <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
                                   <div style={{ marginTop:2, height:1.5, width:28, background:'rgba(255,255,255,0.12)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:`${purp}80` }}/></div>
                                 </div>
-                                <div style={{ marginTop:'auto', fontSize:4, color:'rgba(255,255,255,0.25)' }}>Válida 12/2026</div>
+                                <div style={{ marginTop:'auto', fontSize:4, color:'rgba(255,255,255,0.25)' }}>VÃ¡lida 12/2026</div>
                               </div>
                             </div>
                           );
@@ -1143,17 +1143,17 @@ export default function EmpresasTab() {
                                 </div>
                               </div>
                               <div style={{ margin:'0 9px 0 12px', background:'rgba(255,255,255,0.05)', borderRadius:6, padding:'6px 8px', border:`0.5px solid ${purp}25`, flex:1 }}>
-                                <div style={{ fontSize:9, color:'#fff', fontWeight:900, marginBottom:1 }}>GARCÍA, Juan</div>
+                                <div style={{ fontSize:9, color:'#fff', fontWeight:900, marginBottom:1 }}>GARCÃA, Juan</div>
                                 <div style={{ fontSize:5, color:purp, fontWeight:700, marginBottom:5 }}>VIGILADOR SENIOR</div>
                                 <div style={{ display:'flex', gap:10, marginBottom:4 }}>
                                   <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>LEGAJO</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>#4521</div></div>
                                   <div><div style={{ fontSize:3.5, color:'rgba(255,255,255,0.3)' }}>DNI</div><div style={{ fontSize:6, fontWeight:700, color:'rgba(255,255,255,0.85)', fontFamily:'monospace' }}>28.456.789</div></div>
                                 </div>
                                 <div style={{ height:0.5, background:`${purp}25`, marginBottom:4 }}/>
-                                <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÓDIGO DE VERIFICACIÓN</div>
+                                <div style={{ fontSize:3.5, color:'rgba(255,255,255,0.35)', marginBottom:2 }}>CÃ“DIGO DE VERIFICACIÃ“N</div>
                                 <div style={{ fontSize:13, fontWeight:900, color:'#fff', fontFamily:'monospace', letterSpacing:'0.18em' }}>482 071</div>
                                 <div style={{ marginTop:2, height:1.5, width:30, background:'rgba(255,255,255,0.12)', borderRadius:1, overflow:'hidden' }}><div style={{ height:'100%', width:'65%', background:`${purp}80` }}/></div>
-                                <div style={{ marginTop:'auto', paddingTop:6, fontSize:3.5, color:'rgba(255,255,255,0.22)' }}>Válida 12/2026</div>
+                                <div style={{ marginTop:'auto', paddingTop:6, fontSize:3.5, color:'rgba(255,255,255,0.22)' }}>VÃ¡lida 12/2026</div>
                               </div>
                               <div style={{ height:10 }}/>
                             </div>
@@ -1178,7 +1178,7 @@ export default function EmpresasTab() {
                 })}
               </div>
 
-              {/* ── Tono de color ── */}
+              {/* â”€â”€ Tono de color â”€â”€ */}
               <div className="mb-5">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-3">
                   Tono de color
@@ -1202,16 +1202,16 @@ export default function EmpresasTab() {
                       background: 'linear-gradient(to right, hsl(0,70%,50%), hsl(30,70%,50%), hsl(60,70%,50%), hsl(120,70%,40%), hsl(180,70%,40%), hsl(210,70%,50%), hsl(240,70%,55%), hsl(270,70%,55%), hsl(300,70%,50%), hsl(330,70%,50%), hsl(360,70%,50%))',
                     }}
                   />
-                  <span className="text-[11px] font-mono text-slate-500 w-9 shrink-0 text-right">{credHue}°</span>
+                  <span className="text-[11px] font-mono text-slate-500 w-9 shrink-0 text-right">{credHue}Â°</span>
                 </div>
               </div>
 
-              {/* ── Textos de la credencial ── */}
+              {/* â”€â”€ Textos de la credencial â”€â”€ */}
               <div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-3">Textos de la credencial</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Título del documento</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">TÃ­tulo del documento</label>
                     <input
                       type="text"
                       value={credTitulo}
@@ -1222,7 +1222,7 @@ export default function EmpresasTab() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Subtítulo / Tagline</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">SubtÃ­tulo / Tagline</label>
                     <input
                       type="text"
                       value={credSubtitulo}
@@ -1233,13 +1233,13 @@ export default function EmpresasTab() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Texto pie de página</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">Texto pie de pÃ¡gina</label>
                     <input
                       type="text"
                       value={credPie}
                       onChange={e => setCredPie(e.target.value)}
                       maxLength={50}
-                      placeholder="Portación obligatoria en planta"
+                      placeholder="PortaciÃ³n obligatoria en planta"
                       className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     />
                   </div>
@@ -1247,14 +1247,14 @@ export default function EmpresasTab() {
               </div>
             </div>
 
-            {/* Botón guardar */}
+            {/* BotÃ³n guardar */}
             <button
               onClick={handleGuardarTemplate}
               disabled={guardandoTpl}
               className="flex items-center gap-1.5 px-5 py-2.5 text-white rounded-xl text-xs font-black disabled:opacity-60 transition-colors bg-indigo-600 hover:bg-indigo-700"
             >
               {guardandoTpl ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Guardar configuración
+              Guardar configuraciÃ³n
             </button>
           </div>
         </div>
@@ -1262,4 +1262,3 @@ export default function EmpresasTab() {
     </div>
   );
 }
-          
