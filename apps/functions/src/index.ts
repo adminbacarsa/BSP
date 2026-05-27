@@ -487,6 +487,125 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
 // =========================================================
 // 12. DIAGNÓSTICO DE SISTEMA (HEALTH CHECK)
 // =========================================================
+
+export const platformHealthCheck = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+  }
+
+  const db = admin.firestore();
+  const results: Record<string, { ok: boolean; latencyMs?: number; detail?: string }> = {};
+
+  // ── Firestore ────────────────────────────────────────────
+  const t0 = Date.now();
+  try {
+    const snap = await db.collection('empresas').limit(1).get();
+    results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leída(s)` };
+  } catch (e: any) {
+    results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
+  }
+
+  // ── Gemini API ───────────────────────────────────────────
+  const geminiKey = process.env.GEMINI_API_KEY || '';
+  if (!geminiKey) {
+    results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
+  } else {
+    const tg = Date.now();
+    try {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      await model.generateContent({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }] });
+      results.gemini = { ok: true, latencyMs: Date.now() - tg, detail: 'Respuesta OK' };
+    } catch (e: any) {
+      results.gemini = { ok: false, latencyMs: Date.now() - tg, detail: e.message?.slice(0, 120) };
+    }
+  }
+
+  // ── Gmail SMTP ───────────────────────────────────────────
+  const gmailUser = process.env.GMAIL_USER || '';
+  const gmailPass = process.env.GMAIL_PASS || '';
+  if (!gmailUser || !gmailPass) {
+    results.gmail = { ok: false, detail: 'GMAIL_USER / GMAIL_PASS no configurados' };
+  } else {
+    const tm = Date.now();
+    try {
+      const nodemailerMod = await import('nodemailer');
+      const transporter = nodemailerMod.createTransport({ service: 'gmail', auth: { user: gmailUser, pass: gmailPass } });
+      await transporter.verify();
+      results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: gmailUser };
+    } catch (e: any) {
+      results.gmail = { ok: false, latencyMs: Date.now() - tm, detail: e.message?.slice(0, 120) };
+    }
+  }
+
+  // ── Google Drive ─────────────────────────────────────────
+  const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
+  if (!driveFolderId) {
+    results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
+  } else {
+    try {
+      const snap = await db.collection('system_backups').orderBy('createdAt', 'desc').limit(1).get();
+      if (!snap.empty) {
+        const last = snap.docs[0].data();
+        const ts = last.createdAt?.toDate?.()?.toISOString?.() ?? 'desconocido';
+        results.drive = { ok: true, detail: `Último backup: ${ts}` };
+      } else {
+        results.drive = { ok: true, detail: 'Sin backups registrados aún' };
+      }
+    } catch (e: any) {
+      results.drive = { ok: false, detail: e.message?.slice(0, 120) };
+    }
+  }
+
+  // ── FCM (Push Notifications) ─────────────────────────────
+  try {
+    const tokSnap = await db.collection('device_tokens').limit(1).get();
+    results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? '≥1' : '0'}` };
+  } catch (e: any) {
+    results.fcm = { ok: false, detail: e.message };
+  }
+
+  // ── Scheduled jobs — última ejecución ───────────────────
+  const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
+  const jobStatus: Record<string, string> = {};
+  for (const job of scheduledJobs) {
+    try {
+      const snap = await db.collection('scheduled_job_logs').doc(job).get();
+      if (snap.exists) {
+        const d = snap.data()!;
+        const ts = d.lastRunAt?.toDate?.()?.toISOString?.() ?? null;
+        jobStatus[job] = ts ?? 'sin registro';
+      } else {
+        jobStatus[job] = 'sin registro';
+      }
+    } catch {
+      jobStatus[job] = 'error';
+    }
+  }
+  results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
+
+  // ── Conteos de datos ─────────────────────────────────────
+  try {
+    const [empSnap, sysSnap, empActivos] = await Promise.all([
+      db.collection('empresas').get(),
+      db.collection('system_users').get(),
+      db.collection('empleados').where('active', '==', true).get(),
+    ]);
+    results.data = {
+      ok: true,
+      detail: `Empresas: ${empSnap.size} · Admins: ${sysSnap.size} · Empleados activos: ${empActivos.size}`,
+    };
+  } catch (e: any) {
+    results.data = { ok: false, detail: e.message };
+  }
+
+  // ── Entorno ──────────────────────────────────────────────
+  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+  results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'Producción (Firebase)' };
+
+  return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
+});
 export const checkSystemHealth = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
       throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
