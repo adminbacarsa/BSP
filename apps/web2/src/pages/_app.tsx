@@ -10,6 +10,12 @@ import { EmpresaProvider } from '@/context/EmpresaContext';
 import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
 import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
+import { useAdminFcm } from '@/hooks/useAdminFcm';
+
+function AdminFcmRegistrar() {
+  useAdminFcm();
+  return null;
+}
 
 const AssistantFloatingBubble = dynamic(
   () => import('@/components/assistant/AssistantFloatingBubble').then((m) => m.AssistantFloatingBubble),
@@ -43,6 +49,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <title>COSP V1.0 | Grupo Bacar</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
+        <AdminFcmRegistrar />
         <Component {...pageProps} />
         {showAssistant && <AssistantFloatingBubble />}
       </ToastProvider>

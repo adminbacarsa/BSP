@@ -1491,6 +1491,8 @@ export default function EmployeeDashboard() {
     await setDoc(doc(db, 'device_tokens', token), {
       uid: user.uid,
       employeeId: empDocId || null,
+      empresaId: empProfile?.empresaId || null,
+      role: 'employee',
       token,
       platform: 'web',
       updatedAt: serverTimestamp()
@@ -1515,8 +1517,8 @@ export default function EmployeeDashboard() {
         const { getMessaging, onMessage } = await import('firebase/messaging');
         const messaging = getMessaging(app);
         unsub = onMessage(messaging, (payload) => {
-          const title = payload?.notification?.title || 'CronoApp';
-          const body = payload?.notification?.body || '';
+          const title = payload?.data?.title || payload?.notification?.title || 'CronoApp';
+          const body  = payload?.data?.body  || payload?.notification?.body  || '';
           const notificationId = payload?.data?.notificationId;
           const link = payload?.data?.link || '/empleado/dashboard';
           try {
