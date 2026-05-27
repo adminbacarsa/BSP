@@ -1257,7 +1257,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
   }
-  const { token, deviceInfo } = data as { token: string; deviceInfo?: Record<string, string> };
+  const { token, deviceInfo, deviceId } = data as { token: string; deviceInfo?: Record<string, string>; deviceId?: string };
   if (!token) {
     throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
   }
@@ -1287,8 +1287,8 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   // Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-  // Guardar dispositivo verificado
-  const deviceRef = db.collection('device_tokens').doc();
+  // Guardar dispositivo verificado — doc ID = uid (un dispositivo por usuario)
+  const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
   await deviceRef.set({
     uid: context.auth.uid,
     employeeId: td.employeeId,
@@ -1296,6 +1296,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
     source: 'email_link',
     activatedAt: admin.firestore.FieldValue.serverTimestamp(),
     deviceInfo: deviceInfo || {},
+    deviceId: deviceId || null,
   });
 
   return { success: true, employeeId: td.employeeId };

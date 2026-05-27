@@ -475,13 +475,15 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'device_tokens'),
-      where('uid', '==', user.uid),
-      where('verified', '==', true),
-      limit(1)
-    );
-    getDocs(q).then(snap => setDeviceVerified(!snap.empty)).catch(() => setDeviceVerified(null));
+    const localDeviceId = typeof window !== 'undefined' ? localStorage.getItem('cosp_device_id') : null;
+    getDoc(doc(db, 'device_tokens', user.uid)).then(snap => {
+      if (!snap.exists()) { setDeviceVerified(false); return; }
+      const d = snap.data();
+      if (!d.verified) { setDeviceVerified(false); return; }
+      // Sin deviceId almacenado (activación anterior) → compatible hacia atrás
+      if (!d.deviceId) { setDeviceVerified(true); return; }
+      setDeviceVerified(d.deviceId === localDeviceId);
+    }).catch(() => setDeviceVerified(null));
   }, [user?.uid]);
 
   useEffect(() => {

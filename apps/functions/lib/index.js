@@ -1029,7 +1029,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
     }
-    const { token, deviceInfo } = data;
+    const { token, deviceInfo, deviceId } = data;
     if (!token) {
         throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
     }
@@ -1050,7 +1050,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
     }
     await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
-    const deviceRef = db.collection('device_tokens').doc();
+    const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
     await deviceRef.set({
         uid: context.auth.uid,
         employeeId: td.employeeId,
@@ -1058,6 +1058,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
         source: 'email_link',
         activatedAt: admin.firestore.FieldValue.serverTimestamp(),
         deviceInfo: deviceInfo || {},
+        deviceId: deviceId || null,
     });
     return { success: true, employeeId: td.employeeId };
 });

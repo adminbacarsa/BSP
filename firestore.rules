@@ -290,7 +290,8 @@ service cloud.firestore {
 
     match /device_tokens/{tokenId} {
       allow create, update, delete: if request.auth != null && request.resource.data.uid == request.auth.uid;
-      allow read: if isAdmin();
+      // Admin puede leer todos; empleado puede leer su propio doc (tokenId == uid)
+      allow read: if isAdmin() || (request.auth != null && tokenId == request.auth.uid);
     }
 
     match /user_notifications/{notifId} {

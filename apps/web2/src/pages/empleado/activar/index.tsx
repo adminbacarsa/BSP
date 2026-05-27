@@ -20,6 +20,16 @@ function getDeviceInfo(): Record<string, string> {
   };
 }
 
+function getOrCreateDeviceId(): string {
+  const key = 'cosp_device_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 export default function ActivarDispositivoPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -47,7 +57,8 @@ export default function ActivarDispositivoPage() {
     try {
       const fns = getFunctions(app, 'us-central1');
       const activateDevice = httpsCallable(fns, 'activateDevice');
-      await activateDevice({ token, deviceInfo: getDeviceInfo() });
+      const deviceId = getOrCreateDeviceId();
+      await activateDevice({ token, deviceInfo: getDeviceInfo(), deviceId });
       setState('success');
     } catch (err: any) {
       setState('error');
