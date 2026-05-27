@@ -1022,7 +1022,9 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
 // =========================================================
 import * as nodemailer from 'nodemailer';
 
-function buildPortalEmailHtml(activationLink: string): string {
+function buildPortalEmailHtml(activationLink: string, empresaNombre: string): string {
+  const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
+  const nombreUpper = nombre.toUpperCase();
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -1032,13 +1034,13 @@ function buildPortalEmailHtml(activationLink: string): string {
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
-            <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
+            <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">${nombreUpper}</p>
             <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados · COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
-            <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
+            <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
             <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular</strong> y tocá el botón para crear tu contraseña y vincular tu dispositivo en un solo paso:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
               <tr>
@@ -1057,7 +1059,7 @@ function buildPortalEmailHtml(activationLink: string): string {
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · ${nombre}</strong></p>
           </td>
         </tr>
       </table>
@@ -1067,8 +1069,9 @@ function buildPortalEmailHtml(activationLink: string): string {
 </html>`;
 }
 
-function buildPortalEmailText(activationLink: string): string {
-  return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Empleados de COSP.
+function buildPortalEmailText(activationLink: string, empresaNombre: string): string {
+  const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
+  return `${nombre} te ha otorgado acceso al Portal de Empleados de COSP.
 
 Abrí este email desde tu celular y tocá el siguiente enlace para crear tu contraseña y vincular tu dispositivo en un solo paso:
 
@@ -1077,7 +1080,7 @@ ${activationLink}
 Este enlace expira en 48 horas y es de un solo uso.
 
 Saludos,
-Equipo Operativo - Bacar sa. Seguridad Privada`;
+Equipo Operativo - ${nombre}`;
 }
 
 export const createPortalAccess = functions.https.onCall(async (data, context) => {
@@ -1128,6 +1131,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 
   const db = admin.firestore();
   const results: { empId: string; email: string; success: boolean; error?: string; alreadyExisted: boolean }[] = [];
+  const empresaNombreCache: Record<string, string> = {};
 
   for (const empId of employeeIds) {
     try {
@@ -1139,6 +1143,23 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 
       const emp = empDoc.data()!;
       const email = (emp.email || emp.correo || '').toString().trim().toLowerCase();
+
+      // Resolver nombre de empresa (con cache para no repetir lecturas)
+      const empresaId = (emp.empresaId || '').toString();
+      let empresaNombre = 'Bacar sa. Seguridad Privada';
+      if (empresaId) {
+        if (empresaNombreCache[empresaId] !== undefined) {
+          empresaNombre = empresaNombreCache[empresaId];
+        } else {
+          try {
+            const empDoc2 = await db.collection('empresas').doc(empresaId).get();
+            if (empDoc2.exists) {
+              empresaNombre = empDoc2.data()!.nombre || empDoc2.data()!.name || empresaNombre;
+            }
+          } catch (_) {}
+          empresaNombreCache[empresaId] = empresaNombre;
+        }
+      }
       if (!email) {
         results.push({ empId, email: '', success: false, error: 'Sin email registrado', alreadyExisted: false });
         continue;
@@ -1180,11 +1201,11 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 
       // Enviar email — solo se marca como enviado si el envío fue exitoso
       await transporter.sendMail({
-        from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
+        from: `"${empresaNombre}" <${gmailUser}>`,
         to: email,
-        subject: 'Acceso al Portal de Empleados - COSP',
-        html: buildPortalEmailHtml(activationLink),
-        text: buildPortalEmailText(activationLink),
+        subject: `Acceso al Portal de Empleados - ${empresaNombre}`,
+        html: buildPortalEmailHtml(activationLink, empresaNombre),
+        text: buildPortalEmailText(activationLink, empresaNombre),
       });
 
       // Limpiar uid de cualquier otro documento que ya lo tenga (evita duplicados)

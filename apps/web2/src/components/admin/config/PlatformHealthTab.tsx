@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { collection, getDocs, limit, query } from 'firebase/firestore';
+import { collection, getDocs, limit, query, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import {
   Activity, CheckCircle, XCircle, AlertCircle, Loader2,
   Database, Zap, Mail, HardDrive, Bell, Bot, Clock, Server,
   BarChart3, RefreshCw, Shield, Download, Copy, Check,
+  KeyRound, Eye, EyeOff, Pencil, Trash2, Plus, Save, X,
 } from 'lucide-react';
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
@@ -99,8 +100,181 @@ const INITIAL_CHECKS: CheckResult[] = [
   { status: 'idle', label: 'Entorno de ejecución',         detail: 'Sin ejecutar', group: 'Entorno',       icon: Server },
 ];
 
+// ── Tipos para la bóveda de credenciales ──────────────────────────────────────
+
+interface Credential {
+  id: string;
+  service: string;
+  account: string;
+  notes: string;
+  value: string;
+}
+
+const EMPTY_CRED: Omit<Credential, 'id'> = { service: '', account: '', notes: '', value: '' };
+
+function CredentialVault({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+  const [creds, setCreds] = useState<Credential[]>([]);
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [addingNew, setAddingNew] = useState(false);
+  const [form, setForm] = useState<Omit<Credential, 'id'>>(EMPTY_CRED);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    const unsub = onSnapshot(
+      collection(db, 'platform_credentials'),
+      snap => setCreds(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Credential, 'id'>) }))),
+      () => {},
+    );
+    return unsub;
+  }, [isSuperAdmin]);
+
+  if (!isSuperAdmin) return null;
+
+  function startEdit(c: Credential) {
+    setEditingId(c.id);
+    setForm({ service: c.service, account: c.account, notes: c.notes, value: c.value });
+    setAddingNew(false);
+  }
+
+  function startNew() {
+    setAddingNew(true);
+    setEditingId(null);
+    setForm(EMPTY_CRED);
+  }
+
+  function cancel() {
+    setEditingId(null);
+    setAddingNew(false);
+    setForm(EMPTY_CRED);
+  }
+
+  async function save(id?: string) {
+    if (!form.service.trim()) return;
+    setSaving(true);
+    try {
+      const docId = id || form.service.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      await setDoc(doc(db, 'platform_credentials', docId), {
+        service: form.service.trim(),
+        account: form.account.trim(),
+        notes: form.notes.trim(),
+        value: form.value,
+      });
+      cancel();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('¿Eliminar esta credencial?')) return;
+    await deleteDoc(doc(db, 'platform_credentials', id));
+  }
+
+  const isEditing = (id: string) => editingId === id;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Credenciales de servicio</p>
+        {!addingNew && (
+          <button
+            onClick={startNew}
+            className="flex items-center gap-1.5 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            <Plus size={13} /> Agregar
+          </button>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-700 bg-slate-900 overflow-hidden">
+        {/* Header tabla */}
+        <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr_auto] gap-2 px-4 py-2 border-b border-slate-700 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+          <span>Servicio</span>
+          <span>Cuenta / Email</span>
+          <span>Notas</span>
+          <span>Valor / Clave</span>
+          <span></span>
+        </div>
+
+        {creds.length === 0 && !addingNew && (
+          <div className="px-4 py-6 text-center text-slate-600 text-sm">
+            Sin credenciales guardadas. Usá <span className="text-indigo-400 font-bold">Agregar</span> para registrar la primera.
+          </div>
+        )}
+
+        {creds.map(c => (
+          <div key={c.id} className="border-b border-slate-800 last:border-0">
+            {isEditing(c.id) ? (
+              <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr_auto] gap-2 px-4 py-3 items-center">
+                <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" value={form.service} onChange={e => setForm(f => ({ ...f, service: e.target.value }))} placeholder="Nombre servicio" />
+                <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" value={form.account} onChange={e => setForm(f => ({ ...f, account: e.target.value }))} placeholder="cuenta@email.com" />
+                <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Dónde está / cómo renovar" />
+                <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500 font-mono" value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} placeholder="contraseña / API key" />
+                <div className="flex gap-1">
+                  <button onClick={() => save(c.id)} disabled={saving} className="p-1.5 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-400"><Save size={13} /></button>
+                  <button onClick={cancel} className="p-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 text-slate-400"><X size={13} /></button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[1fr_1fr_1.5fr_1fr_auto] gap-2 px-4 py-3 items-center">
+                <div className="flex items-center gap-2">
+                  <KeyRound size={13} className="text-slate-500 shrink-0" />
+                  <span className="text-xs font-bold text-white truncate">{c.service}</span>
+                </div>
+                <span className="text-xs text-slate-400 truncate">{c.account || '—'}</span>
+                <span className="text-xs text-slate-500 truncate">{c.notes || '—'}</span>
+                <div className="flex items-center gap-1.5">
+                  {c.value ? (
+                    <>
+                      <span className="text-xs font-mono text-slate-300 truncate max-w-[100px]">
+                        {revealed[c.id] ? c.value : '••••••••••••'}
+                      </span>
+                      <button
+                        onClick={() => setRevealed(r => ({ ...r, [c.id]: !r[c.id] }))}
+                        className="text-slate-500 hover:text-slate-300 transition-colors shrink-0"
+                      >
+                        {revealed[c.id] ? <EyeOff size={12} /> : <Eye size={12} />}
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-600 italic">sin valor</span>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => startEdit(c)} className="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 transition-colors"><Pencil size={12} /></button>
+                  <button onClick={() => remove(c.id)} className="p-1.5 rounded-lg hover:bg-rose-900/30 text-slate-500 hover:text-rose-400 transition-colors"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Fila para nueva credencial */}
+        {addingNew && (
+          <div className="border-t border-slate-700 grid grid-cols-[1fr_1fr_1.5fr_1fr_auto] gap-2 px-4 py-3 items-center bg-indigo-950/20">
+            <input className="bg-slate-800 border border-indigo-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-400" value={form.service} onChange={e => setForm(f => ({ ...f, service: e.target.value }))} placeholder="Ej: Gmail SMTP" autoFocus />
+            <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" value={form.account} onChange={e => setForm(f => ({ ...f, account: e.target.value }))} placeholder="cuenta@email.com" />
+            <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Dónde está / cómo renovar" />
+            <input className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500 font-mono" value={form.value} onChange={e => setForm(f => ({ ...f, value: e.target.value }))} placeholder="contraseña / API key" />
+            <div className="flex gap-1">
+              <button onClick={() => save()} disabled={saving || !form.service.trim()} className="p-1.5 rounded-lg bg-emerald-800/40 hover:bg-emerald-700/50 text-emerald-400 disabled:opacity-40"><Save size={13} /></button>
+              <button onClick={cancel} className="p-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 text-slate-400"><X size={13} /></button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-[10px] text-slate-600 mt-2">Los valores se guardan cifrados en Firestore. Solo visible para SuperAdmin.</p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function PlatformHealthTab() {
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const [checks, setChecks] = useState<CheckResult[]>(INITIAL_CHECKS);
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
@@ -370,6 +544,9 @@ export default function PlatformHealthTab() {
           Presioná <span className="text-indigo-400 font-bold">Ejecutar diagnóstico</span> para verificar el estado de todos los servicios.
         </div>
       )}
+
+      {/* Bóveda de credenciales — solo SuperAdmin */}
+      <CredentialVault isSuperAdmin={isSuperAdmin} />
     </div>
   );
 }
