@@ -44,7 +44,11 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
-import { generateScheduleV4, pickOptimalAutoCycles, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import {
+    resolveAutoPlanningBrain,
+    type AutoPlanningBrainResult,
+} from '@/lib/planificacion/autoPlanningBrain';
 import {
     countPositionClosedUnitsFromShifts,
     PLANNING_NON_BILLABLE_CODES,
@@ -384,6 +388,15 @@ export default function PlanificacionPage() {
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     const [autoRotateShifts, setAutoRotateShifts] = useState(false);
+    const [autoAjustarCrono, setAutoAjustarCrono] = useState(false);
+    /** Fechas manuales Contingencia (Modo 12 para liberar guardias / RET). */
+    const [autoContingenciaDias, setAutoContingenciaDias] = useState<Set<string>>(() => new Set());
+    const [autoPlanningBrainReport, setAutoPlanningBrainReport] = useState<AutoPlanningBrainResult | null>(null);
+    const autoPlanningBrainRef = React.useRef<AutoPlanningBrainResult | null>(null);
+
+    useEffect(() => {
+        if (!autoRotateShifts && autoAjustarCrono) setAutoAjustarCrono(false);
+    }, [autoRotateShifts, autoAjustarCrono]);
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
@@ -413,6 +426,10 @@ export default function PlanificacionPage() {
         employeeRetHoursPotential?: Record<string, number>;
         totalRetCount?: number;
         totalRetHoursPotential?: number;
+        overCoverageRetDays?: number;
+        maxRetConcurrent?: number;
+        ajustarCrono?: boolean;
+        apretarCronoDays?: string[];
         uncoveredSlotsByDay?: Record<string, { positionName: string; code: string; missing: number }[]>;
         excessPositionEmployees?: { positionName: string; assigned: number; needed: number; excess: number }[];
         slaDeficitRemaining?: number;
@@ -433,7 +450,7 @@ export default function PlanificacionPage() {
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
     const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
-    const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'done'>('configure');
+    const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'sla_open'|'done'>('configure');
     // Empleados bloqueados por cap 200h en la última generación
     const [capOverflowEmps, setCapOverflowEmps] = useState<{ empId: string; nombre: string }[]>([]);
     // IDs autorizados por supervisor para superar 200h (ref = valor síncrono para el engine)
@@ -2696,6 +2713,39 @@ export default function PlanificacionPage() {
         return absences;
     };
 
+    const RRHH_ABSENCE_GRID = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
+
+    /** Licencias/ausencias ya visibles en grilla o pendientes (no solo colección ausencias). */
+    const mergeAbsencesFromLocalGrid = (
+        absences: Record<string, Map<string, string>>,
+        empIds: string[],
+        monthStart: Date,
+        monthEnd: Date,
+    ) => {
+        const idSet = new Set(empIds);
+        const mergeCell = (empId: string, dateStr: string, code: string) => {
+            if (!idSet.has(empId)) return;
+            const d = new Date(`${dateStr}T12:00:00`);
+            if (d < monthStart || d > monthEnd) return;
+            if (!absences[empId]) absences[empId] = new Map();
+            if (!absences[empId].has(dateStr)) absences[empId].set(dateStr, code);
+        };
+        const scan = (src: Record<string, any>) => {
+            Object.entries(src).forEach(([key, cell]) => {
+                if (!cell || cell.isDeleted) return;
+                if (cell.objectiveId && cell.objectiveId !== selectedObjective) return;
+                const code = String(cell.code || '').toUpperCase();
+                if (!RRHH_ABSENCE_GRID.has(code)) return;
+                const empId = String(cell.employeeId || key.split('_')[0] || '');
+                const dateStr = String(cell.dateStr || key.slice(empId.length + 1) || '');
+                if (!empId || !dateStr) return;
+                mergeCell(empId, dateStr, code);
+            });
+        };
+        scan(shiftsMap);
+        scan(pendingChanges);
+    };
+
     const bumpAutoV2Progress = async (pct: number, label: string) => {
         setAutoV2Progress({ pct, label });
         await new Promise<void>((r) => {
@@ -2721,6 +2771,7 @@ export default function PlanificacionPage() {
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
             await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
+            mergeAbsencesFromLocalGrid(absences, displayedEmployees.map((e: any) => e.id), monthStart, monthEnd);
 
             // Acumular cola CCT del mes anterior (26 → fin) por empleado
             const empMonthlyInitial: Record<string,number> = {};
@@ -2749,9 +2800,9 @@ export default function PlanificacionPage() {
 
             const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
-            await bumpAutoV2Progress(52, 'Calculando esquema óptimo y viabilidad…');
+            await bumpAutoV2Progress(52, 'Cerebro Auto: esquema, dotación y Modo 12…');
             await new Promise<void>((r) => setTimeout(r, 0));
-            const baseCtx = {
+            const brainInput = {
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
                     id: e.id,
@@ -2764,17 +2815,33 @@ export default function PlanificacionPage() {
                 empMonthlyInitial,
                 absences,
                 slaVendidas,
-                autoCycles: [] as string[],
                 budgetMode: autoV2BudgetMode,
                 objectiveId: selectedObjective,
                 objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
                 objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
                 getDayLetter,
                 getDateKey,
+                contingencyDaysManual: [...autoContingenciaDias],
+                rotateShiftsOverride: autoRotateShifts,
+                ajustarCronoOverride: autoAjustarCrono,
             };
-            const picked = pickOptimalAutoCycles(baseCtx);
-            autoSelectedCyclesRef.current = picked.cycles;
-            setAutoCycles(picked.cycles);
+            const brain = resolveAutoPlanningBrain(brainInput);
+            autoPlanningBrainRef.current = brain;
+            setAutoPlanningBrainReport(brain);
+
+            if (!brain.contingencyOk) {
+                brain.contingencyMessages.forEach(msg => toast.error(msg, { duration: 9000 }));
+                autoV2ReportRef.current = brain.feasibility;
+                setAutoV2Report(brain.feasibility);
+                return { ok: false, cycles: brain.cycles };
+            }
+
+            if (!autoRotateShifts && brain.rotateShifts) {
+                setAutoRotateShifts(true);
+            }
+
+            autoSelectedCyclesRef.current = brain.cycles;
+            setAutoCycles(brain.cycles);
 
             await bumpAutoV2Progress(72, 'Leyendo demanda SLA del objetivo…');
             const preflightDays = daysInMonth.map(day => {
@@ -2787,20 +2854,22 @@ export default function PlanificacionPage() {
                 employees: displayedEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
                 absences,
                 slaVendidas,
-                cycles: picked.cycles,
+                cycles: brain.cycles,
                 objectiveId: selectedObjective,
                 isPosActiveOnDay,
+                apretarCronoDays: brain.modo12DaysEngine,
             });
             setAutoV2CoveragePreflight(preflight);
 
-            await bumpAutoV2Progress(100, `Esquema ${picked.pickedKey} · viabilidad`);
+            await bumpAutoV2Progress(100, `Esquema ${brain.pickedCycle} · ${brain.staffing.servicioDiarioModo8}+${brain.staffing.poolFrancos} · viabilidad`);
             await new Promise<void>((r) => setTimeout(r, 150));
-            autoV2ReportRef.current = picked.feasibility;
-            setAutoV2Report(picked.feasibility);
-            if (picked.pickedKey === '4+2') {
+            autoV2ReportRef.current = brain.feasibility;
+            setAutoV2Report(brain.feasibility);
+            if (brain.pickedCycle === '4+2') {
                 toast.warning('Esquema 4+2 (D12/N12): ningún ciclo M/T/N 8h cerró con la dotación actual.', { duration: 8000 });
             }
-            return { ok: picked.feasibility.ok, cycles: picked.cycles };
+            brain.warnings.forEach(w => toast.message(w, { duration: 6000 }));
+            return { ok: brain.feasibility.ok, cycles: brain.cycles };
         } catch (e:any) {
             toast.error('Error al analizar viabilidad');
             console.error('[autoScheduleCOSP]', e);
@@ -2828,7 +2897,9 @@ export default function PlanificacionPage() {
             setAutoWizardStep('configure');
             setAutoWizardPersonalize(true);
             autoV2ReportRef.current = null;
+            autoPlanningBrainRef.current = null;
             setAutoV2Report(null);
+            setAutoPlanningBrainReport(null);
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
         }
@@ -2936,6 +3007,7 @@ export default function PlanificacionPage() {
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
             await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
+            mergeAbsencesFromLocalGrid(absences, displayedEmployees.map((e: any) => e.id), monthStart, monthEnd);
 
             const preflightDays = daysInMonth.map(day => {
                 const dateStr = getDateKey(day);
@@ -2950,6 +3022,7 @@ export default function PlanificacionPage() {
                 cycles: cyclesForGen,
                 objectiveId: selectedObjective,
                 isPosActiveOnDay,
+                apretarCronoDays: autoPlanningBrainRef.current?.modo12DaysEngine ?? [...autoContingenciaDias],
             }));
 
             const empMonthlyInitial: Record<string,number> = {};
@@ -3039,6 +3112,38 @@ export default function PlanificacionPage() {
                 )
                 .map((e: any) => ({ id: e.id, nombre: e.nombre || e.name }));
 
+            const genBrain = resolveAutoPlanningBrain({
+                positions: positionStructure,
+                employees: displayedEmployees.map((e:any) => ({
+                    id: e.id,
+                    nombre: e.nombre || e.name,
+                    lat: typeof e.lat === 'number' ? e.lat : null,
+                    lng: typeof e.lng === 'number' ? e.lng : null,
+                    preferredObjectiveId: e.preferredObjectiveId,
+                })),
+                daysInMonth,
+                empMonthlyInitial,
+                absences,
+                slaVendidas,
+                budgetMode: autoV2BudgetMode,
+                objectiveId: selectedObjective,
+                objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
+                objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
+                getDayLetter,
+                getDateKey,
+                contingencyDaysManual: [...autoContingenciaDias],
+                rotateShiftsOverride: autoRotateShifts,
+                ajustarCronoOverride: autoAjustarCrono,
+            });
+            autoPlanningBrainRef.current = genBrain;
+            setAutoPlanningBrainReport(genBrain);
+            if (!genBrain.contingencyOk) {
+                toast.error(genBrain.contingencyMessages[0] || 'Contingencia no viable');
+                setAutoV2Generating(false);
+                setAutoV2Progress(null);
+                return;
+            }
+
             const baseGenCtx = {
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
@@ -3061,8 +3166,10 @@ export default function PlanificacionPage() {
                 defaultShiftByEmp,
                 getDayLetter,
                 getDateKey,
-                rotateShifts: autoRotateShifts,
+                rotateShifts: genBrain.rotateShifts,
                 codeHoursHint: slaCodeHoursHint,
+                ajustarCrono: genBrain.ajustarCrono,
+                apretarCronoDays: genBrain.modo12DaysEngine,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
                 globalRetPool,
@@ -3072,8 +3179,8 @@ export default function PlanificacionPage() {
             await new Promise<void>((r) => setTimeout(r, 0));
             const gen = generateScheduleV4(baseGenCtx);
 
-            await bumpAutoV2Progress(58, 'Volcando celdas en pendientes…');
-            // Volcamos a pendingChanges respetando autoOverwrite y celdas bloqueadas
+            await bumpAutoV2Progress(58, 'Verificando cobertura…');
+            // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.
             const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
             let written = 0;
             let skipped = 0;
@@ -3095,8 +3202,6 @@ export default function PlanificacionPage() {
                 };
                 written++;
             }
-            setPendingChanges(newChanges);
-            setAutoGeneratedReady(true);
 
             // Si hay slots que solo podrían cubrirse superando las 200h → guardar para panel de autorización
             if (gen.capOverflowSlots.length > 0) {
@@ -3131,6 +3236,10 @@ export default function PlanificacionPage() {
                 employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
                 totalRetCount: gen.stats.totalRetCount,
                 totalRetHoursPotential: gen.stats.totalRetHoursPotential,
+                overCoverageRetDays: gen.stats.overCoverageRetDays,
+                maxRetConcurrent: gen.stats.maxRetConcurrent,
+                ajustarCrono: gen.stats.ajustarCrono,
+                apretarCronoDays: gen.stats.apretarCronoDays,
                 uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
                 excessPositionEmployees: gen.stats.excessPositionEmployees,
                 slaDeficitRemaining: gen.stats.slaDeficitRemaining,
@@ -3193,7 +3302,7 @@ export default function PlanificacionPage() {
                         ...(a.isReten ? { isReten: true } : {}),
                     };
                 }
-                setPendingChanges({ ...newChanges });
+                // No volcar a grilla hasta confirmar SLA cerrado (ver más abajo).
 
                 const newIssues = countIssues(coverage);
                 if (newIssues >= prevIssues) break; // sin progreso: detener
@@ -3216,10 +3325,13 @@ export default function PlanificacionPage() {
             finalAssignments = geminiOut.assignments;
             coverage = geminiOut.coverage;
             const finalChanges = { ...geminiOut.changes };
-            setPendingChanges(finalChanges);
-            setAutoV2Coverage(coverage);
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
-            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
+
+            const verifiedBillable = coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours;
+            const verifiedUncovered = coverage.coverage.uncoveredSlots;
+            const hrsDeficit = slaVendidas > 0
+                ? Math.max(0, Math.round((slaVendidas - verifiedBillable) * 10) / 10)
+                : 0;
+            const slaClosed = slaVendidas <= 0 || (hrsDeficit <= 0.5 && verifiedUncovered <= 0);
 
             let gridBillableHours = 0;
             displayedEmployees.forEach((emp: any) => {
@@ -3237,18 +3349,41 @@ export default function PlanificacionPage() {
                     gridBillableHours += calcShiftHours(activeShift, slaCodeHoursHint);
                 });
             });
-            const verifiedBillable = coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours;
+
             setAutoV2GenStats((prev) => prev ? {
                 ...prev,
                 totalBillableHours: verifiedBillable,
                 gridBillableHours,
                 cellsSkippedOverwrite: skipped,
+                uncoveredSlots: verifiedUncovered,
+                slaDeficitRemaining: hrsDeficit,
+                slaHoursClosed: slaClosed,
             } : prev);
+            setAutoV2Coverage(coverage);
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
+            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
 
-            await bumpAutoV2Progress(100, 'Listo');
+            // Vista previa en grilla siempre (aunque el SLA quede abierto) para poder diagnosticar.
+            setPendingChanges(finalChanges);
+            setAutoGeneratedReady(true);
+
+            await bumpAutoV2Progress(100, slaClosed ? 'Listo' : 'SLA sin cerrar — vista previa');
             await new Promise<void>((r) => setTimeout(r, 180));
 
             const gridGap = Math.abs(verifiedBillable - gridBillableHours);
+
+            if (!slaClosed) {
+                const parts: string[] = [];
+                if (hrsDeficit > 0.5) parts.push(`${Math.round(hrsDeficit)}h faltantes`);
+                if (verifiedUncovered > 0) parts.push(`${verifiedUncovered} slots sin cubrir`);
+                toast.warning(
+                    `Vista previa en grilla: SLA abierto (${parts.join(' · ')}). Revisá la grilla detrás del modal; no publiques hasta cerrar.`,
+                    { duration: 12000 },
+                );
+                setAutoWizardStep('sla_open');
+                return;
+            }
+
             if (written === 0 && skipped > 0) {
                 toast.error(
                     `No se generó nada: las ${skipped} celdas calculadas ya estaban ocupadas. ` +
@@ -3270,13 +3405,7 @@ export default function PlanificacionPage() {
                     { duration: 9000 },
                 );
                 setAutoWizardStep('done');
-            } else if (slaVendidas > 0 && gen.stats.slaHoursClosed === false && (gen.stats.slaDeficitRemaining ?? 0) > 0) {
-                toast.warning(
-                    `Faltan ${Math.round(gen.stats.slaDeficitRemaining ?? 0)}h para igualar el SLA (${slaVendidas}h vendidas). No podrás publicar hasta cerrar la diferencia.`,
-                    { duration: 10000 },
-                );
-                setAutoWizardStep('done');
-            } else if (slaVendidas > 0 && gen.stats.slaHoursClosed) {
+            } else if (slaVendidas > 0 && hrsDeficit <= 0.5 && verifiedUncovered <= 0) {
                 toast.success(`Cronograma cerrado: ${Math.round(verifiedBillable)}h = ${slaVendidas}h vendidas.`, { duration: 5000 });
                 setAutoWizardStep('done');
             } else {
@@ -5914,7 +6043,7 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
-                                {autoWizardStep === 'done' && !autoV2Generating && autoV2CoveragePreflight && (
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2CoveragePreflight && (
                                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide mb-1">Objetivo pedía (SLA)</p>
                                         <p className="text-[10px] text-slate-700 font-bold">
@@ -5930,11 +6059,13 @@ export default function PlanificacionPage() {
                                 {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && (
                                     <div className="space-y-3">
                                         <p className="text-[11px] text-slate-600 font-bold leading-snug">
-                                            El motor elige solo el <strong>esquema más eficiente</strong> (prioriza 6+2 con M/T/N; EN/RO custom sin tope 200h). Vos configurás sobreescritura e IA opcional.
+                                            <strong>Auto</strong> elige esquema (6+2…), rotativo, <strong>Modo 12</strong> por ausencias y valida <strong>Contingencia</strong> si marcás fechas.
                                         </p>
                                         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                            <p className="text-[10px] font-black text-amber-800 uppercase tracking-wide">Esquema de ciclo</p>
-                                            <p className="text-[11px] text-amber-900 font-bold mt-0.5">Automático — evalúa 6+2, 5+1, 6+1 y 4+2 según dotación y SLA</p>
+                                            <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Modo 8 (normal)</p>
+                                            <p className="text-[11px] font-bold mt-0.5 text-amber-900">
+                                                M+T+N · el motor calcula servicio + franco + plantilla (ej. 12+4=16)
+                                            </p>
                                         </div>
                                         <div className="grid grid-cols-2 gap-1.5">
                                             <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
@@ -5955,16 +6086,77 @@ export default function PlanificacionPage() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Turnos rotativos (péndulo CCT)
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">6+2: bloques M→T→N→T por guardia · continúa mes a mes · OFF = banda fija</span>
+                                                Turnos rotativos (equilibrio M→T→N)
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">Auto lo activa si cierra; podés forzar OFF</span>
                                             </span>
                                             <button type="button" onClick={() => setAutoRotateShifts(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoRotateShifts ? 'bg-emerald-500' : 'bg-slate-300'}`}>
                                                 <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoRotateShifts ? 'translate-x-4' : ''}`}/>
                                             </button>
                                         </div>
+
+                                        <div className="rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2 space-y-1.5">
+                                            <p className="text-[10px] font-black text-violet-900 uppercase tracking-wide">
+                                                Contingencia — Modo 12 manual
+                                            </p>
+                                            <p className="text-[9px] font-bold text-violet-800 leading-snug">
+                                                Elegí fechas para D12+N12 y liberar guardias (RET / otro objetivo). El motor valida que haya dotación liberable; no aplica si las ausencias ya maximizan la cobertura.
+                                            </p>
+                                            <div className="flex flex-wrap gap-1">
+                                                {daysInMonth.map(day => {
+                                                    const ds = getDateKey(day);
+                                                    const sel = autoContingenciaDias.has(ds);
+                                                    const isWe = day.getDay() === 0 || day.getDay() === 6;
+                                                    return (
+                                                        <button
+                                                            key={ds}
+                                                            type="button"
+                                                            title={ds}
+                                                            onClick={() => {
+                                                                setAutoContingenciaDias(prev => {
+                                                                const next = new Set(prev);
+                                                                if (next.has(ds)) next.delete(ds);
+                                                                else next.add(ds);
+                                                                return next;
+                                                            });
+                                                            }}
+                                                            className={`min-w-[1.65rem] h-6 rounded text-[10px] font-black border transition-colors ${
+                                                                sel
+                                                                    ? 'bg-violet-600 text-white border-violet-700'
+                                                                    : isWe
+                                                                        ? 'bg-rose-50 text-rose-600 border-rose-200 hover:border-violet-300'
+                                                                        : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
+                                                            }`}
+                                                        >
+                                                            {day.getDate()}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            {autoContingenciaDias.size > 0 && (
+                                                <p className="text-[9px] font-bold text-violet-700">
+                                                    {autoContingenciaDias.size} día(s) Contingencia · Modo 12 (D12/N12)
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="border-t border-slate-200 pt-2 space-y-2 opacity-60">
+                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                                                Avanzado (opcional)
+                                            </p>
+                                        <div className={`flex items-center gap-2 ${!autoRotateShifts ? 'opacity-60' : ''}`}>
+                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
+                                                Intensivo mes completo
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">4+2→6+1 · más RET · requiere rotativo ON</span>
+                                            </span>
+                                            <button type="button" disabled={!autoRotateShifts} onClick={() => autoRotateShifts && setAutoAjustarCrono(p => !p)}
+                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoAjustarCrono ? 'bg-violet-500' : 'bg-slate-300'}`}>
+                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoAjustarCrono ? 'translate-x-4' : ''}`}/>
+                                            </button>
+                                        </div>
+                                        </div>
                                         <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini)</span>
+                                            <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini) <span className="text-slate-400">· opcional</span></span>
                                             <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
                                                 <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoV2RunGemini ? 'translate-x-4' : ''}`}/>
@@ -6022,15 +6214,54 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
+                                {autoWizardStep === 'sla_open' && !autoV2Generating && (
+                                    <div className="rounded-xl border-2 border-rose-300 bg-rose-50 p-3">
+                                        <p className="text-sm font-black text-rose-800 mb-1">✗ Cobertura sin cerrar — vista previa</p>
+                                        <p className="text-[11px] font-bold text-rose-700 leading-snug">
+                                            El cronograma calculado ya está en la grilla (celdas pendientes). Cerrá este modal para revisarlo.
+                                            No publiques ni guardes como definitivo hasta cerrar el SLA.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {autoPlanningBrainReport && (autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Loading && (
+                                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-1.5">
+                                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-wide">Cerebro Auto — dotación diaria</p>
+                                        <p className="text-[11px] font-bold text-slate-800">
+                                            Modo 8: <strong>{autoPlanningBrainReport.staffing.servicioDiarioModo8}</strong> servicio
+                                            + <strong>{autoPlanningBrainReport.staffing.poolFrancos}</strong> franco
+                                            = <strong>{autoPlanningBrainReport.staffing.plantillaTotal}</strong> plantilla
+                                            <span className="text-slate-500 font-bold"> ({autoPlanningBrainReport.pickedCycle})</span>
+                                        </p>
+                                        <p className="text-[10px] font-bold text-slate-500">
+                                            Modo 12: {autoPlanningBrainReport.staffing.servicioDiarioModo12} en servicio (D12/N12)
+                                            · rotativo {autoPlanningBrainReport.rotateShifts ? 'ON' : 'OFF'}
+                                        </p>
+                                        {autoPlanningBrainReport.modo12DaysAuto.length > 0 && (
+                                            <p className="text-[10px] font-bold text-amber-800 bg-amber-50 rounded px-2 py-1">
+                                                Modo 12 auto: {autoPlanningBrainReport.modo12DaysAuto.length} día(s) por ausencias
+                                            </p>
+                                        )}
+                                        {autoPlanningBrainReport.contingencyDaysManual.length > 0 && (
+                                            <p className={`text-[10px] font-bold rounded px-2 py-1 ${autoPlanningBrainReport.contingencyOk ? 'text-violet-800 bg-violet-50' : 'text-rose-800 bg-rose-50'}`}>
+                                                Contingencia: {autoPlanningBrainReport.contingencyDaysManual.length} día(s)
+                                                {autoPlanningBrainReport.contingencyOk ? ' · viable' : ' · no viable'}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
                                 {/* Resultado: 3 tarjetas */}
-                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && autoCycles.length > 0 && (
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && autoCycles.length > 0 && (
                                     <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 mb-1">
-                                        <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">Esquema aplicado</p>
+                                        <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">
+                                            {autoWizardStep === 'sla_open' ? 'Esquema calculado' : 'Esquema aplicado'}
+                                        </p>
                                         <p className="text-sm font-black text-indigo-900">{autoCycles.join(' · ')} <span className="text-[10px] font-bold text-indigo-600">(auto)</span></p>
                                     </div>
                                 )}
 
-                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && slaVendidas > 0 && (
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && slaVendidas > 0 && (
                                     <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
                                         autoV2GenStats.slaHoursClosed
                                             ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
@@ -6038,11 +6269,23 @@ export default function PlanificacionPage() {
                                     }`}>
                                         {autoV2GenStats.slaHoursClosed
                                             ? `✓ SLA cerrado: ${Math.round(autoV2GenStats.totalBillableHours)}h planificadas = ${slaVendidas}h vendidas`
-                                            : `✗ SLA abierto: faltan ${Math.round(autoV2GenStats.slaDeficitRemaining ?? 0)}h para publicar (${slaVendidas}h vendidas)`}
+                                            : (() => {
+                                                const hrs = Math.round(
+                                                    autoV2GenStats.slaDeficitRemaining
+                                                    ?? Math.max(0, slaVendidas - autoV2GenStats.totalBillableHours),
+                                                );
+                                                const slots = autoV2Coverage?.coverage.uncoveredSlots
+                                                    ?? autoV2GenStats.uncoveredSlots ?? 0;
+                                                const parts: string[] = [];
+                                                if (hrs > 0) parts.push(`${hrs}h`);
+                                                if (slots > 0) parts.push(`${slots} slot${slots !== 1 ? 's' : ''} sin cubrir`);
+                                                const detail = parts.length > 0 ? parts.join(' · ') : 'revisar cobertura';
+                                                return `✗ SLA abierto: ${detail} (${slaVendidas}h vendidas, ${Math.round(autoV2GenStats.totalBillableHours)}h planificadas)`;
+                                            })()}
                                     </div>
                                 )}
 
-                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && (
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && (
                                     <div className="grid grid-cols-3 gap-2">
                                         <div className={`bg-white rounded-xl p-3 border-2 text-center ${
                                             autoV2GenStats.gridBillableHours != null
@@ -6073,9 +6316,40 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
-                                {autoWizardStep === 'done' && !autoV2Generating && (
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && (autoV2GenStats.totalRetCount ?? 0) > 0 && (
+                                    <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
+                                        autoV2GenStats.ajustarCrono ? 'border-violet-300 bg-violet-50 text-violet-900' : 'border-amber-200 bg-amber-50 text-amber-900'
+                                    }`}>
+                                        <p className="font-black">
+                                            Pool RET: {autoV2GenStats.totalRetCount} días-persona
+                                            {autoV2GenStats.totalRetHoursPotential
+                                                ? ` (~${Math.round(autoV2GenStats.totalRetHoursPotential)}h stand-by potencial)`
+                                                : ''}
+                                        </p>
+                                        {(autoV2GenStats.overCoverageRetDays ?? 0) > 0 && (
+                                            <p className="text-[10px] mt-1 opacity-90">
+                                                ⚠ {autoV2GenStats.overCoverageRetDays} día(s) con 2+ RET simultáneos
+                                                (máx. {autoV2GenStats.maxRetConcurrent ?? 0}) — revisar sobrecobertura en dotación.
+                                            </p>
+                                        )}
+                                        {autoV2GenStats.ajustarCrono && (
+                                            <p className="text-[10px] mt-1 opacity-80">
+                                                Modo ajustar crono: esquemas intensivos para liberar guardias a otros objetivos / eventos.
+                                            </p>
+                                        )}
+                                        {(autoV2GenStats.apretarCronoDays?.length ?? 0) > 0 && (
+                                            <p className="text-[10px] mt-1 opacity-90">
+                                                Modo 12 (D12+N12):{' '}
+                                                {autoV2GenStats.apretarCronoDays!.map(d => d.slice(8, 10)).join(', ')}
+                                                {' '}— ausencias auto y/o Contingencia manual.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && (
                                     <>
-                                        {/* Conflictos / descansos */}
+                                        {/* Conflictos / descansos — grilla aplicada */}
                                         {autoV2Coverage && (autoV2Coverage.licenseConflicts.length > 0 || autoV2Coverage.restViolations.length > 0) && (
                                             <div className="flex flex-wrap gap-2">
                                                 {autoV2Coverage.licenseConflicts.length > 0 && (
@@ -6189,7 +6463,7 @@ export default function PlanificacionPage() {
                                 )}
 
                                 {/* Ajustar configuración — colapsible, visible en verified (no viable) y done */}
-                                {(autoWizardStep === 'verified' || autoWizardStep === 'done') && !autoV2Generating && (
+                                {(autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (
                                     <div className="border border-slate-200 rounded-xl overflow-hidden">
                                         <button type="button"
                                             onClick={() => setAutoWizardPersonalize(p => !p)}
@@ -6268,6 +6542,20 @@ export default function PlanificacionPage() {
                                                 className="px-5 py-2 rounded-xl text-sm font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors flex items-center gap-1.5">
                                                 <Wand2 size={14}/> Generar
                                             </button>
+                                        )}
+                                        {autoWizardStep === 'sla_open' && !autoV2Loading && !autoV2Generating && (
+                                            <>
+                                                <button type="button"
+                                                    onClick={() => setShowAutoV2Modal(false)}
+                                                    className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                                                    Ver grilla
+                                                </button>
+                                                <button type="button"
+                                                    onClick={() => runFullGeneration()}
+                                                    className="px-5 py-2 rounded-xl text-sm font-black text-white bg-rose-600 hover:bg-rose-700 transition-colors flex items-center gap-1.5">
+                                                    <RefreshCw size={14}/> Re-generar
+                                                </button>
+                                            </>
                                         )}
                                         <button type="button"
                                             onClick={() => {

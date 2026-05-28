@@ -76,16 +76,57 @@ function bandSetsForPosition(pos: PlanningPositionLike): { bands8: string[]; ban
     return { bands8, bands12 };
 }
 
+export function isApretarCronoDay(dateStr: string, apretarCronoDays?: string[] | Set<string>): boolean {
+    if (!apretarCronoDays || (apretarCronoDays instanceof Set ? apretarCronoDays.size === 0 : apretarCronoDays.length === 0)) {
+        return false;
+    }
+    return apretarCronoDays instanceof Set ? apretarCronoDays.has(dateStr) : apretarCronoDays.includes(dateStr);
+}
+
+/** Apretar días activo: fechas elegidas + rotativo ON (demand-driven D12+N12). */
+export function isApretarScheduleActive(
+    ctx: { apretarCronoDays?: string[]; rotateShifts?: boolean },
+    dateStr: string,
+): boolean {
+    if (ctx.rotateShifts === false) return false;
+    if (!ctx.apretarCronoDays?.length) return false;
+    return isApretarCronoDay(dateStr, ctx.apretarCronoDays);
+}
+
+/** Pool RET ampliado: mes entero con ajustar crono, o solo fechas apretadas con rotativo. */
+export function usesExpandedRetPool(
+    ctx: { ajustarCrono?: boolean; apretarCronoDays?: string[]; rotateShifts?: boolean },
+    dateStr: string,
+): boolean {
+    if (ctx.rotateShifts === false) return false;
+    if (ctx.ajustarCrono === true) return true;
+    return isApretarScheduleActive(ctx, dateStr);
+}
+
+/** Guardias liberados ese día al usar D12+N12 en todos los puestos 24hs (1 por pax). */
+export function apretarSlotsFreedPerDay(day: ObjectiveDayDemand): number {
+    if (!day.positions.some(p => p.schemeLabel === 'D12+N12' || (p.bandSlots.D12 && p.bandSlots.N12))) return 0;
+    return day.totalPaxUnits;
+}
+
 function buildBandSlotsForPositionDay(
     pos: PlanningPositionLike,
     dayLetter: string,
     cycles?: string[],
-): { primary: Record<string, number>; alternate?: Record<string, number>; hours: number } {
+    dateStr?: string,
+    apretarCronoDays?: string[] | Set<string>,
+): { primary: Record<string, number>; alternate?: Record<string, number>; hours: number; schemeLabel?: string } {
     const qty = Math.max(1, Number(pos.qty) || 1);
     const coverageType = String(pos.coverageType || 'custom').toLowerCase();
 
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         const { bands8, bands12 } = bandSetsForPosition(pos);
+        const b12 = bands12.length >= 2 ? bands12 : ['D12', 'N12'];
+        if (dateStr && isApretarCronoDay(dateStr, apretarCronoDays)) {
+            const primary: Record<string, number> = {};
+            for (const b of b12) primary[b] = qty;
+            return { primary, hours: qty * 24, schemeLabel: 'D12+N12' };
+        }
         const mtn = bands8.length > 0 ? bands8 : ['M', 'T', 'N'];
         const primary: Record<string, number> = {};
         for (const b of mtn) primary[b] = qty;
@@ -117,6 +158,7 @@ export function buildObjectiveCoverageDemand(
     days: Array<{ dateStr: string; dayLetter: string }>,
     cycles?: string[],
     isPosActiveOnDay: (pos: PlanningPositionLike, dayLetter: string) => boolean = DEFAULT_IS_ACTIVE,
+    apretarCronoDays?: string[] | Set<string>,
 ): ObjectiveDayDemand[] {
     return days.map(({ dateStr, dayLetter }) => {
         const dayPositions: PositionDayDemand[] = [];
@@ -127,21 +169,21 @@ export function buildObjectiveCoverageDemand(
         for (const pos of positions) {
             if (!isPosActiveOnDay(pos, dayLetter)) continue;
             const qty = Math.max(1, Number(pos.qty) || 1);
-            const { primary, alternate, hours } = buildBandSlotsForPositionDay(pos, dayLetter, cycles);
-            const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles);
+            const built = buildBandSlotsForPositionDay(pos, dayLetter, cycles, dateStr, apretarCronoDays);
+            const schemeLabel = built.schemeLabel || positionSchemeLabelForDay(pos, dayLetter, cycles);
 
             dayPositions.push({
                 positionName: String(pos.positionName || 'General'),
                 qty,
                 schemeLabel,
-                bandSlots: primary,
-                alternateBandSlots: alternate,
-                hoursRequired: hours,
+                bandSlots: built.primary,
+                alternateBandSlots: built.alternate,
+                hoursRequired: built.hours,
             });
 
             totalPaxUnits += qty;
-            hoursRequired += hours;
-            for (const [code, n] of Object.entries(primary)) {
+            hoursRequired += built.hours;
+            for (const [code, n] of Object.entries(built.primary)) {
                 totalBandSlots[code] = (totalBandSlots[code] || 0) + n;
             }
         }
@@ -179,12 +221,15 @@ export function buildObjectiveCoveragePreflight(opts: {
     cycles?: string[];
     objectiveId?: string;
     isPosActiveOnDay?: (pos: PlanningPositionLike, dayLetter: string) => boolean;
+    /** Días YYYY-MM-DD con esquema D12+N12 (apretar crono → liberar RET). */
+    apretarCronoDays?: string[];
 }): ObjectiveCoveragePreflight {
     const dayDemands = buildObjectiveCoverageDemand(
         opts.positions,
         opts.days,
         opts.cycles,
         opts.isPosActiveOnDay,
+        opts.apretarCronoDays,
     );
     const employees = buildEmployeeAvailability(opts.employees, opts.days, opts.absences);
 
@@ -219,6 +264,18 @@ export function buildObjectiveCoveragePreflight(opts: {
         if (slotsPerDay > 0 && availSlots < slotsPerDay) {
             warnings.push(
                 `Día pico: piden ${slotsPerDay} turnos/día pero hay ${availSlots} días-persona disponibles (con ausencias)`,
+            );
+        }
+    }
+
+    if (opts.apretarCronoDays?.length) {
+        for (const ds of opts.apretarCronoDays) {
+            const day = dayDemands.find(d => d.dateStr === ds);
+            if (!day) continue;
+            const freed = apretarSlotsFreedPerDay(day);
+            const bands = Object.entries(day.totalBandSlots).map(([c, n]) => `${n}×${c}`).join(' + ');
+            warnings.push(
+                `Modo 12 ${ds.slice(8, 10)}/${ds.slice(5, 7)}: ${bands} (≈${freed} guardia(s) menos activos vs M+T+N)`,
             );
         }
     }
