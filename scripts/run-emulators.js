@@ -146,8 +146,36 @@ if (!skipFunctions) {
 }
 
 const backupsDir = path.join(projectRoot, 'backups');
-const latestDir = path.join(backupsDir, 'latest');
+const latestDir   = path.join(backupsDir, 'latest');
+const previousDir = path.join(backupsDir, 'previous');
 fs.mkdirSync(backupsDir, { recursive: true });
+
+/** Devuelve true si el directorio tiene datos reales (auth users o archivos Firestore). */
+function hasRealData(dir) {
+  if (!fs.existsSync(dir)) return false;
+  try {
+    const accounts = JSON.parse(fs.readFileSync(path.join(dir, 'auth_export', 'accounts.json'), 'utf8'));
+    if (accounts.users && accounts.users.length > 0) return true;
+  } catch {}
+  try {
+    const fsFiles = fs.readdirSync(path.join(dir, 'firestore_export'));
+    // Más de 1 archivo = hay colecciones exportadas además del metadata
+    if (fsFiles.length > 1) return true;
+  } catch {}
+  return false;
+}
+
+/** Copia recursiva de src → dest (limpia dest si existe). */
+function copyDirSync(src, dest) {
+  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDirSync(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
 
 let hasImport = false;
 try {
@@ -156,6 +184,19 @@ try {
   }
 } catch {
   hasImport = false;
+}
+
+// Antes de arrancar: si latest tiene datos reales, guardamos copia en previous
+if (hasImport && hasRealData(latestDir)) {
+  try {
+    copyDirSync(latestDir, previousDir);
+    logErr('[emulators] Backup previo guardado en backups/previous');
+  } catch (e) {
+    logErr('[emulators] AVISO: no se pudo copiar a backups/previous:', e.message);
+  }
+} else if (hasImport) {
+  logErr('[emulators] AVISO: backups/latest existe pero no tiene datos reales (Auth vacío + Firestore vacío).');
+  logErr('[emulators] Tip: arrancá el emulador, corré "npm run seed" y cerrá con Ctrl+C para regenerar el backup.');
 }
 
 const emulatorArgs = ['emulators:start'];
@@ -192,6 +233,17 @@ if (fs.existsSync(firebaseJs)) {
     cwd: projectRoot,
     shell: process.platform === 'win32',
   });
+}
+
+// Al salir: si latest quedó vacío pero previous tiene datos → restaurar automáticamente
+if (!hasRealData(latestDir) && hasRealData(previousDir)) {
+  logErr('[emulators] AVISO: el export salió vacío. Restaurando backups/previous → backups/latest...');
+  try {
+    copyDirSync(previousDir, latestDir);
+    logErr('[emulators] Restauración completada. El próximo arranque cargará los datos de la sesión anterior.');
+  } catch (e) {
+    logErr('[emulators] ERROR al restaurar backup:', e.message);
+  }
 }
 
 process.exit(r && r.status !== null && r.status !== undefined ? r.status : 1);

@@ -34,6 +34,7 @@
     "backup:import": "node scripts/import-backup.js",
     "emulators": "node scripts/run-emulators.js",
     "emulators:light": "node scripts/run-emulators.js --without-functions",
+    "backup:restore": "node -e \"const fs=require('fs'),path=require('path'),p=path.join(__dirname,'backups');const prev=path.join(p,'previous'),lat=path.join(p,'latest');if(!fs.existsSync(prev)){console.error('No existe backups/previous');process.exit(1);}if(fs.existsSync(lat))fs.rmSync(lat,{recursive:true,force:true});fs.cpSync(prev,lat,{recursive:true});console.log('Restaurado backups/previous -> backups/latest');\"",
     "seed": "node scripts/seed-lab.js",
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
