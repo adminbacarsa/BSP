@@ -47,6 +47,7 @@ import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificac
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import {
     resolveAutoPlanningBrain,
+    PLANNING_COVERAGE_RULES,
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import {
@@ -1958,6 +1959,7 @@ export default function PlanificacionPage() {
     };
 
     const handleSaveAll = async () => {
+        if (isProcessing) return;
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         const count = Object.keys(pendingChanges).length;
         if (count === 0) return;
@@ -4379,7 +4381,7 @@ export default function PlanificacionPage() {
                                     </div>
                                 );
                             })()}
-                            {Object.keys(pendingChanges).length > 0 && !isServiceLocked && <div className="flex items-center gap-2 animate-in slide-in-from-top-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg no-print"><span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span><div className="h-4 w-px bg-amber-200 mx-1"></div><span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span><button onClick={() => setPendingChanges({})} className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button><button onClick={handleSaveAll} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow"><Save size={14}/> GUARDAR</button></div>}
+                            {Object.keys(pendingChanges).length > 0 && !isServiceLocked && <div className="flex items-center gap-2 animate-in slide-in-from-top-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg no-print"><span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span><div className="h-4 w-px bg-amber-200 mx-1"></div><span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span><button onClick={() => setPendingChanges({})} className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button><button onClick={handleSaveAll} disabled={isProcessing} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">{isProcessing ? <Loader2 size={14} className="animate-spin"/> : <Save size={14}/>}{isProcessing ? 'GUARDANDO…' : 'GUARDAR'}</button></div>}
                             
                             <div className="flex items-center gap-3 no-print">
                                 
@@ -6069,8 +6071,21 @@ export default function PlanificacionPage() {
                                 {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && (
                                     <div className="space-y-3">
                                         <p className="text-[11px] text-slate-600 font-bold leading-snug">
-                                            <strong>Auto</strong> elige esquema (6+2…), rotativo, <strong>Modo 12</strong> por ausencias y valida <strong>Contingencia</strong> si marcás fechas.
+                                            <strong>Auto</strong> arma 6+2 + rotativo. Vacaciones/licencias/enfermedad → <strong>Modo 12</strong> con plantilla del objetivo.
+                                            Contingencia (fechas) → <strong>RET</strong> sin sacar gente de franco.
                                         </p>
+                                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
+                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-600">Reglas de cobertura</p>
+                                            {PLANNING_COVERAGE_RULES.map(rule => (
+                                                <div key={rule.id} className="text-[9px] font-bold text-slate-700 leading-snug">
+                                                    <span className="text-slate-900">{rule.title}:</span>{' '}
+                                                    {rule.summary}
+                                                    {rule.extraCost && (
+                                                        <span className="text-amber-700"> · costo extra si lo hacés manual en la grilla</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
                                         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
                                             <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Modo 8 (normal)</p>
                                             <p className="text-[11px] font-bold mt-0.5 text-amber-900">
@@ -6116,7 +6131,7 @@ export default function PlanificacionPage() {
                                                 Contingencia — Modo 12 manual
                                             </p>
                                             <p className="text-[9px] font-bold text-violet-800 leading-snug">
-                                                Elegí fechas para D12+N12 y liberar guardias (RET / otro objetivo). El motor valida que haya dotación liberable; no aplica si las ausencias ya maximizan la cobertura.
+                                                Elegí fechas para D12+N12 y liberar RET. Reorganiza quien ya trabaja ese día — no convierte F en turno (eso es franco trabajado / extra).
                                             </p>
                                             <div className="flex flex-wrap gap-1">
                                                 {daysInMonth.map(day => {
@@ -6254,8 +6269,9 @@ export default function PlanificacionPage() {
                                             · rotativo {autoPlanningBrainReport.rotateShifts ? 'ON' : 'OFF'}
                                         </p>
                                         {autoPlanningBrainReport.modo12DaysAuto.length > 0 && (
-                                            <p className="text-[10px] font-bold text-amber-800 bg-amber-50 rounded px-2 py-1">
-                                                Modo 12 auto: {autoPlanningBrainReport.modo12DaysAuto.length} día(s) por ausencias
+                                            <p className={`text-[10px] font-bold rounded px-2 py-1 ${autoPlanningBrainReport.absenceModo12Ok ? 'text-amber-800 bg-amber-50' : 'text-rose-800 bg-rose-50'}`}>
+                                                Ausencias V/L/E: {autoPlanningBrainReport.modo12DaysAuto.length} día(s) Modo 12
+                                                {autoPlanningBrainReport.absenceModo12Ok ? ' · plantilla objetivo' : ' · revisar (sin franco extra)'}
                                             </p>
                                         )}
                                         {autoPlanningBrainReport.contingencyDaysManual.length > 0 && (
