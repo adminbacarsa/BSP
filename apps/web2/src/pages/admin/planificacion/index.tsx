@@ -272,7 +272,7 @@ export default function PlanificacionPage() {
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band'>('activity');
+    const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
     const [employees, setEmployees] = useState<any[]>([]);
@@ -605,9 +605,18 @@ export default function PlanificacionPage() {
                 const ob = bandB ? (BAND_ORDER[bandB] ?? 99) : 99;
                 if (oa !== ob) return (oa - ob) * dir;
             }
+            if (sortBy === 'position') {
+                const posA = getEmpDefaultPos(a.id) ?? '';
+                const posB = getEmpDefaultPos(b.id) ?? '';
+                // Sin puesto asignado va al final
+                if (!posA && posB) return 1;
+                if (posA && !posB) return -1;
+                const cmp = posA.localeCompare(posB);
+                if (cmp !== 0) return cmp * dir;
+            }
             return a.name.localeCompare(b.name) * dir;
         });
-    }, [employees, selectedObjective, forceShowAll, searchTerm, bandFilter, shiftsMap, pendingChanges, sortBy, sortDir, daysInMonth, slaIdToObjId, customOrderMap]);
+    }, [employees, selectedObjective, forceShowAll, searchTerm, bandFilter, shiftsMap, pendingChanges, sortBy, sortDir, daysInMonth, slaIdToObjId, customOrderMap, empDefaultPos]);
 
     // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
     // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
@@ -4462,7 +4471,7 @@ export default function PlanificacionPage() {
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
                                 <div className="flex items-center gap-0.5">
-                                    <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : "Ordenado por Banda"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : <Briefcase size={18}/>}</button>
+                                    <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
                                 </div>
                                 <div className="flex items-center gap-0.5" title="Filtrar por banda horaria">
@@ -5318,6 +5327,7 @@ export default function PlanificacionPage() {
                                                             const disabledByCoverage = coverageFull;
                                                             const disabled = isServiceLocked || isBlocked || disabledByCoverage;
                                                             const timeRange = (s.startTime && s.endTime) ? `${s.startTime}–${s.endTime}` : null;
+                                                            const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
                                                             return (
                                                                 <button
                                                                     key={s.code}
