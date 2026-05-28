@@ -177,26 +177,20 @@ function copyDirSync(src, dest) {
   }
 }
 
-let hasImport = false;
-try {
-  if (fs.existsSync(latestDir) && fs.statSync(latestDir).isDirectory()) {
-    hasImport = fs.readdirSync(latestDir).length > 0;
-  }
-} catch {
-  hasImport = false;
-}
+// hasImport = true solo si el backup tiene datos reales; un backup vacío NO se importa
+// (un import vacío/corrupto puede hacer crashear el emulador de Firestore)
+const hasImport = hasRealData(latestDir);
 
-// Antes de arrancar: si latest tiene datos reales, guardamos copia en previous
-if (hasImport && hasRealData(latestDir)) {
+if (hasImport) {
   try {
     copyDirSync(latestDir, previousDir);
     logErr('[emulators] Backup previo guardado en backups/previous');
   } catch (e) {
     logErr('[emulators] AVISO: no se pudo copiar a backups/previous:', e.message);
   }
-} else if (hasImport) {
-  logErr('[emulators] AVISO: backups/latest existe pero no tiene datos reales (Auth vacío + Firestore vacío).');
-  logErr('[emulators] Tip: arrancá el emulador, corré "npm run seed" y cerrá con Ctrl+C para regenerar el backup.');
+} else {
+  logErr('[emulators] AVISO: backups/latest vacío o sin datos reales — iniciando Firestore limpio.');
+  logErr('[emulators] Tip: una vez arrancado corré "npm run seed" y cerrá con Ctrl+C para guardar el backup.');
 }
 
 const emulatorArgs = ['emulators:start'];
