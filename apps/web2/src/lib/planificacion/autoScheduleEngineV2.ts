@@ -55,10 +55,10 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions } from './demandDrivenSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
-import { isApretarCronoDay, isApretarScheduleActive, usesExpandedRetPool } from './objectiveCoverageDemand';
+import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
 import { normBand } from './rotativeBandGuard';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
@@ -299,10 +299,21 @@ export interface V2EngineContext {
      */
     ajustarCrono?: boolean;
     /**
-     * Días YYYY-MM-DD en los que el objetivo usa D12+N12 (apretar crono) para liberar RET.
-     * Ej.: evento 29–30 may → ['2026-05-29','2026-05-30'].
+     * Días YYYY-MM-DD con demanda D12+N12 (ausencias V/L/E + contingencia).
+     * Alias legacy: si falta `modo12Days`, se usa este array.
+     */
+    modo12Days?: string[];
+    /** Subconjunto manual: pool RET / liberación. Ausencias auto no activan RET masivo. */
+    contingencyApretarDays?: string[];
+    /**
+     * @deprecated Preferir `modo12Days`. Días D12+N12 (ausencias + contingencia).
      */
     apretarCronoDays?: string[];
+    /**
+     * Franco trabajado (F→turno): costo extra. Solo si true el motor puede promover F a turno
+     * para cerrar huecos. Default false — Contingencia y ausencias usan Modo 12, no francos.
+     */
+    allowFrancoWorkedRescue?: boolean;
     /** Fase de offset 0..cycleLen-1 (solo bandas fijas; búsqueda de cobertura). */
     fixedBandOffsetPhase?: number;
     /** Escalonado global M/T/N (interno, bandas fijas). */
@@ -2588,7 +2599,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 && !isCustomCoverPosition(assignedPos)
                 && ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every(l => positionIsActiveOn(assignedPos, l));
             if (is24hsAssigned && isWorkDayInCycle && positionIsActiveOn(assignedPos!, dayLetter)) {
-                if (isApretarCronoDay(dateStr, ctx.apretarCronoDays)) {
+                if (isModo12Day(dateStr, ctx)) {
                     const primary = expectedShiftForDay(emp.id, dateStr, assignedPosName!);
                     const bc = normBand(primary || '');
                     if (bc === 'M' || bc === 'D12' || bc === 'N' || bc === 'N12') {
@@ -2612,10 +2623,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
 
             const isAssignedHere = empAssignedTo[emp.id] != null;
-            const apretarDay = isApretarScheduleActive(ctx, dateStr);
+            const contingencyDay = isContingencyApretarDay(dateStr, ctx);
             const optionalRetPool = usesExpandedRetPool(ctx, dateStr);
             let fallbackCode = isWorkDayInCycle
-                ? (apretarDay
+                ? (contingencyDay
                     ? 'RET'
                     : isPostStreakShortCycle ? 'F'
                         : optionalRetPool
@@ -2691,6 +2702,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
         ensureRotativeCellsAssigned(gapFillFinal);
         finalizeApretarDayAssignments(gapFillFinal, dayDemandsFromFill);
+        forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
     }
 
@@ -2708,6 +2720,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     if (gapFillFinal && ((stats.uncoveredSlots ?? 0) > 0 || francoGuard.convertedToRet > 0)) {
         fillDemandGapsBeforeFrancos(gapFillFinal, dayDemandsFromFill);
         fillDemandGapsWithFlexibleCycle(gapFillFinal, dayDemandsFromFill);
+        forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
         stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet);
     }

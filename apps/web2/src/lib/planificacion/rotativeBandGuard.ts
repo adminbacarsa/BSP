@@ -17,6 +17,15 @@ export function bandMatchesExpected(expected: string | null | undefined, code: s
     return false;
 }
 
+/** Péndulo en día apretado (D12+N12): M→D12, N→N12; T no cubre slot. */
+export function pendulumMatchesApretarSlot(expected: string | null | undefined, code: string): boolean {
+    const e = normBand(expected || '');
+    const c = normBand(code);
+    if (c === 'D12') return e === 'M' || e === 'D12';
+    if (c === 'N12') return e === 'N' || e === 'N12';
+    return false;
+}
+
 /** Bloquea N→T/M y T→M consecutivos sin franco intermedio. */
 export function assignmentBreaksBandTransition(
     assignments: V2Assignment[],

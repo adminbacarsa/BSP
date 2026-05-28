@@ -83,21 +83,39 @@ export function isApretarCronoDay(dateStr: string, apretarCronoDays?: string[] |
     return apretarCronoDays instanceof Set ? apretarCronoDays.has(dateStr) : apretarCronoDays.includes(dateStr);
 }
 
-/** Apretar días activo: fechas elegidas + rotativo ON (demand-driven D12+N12). */
-export function isApretarScheduleActive(
-    ctx: { apretarCronoDays?: string[]; rotateShifts?: boolean },
-    dateStr: string,
-): boolean {
-    if (ctx.rotateShifts === false) return false;
-    if (!ctx.apretarCronoDays?.length) return false;
-    return isApretarCronoDay(dateStr, ctx.apretarCronoDays);
+export type Modo12ScheduleCtx = {
+    modo12Days?: string[];
+    apretarCronoDays?: string[];
+    contingencyApretarDays?: string[];
+    rotateShifts?: boolean;
+    ajustarCrono?: boolean;
+};
+
+/** Todos los días con demanda D12+N12 (ausencias V/L/E + contingencia manual). */
+export function getModo12Days(ctx: Modo12ScheduleCtx): string[] {
+    if (ctx.modo12Days?.length) return ctx.modo12Days;
+    return ctx.apretarCronoDays ?? [];
 }
 
-/** Pool RET ampliado: mes entero con ajustar crono, o solo fechas apretadas con rotativo. */
-export function usesExpandedRetPool(
-    ctx: { ajustarCrono?: boolean; apretarCronoDays?: string[]; rotateShifts?: boolean },
-    dateStr: string,
-): boolean {
+/** Día con esquema D12+N12 en la demanda SLA. */
+export function isModo12Day(dateStr: string, ctx: Modo12ScheduleCtx): boolean {
+    return isApretarCronoDay(dateStr, getModo12Days(ctx));
+}
+
+/** Contingencia manual: permite pool RET / liberación operativa. Ausencias auto NO entran acá. */
+export function isContingencyApretarDay(dateStr: string, ctx: Modo12ScheduleCtx): boolean {
+    return isApretarCronoDay(dateStr, ctx.contingencyApretarDays);
+}
+
+/** Contingencia manual activa (rotativo ON): pool RET y conversión F→RET. */
+export function isApretarScheduleActive(ctx: Modo12ScheduleCtx, dateStr: string): boolean {
+    if (ctx.rotateShifts === false) return false;
+    if (!ctx.contingencyApretarDays?.length) return false;
+    return isContingencyApretarDay(dateStr, ctx);
+}
+
+/** Pool RET ampliado: ajustar crono (mes entero) o contingencia manual — nunca solo por V/L/E. */
+export function usesExpandedRetPool(ctx: Modo12ScheduleCtx, dateStr: string): boolean {
     if (ctx.rotateShifts === false) return false;
     if (ctx.ajustarCrono === true) return true;
     return isApretarScheduleActive(ctx, dateStr);

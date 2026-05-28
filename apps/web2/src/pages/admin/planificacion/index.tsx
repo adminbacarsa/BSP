@@ -3144,6 +3144,8 @@ export default function PlanificacionPage() {
                 rotateShifts: genBrain.rotateShifts,
                 codeHoursHint: slaCodeHoursHint,
                 ajustarCrono: genBrain.ajustarCrono,
+                modo12Days: genBrain.modo12DaysEngine,
+                contingencyApretarDays: genBrain.contingencyOk ? genBrain.contingencyDaysManual : [],
                 apretarCronoDays: genBrain.modo12DaysEngine,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,

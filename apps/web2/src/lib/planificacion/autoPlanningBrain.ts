@@ -6,6 +6,11 @@
  *  2. Día a día: servicio + pool franco + plantilla
  *  3. Modo 8 (M/T/N) vs Modo 12 (D12/N12)
  *  4. Modo 12 auto por ausencias · Contingencia manual (liberar RET)
+ *
+ * Reglas unificadas: planningCoveragePolicy.ts
+ *  · Ausencias V/L/E → Modo 12, plantilla objetivo (no F→turno)
+ *  · Contingencia → D12+N12, RET liberables (no F→turno)
+ *  · Franco trabajado → solo manual, costo extra
  */
 
 import {
@@ -15,6 +20,18 @@ import {
     type V2FeasibilityReport,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import {
+    MODO12_ABSENCE_CODES,
+    PLANNING_COVERAGE_RULES,
+    validateAbsenceModo12Days,
+    validateContingencyCoverage,
+    type Modo12DayCheck,
+    type PlanningCoverageRule,
+    type StaffingSnapshot,
+} from './planningCoveragePolicy';
+
+export { MODO12_ABSENCE_CODES as MODO12_AUTO_ABSENCE_CODES, PLANNING_COVERAGE_RULES };
+export type { Modo12DayCheck as ContingencyDayCheck, PlanningCoverageRule };
 
 const CYCLE_MAP: Record<string, [number, number]> = {
     '4+2': [4, 2],
@@ -23,15 +40,7 @@ const CYCLE_MAP: Record<string, [number, number]> = {
     '6+2': [6, 2],
 };
 
-/** Ausencias que disparan Modo 12 automático (cubrir con plantilla del objetivo). */
-export const MODO12_AUTO_ABSENCE_CODES = new Set(['V', 'L', 'E']);
-
-export interface DailyStaffingModel {
-    cycleKey: string;
-    /** Slots Modo 8 (M+T+N u equivalente) en día tipo 24hs. */
-    servicioDiarioModo8: number;
-    /** Slots Modo 12 (D12+N12) en el mismo día. */
-    servicioDiarioModo12: number;
+export interface DailyStaffingModel extends StaffingSnapshot {
     /** Pico en servicio simultáneo (pax en puesto). */
     picoEnServicio: number;
     /** Plantilla total = ceil(servicioModo8 × factor ciclo). */
@@ -45,14 +54,6 @@ export interface DailyStaffingModel {
     structuralHoras: number;
 }
 
-export interface ContingencyDayCheck {
-    dateStr: string;
-    ok: boolean;
-    liberables: number;
-    absentCount: number;
-    reason?: string;
-}
-
 export interface AutoPlanningBrainResult {
     pickedCycle: string;
     cycles: string[];
@@ -64,8 +65,11 @@ export interface AutoPlanningBrainResult {
     contingencyDaysManual: string[];
     /** Unión para el motor (D12/N12 en crono). */
     modo12DaysEngine: string[];
+    absenceModo12Ok: boolean;
+    absenceModo12Checks: Modo12DayCheck[];
+    absenceModo12Messages: string[];
     contingencyOk: boolean;
-    contingencyChecks: ContingencyDayCheck[];
+    contingencyChecks: Modo12DayCheck[];
     contingencyMessages: string[];
     rotateShifts: boolean;
     ajustarCrono: boolean;
@@ -146,7 +150,7 @@ export function deriveModo12DaysFromAbsences(
         if (!map) continue;
         map.forEach((code, dateStr) => {
             if (!monthDateStrs.includes(dateStr)) return;
-            if (MODO12_AUTO_ABSENCE_CODES.has(String(code || '').toUpperCase())) {
+            if (MODO12_ABSENCE_CODES.has(String(code || '').toUpperCase())) {
                 out.add(dateStr);
             }
         });
@@ -154,104 +158,9 @@ export function deriveModo12DaysFromAbsences(
     return [...out].sort();
 }
 
-function countAbsentOnDate(
-    absences: V2AbsenceMap,
-    employeeIds: string[],
-    dateStr: string,
-): number {
-    let n = 0;
-    for (const empId of employeeIds) {
-        if (absences[empId]?.has(dateStr)) n++;
-    }
-    return n;
-}
-
-/**
- * Contingencia manual: liberar guardias para otro objetivo/evento.
- * Solo viable si, tras cubrir SLA + ausencias, queda slack para pasar a Modo 12.
- */
-export function validateContingencyDays(params: {
-    staffing: DailyStaffingModel;
-    contingencyDays: string[];
-    absences: V2AbsenceMap;
-    employeeIds: string[];
-    peopleAvailable: number;
-    modo12DaysAuto: string[];
-}): { ok: boolean; checks: ContingencyDayCheck[]; messages: string[] } {
-    const {
-        staffing,
-        contingencyDays,
-        absences,
-        employeeIds,
-        peopleAvailable,
-        modo12DaysAuto,
-    } = params;
-
-    const messages: string[] = [];
-    const checks: ContingencyDayCheck[] = [];
-    const freedPerDay = Math.max(
-        0,
-        staffing.servicioDiarioModo8 - staffing.servicioDiarioModo12,
-    );
-
-    if (!contingencyDays.length) {
-        return { ok: true, checks, messages };
-    }
-
-    if (peopleAvailable < staffing.plantillaTotal) {
-        messages.push(
-            `Contingencia: la dotación (${peopleAvailable}) está por debajo de la plantilla diseñada (${staffing.plantillaTotal}).`,
-        );
-    }
-
-    const autoSet = new Set(modo12DaysAuto);
-    const [cL, cF] = CYCLE_MAP[staffing.cycleKey] ?? [6, 2];
-    const workRatio = cL / (cL + cF);
-
-    for (const dateStr of [...contingencyDays].sort()) {
-        const absentCount = countAbsentOnDate(absences, employeeIds, dateStr);
-        const expectedWorking = Math.floor(peopleAvailable * workRatio) - absentCount;
-        const needModo8 = staffing.servicioDiarioModo8;
-
-        let ok = true;
-        let reason: string | undefined;
-        let liberables = freedPerDay;
-
-        if (absentCount > 0 && autoSet.has(dateStr)) {
-            liberables = 0;
-            ok = false;
-            reason = 'Modo 12 ya activo por ausencia; cobertura maximizada, no hay guardias liberables.';
-        } else if (expectedWorking < needModo8) {
-            liberables = 0;
-            ok = false;
-            reason = `Cobertura ajustada (${expectedWorking} disponibles vs ${needModo8} necesarios en Modo 8).`;
-        } else if (peopleAvailable < staffing.plantillaTotal) {
-            liberables = Math.min(liberables, Math.max(0, peopleAvailable - needModo8));
-            if (liberables <= 0) {
-                ok = false;
-                reason = 'Sin plantilla de sobra para liberar guardias.';
-            }
-        }
-
-        checks.push({ dateStr, ok, liberables, absentCount, reason });
-        if (!ok && reason) {
-            messages.push(`Contingencia ${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}: ${reason}`);
-        }
-    }
-
-    const ok = checks.every(c => c.ok);
-    if (!ok) {
-        messages.unshift(
-            'Contingencia no viable: el objetivo ya está maximizado por cobertura/ausencias. Quitá fechas o agregá dotación.',
-        );
-    } else if (checks.length > 0) {
-        const minLib = Math.min(...checks.map(c => c.liberables));
-        messages.push(
-            `Contingencia OK: hasta ${minLib} guardia(s) liberable(s)/día para RET u otro objetivo (Modo 12).`,
-        );
-    }
-
-    return { ok, checks, messages };
+/** @deprecated Usar validateContingencyCoverage en planningCoveragePolicy */
+export function validateContingencyDays(params: Parameters<typeof validateContingencyCoverage>[0]) {
+    return validateContingencyCoverage(params);
 }
 
 function resolveRotateShifts(
@@ -306,7 +215,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     );
     const contingencyDaysManual = [...(input.contingencyDaysManual ?? [])].sort();
 
-    const contingency = validateContingencyDays({
+    const contingency = validateContingencyCoverage({
         staffing,
         contingencyDays: contingencyDaysManual,
         absences: input.absences,
@@ -315,11 +224,15 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         modo12DaysAuto,
     });
 
-    if (modo12DaysAuto.length > 0) {
-        warnings.push(
-            `Modo 12 automático: ${modo12DaysAuto.length} día(s) por vacaciones/licencias/enfermedad (cubrir con plantilla del objetivo).`,
-        );
-    }
+    const absenceModo12 = validateAbsenceModo12Days({
+        staffing,
+        modo12DaysAuto,
+        absences: input.absences,
+        employeeIds,
+        peopleAvailable: input.employees.length,
+    });
+
+    warnings.push(...absenceModo12.messages);
 
     const modo12DaysEngine = mergeModo12DaySets(modo12DaysAuto, contingency.ok ? contingencyDaysManual : []);
 
@@ -344,6 +257,9 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         modo12DaysAuto,
         contingencyDaysManual,
         modo12DaysEngine,
+        absenceModo12Ok: absenceModo12.ok,
+        absenceModo12Checks: absenceModo12.checks,
+        absenceModo12Messages: absenceModo12.messages,
         contingencyOk: contingency.ok,
         contingencyChecks: contingency.checks,
         contingencyMessages: contingency.messages,

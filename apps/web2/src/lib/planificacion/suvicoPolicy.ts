@@ -14,6 +14,9 @@ export const SUVICO_POLICY = {
         DAILY_MIN_HOURS: 8,
         /** Horas trabajadas en racha (con interjornadas de 12h entre medias) que disparan el descanso prolongado. */
         STREAK_HOURS_FOR_LONG_REST: 48,
+        /** Equivalente operativo: 6 turnos × 8 h (M/T/N) o 4 turnos × 12 h (D12/N12). */
+        STREAK_SHIFTS_8H: 6,
+        STREAK_SHIFTS_12H: 4,
         /**
          * Descanso mínimo tras cumplir la racha de `STREAK_HOURS_FOR_LONG_REST` (horas reales
          * entre fin del último turno de la racha e inicio del siguiente). Equivale a la fórmula
