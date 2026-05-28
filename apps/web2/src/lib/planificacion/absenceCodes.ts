@@ -34,6 +34,19 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'injustificada': 'AA',
     'falta injustificada': 'AA',
     'aa': 'AA',
+    // Callable manageAbsences (backend Nest)
+    'vacation': 'V',
+    'sick_leave': 'E',
+};
+
+/** Etiquetas exactas del formulario RRHH → código grilla. */
+export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
+    'Vacaciones': 'V',
+    'Enfermedad': 'E',
+    'ART': 'A',
+    'Injustificada': 'AA',
+    'Licencia Esp.': 'L',
+    'PG Permiso Gremial': 'PG',
 };
 
 /** Códigos válidos de ausencia/licencia para grilla. */
@@ -57,7 +70,10 @@ export function inferAbsenceCode(doc: any): string {
     const code = String(doc?.code || '').toUpperCase().trim();
     if (ABSENCE_VALID_CODES.has(code)) return code;
 
-    const t = String(doc?.type || '').toLowerCase().trim();
+    const rawType = String(doc?.type || '').trim();
+    if (rawType && RRHH_ABSENCE_LABEL_TO_CODE[rawType]) return RRHH_ABSENCE_LABEL_TO_CODE[rawType];
+
+    const t = rawType.toLowerCase();
     if (t && ABSENCE_TYPE_TO_CODE[t]) return ABSENCE_TYPE_TO_CODE[t];
 
     // último intento: por keyword
@@ -82,4 +98,99 @@ export function isActiveAbsence(doc: any): boolean {
         return false;
     }
     return true;
+}
+
+/** Normaliza startDate/endDate de Firestore a YYYY-MM-DD (calendario local). */
+export function toCalendarDateStr(val: unknown): string | null {
+    if (val == null || val === '') return null;
+    if (typeof val === 'string') {
+        const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        const dt = new Date(val);
+        if (!isNaN(dt.getTime())) {
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }
+        return null;
+    }
+    if (typeof val === 'object' && val !== null) {
+        const rec = val as { toDate?: () => Date; seconds?: number };
+        if (typeof rec.toDate === 'function') {
+            const dt = rec.toDate();
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }
+        if (typeof rec.seconds === 'number') {
+            const dt = new Date(rec.seconds * 1000);
+            return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        }
+    }
+    return null;
+}
+
+/** Compara dos fechas calendario YYYY-MM-DD. Devuelve -1 | 0 | 1. */
+export function compareCalendarDateStr(a: string, b: string): number {
+    return String(a).slice(0, 10).localeCompare(String(b).slice(0, 10));
+}
+
+/** Valida rango de ausencia/licencia (inicio ≤ fin). */
+export function validateAbsenceDateRange(
+    startVal: unknown,
+    endVal: unknown,
+): { ok: true; startDate: string; endDate: string } | { ok: false; message: string } {
+    const startDate = toCalendarDateStr(startVal);
+    const endDate = toCalendarDateStr(endVal);
+    if (!startDate || !endDate) {
+        return { ok: false, message: 'Ingrese fecha de inicio y fin válidas.' };
+    }
+    if (compareCalendarDateStr(endDate, startDate) < 0) {
+        return { ok: false, message: 'La fecha fin no puede ser anterior a la fecha inicio.' };
+    }
+    return { ok: true, startDate, endDate };
+}
+
+/** Lista inclusive de fechas YYYY-MM-DD entre start y end. */
+export function iterateCalendarDateRange(startStr: string, endStr: string): string[] {
+    if (compareCalendarDateStr(endStr, startStr) < 0) return [];
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+    if (!sy || !ey) return [];
+    const out: string[] = [];
+    const cur = new Date(sy, sm - 1, sd, 12, 0, 0, 0);
+    const end = new Date(ey, em - 1, ed, 12, 0, 0, 0);
+    while (cur <= end) {
+        out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`);
+        cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+}
+
+/**
+ * Construye el mapa `${employeeId}_${dateKey}` usado por la grilla de planificación.
+ * `formatDateKey` debe ser la misma función que usa la grilla (p. ej. getDateKey con TZ AR).
+ */
+export function buildAbsencesMapFromDocs(
+    docs: Array<{ id: string; data: Record<string, unknown> }>,
+    formatDateKey: (d: Date) => string,
+    opts?: { filterActive?: boolean },
+): Record<string, Record<string, unknown>> {
+    const map: Record<string, Record<string, unknown>> = {};
+    const filterActive = opts?.filterActive !== false;
+
+    docs.forEach(({ id, data }) => {
+        if (filterActive && !isActiveAbsence(data)) return;
+        const empId = String(data.employeeId ?? '').trim();
+        if (!empId) return;
+
+        const range = validateAbsenceDateRange(data.startDate, data.endDate);
+        if (!range.ok) return;
+        const { startDate: startStr, endDate: endStr } = range;
+
+        const inferredCode = inferAbsenceCode(data);
+        iterateCalendarDateRange(startStr, endStr).forEach((dateStr) => {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const key = `${empId}_${formatDateKey(new Date(y, m - 1, d, 12, 0, 0, 0))}`;
+            map[key] = { id, ...data, isAbsence: true, inferredCode };
+        });
+    });
+
+    return map;
 }

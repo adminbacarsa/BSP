@@ -2,6 +2,7 @@
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { empresaScopedQuery, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
+import { validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 
 export interface Absence {
   id?: string;
@@ -53,16 +54,29 @@ export const absenceService = {
     return scope ? rows.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')) : rows;
   },
 
-  add: async (data: Absence, empresaId?: string) => addDoc(collection(db, 'ausencias'), stampEmpresaId({
+  add: async (data: Absence, empresaId?: string) => {
+    const range = validateAbsenceDateRange(data.startDate, data.endDate);
+    if (!range.ok) throw new Error(range.message);
+    return addDoc(collection(db, 'ausencias'), stampEmpresaId({
       ...data,
+      startDate: range.startDate,
+      endDate: range.endDate,
       createdAt: new Date().toISOString(),
-  }, empresaId || '')),
+    }, empresaId || ''));
+  },
 
   update: async (id: string, data: Partial<Absence>, opts?: { empresaId: string; migracionCompleta: boolean }) => {
-    if (opts?.empresaId) {
-      return updateDocForEmpresa('ausencias', id, data as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
+    const payload = { ...data } as Partial<Absence>;
+    if (payload.startDate != null || payload.endDate != null) {
+      const range = validateAbsenceDateRange(payload.startDate, payload.endDate);
+      if (!range.ok) throw new Error(range.message);
+      payload.startDate = range.startDate;
+      payload.endDate = range.endDate;
     }
-    return updateDoc(doc(db, 'ausencias', id), data);
+    if (opts?.empresaId) {
+      return updateDocForEmpresa('ausencias', id, payload as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
+    }
+    return updateDoc(doc(db, 'ausencias', id), payload);
   },
 
   delete: (id: string, opts?: { empresaId: string; migracionCompleta: boolean }) => {

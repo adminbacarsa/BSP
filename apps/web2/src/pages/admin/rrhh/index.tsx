@@ -26,6 +26,7 @@ import {
     BellRing, MessageCircle
 } from 'lucide-react';
 import { normalizeArgPhone } from '@/lib/whatsapp';
+import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -304,31 +305,40 @@ export default function EmployeesPage() {
 
   const replicarAusenciaEnPlanificador = async (absenceId: string, data: Absence) => {
     try {
+      const range = validateAbsenceDateRange(data.startDate, data.endDate);
+      if (!range.ok) return;
       const turnosQ = query(collection(db, 'turnos'), where('absenceId', '==', absenceId));
       await queryAndDeleteForEmpresa('turnos', turnosQ, empresaId, migracionCompleta);
-      const [sY, sM, sD] = data.startDate.split('-').map(Number);
-      const [eY, eM, eD] = data.endDate.split('-').map(Number);
+      const [sY, sM, sD] = range.startDate.split('-').map(Number);
+      const [eY, eM, eD] = range.endDate.split('-').map(Number);
       const start = new Date(sY, sM - 1, sD);
       const end = new Date(eY, eM - 1, eD);
-      const absenceCodeMap: Record<string, string> = {
-        Vacaciones: 'V', Enfermedad: 'E', ART: 'A', Injustificada: 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG',
-      };
-      const code = absenceCodeMap[data.type] || 'AA';
+      const code = inferAbsenceCode(data);
+      const emp = employees.find(e => e.id === data.employeeId);
+      const objectiveId = emp?.preferredObjectiveId || '';
+      const objRow = allObjectives.find(o => o.id === objectiveId || o.docId === objectiveId);
+      const clientId = objRow?.clientId || '';
+      const objectiveName = objRow?.name || (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
       const batch = writeBatch(db);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+        const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
         const turnoRef = doc(collection(db, 'turnos'));
         batch.set(turnoRef, stampEmpresaId({
           employeeId: data.employeeId,
           employeeName: data.employeeName,
-          startTime: Timestamp.fromDate(new Date(new Date(d).setHours(0, 0, 0, 0))),
-          endTime: Timestamp.fromDate(new Date(new Date(d).setHours(23, 59, 59, 999))),
+          startTime: Timestamp.fromDate(dayStart),
+          endTime: Timestamp.fromDate(dayEnd),
           type: 'NOVEDAD',
           code,
           status: 'Approved',
-          objectiveName: `NOVEDAD - ${data.type}`,
-          clientId: 'INTERNO',
+          objectiveId: objectiveId || undefined,
+          objectiveName,
+          clientId: clientId || undefined,
           absenceId,
           isFranco: false,
+          hasNovedad: true,
+          plannedNovedad: data.type?.includes('Licencia') ? 'LICENCIA' : 'AVISO',
           comments: data.reason,
         }, empresaId));
       }
@@ -881,7 +891,51 @@ export default function EmployeesPage() {
   const handleEditAgreement = (a: Agreement) => { setAgreementForm(a as ExtendedAgreement); setIsEditingAgreement(true); };
   const handleDeleteAgreement = async (id: string) => { if(confirm('?')) { await agreementService.delete(id); loadAgreements(); } };
   const handleOpenAbsenceModal = (absence?: Absence) => { if (absence) { setAbsenceForm(absence); setIsEditingAbsence(true); } else { setAbsenceForm(initialAbsenceForm); setIsEditingAbsence(false); } setEmpSearch(''); setEmpDropOpen(false); setShowAbsenceModal(true); };
-  const handleSaveAbsence = async () => { if (!absenceForm.employeeId) return addToast('Seleccione un empleado', 'error'); if (absenceForm.status === 'Rechazada' && !absenceForm.rejectionReason?.trim()) return addToast('Ingrese el motivo de rechazo', 'error'); const emp = employees.find(x => x.id === absenceForm.employeeId); const auth = getAuth(); const u = auth.currentUser; const nombreReal = u?.displayName || u?.email || "Usuario Desconocido"; const dataToSave = { ...absenceForm, employeeName: emp ? `${emp.lastName} ${emp.firstName}` : (absenceForm.employeeName || 'Desconocido'), comments: `${absenceForm.comments || ''} (Cargado por: ${nombreReal})`, createdBy: nombreReal, createdAt: new Date().toISOString() }; let savedId = ''; if (isEditingAbsence && absenceForm.id) { await absenceService.update(absenceForm.id, dataToSave, { empresaId, migracionCompleta }); savedId = absenceForm.id; await registrarAuditoria('UPDATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Actualizado', 'success'); } else { const docRef = await absenceService.add(dataToSave, empresaId); savedId = docRef.id; await registrarAuditoria('CREATE_ABSENCE', `Novedad: ${dataToSave.type}`); addToast('Registrado', 'success'); } if (dataToSave.status === 'Autorizada') {
+
+  const absenceDateRangeError = useMemo(() => {
+    const r = validateAbsenceDateRange(absenceForm.startDate, absenceForm.endDate);
+    return r.ok ? '' : r.message;
+  }, [absenceForm.startDate, absenceForm.endDate]);
+
+  const handleSaveAbsence = async () => {
+    if (!absenceForm.employeeId) return addToast('Seleccione un empleado', 'error');
+    const range = validateAbsenceDateRange(absenceForm.startDate, absenceForm.endDate);
+    if (!range.ok) return addToast(range.message, 'error');
+    if (absenceForm.status === 'Rechazada' && !absenceForm.rejectionReason?.trim()) return addToast('Ingrese el motivo de rechazo', 'error');
+    const emp = employees.find(x => x.id === absenceForm.employeeId);
+    const auth = getAuth();
+    const u = auth.currentUser;
+    const nombreReal = u?.displayName || u?.email || 'Usuario Desconocido';
+    const absenceType = RRHH_ABSENCE_LABEL_TO_CODE[absenceForm.type] || inferAbsenceCode({ type: absenceForm.type });
+    const dataToSave = {
+      ...absenceForm,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      absenceType,
+      employeeName: emp ? `${emp.lastName} ${emp.firstName}` : (absenceForm.employeeName || 'Desconocido'),
+      comments: `${absenceForm.comments || ''} (Cargado por: ${nombreReal})`,
+      createdBy: nombreReal,
+      createdAt: new Date().toISOString(),
+    };
+    let savedId = '';
+    try {
+      if (isEditingAbsence && absenceForm.id) {
+        await absenceService.update(absenceForm.id, dataToSave, { empresaId, migracionCompleta });
+        savedId = absenceForm.id;
+        await registrarAuditoria('UPDATE_ABSENCE', `Novedad: ${dataToSave.type}`);
+        addToast('Actualizado', 'success');
+      } else {
+        const docRef = await absenceService.add(dataToSave, empresaId);
+        savedId = docRef.id;
+        await registrarAuditoria('CREATE_ABSENCE', `Novedad: ${dataToSave.type}`);
+        addToast('Registrado', 'success');
+      }
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Error al guardar la novedad', 'error');
+      return;
+    }
+    if (dataToSave.status === 'Autorizada' || dataToSave.status === 'Justificada') {
+      await replicarAusenciaEnPlanificador(savedId, { ...dataToSave, id: savedId });
       await addDoc(collection(db, 'novedades'), stampEmpresaId({
         source: 'AUSENCIA',
         type: dataToSave.type,
@@ -895,8 +949,12 @@ export default function EmployeesPage() {
         reportedBy: nombreReal,
         createdAt: serverTimestamp(),
       }, empresaId));
+    } else if (dataToSave.status === 'Rechazada') {
+      await eliminarReplicasPlanificador(savedId);
     }
-    setShowAbsenceModal(false); loadAbsences(); };
+    setShowAbsenceModal(false);
+    loadAbsences();
+  };
   const handleDeleteAbsence = async (id: string) => {
     if (!confirm('¿Eliminar?')) return;
     try {
@@ -2526,13 +2584,34 @@ export default function EmployeesPage() {
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Fecha inicio</label>
-                                <input type="date" value={absenceForm.startDate} onChange={e => setAbsenceForm(f => ({...f, startDate: e.target.value}))} className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"/>
+                                <input
+                                    type="date"
+                                    value={absenceForm.startDate}
+                                    onChange={e => {
+                                        const startDate = e.target.value;
+                                        setAbsenceForm(f => ({
+                                            ...f,
+                                            startDate,
+                                            endDate: f.endDate && f.endDate < startDate ? startDate : f.endDate,
+                                        }));
+                                    }}
+                                    className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
+                                />
                             </div>
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Fecha fin</label>
-                                <input type="date" value={absenceForm.endDate} onChange={e => setAbsenceForm(f => ({...f, endDate: e.target.value}))} className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"/>
+                                <input
+                                    type="date"
+                                    value={absenceForm.endDate}
+                                    min={absenceForm.startDate || undefined}
+                                    onChange={e => setAbsenceForm(f => ({ ...f, endDate: e.target.value }))}
+                                    className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
+                                />
                             </div>
                         </div>
+                        {absenceDateRangeError && (
+                            <p className="text-xs font-bold text-rose-600 -mt-2">{absenceDateRangeError}</p>
+                        )}
                         <div>
                             <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Motivo (opcional)</label>
                             <input type="text" value={absenceForm.reason || ''} onChange={e => setAbsenceForm(f => ({...f, reason: e.target.value}))} placeholder="Descripción breve..." className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"/>
@@ -2571,7 +2650,11 @@ export default function EmployeesPage() {
                     </div>
                     <div className="flex gap-3 mt-6">
                         <button onClick={() => setShowAbsenceModal(false)} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
-                        <button onClick={handleSaveAbsence} className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
+                        <button
+                            onClick={handleSaveAbsence}
+                            disabled={!!absenceDateRangeError}
+                            className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black text-sm transition-colors flex items-center justify-center gap-2"
+                        >
                             <Save size={15}/> {isEditingAbsence ? 'Actualizar' : 'Registrar'}
                         </button>
                     </div>

@@ -65,7 +65,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
@@ -1683,37 +1683,10 @@ export default function PlanificacionPage() {
 
         const ausenciasQ = empresaCollectionQuery('ausencias', empresaId, scopeEmpresa);
         const unsubA = onSnapshot(ausenciasQ, snap => {
-            const map: any = {};
-            snap.docs.forEach(d => {
-                const data = d.data();
-                if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-                if (!data.employeeId) return;
-                const toDay = (val: any) => {
-                    if (!val) return null;
-                    if (val.toDate) return val.toDate();
-                    if (val.seconds) return new Date(val.seconds * 1000);
-                    if (typeof val === 'string') {
-                        const parts = val.split('-').map(Number);
-                        if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]);
-                    }
-                    const dt = new Date(val);
-                    return isNaN(dt.getTime()) ? null : dt;
-                };
-                const start = toDay(data.startDate);
-                const end = toDay(data.endDate);
-                if (start && end) {
-                    let current = new Date(start);
-                    const endDay = new Date(end);
-                    current.setHours(0, 0, 0, 0);
-                    endDay.setHours(0, 0, 0, 0);
-                    while (current <= endDay) { 
-                        const key = `${data.employeeId}_${getDateKey(current)}`; 
-                        map[key] = { id: d.id, ...data, isAbsence: true }; 
-                        current.setDate(current.getDate() + 1); 
-                    } 
-                }
-            });
-            setAbsencesMap(map);
+            const docs = snap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .map(d => ({ id: d.id, data: d.data() as Record<string, unknown> }));
+            setAbsencesMap(buildAbsencesMapFromDocs(docs, getDateKey));
         }, (e) => console.error('[plan] ausencias error:', e));
 
         // novedades: equality + orderBy requires composite index (status ASC, createdAt DESC in firestore.indexes.json)
@@ -2691,12 +2664,9 @@ export default function PlanificacionPage() {
         monthStart: Date,
         monthEnd: Date,
     ): Promise<Record<string, Map<string, string>>> => {
-        const queryStart = new Date(monthStart);
-        queryStart.setMonth(queryStart.getMonth() - 2);
-        const absSnap = await getDocs(scopeEmpresa
-            ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('startDate', '>=', Timestamp.fromDate(queryStart)), where('startDate', '<=', Timestamp.fromDate(monthEnd)))
-            : query(collection(db, 'ausencias'), where('startDate', '>=', Timestamp.fromDate(queryStart)), where('startDate', '<=', Timestamp.fromDate(monthEnd)))
-        );
+        const absSnap = await getDocs(empresaCollectionQuery('ausencias', empresaId, scopeEmpresa));
+        const monthStartStr = toCalendarDateStr(monthStart) || getDateKey(monthStart);
+        const monthEndStr = toCalendarDateStr(monthEnd) || getDateKey(monthEnd);
         const absences: Record<string, Map<string, string>> = {};
         absSnap.docs.forEach(d => {
             const data = d.data() as any;
@@ -2704,22 +2674,19 @@ export default function PlanificacionPage() {
             const empId = data.employeeId;
             if (!empId) return;
             if (!isActiveAbsence(data)) return;
-            const s = data.startDate?.toDate ? data.startDate.toDate() : new Date((data.startDate?.seconds || 0) * 1000);
-            const e = data.endDate?.toDate ? data.endDate.toDate() : new Date((data.endDate?.seconds || 0) * 1000);
-            if (!(s instanceof Date) || isNaN(s.getTime())) return;
-            if (!(e instanceof Date) || isNaN(e.getTime())) return;
-            // Solapamiento real con el mes a planificar
-            if (e < monthStart) return;
+            const startStr = toCalendarDateStr(data.startDate);
+            const endStr = toCalendarDateStr(data.endDate);
+            if (!startStr || !endStr) return;
+            const range = validateAbsenceDateRange(startStr, endStr);
+            if (!range.ok) return;
+            if (range.endDate < monthStartStr || range.startDate > monthEndStr) return;
             const code = inferAbsenceCode(data);
             if (!absences[empId]) absences[empId] = new Map();
-            const cur = new Date(Math.max(s.getTime(), monthStart.getTime()));
-            cur.setHours(12, 0, 0, 0);
-            const end = new Date(Math.min(e.getTime(), monthEnd.getTime()));
-            end.setHours(12, 0, 0, 0);
-            while (cur <= end) {
-                absences[empId].set(getDateKey(cur), code);
-                cur.setDate(cur.getDate() + 1);
-            }
+            iterateCalendarDateRange(range.startDate, range.endDate).forEach((dateStr) => {
+                if (dateStr < monthStartStr || dateStr > monthEndStr) return;
+                const [y, m, day] = dateStr.split('-').map(Number);
+                absences[empId].set(getDateKey(new Date(y, m - 1, day, 12, 0, 0, 0)), code);
+            });
         });
         return absences;
     };
@@ -3855,7 +3822,7 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        if (absence) { const absCodes: Record<string,string> = {'Vacaciones':'V','Enfermedad':'E','ART':'A','Injustificada':'AA','Licencia Esp.':'L','PG Permiso Gremial':'PG'}; const absCode = absCodes[absence.type] || 'AA'; content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
