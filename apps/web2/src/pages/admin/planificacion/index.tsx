@@ -606,9 +606,8 @@ export default function PlanificacionPage() {
                 if (oa !== ob) return (oa - ob) * dir;
             }
             if (sortBy === 'position') {
-                const posA = getEmpDefaultPos(a.id) ?? '';
-                const posB = getEmpDefaultPos(b.id) ?? '';
-                // Sin puesto asignado va al final
+                const posA = empDefaultPos[`${a.id}___${selectedObjective}`] ?? '';
+                const posB = empDefaultPos[`${b.id}___${selectedObjective}`] ?? '';
                 if (!posA && posB) return 1;
                 if (posA && !posB) return -1;
                 const cmp = posA.localeCompare(posB);
