@@ -387,7 +387,8 @@ export default function PlanificacionPage() {
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
-    const [autoRotateShifts, setAutoRotateShifts] = useState(false);
+    /** null = Auto decide; true/false = forzar rotativo ON/OFF */
+    const [autoRotateForce, setAutoRotateForce] = useState<boolean | null>(null);
     const [autoAjustarCrono, setAutoAjustarCrono] = useState(false);
     /** Fechas manuales Contingencia (Modo 12 para liberar guardias / RET). */
     const [autoContingenciaDias, setAutoContingenciaDias] = useState<Set<string>>(() => new Set());
@@ -395,8 +396,8 @@ export default function PlanificacionPage() {
     const autoPlanningBrainRef = React.useRef<AutoPlanningBrainResult | null>(null);
 
     useEffect(() => {
-        if (!autoRotateShifts && autoAjustarCrono) setAutoAjustarCrono(false);
-    }, [autoRotateShifts, autoAjustarCrono]);
+        if (autoRotateForce === false && autoAjustarCrono) setAutoAjustarCrono(false);
+    }, [autoRotateForce, autoAjustarCrono]);
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
@@ -2822,7 +2823,7 @@ export default function PlanificacionPage() {
                 getDayLetter,
                 getDateKey,
                 contingencyDaysManual: [...autoContingenciaDias],
-                rotateShiftsOverride: autoRotateShifts,
+                rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
             };
             const brain = resolveAutoPlanningBrain(brainInput);
@@ -2834,10 +2835,6 @@ export default function PlanificacionPage() {
                 autoV2ReportRef.current = brain.feasibility;
                 setAutoV2Report(brain.feasibility);
                 return { ok: false, cycles: brain.cycles };
-            }
-
-            if (!autoRotateShifts && brain.rotateShifts) {
-                setAutoRotateShifts(true);
             }
 
             autoSelectedCyclesRef.current = brain.cycles;
@@ -2900,6 +2897,7 @@ export default function PlanificacionPage() {
             autoPlanningBrainRef.current = null;
             setAutoV2Report(null);
             setAutoPlanningBrainReport(null);
+            setAutoRotateForce(null);
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
         }
@@ -3112,7 +3110,7 @@ export default function PlanificacionPage() {
                 )
                 .map((e: any) => ({ id: e.id, nombre: e.nombre || e.name }));
 
-            const genBrain = resolveAutoPlanningBrain({
+            const genBrain = autoPlanningBrainRef.current ?? resolveAutoPlanningBrain({
                 positions: positionStructure,
                 employees: displayedEmployees.map((e:any) => ({
                     id: e.id,
@@ -3132,7 +3130,7 @@ export default function PlanificacionPage() {
                 getDayLetter,
                 getDateKey,
                 contingencyDaysManual: [...autoContingenciaDias],
-                rotateShiftsOverride: autoRotateShifts,
+                rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
             });
             autoPlanningBrainRef.current = genBrain;
@@ -3268,8 +3266,7 @@ export default function PlanificacionPage() {
                 r.coverage.uncoveredSlots + r.restViolations.length + r.licenseConflicts.length;
 
             let prevIssues = countIssues(coverage);
-            // Fixer post-gen deshabilitado: promueve RET como parche y rompe reglas acordadas.
-            const MAX_REPRO_PASSES = 0;
+            const MAX_REPRO_PASSES = coverage.coverage.uncoveredSlots > 0 ? 5 : 0;
             for (let pass = 0; pass < MAX_REPRO_PASSES && prevIssues > 0; pass++) {
                 await bumpAutoV2Progress(
                     Math.min(97, 88 + pass * 2),
@@ -6087,11 +6084,17 @@ export default function PlanificacionPage() {
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
                                                 Turnos rotativos (equilibrio M→T→N)
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">Auto lo activa si cierra; podés forzar OFF</span>
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">
+                                                    Auto {autoPlanningBrainReport?.rotateShifts ? 'ON' : 'OFF'}
+                                                    {autoRotateForce === null ? ' · tocá para forzar' : autoRotateForce ? ' · forzado ON' : ' · forzado OFF'}
+                                                </span>
                                             </span>
-                                            <button type="button" onClick={() => setAutoRotateShifts(p => !p)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoRotateShifts ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoRotateShifts ? 'translate-x-4' : ''}`}/>
+                                            <button type="button" onClick={() => setAutoRotateForce(p => {
+                                                const cur = p ?? autoPlanningBrainReport?.rotateShifts ?? true;
+                                                return !cur;
+                                            })}
+                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'translate-x-4' : ''}`}/>
                                             </button>
                                         </div>
 
@@ -6144,12 +6147,12 @@ export default function PlanificacionPage() {
                                             <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
                                                 Avanzado (opcional)
                                             </p>
-                                        <div className={`flex items-center gap-2 ${!autoRotateShifts ? 'opacity-60' : ''}`}>
+                                        <div className={`flex items-center gap-2 ${!(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'opacity-60' : ''}`}>
                                             <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
                                                 Intensivo mes completo
                                                 <span className="block text-[9px] font-bold text-slate-500 normal-case">4+2→6+1 · más RET · requiere rotativo ON</span>
                                             </span>
-                                            <button type="button" disabled={!autoRotateShifts} onClick={() => autoRotateShifts && setAutoAjustarCrono(p => !p)}
+                                            <button type="button" disabled={!(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts)} onClick={() => (autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) && setAutoAjustarCrono(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoAjustarCrono ? 'bg-violet-500' : 'bg-slate-300'}`}>
                                                 <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoAjustarCrono ? 'translate-x-4' : ''}`}/>
                                             </button>
