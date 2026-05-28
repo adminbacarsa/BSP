@@ -4061,25 +4061,29 @@ export default function PlanificacionPage() {
                             <div key={p.positionName} className={`border-b last:border-0 ${isSelPos ? 'bg-indigo-50' : ''}`}>
                                 <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600">{p.positionName}</div>
                                 <div className="flex flex-wrap gap-1 px-3 pb-2">
-                                {codes.length > 0 ? codes.map((sc:string) => {
-                                    const saveCode = NORM[sc] ?? sc;
-                                    const displayLabel = NORM[sc] ?? sc;
-                                    const is12h = sc === 'D12' || sc === 'N12';
-                                    const active = isSelPos && selShift === saveCode;
-                                    return (
-                                        <button key={sc}
-                                            onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, saveCode)}
-                                            className={`flex items-center gap-0.5 px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[saveCode] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
-                                            {displayLabel}
-                                            {is12h && <span className={`text-[8px] font-bold ml-0.5 ${active ? 'opacity-80' : 'text-slate-400'}`}>12h</span>}
-                                        </button>
-                                    );
-                                }) : (
-                                    <button onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
-                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-indigo-100'}`}>
-                                        Asignar
+                                    {/* Sin preferencia de turno — siempre disponible */}
+                                    <button
+                                        onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
+                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}
+                                        title="Asignar al puesto sin preferencia de turno — el auto-scheduler elige"
+                                    >
+                                        AUTO
                                     </button>
-                                )}
+                                    {/* Botones por turno específico */}
+                                    {codes.map((sc:string) => {
+                                        const saveCode = NORM[sc] ?? sc;
+                                        const displayLabel = NORM[sc] ?? sc;
+                                        const is12h = sc === 'D12' || sc === 'N12';
+                                        const active = isSelPos && selShift === saveCode;
+                                        return (
+                                            <button key={sc}
+                                                onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, saveCode)}
+                                                className={`flex items-center gap-0.5 px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[saveCode] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
+                                                {displayLabel}
+                                                {is12h && <span className={`text-[8px] font-bold ml-0.5 ${active ? 'opacity-80' : 'text-slate-400'}`}>12h</span>}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         );
