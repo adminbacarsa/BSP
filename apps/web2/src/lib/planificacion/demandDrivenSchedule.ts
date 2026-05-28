@@ -79,6 +79,8 @@ interface TryFillOptions {
     ignoreFixedShift?: boolean;
     ignorePendulum?: boolean;
     preferRemainingBudget?: boolean;
+    allowSlaClose?: boolean;
+    allowTwelveHourUpgrade?: boolean;
 }
 
 function isFrancoAssignment(a: V2Assignment | undefined): boolean {
@@ -403,13 +405,23 @@ function tryFillOneSlot(
         return false;
     }
 
+    const band = normBand(code);
+    if ((band === 'T' || band === 'N') && !options?.allowSlaClose && !isModo12Day(dateStr, ctx)) {
+        if (countAssigned(params.assignments, dateStr, pos.positionName, 'M') < slotQty) return false;
+    }
+    if ((code === 'D12' || code === 'N12') && !isModo12Day(dateStr, ctx) && !options?.allowTwelveHourUpgrade) {
+        return false;
+    }
+
     for (const empId of candidates) {
-        if (!authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
+        if (!options?.allowSlaClose && !authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
             continue;
         }
-        const restOk = rotate
-            ? canAssignBand(params, empId, dateStr, code, sStart, sHrs)
-            : passesAgreementRest(empId, dateStr, code, sStart, sHrs);
+        const restOk = options?.allowSlaClose
+            ? passesAgreementRest(empId, dateStr, code, sStart, sHrs)
+            : rotate
+                ? canAssignBand(params, empId, dateStr, code, sStart, sHrs)
+                : passesAgreementRest(empId, dateStr, code, sStart, sHrs);
         if (!restOk) continue;
         writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
         return true;
@@ -574,16 +586,268 @@ function countAssigned(
     ).length;
 }
 
+/** Cobertura efectiva M/T/N (D12≡M, N12≡N, par D12+N12 cubre T si no hay tarde 8h). */
+function effectiveMtnCoverage(
+    assignments: V2Assignment[],
+    dateStr: string,
+    positionName: string,
+    qty: number,
+): { M: number; T: number; N: number } {
+    const m = countAssigned(assignments, dateStr, positionName, 'M')
+        + countAssigned(assignments, dateStr, positionName, 'D12');
+    const n = countAssigned(assignments, dateStr, positionName, 'N')
+        + countAssigned(assignments, dateStr, positionName, 'N12');
+    let t = countAssigned(assignments, dateStr, positionName, 'T');
+    const d12 = countAssigned(assignments, dateStr, positionName, 'D12');
+    const n12 = countAssigned(assignments, dateStr, positionName, 'N12');
+    if (t < qty && d12 >= qty && n12 >= qty) t = qty;
+    return { M: m, T: t, N: n };
+}
+
+function positionDayMtnGap(
+    assignments: V2Assignment[],
+    dateStr: string,
+    pd: { positionName: string; bandSlots: Record<string, number> },
+    qty: number,
+): boolean {
+    const eff = effectiveMtnCoverage(assignments, dateStr, pd.positionName, qty);
+    return (eff.M < (pd.bandSlots.M || 0))
+        || (eff.T < (pd.bandSlots.T || 0))
+        || (eff.N < (pd.bandSlots.N || 0));
+}
+
+function applyBillableUpgrade(
+    params: DemandDrivenFillParams,
+    a: V2Assignment,
+    newHrs: number,
+    inCurrent: boolean,
+): void {
+    const st = params.runtime[a.empId];
+    const wkKey = isoWeekKeyFromDateStr(a.dateStr);
+    st.weekHours[wkKey] = (st.weekHours[wkKey] || 0) + newHrs;
+    if (inCurrent) {
+        st.cycleCurrentUsed += newHrs;
+        params.stats.employeeCycleHours.current[a.empId] = st.cycleCurrentUsed;
+    } else {
+        st.cycleNextUsed += newHrs;
+        params.stats.employeeCycleHours.next[a.empId] = st.cycleNextUsed;
+    }
+    st.monthHours += newHrs;
+    params.stats.employeeMonthlyHours[a.empId] = st.monthHours;
+    params.stats.totalBillableHours = (params.stats.totalBillableHours || 0) + newHrs;
+    st.lastShiftCode = a.code;
+    st.lastShiftHours = newHrs;
+    st.lastShiftStart = parseHourFromTime(a.startTime);
+}
+
+function canUpgradeCellTo12h(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    a: V2Assignment,
+    dayLetter: string,
+    target: 'D12' | 'N12',
+    inCurrent: boolean,
+): boolean {
+    if (!a.positionName || (a.hours ?? 0) <= 0) return false;
+    const from = normBand(a.code);
+    if (normBand(a.code) === target) return true;
+    const validFrom = target === 'D12' ? new Set(['T', 'M']) : new Set(['N']);
+    if (!validFrom.has(from)) return false;
+
+    const { shiftHoursH, ctx, runtime, limitedEmpIds } = params;
+    const sh = shiftDefForCode(pos, dayLetter, target, ctx.autoCycles, shiftHoursH);
+    const sHrs = shiftHoursH(sh);
+    const sStart = sh.startTime || DEFAULT_START[target] || (target === 'D12' ? '07:00' : '19:00');
+    const oldHrs = Number(a.hours) || 0;
+    const delta = sHrs - oldHrs;
+    const authorized = ctx.authorizedOver200Ids;
+    if (!authorized?.has(a.empId) && cctUsed(runtime, a.empId, inCurrent, limitedEmpIds.has(a.empId)) + delta > HARD_MAX_HOURS) {
+        return false;
+    }
+    return canAssignBand(params, a.empId, a.dateStr, target, sStart, sHrs)
+        || params.passesAgreementRest(a.empId, a.dateStr, target, sStart, sHrs);
+}
+
+function tryUpgradeCellTo12h(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    a: V2Assignment,
+    dayLetter: string,
+    target: 'D12' | 'N12',
+    inCurrent: boolean,
+): boolean {
+    if (!canUpgradeCellTo12h(params, pos, a, dayLetter, target, inCurrent)) return false;
+    if (normBand(a.code) === target) return true;
+
+    const { shiftHoursH, ctx } = params;
+    const sh = shiftDefForCode(pos, dayLetter, target, ctx.autoCycles, shiftHoursH);
+    const sHrs = shiftHoursH(sh);
+    const sStart = sh.startTime || DEFAULT_START[target] || (target === 'D12' ? '07:00' : '19:00');
+    const sEnd = sh.endTime;
+
+    revertBillableCell(params, a);
+    a.code = target;
+    a.name = sh.name || target;
+    a.hours = sHrs;
+    a.startTime = sStart;
+    if (sEnd) a.endTime = sEnd;
+    else delete a.endTime;
+    applyBillableUpgrade(params, a, sHrs, inCurrent);
+    return true;
+}
+
+/** D12 suelto en día rotativo 8h: baja a T para liberar horas y cerrar slot tarde. */
+function tryDowngradeOrphanD12ToT(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    a: V2Assignment,
+    dayLetter: string,
+    inCurrent: boolean,
+): boolean {
+    if (normBand(a.code) !== 'D12' || isModo12Day(a.dateStr, params.ctx)) return false;
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const n12 = countAssigned(params.assignments, a.dateStr, pos.positionName, 'N12');
+    if (n12 >= qty) return false;
+    if (countAssigned(params.assignments, a.dateStr, pos.positionName, 'T') >= qty) return false;
+
+    const { shiftHoursH, ctx } = params;
+    const sh = shiftDefForCode(pos, dayLetter, 'T', ctx.autoCycles, shiftHoursH);
+    const newHrs = shiftHoursH(sh);
+    const oldHrs = Number(a.hours) || 12;
+    const delta = newHrs - oldHrs;
+    if (delta === 0) return false;
+
+    const st = params.runtime[a.empId];
+    const wkKey = isoWeekKeyFromDateStr(a.dateStr);
+    st.weekHours[wkKey] = (st.weekHours[wkKey] || 0) + delta;
+    if (inCurrent) {
+        st.cycleCurrentUsed += delta;
+        params.stats.employeeCycleHours.current[a.empId] = st.cycleCurrentUsed;
+    } else {
+        st.cycleNextUsed += delta;
+        params.stats.employeeCycleHours.next[a.empId] = st.cycleNextUsed;
+    }
+    st.monthHours += delta;
+    params.stats.employeeMonthlyHours[a.empId] = st.monthHours;
+    params.stats.totalBillableHours = (params.stats.totalBillableHours || 0) + delta;
+
+    a.code = 'T';
+    a.name = sh.name || 'T';
+    a.hours = newHrs;
+    a.startTime = sh.startTime || DEFAULT_START.T || '14:00';
+    if (sh.endTime) a.endTime = sh.endTime;
+    else delete a.endTime;
+    st.lastShiftCode = 'T';
+    st.lastShiftHours = newHrs;
+    st.lastShiftStart = parseHourFromTime(a.startTime);
+    return true;
+}
+
+function repairOrphan12hOnRotativoDays(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+    isCustomCoverPosition: (pos: V2PositionDef) => boolean,
+): void {
+    const { ctx, assignments } = params;
+    for (const day of dayDemands) {
+        if (day.totalPaxUnits <= 0 || isModo12Day(day.dateStr, ctx)) continue;
+        const dayNum = parseInt(day.dateStr.split('-')[2], 10);
+        const inCurrent = dayNum <= params.cutoffDay;
+        for (const pd of day.positions) {
+            const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+            if (!pos || isCustomCoverPosition(pos)) continue;
+            const d12Cells = assignments.filter(a =>
+                a.dateStr === day.dateStr
+                && a.positionName === pd.positionName
+                && normBand(a.code) === 'D12'
+                && (a.hours ?? 0) > 0,
+            );
+            for (const cell of d12Cells) {
+                tryDowngradeOrphanD12ToT(params, pos, cell, day.dayLetter, inCurrent);
+            }
+        }
+    }
+}
+
+/**
+ * Cierra huecos M/T/N en un puesto con par D12+N12 (misma lógica que coverageVerification).
+ * Aplica en rotativo ON donde el péndulo dejó T+N sin M por descanso CCT.
+ */
+function tryClosePositionDayWith12hAlternate(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    pd: { positionName: string; bandSlots: Record<string, number>; alternateBandSlots?: Record<string, number> },
+    dateStr: string,
+    dayLetter: string,
+    inCurrent: boolean,
+): boolean {
+    const { ctx, assignments } = params;
+    if (isModo12Day(dateStr, ctx)) return false;
+    if (!pd.alternateBandSlots?.D12 || !pd.alternateBandSlots?.N12) return false;
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    if (!positionDayMtnGap(assignments, dateStr, pd, qty)) return false;
+
+    const globalPool = global24hsEmployeePool(params);
+    const onPos = () => assignments.filter(a =>
+        a.dateStr === dateStr && a.positionName === pos.positionName && (a.hours ?? 0) > 0,
+    );
+
+    const tCells = onPos().filter(a => normBand(a.code) === 'T');
+    const nCells = onPos().filter(a => normBand(a.code) === 'N');
+    if (tCells.length >= qty && nCells.length >= qty) {
+        let upgraded = true;
+        for (let i = 0; i < qty; i++) {
+            if (!tryUpgradeCellTo12h(params, pos, tCells[i], dayLetter, 'D12', inCurrent)
+                || !tryUpgradeCellTo12h(params, pos, nCells[i], dayLetter, 'N12', inCurrent)) {
+                upgraded = false;
+                break;
+            }
+        }
+        if (upgraded && !positionDayMtnGap(assignments, dateStr, pd, qty)) return true;
+    }
+
+    const mActual = countAssigned(assignments, dateStr, pos.positionName, 'M');
+    if (mActual < qty && tCells.length >= qty && nCells.length < qty) {
+        if (tryUpgradeCellTo12h(params, pos, tCells[0], dayLetter, 'D12', inCurrent)) {
+            let n12 = countAssigned(assignments, dateStr, pos.positionName, 'N12');
+            while (n12 < qty) {
+                if (!tryFillOneSlot(params, pos, dateStr, dayLetter, 'N12', inCurrent, {
+                    candidatePool: globalPool,
+                    ignoreFixedShift: true,
+                    ignorePendulum: true,
+                    preferRemainingBudget: true,
+                    allowTwelveHourUpgrade: true,
+                })) break;
+                n12++;
+            }
+            if (!positionDayMtnGap(assignments, dateStr, pd, qty)) return true;
+        }
+    }
+
+    return false;
+}
+
 export function recomputeUncoveredStats(params: DemandDrivenFillParams, dayDemands: ObjectiveDayDemand[]): void {
-    const { stats, isCustomCoverPosition, ctx } = params;
+    const { stats, isCustomCoverPosition, ctx, assignments } = params;
     stats.uncoveredSlots = 0;
     stats.uncoveredSlotsByDay = {};
     for (const day of dayDemands) {
         for (const pd of day.positions) {
             const pos = ctx.positions.find(p => p.positionName === pd.positionName);
             if (!pos || isCustomCoverPosition(pos)) continue;
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const eff = effectiveMtnCoverage(assignments, day.dateStr, pd.positionName, qty);
+            for (const code of ['M', 'T', 'N'] as const) {
+                const needed = pd.bandSlots[code] || 0;
+                if (needed <= 0) continue;
+                const have = eff[code];
+                if (have < needed) {
+                    recordUncovered(stats, day.dateStr, pd.positionName, code, needed - have);
+                }
+            }
             for (const [code, needed] of Object.entries(pd.bandSlots)) {
-                const have = countAssigned(params.assignments, day.dateStr, pd.positionName, code);
+                if (code === 'M' || code === 'T' || code === 'N') continue;
+                const have = countAssigned(assignments, day.dateStr, pd.positionName, code);
                 if (have < needed) {
                     recordUncovered(stats, day.dateStr, pd.positionName, code, needed - have);
                 }
@@ -652,8 +916,68 @@ export function fillDemandGapsBeforeFrancos(
                 }
             }
         }
+        if (!apretarDay) {
+            for (const pd of day.positions) {
+                const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+                if (!pos || isCustomCoverPosition(pos)) continue;
+                tryClosePositionDayWith12hAlternate(params, pos, pd, day.dateStr, day.dayLetter, inCurrent);
+            }
+        }
     }
     recomputeUncoveredStats(params, dayDemands);
+}
+
+function removePlainFrancoCell(
+    params: DemandDrivenFillParams,
+    empId: string,
+    dateStr: string,
+): V2Assignment | null {
+    const idx = params.assignments.findIndex(a =>
+        a.empId === empId &&
+        a.dateStr === dateStr &&
+        String(a.code || '').toUpperCase() === 'F' &&
+        (a.hours ?? 0) === 0,
+    );
+    if (idx < 0) return null;
+    const cell = params.assignments[idx];
+    params.assignments.splice(idx, 1);
+    params.runtime[empId]?.assignedDays.delete(dateStr);
+    return cell;
+}
+
+function restorePlainFrancoCell(params: DemandDrivenFillParams, cell: V2Assignment): void {
+    params.assignments.push(cell);
+    params.runtime[cell.empId]?.assignedDays.add(cell.dateStr);
+}
+
+/** Día laborable del ciclo marcado F por fallback → cubrir hueco SLA (no franco trabajado). */
+function tryPromoteCycleWorkFrancoToGap(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    dateStr: string,
+    dayLetter: string,
+    code: string,
+    inCurrent: boolean,
+): boolean {
+    const { cycleWorkDays, positionGroups } = params;
+    const posPool = positionGroups[pos.positionName] || [];
+    const pool = [...posPool, ...global24hsEmployeePool(params).filter(id => !posPool.includes(id))];
+
+    for (const empId of pool) {
+        if (!cycleWorkDays[empId]?.has(dateStr)) continue;
+        const saved = removePlainFrancoCell(params, empId, dateStr);
+        if (!saved) continue;
+
+        const filled = tryFillOneSlot(params, pos, dateStr, dayLetter, code, inCurrent, {
+            candidatePool: [empId],
+            ignoreFixedShift: true,
+            ignorePendulum: true,
+            preferRemainingBudget: true,
+        });
+        if (filled) return true;
+        restorePlainFrancoCell(params, saved);
+    }
+    return false;
 }
 
 /** Mueve guardia que ya cubre la banda en otro puesto hacia el hueco (misma banda/día). */
@@ -688,15 +1012,21 @@ function tryMoveSameBandWorkerToGap(
         if (sEnd) donor.endTime = sEnd;
 
         const filledBack =
-            (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
+            tryFillSlotFromFrancoRescue(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
+                ignorePendulum: true,
+                allowSlaClose: true,
+            })
+            || (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
                 ignorePendulum: true,
                 allowSlaClose: true,
             }))
+            || bruteForceFrancoToGap(params, donorPos, dateStr, dayLetter, targetCode, inCurrent)
             || tryFillOneSlot(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
                 candidatePool: global24hsEmployeePool(params),
                 ignoreFixedShift: true,
                 ignorePendulum: true,
                 preferRemainingBudget: true,
+                allowSlaClose: true,
             })
             || tryPromoteRetToSlot(params, donorPos, dateStr, dayLetter, targetCode, inCurrent)
             || tryReassignWorkerToGap(params, donorPos, dateStr, dayLetter, targetCode, inCurrent);
@@ -745,7 +1075,11 @@ function trySwapBandOnSamePosition(
     if (sEnd) donor.endTime = sEnd;
 
     const filled =
-        (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
+        tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
+            ignorePendulum: true,
+            allowSlaClose: true,
+        })
+        || (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
             ignorePendulum: true,
             allowSlaClose: true,
         }))
@@ -762,6 +1096,289 @@ function trySwapBandOnSamePosition(
     return false;
 }
 
+/** Intercambia puesto entre quien tiene la banda faltante y otro puesto con banda distinta (cierra M en Internado). */
+function tryCrossPositionTwoWorkerSwapForGap(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    dateStr: string,
+    dayLetter: string,
+    neededCode: string,
+    inCurrent: boolean,
+): boolean {
+    const targetCode = normBand(neededCode);
+    const { assignments, ctx, isCustomCoverPosition, shiftHoursH, passesAgreementRest } = params;
+
+    const gapPosWorkers = assignments.filter(a =>
+        a.dateStr === dateStr && a.positionName === pos.positionName && (a.hours ?? 0) > 0,
+    );
+    const blockers = gapPosWorkers.filter(a => normBand(a.code) !== targetCode);
+    if (blockers.length === 0) return false;
+
+    const mDonors = assignments.filter(a =>
+        a.dateStr === dateStr &&
+        a.positionName &&
+        a.positionName !== pos.positionName &&
+        normBand(a.code) === targetCode &&
+        (a.hours ?? 0) > 0,
+    );
+
+    for (const blocker of blockers) {
+    for (const donor of mDonors) {
+        const donorPos = ctx.positions.find(p => p.positionName === donor.positionName);
+        if (!donorPos || isCustomCoverPosition(donorPos)) continue;
+
+        const savedDonor = { ...donor };
+        const savedBlocker = { ...blocker };
+        const blockerBand = normBand(blocker.code);
+        const blockerSh = shiftDefForCode(donorPos, dayLetter, blockerBand, ctx.autoCycles, shiftHoursH);
+        const gapSh = shiftDefForCode(pos, dayLetter, targetCode, ctx.autoCycles, shiftHoursH);
+
+        donor.positionName = pos.positionName;
+        donor.name = gapSh.name || targetCode;
+
+        blocker.positionName = donorPos.positionName;
+        blocker.code = blockerBand;
+        blocker.name = blockerSh.name || blockerBand;
+        blocker.hours = shiftHoursH(blockerSh);
+        blocker.startTime = blockerSh.startTime || DEFAULT_START[blockerBand] || '07:00';
+        if (blockerSh.endTime) blocker.endTime = blockerSh.endTime;
+        else delete blocker.endTime;
+
+        const ok1 = passesAgreementRest(donor.empId, dateStr, targetCode, donor.startTime, donor.hours ?? 8);
+        const ok2 = passesAgreementRest(blocker.empId, dateStr, blockerBand, blocker.startTime, blocker.hours ?? 8);
+        if (!ok1 || !ok2) {
+            Object.assign(donor, savedDonor);
+            Object.assign(blocker, savedBlocker);
+            continue;
+        }
+
+        const backfill =
+            tryFillSlotFromFrancoRescue(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
+                ignorePendulum: true,
+                allowSlaClose: true,
+            })
+            || bruteForceFrancoToGap(params, donorPos, dateStr, dayLetter, targetCode, inCurrent)
+            || tryFillOneSlot(params, donorPos, dateStr, dayLetter, targetCode, inCurrent, {
+                candidatePool: global24hsEmployeePool(params),
+                ignoreFixedShift: true,
+                ignorePendulum: true,
+                preferRemainingBudget: true,
+                allowSlaClose: true,
+            });
+
+        if (backfill) return true;
+
+        Object.assign(donor, savedDonor);
+        Object.assign(blocker, savedBlocker);
+    }
+    }
+    return false;
+}
+
+/**
+ * Guardias en día laborable del ciclo aún sin celda → cubrir huecos SLA (ignore péndulo).
+ */
+export function assignUnassignedWorkDayEmployeesToGaps(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+): void {
+    const { ctx, cycleWorkDays, runtime, isCustomCoverPosition } = params;
+    const bandOrder = ['M', 'T', 'N'] as const;
+    const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+
+    for (let pass = 0; pass < 6; pass++) {
+        let progress = false;
+        for (const day of orderedDays) {
+            if (day.totalPaxUnits <= 0 || isModo12Day(day.dateStr, ctx)) continue;
+            const dayNum = parseInt(day.dateStr.split('-')[2], 10);
+            const inCurrent = dayNum <= params.cutoffDay;
+
+            for (const code of bandOrder) {
+                for (const pd of day.positions) {
+                    const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+                    if (!pos || isCustomCoverPosition(pos)) continue;
+                    const qty = Math.max(1, Number(pos.qty) || 1);
+                    const eff = effectiveMtnCoverage(params.assignments, day.dateStr, pd.positionName, qty);
+                    const needed = pd.bandSlots[code] || 0;
+                    if (needed <= 0 || eff[code] >= needed) continue;
+
+                    const posPool = params.positionGroups[pos.positionName] || [];
+                    const freeWorkers = [...posPool, ...global24hsEmployeePool(params).filter(id => !posPool.includes(id))]
+                        .filter(empId =>
+                            cycleWorkDays[empId]?.has(day.dateStr) &&
+                            !runtime[empId].assignedDays.has(day.dateStr) &&
+                            !ctx.absences[empId]?.has(day.dateStr),
+                        );
+
+                    for (const empId of freeWorkers) {
+                        if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                            candidatePool: [empId],
+                            ignoreFixedShift: true,
+                            ignorePendulum: true,
+                            preferRemainingBudget: true,
+                        })) {
+                            progress = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!progress) break;
+    }
+    recomputeUncoveredStats(params, dayDemands);
+}
+
+/** Empleado sin celda en día laborable → intentar cerrar cualquier hueco SLA del día. */
+export function tryAssignEmployeeToDayGap(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+    empId: string,
+    dateStr: string,
+    inCurrent: boolean,
+): boolean {
+    const { ctx, cycleWorkDays, isCustomCoverPosition } = params;
+    if (!cycleWorkDays[empId]?.has(dateStr)) return false;
+    if (ctx.absences[empId]?.has(dateStr)) return false;
+    if (params.runtime[empId].assignedDays.has(dateStr)) return false;
+
+    const day = dayDemands.find(d => d.dateStr === dateStr);
+    if (!day || isModo12Day(dateStr, ctx)) return false;
+
+    for (const code of ['M', 'T', 'N'] as const) {
+        for (const pd of day.positions) {
+            const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+            if (!pos || isCustomCoverPosition(pos)) continue;
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const eff = effectiveMtnCoverage(params.assignments, dateStr, pd.positionName, qty);
+            const needed = pd.bandSlots[code] || 0;
+            if (needed <= 0 || eff[code] >= needed) continue;
+
+            if (tryFillOneSlot(params, pos, dateStr, day.dayLetter, code, inCurrent, {
+                candidatePool: [empId],
+                ignoreFixedShift: true,
+                ignorePendulum: true,
+                preferRemainingBudget: true,
+                allowSlaClose: true,
+            })) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/** Último recurso: cualquier F del día con descanso OK → hueco SLA (cierre 2880h). */
+function bruteForceFrancoToGap(
+    params: DemandDrivenFillParams,
+    pos: V2PositionDef,
+    dateStr: string,
+    dayLetter: string,
+    code: string,
+    inCurrent: boolean,
+): boolean {
+    const { assignments, ctx, shiftHoursH, passesAgreementRest, stats, runtime, limitedEmpIds } = params;
+    const sh = shiftDefForCode(pos, dayLetter, code, ctx.autoCycles, shiftHoursH);
+    const sHrs = shiftHoursH(sh);
+    const sStart = sh.startTime || DEFAULT_START[code] || '07:00';
+    const sEnd = sh.endTime;
+    const slotQty = Math.max(1, Number(pos.qty) || 1);
+    if (countAssigned(assignments, dateStr, pos.positionName, code) >= slotQty) return false;
+
+    for (const emp of ctx.employees) {
+        const empId = emp.id;
+        if (ctx.absences[empId]?.has(dateStr)) continue;
+        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
+        if (!a || !isFrancoAssignment(a)) continue;
+        if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
+
+        const st = runtime[empId];
+        const wkKey = isoWeekKeyFromDateStr(dateStr);
+        st.weekHours[wkKey] = (st.weekHours[wkKey] || 0) + sHrs;
+        if (inCurrent) {
+            st.cycleCurrentUsed += sHrs;
+            stats.employeeCycleHours.current[empId] = st.cycleCurrentUsed;
+        } else {
+            st.cycleNextUsed += sHrs;
+            stats.employeeCycleHours.next[empId] = st.cycleNextUsed;
+        }
+        st.monthHours += sHrs;
+        stats.employeeMonthlyHours[empId] = st.monthHours;
+        st.lastWorkDate = dateStr;
+        st.lastShiftCode = code;
+        st.lastShiftStart = parseHourFromTime(sStart);
+        st.lastShiftHours = sHrs;
+
+        a.positionName = pos.positionName;
+        a.code = code;
+        a.name = sh.name || code;
+        a.hours = sHrs;
+        a.startTime = sStart;
+        if (sEnd) a.endTime = sEnd;
+        else delete a.endTime;
+        a.isFranco = false;
+        a.isReten = false;
+        stats.totalBillableHours = (stats.totalBillableHours || 0) + sHrs;
+        return true;
+    }
+    return false;
+}
+
+/** Repara puestos con M/T/N incompleto (Internado T+N sin M, etc.). */
+export function repairPositionDayTripletGaps(
+    params: DemandDrivenFillParams,
+    dayDemands: ObjectiveDayDemand[],
+): void {
+    const { ctx, isCustomCoverPosition } = params;
+    repairOrphan12hOnRotativoDays(params, dayDemands, isCustomCoverPosition);
+    const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+
+    for (let round = 0; round < 8; round++) {
+        let progress = false;
+        for (const day of orderedDays) {
+            if (day.totalPaxUnits <= 0 || isModo12Day(day.dateStr, ctx)) continue;
+            const dayNum = parseInt(day.dateStr.split('-')[2], 10);
+            const inCurrent = dayNum <= params.cutoffDay;
+
+            for (const pd of day.positions) {
+                const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+                if (!pos || isCustomCoverPosition(pos)) continue;
+                const qty = Math.max(1, Number(pos.qty) || 1);
+                if (!positionDayMtnGap(params.assignments, day.dateStr, pd, qty)) continue;
+
+                for (const code of ['M', 'T', 'N'] as const) {
+                    const needed = pd.bandSlots[code] || 0;
+                    if (needed <= 0) continue;
+                    const eff = effectiveMtnCoverage(params.assignments, day.dateStr, pd.positionName, qty);
+                    if (eff[code] >= needed) continue;
+
+                    if (tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        ignorePendulum: true,
+                        allowSlaClose: true,
+                    })) {
+                        progress = true;
+                        continue;
+                    }
+                    if (bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                        progress = true;
+                        continue;
+                    }
+                    if (tryCrossPositionTwoWorkerSwapForGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)
+                        || tryMoveSameBandWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)
+                        || tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                        progress = true;
+                    }
+                }
+                if (tryClosePositionDayWith12hAlternate(params, pos, pd, day.dateStr, day.dayLetter, inCurrent)) {
+                    progress = true;
+                }
+            }
+        }
+        recomputeUncoveredStats(params, dayDemands);
+        if (!progress || (params.stats.uncoveredSlots ?? 0) <= 0) break;
+    }
+}
+
 /**
  * Último recurso: cierra huecos SLA ignorando péndulo (prioridad cobertura 4/4).
  * Solo aplica descanso CCT y tope 200h.
@@ -771,6 +1388,7 @@ export function forceCloseRemainingSlaGaps(
     dayDemands: ObjectiveDayDemand[],
 ): void {
     const { ctx, isCustomCoverPosition } = params;
+    repairOrphan12hOnRotativoDays(params, dayDemands, isCustomCoverPosition);
     const bandOrder = ['M', 'T', 'N', 'D12', 'N12'] as const;
     const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
@@ -789,6 +1407,7 @@ export function forceCloseRemainingSlaGaps(
                     if (!pos || isCustomCoverPosition(pos)) continue;
                     const needed = pd.bandSlots[code] || 0;
                     if (needed <= 0) continue;
+                    const posPool = params.positionGroups[pos.positionName] || [];
                     let have = countAssigned(params.assignments, day.dateStr, pd.positionName, code);
                     while (have < needed) {
                         if (trySwapBandOnSamePosition(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
@@ -797,6 +1416,16 @@ export function forceCloseRemainingSlaGaps(
                             continue;
                         }
                         if (tryMoveSameBandWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            progress = true;
+                            continue;
+                        }
+                        if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                            candidatePool: posPool.length > 0 ? posPool : globalPool,
+                            ignoreFixedShift: true,
+                            ignorePendulum: true,
+                            preferRemainingBudget: true,
+                        })) {
                             have++;
                             progress = true;
                             continue;
@@ -811,7 +1440,20 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
+                        if (tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            progress = true;
+                            continue;
+                        }
                         if (tryPromoteRetToSlot(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            progress = true;
+                            continue;
+                        }
+                        if (tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                            ignorePendulum: true,
+                            allowSlaClose: true,
+                        })) {
                             have++;
                             progress = true;
                             continue;
@@ -829,8 +1471,25 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
+                        if (tryCrossPositionTwoWorkerSwapForGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            progress = true;
+                            continue;
+                        }
+                        if (bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                            have++;
+                            progress = true;
+                            continue;
+                        }
                         break;
                     }
+                }
+            }
+            for (const pd of day.positions) {
+                const pos = ctx.positions.find(p => p.positionName === pd.positionName);
+                if (!pos || isCustomCoverPosition(pos)) continue;
+                if (tryClosePositionDayWith12hAlternate(params, pos, pd, day.dateStr, day.dayLetter, inCurrent)) {
+                    progress = true;
                 }
             }
         }
@@ -1039,19 +1698,8 @@ export function ensureRotativeCellsAssigned(
                             isFranco: false,
                             isReten: true,
                         });
-                    } else {
-                        assignments.push({
-                            empId: emp.id,
-                            dateStr,
-                            positionName: '',
-                            code: 'F',
-                            name: 'Franco',
-                            hours: 0,
-                            startTime: '00:00',
-                            isFranco: true,
-                        });
+                        st.assignedDays.add(dateStr);
                     }
-                    st.assignedDays.add(dateStr);
                 }
                 continue;
             }
@@ -1295,7 +1943,10 @@ function fillScheduleFromPendulum(
             }
         }
 
-        for (const slot of openSlots.filter(s => !s.filled)) {
+        for (const slot of openSlots.filter(s => !s.filled).sort((a, b) => {
+            const pri = (c: string) => (c === 'M' ? 0 : c === 'T' ? 1 : c === 'N' ? 2 : 3);
+            return pri(a.code) - pri(b.code);
+        })) {
             const phasePool = globalPool.filter(empId => {
                 if (params.runtime[empId].assignedDays.has(day.dateStr)) return false;
                 if (!params.cycleWorkDays[empId]?.has(day.dateStr)) return false;
@@ -1338,6 +1989,39 @@ function fillScheduleFromPendulum(
                 }
             }
         }
+        ensureMorningBandBeforeEveningOnDay(params, day, rotPositions, inCurrent, isCustomCoverPosition);
+    }
+}
+
+/** Evita T/N huérfanos: si hay tarde/noche sin mañana en el puesto, prioriza M. */
+function ensureMorningBandBeforeEveningOnDay(
+    params: DemandDrivenFillParams,
+    day: ObjectiveDayDemand,
+    rotPositions: ObjectiveDayDemand['positions'],
+    inCurrent: boolean,
+    isCustomCoverPosition: (pos: V2PositionDef) => boolean,
+): void {
+    if (isModo12Day(day.dateStr, params.ctx)) return;
+
+    for (const pd of rotPositions) {
+        const pos = params.ctx.positions.find(p => p.positionName === pd.positionName);
+        if (!pos || isCustomCoverPosition(pos)) continue;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        const mActual = countAssigned(params.assignments, day.dateStr, pd.positionName, 'M');
+        const eff = effectiveMtnCoverage(params.assignments, day.dateStr, pd.positionName, qty);
+        if (mActual >= qty || (eff.T < qty && eff.N < qty)) continue;
+
+        const mNeed = (pd.bandSlots.M || 0);
+        if (mNeed <= 0 || eff.M >= mNeed) continue;
+
+        if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, 'M', inCurrent, {
+            candidatePool: params.positionGroups[pos.positionName] || global24hsEmployeePool(params),
+            ignoreFixedShift: true,
+            ignorePendulum: true,
+            preferRemainingBudget: true,
+        })) continue;
+
+        tryCrossPositionTwoWorkerSwapForGap(params, pos, day.dateStr, day.dayLetter, 'M', inCurrent);
     }
 }
 
@@ -1426,33 +2110,8 @@ function fillScheduleDemandDriven(
 
         for (const posDemand of rotPositions) {
             const pos = ctx.positions.find(p => p.positionName === posDemand.positionName)!;
-            if (!posDemand.alternateBandSlots || Object.keys(posDemand.alternateBandSlots).length < 2) continue;
-            const mtnCodes = Object.keys(posDemand.bandSlots);
-            const hasGap = mtnCodes.some(code => {
-                const needed = posDemand.bandSlots[code] || 0;
-                const have = params.assignments.filter(a =>
-                    a.dateStr === day.dateStr &&
-                    a.positionName === pos.positionName &&
-                    String(a.code).toUpperCase() === code &&
-                    a.hours > 0,
-                ).length;
-                return have < needed;
-            });
-            if (!hasGap) continue;
-            for (const altCode of ['D12', 'N12']) {
-                const altNeed = posDemand.alternateBandSlots[altCode] || 0;
-                let altFilled = params.assignments.filter(a =>
-                    a.dateStr === day.dateStr &&
-                    a.positionName === pos.positionName &&
-                    String(a.code).toUpperCase() === altCode &&
-                    a.hours > 0,
-                ).length;
-                while (altFilled < altNeed) {
-                    if (tryFillOneSlot(params, pos, day.dateStr, day.dayLetter, altCode, inCurrent)) {
-                        altFilled++;
-                    } else break;
-                }
-            }
+            if (!positionDayMtnGap(params.assignments, day.dateStr, posDemand, Math.max(1, Number(pos.qty) || 1))) continue;
+            tryClosePositionDayWith12hAlternate(params, pos, posDemand, day.dateStr, day.dayLetter, inCurrent);
         }
     }
 }

@@ -55,7 +55,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions } from './demandDrivenSchedule';
+import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions, assignUnassignedWorkDayEmployeesToGaps, repairPositionDayTripletGaps, tryAssignEmployeeToDayGap } from './demandDrivenSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
@@ -2534,8 +2534,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
     stats.suvicoWeekBillableOver48 = suvicoWeekBillableOver48;
 
+    let gapFillParamsForFallback: Parameters<typeof fillDemandGapsBeforeFrancos>[0] | null = null;
     if (useDemandDriven && dayDemandsFromFill.length > 0) {
-        const gapFillParams = {
+        gapFillParamsForFallback = {
             ctx,
             positionGroups,
             cycleWorkDays,
@@ -2554,7 +2555,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             retDesignateSet,
             flexSchemeEmpIds: flexSchemeEmpSet,
         };
-        fillDemandGapsBeforeFrancos(gapFillParams, dayDemandsFromFill);
+        fillDemandGapsBeforeFrancos(gapFillParamsForFallback, dayDemandsFromFill);
     }
 
     // Días sobrantes:
@@ -2650,6 +2651,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
+            if (
+                fallbackCode === 'F'
+                && isWorkDayInCycle
+                && gapFillParamsForFallback
+                && ctx.rotateShifts !== false
+            ) {
+                if (tryAssignEmployeeToDayGap(gapFillParamsForFallback, dayDemandsFromFill, emp.id, dateStr, inCurrent)) {
+                    continue;
+                }
+            }
+
             assignments.push({
                 empId: emp.id,
                 dateStr,
@@ -2701,7 +2713,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if ((stats.uncoveredSlots ?? 0) <= 0) break;
         }
         ensureRotativeCellsAssigned(gapFillFinal);
+        assignUnassignedWorkDayEmployeesToGaps(gapFillFinal, dayDemandsFromFill);
         finalizeApretarDayAssignments(gapFillFinal, dayDemandsFromFill);
+        forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
+        repairPositionDayTripletGaps(gapFillFinal, dayDemandsFromFill);
+        assignUnassignedWorkDayEmployeesToGaps(gapFillFinal, dayDemandsFromFill);
         forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
     }
