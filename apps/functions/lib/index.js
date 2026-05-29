@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -829,19 +829,9 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
     }
 });
 const nodemailer = require("nodemailer");
-function buildPortalEmailHtml(resetLink, activationLink) {
-    const activationBlock = activationLink ? `
-            <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#1e293b;font-size:15px;font-weight:bold;margin:0 0 8px;">📱 Activá tu dispositivo</p>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 16px;">Para poder marcar presencia, abrí este email <strong>desde tu celular</strong> y tocá el botón de abajo. Esto vincula tu dispositivo a tu cuenta.</p>
-            <table cellpadding="0" cellspacing="0" style="margin:0 auto 8px;">
-              <tr>
-                <td style="background:#0f766e;border-radius:8px;">
-                  <a href="${activationLink}" target="_blank" style="display:inline-block;padding:12px 28px;color:#fff;font-size:14px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR MI DISPOSITIVO</a>
-                </td>
-              </tr>
-            </table>
-            <p style="color:#94a3b8;font-size:11px;text-align:center;margin:0 0 4px;">Este enlace expira en 48 horas y es de un solo uso.</p>` : '';
+function buildPortalEmailHtml(activationLink, empresaNombre) {
+    const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
+    const nombreUpper = nombre.toUpperCase();
     return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -851,33 +841,32 @@ function buildPortalEmailHtml(resetLink, activationLink) {
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
-            <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
+            <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">${nombreUpper}</p>
             <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados · COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
-            <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Hacé clic en el botón de abajo para crear tu contraseña y acceder al portal:</p>
-            <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
+            <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular</strong> y tocá el botón para crear tu contraseña y vincular tu dispositivo en un solo paso:</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
               <tr>
-                <td style="background:#1e3a5f;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÑA</a>
+                <td style="background:#0f766e;border-radius:8px;">
+                  <a href="${activationLink}" target="_blank" style="display:inline-block;padding:16px 40px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR MI CUENTA</a>
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.</p>
-            ${activationBlock}
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrás ver tus turnos, marcar presencia y gestionar novedades.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podés ignorarlo.</p>
             <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
-              <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
+              <a href="${activationLink}" style="color:#3b82f6;word-break:break-all;">${activationLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · ${nombre}</strong></p>
           </td>
         </tr>
       </table>
@@ -886,25 +875,18 @@ function buildPortalEmailHtml(resetLink, activationLink) {
 </body>
 </html>`;
 }
-function buildPortalEmailText(resetLink, activationLink) {
-    const activationSection = activationLink ? `
+function buildPortalEmailText(activationLink, empresaNombre) {
+    const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
+    return `${nombre} te ha otorgado acceso al Portal de Empleados de COSP.
 
-📱 ACTIVAR DISPOSITIVO (abrí desde tu celular):
+Abrí este email desde tu celular y tocá el siguiente enlace para crear tu contraseña y vincular tu dispositivo en un solo paso:
+
 ${activationLink}
-Este enlace expira en 48 horas y es de un solo uso.` : '';
-    return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Empleados de COSP.
 
-Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
-
-${resetLink}
-
-Una vez que crees tu contraseña, podrás ver tus turnos, novedades y más.
-${activationSection}
-
-Si no esperabas este email, podés ignorarlo. El enlace de contraseña caduca en 24 horas.
+Este enlace expira en 48 horas y es de un solo uso.
 
 Saludos,
-Equipo Operativo - Bacar sa. Seguridad Privada`;
+Equipo Operativo - ${nombre}`;
 }
 exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
@@ -941,6 +923,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     });
     const db = admin.firestore();
     const results = [];
+    const empresaNombreCache = {};
     for (const empId of employeeIds) {
         try {
             const empDoc = await db.collection('empleados').doc(empId).get();
@@ -950,6 +933,23 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
             }
             const emp = empDoc.data();
             const email = (emp.email || emp.correo || '').toString().trim().toLowerCase();
+            const empresaId = (emp.empresaId || '').toString();
+            let empresaNombre = 'Bacar sa. Seguridad Privada';
+            if (empresaId) {
+                if (empresaNombreCache[empresaId] !== undefined) {
+                    empresaNombre = empresaNombreCache[empresaId];
+                }
+                else {
+                    try {
+                        const empDoc2 = await db.collection('empresas').doc(empresaId).get();
+                        if (empDoc2.exists) {
+                            empresaNombre = empDoc2.data().nombre || empDoc2.data().name || empresaNombre;
+                        }
+                    }
+                    catch (_) { }
+                    empresaNombreCache[empresaId] = empresaNombre;
+                }
+            }
             if (!email) {
                 results.push({ empId, email: '', success: false, error: 'Sin email registrado', alreadyExisted: false });
                 continue;
@@ -973,9 +973,6 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                     throw e;
                 }
             }
-            const resetLink = await admin.auth().generatePasswordResetLink(email, {
-                url: 'https://comtroldata.web.app/empleado/dashboard',
-            });
             const crypto = await Promise.resolve().then(() => require('crypto'));
             const activationToken = crypto.randomUUID();
             const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
@@ -989,11 +986,11 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
             });
             const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
             await transporter.sendMail({
-                from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
+                from: `"${empresaNombre}" <${gmailUser}>`,
                 to: email,
-                subject: 'Acceso al Portal de Empleados - COSP',
-                html: buildPortalEmailHtml(resetLink, activationLink),
-                text: buildPortalEmailText(resetLink, activationLink),
+                subject: `Acceso al Portal de Empleados - ${empresaNombre}`,
+                html: buildPortalEmailHtml(activationLink, empresaNombre),
+                text: buildPortalEmailText(activationLink, empresaNombre),
             });
             const staleSnap = await db.collection('empleados')
                 .where('uid', '==', uid)
@@ -1061,6 +1058,44 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
         deviceId: deviceId || null,
     });
     return { success: true, employeeId: td.employeeId };
+});
+exports.activateAndSetPassword = functions.https.onCall(async (data, _context) => {
+    const { token, password, deviceId, deviceInfo } = data;
+    if (!token)
+        throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
+    if (!password || password.length < 6) {
+        throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+    }
+    const db = admin.firestore();
+    const tokenRef = db.collection('device_activations').doc(token);
+    const tokenDoc = await tokenRef.get();
+    if (!tokenDoc.exists) {
+        throw new functions.https.HttpsError('not-found', 'Enlace inválido o ya utilizado.');
+    }
+    const td = tokenDoc.data();
+    if (td.used) {
+        throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado. Tu dispositivo puede estar activo.');
+    }
+    if (td.expiresAt.toDate() < new Date()) {
+        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expiró. Pedile al administrador que te reenvíe el mail de acceso.');
+    }
+    const { uid, employeeId } = td;
+    const userRecord = await admin.auth().getUser(uid);
+    const email = userRecord.email;
+    if (!email)
+        throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
+    await admin.auth().updateUser(uid, { password });
+    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('device_tokens').doc(uid).set({
+        uid,
+        employeeId,
+        verified: true,
+        source: 'email_link',
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        deviceInfo: deviceInfo || {},
+        deviceId: deviceId || null,
+    });
+    return { email, employeeId };
 });
 function buildClientPortalEmailHtml(resetLink, clientName) {
     return `<!DOCTYPE html>

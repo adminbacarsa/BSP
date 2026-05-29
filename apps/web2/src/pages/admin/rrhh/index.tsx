@@ -6,8 +6,6 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { TabBar } from '@/components/ui';
 import { employeeService, Employee } from '@/services/employeeService';
 import { absenceService, Absence } from '@/services/absenceService';
-import AjustarCronoCoberturaModal from '@/components/admin/rrhh/AjustarCronoCoberturaModal';
-import { mapAbsenceTypeToCobertura, applyCoberturaPendientesMasivo } from '@/lib/ajustesCrono/ajustesCronoService';
 import { holidayService, Holiday } from '@/services/holidayService';
 import { agreementService } from '@/services/agreementService';
 import { db } from '@/lib/firebase';
@@ -239,17 +237,6 @@ export default function EmployeesPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
 
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
-  const [showCoberturaModal, setShowCoberturaModal] = useState(false);
-  const [coberturaAusencia, setCoberturaAusencia] = useState<{
-    id: string;
-    employeeId: string;
-    employeeName: string;
-    startDate: Date;
-    endDate: Date;
-    tipo: 'VACACIONES' | 'LICENCIA' | 'AUSENCIA' | 'ENFERMEDAD';
-  } | null>(null);
-  const [coberturaReadOnly, setCoberturaReadOnly] = useState(false);
-  const [coberturaMasivoLoading, setCoberturaMasivoLoading] = useState(false);
   const initialAbsenceForm: Absence = { employeeId: '', employeeName: '', type: 'Vacaciones', startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], status: 'Pendiente', hasCertificate: false, reason: '', comments: '', rejectionReason: '', alternativePeriodStart: '', alternativePeriodEnd: '' };
   const [absenceForm, setAbsenceForm] = useState<Absence>(initialAbsenceForm);
   const [isEditingAbsence, setIsEditingAbsence] = useState(false);
@@ -985,64 +972,10 @@ export default function EmployeesPage() {
     }
   };
   const getAbsenceEmployeeName = (a: Absence) => { if (a.employeeName) return a.employeeName; const emp = employees.find(e => e.id === a.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : 'Desconocido'; };
-  const openCoberturaModal = (a: Absence, readOnly = false) => {
-    setCoberturaAusencia({
-      id: a.id!,
-      employeeId: a.employeeId,
-      employeeName: getAbsenceEmployeeName(a),
-      startDate: new Date(`${a.startDate}T12:00:00`),
-      endDate: new Date(`${a.endDate}T12:00:00`),
-      tipo: mapAbsenceTypeToCobertura(a.type),
-    });
-    setCoberturaReadOnly(readOnly);
-    setShowCoberturaModal(true);
-  };
   const coberturaBadgeClass = (estado?: string) => {
     if (estado === 'GESTIONADA') return 'bg-teal-100 text-teal-700';
     if (estado === 'VACANTE') return 'bg-amber-100 text-amber-700';
     return 'bg-slate-100 text-slate-500';
-  };
-  const handleCoberturaMasiva = async () => {
-    const pendientes = absences.filter(a =>
-      a.status !== 'Rechazada' && (!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE'),
-    );
-    if (pendientes.length === 0) {
-      addToast('No hay ausencias con cobertura pendiente.', 'info');
-      return;
-    }
-    if (!confirm(`¿Ajustar crono automáticamente para ${pendientes.length} ausencia(s) pendiente(s)?`)) return;
-    const auth = getAuth();
-    const creadoPor = auth.currentUser?.email || auth.currentUser?.displayName || 'admin';
-    setCoberturaMasivoLoading(true);
-    try {
-      const res = await applyCoberturaPendientesMasivo({
-        empresaId: empresaId || '',
-        creadoPor,
-        ausencias: pendientes.map(a => ({
-          id: a.id!,
-          employeeId: a.employeeId,
-          employeeName: getAbsenceEmployeeName(a),
-          startDate: a.startDate,
-          endDate: a.endDate,
-          type: a.type,
-          coberturaEstado: a.coberturaEstado,
-          status: a.status,
-        })),
-      });
-      loadAbsences();
-      if (res.aplicadas > 0) {
-        addToast(`${res.aplicadas} ausencia(s) cubiertas con ajuste crono.`, 'success');
-      }
-      if (res.omitidas > 0 && res.aplicadas === 0) {
-        addToast(`No se pudo cubrir ninguna (${res.omitidas} omitidas).`, 'error');
-      } else if (res.errores.length > 0) {
-        addToast(`${res.aplicadas} ok · ${res.errores.length} con error.`, 'info');
-      }
-    } catch (e: any) {
-      addToast(e?.message || 'Error en cobertura masiva.', 'error');
-    } finally {
-      setCoberturaMasivoLoading(false);
-    }
   };
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setFileName(file.name); const reader = new FileReader(); reader.onload = (evt) => { if (evt.target?.result) { setCsvContent(evt.target.result as string); } }; reader.readAsText(file, 'ISO-8859-1'); };
   
@@ -2391,7 +2324,7 @@ export default function EmployeesPage() {
             {activeTab === 'correcciones' && (
                 <CorreccionesTab employees={employees} canAdjust={canAdjust} />
             )}
-            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}<button type="button" onClick={handleCoberturaMasiva} disabled={coberturaMasivoLoading} className="px-3 py-2 rounded-xl text-xs font-black uppercase bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5 ml-auto">{coberturaMasivoLoading ? '…' : '⚡ Ajustar crono — pendientes'}</button></div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr><th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30"><td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Autorizada' ? 'bg-teal-100 text-teal-700' : a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : a.status === 'Rechazada' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span></td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <button type="button" onClick={() => openCoberturaModal(a)} className="block mx-auto mt-1 text-[10px] font-black uppercase text-teal-600 hover:text-teal-800">Ajustar crono</button>}{a.coberturaEstado === 'GESTIONADA' && <button type="button" onClick={() => openCoberturaModal(a, true)} className="block mx-auto mt-1 text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800">Ver ajuste</button>}</td><td className="p-4 text-right flex justify-end gap-2">{a.status === 'Pendiente' && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
+            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}</div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr><th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30"><td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Autorizada' ? 'bg-teal-100 text-teal-700' : a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : a.status === 'Rechazada' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span></td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <p className="text-[9px] text-slate-400 mt-1 font-bold">Gestionar en Planificación</p>}</td><td className="p-4 text-right flex justify-end gap-2">{a.status === 'Pendiente' && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
         </div>
 
         {/* MODAL DE IMPORTACIÓN CSV (AMPLIADO) */}
@@ -2810,16 +2743,6 @@ export default function EmployeesPage() {
                     </div>
                 </div>
             </div>
-        )}
-        {showCoberturaModal && coberturaAusencia && empresaId && (
-            <AjustarCronoCoberturaModal
-                open={showCoberturaModal}
-                onClose={() => { setShowCoberturaModal(false); loadAbsences(); }}
-                empresaId={empresaId}
-                ausencia={coberturaAusencia}
-                clients={clients}
-                readOnly={coberturaReadOnly}
-            />
         )}
     </DashboardLayout>
   );

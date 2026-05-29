@@ -316,7 +316,9 @@ service cloud.firestore {
     match /novedades/{novedadId} {
       allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
       allow create: if request.auth != null && (isAdmin() ? tenantAdminCreate() : true);
-      allow update: if tenantAdminUpdate();
+      allow update: if tenantAdminUpdate() || (
+        request.auth != null && isAdmin() && tenantMatches(resource.data)
+      );
       allow delete: if tenantAdminDelete();
     }
 

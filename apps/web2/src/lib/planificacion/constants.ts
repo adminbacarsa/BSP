@@ -3,7 +3,7 @@ export const SHIFT_STYLES: any = {
     'N': 'bg-indigo-100 text-indigo-700 border-indigo-200', 'D12': 'bg-cyan-100 text-cyan-700 border-cyan-200',
     'N12': 'bg-purple-100 text-purple-700 border-purple-200', 'F': 'bg-emerald-100 text-emerald-700 border-emerald-200',
     'PU': 'bg-pink-100 text-pink-700 border-pink-200', 'A': 'bg-red-100 text-red-700 border-red-300 font-black',
-    'V': 'bg-teal-600 text-white border-teal-700 font-black shadow-sm', 'L': 'bg-purple-100 text-purple-700 border-purple-300 font-black',
+    'V': 'bg-red-600 text-white border-red-700 font-black shadow-sm', 'L': 'bg-purple-100 text-purple-700 border-purple-300 font-black',
     'E': 'bg-rose-100 text-rose-700 border-rose-300 font-black', 'AA': 'bg-amber-100 text-amber-700 border-amber-300',
     'RET': 'bg-amber-200 text-amber-900 border-amber-500 font-black',
     'PG': 'bg-blue-100 text-blue-700 border-blue-300 font-black',

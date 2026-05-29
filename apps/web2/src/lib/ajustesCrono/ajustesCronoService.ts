@@ -25,7 +25,11 @@ import type {
 const WORK_8 = new Set(['M', 'T', 'N']);
 const WORK_12 = new Set(['D12', 'N12']);
 
-/** Firestore rechaza `undefined`; limpia objetos antes de batch.set. */
+/** Asegura tenant en emulador cuando superadmin no tiene empresa activa seleccionada. */
+function resolveEmpresaId(empresaId: string): string {
+    return String(empresaId || '').trim() || 'bacarsa';
+}
+
 function stripUndefinedDeep<T>(value: T): T {
     if (value === undefined || value === null) return value;
     if (value instanceof Timestamp) return value;
@@ -50,7 +54,7 @@ function setAjusteCronoDoc(
 ) {
     batch.set(
         ajusteRef,
-        stripUndefinedDeep(stampEmpresaId({ ...ajuste, createdAt: Timestamp.now() }, empresaId)),
+        stripUndefinedDeep(stampEmpresaId({ ...ajuste, createdAt: Timestamp.now() }, resolveEmpresaId(empresaId))),
     );
 }
 
@@ -394,9 +398,10 @@ export async function existsActiveAjusteOperativo(
     objectiveId: string,
     fecha: Date,
 ): Promise<boolean> {
+    const tenantId = resolveEmpresaId(empresaId);
     const snap = await getDocs(query(
         collection(db, 'ajustes_crono'),
-        where('empresaId', '==', empresaId),
+        where('empresaId', '==', tenantId),
         where('tipo', '==', 'OPERATIVO'),
         where('origenObjetivoId', '==', objectiveId),
         where('estado', '==', 'ACTIVO'),
@@ -413,9 +418,10 @@ export async function existsActiveAjusteAusencia(
     empresaId: string,
     ausenciaId: string,
 ): Promise<boolean> {
+    const tenantId = resolveEmpresaId(empresaId);
     const snap = await getDocs(query(
         collection(db, 'ajustes_crono'),
-        where('empresaId', '==', empresaId),
+        where('empresaId', '==', tenantId),
         where('ausenciaId', '==', ausenciaId),
         where('estado', '==', 'ACTIVO'),
     ));
@@ -469,7 +475,7 @@ function appendOperativoOps(
                     origin: 'RETEN',
                     isReten: true,
                     draft: false,
-                }, empresaId));
+                }, resolveEmpresaId(empresaId)));
                 reten.destinoTurnoIds = [ref.id];
             }
             retenes.push(reten);
@@ -517,7 +523,8 @@ export async function applyAjusteOperativo(params: {
     motivo: string;
     filas: FilaGuardiaAjuste[];
 }): Promise<string> {
-    const { empresaId, creadoPor, fecha, objectiveId, objectiveNombre, motivo, filas } = params;
+    const { empresaId: rawEmpresaId, creadoPor, fecha, objectiveId, objectiveNombre, motivo, filas } = params;
+    const empresaId = resolveEmpresaId(rawEmpresaId);
     const valid = validateAjusteOperativo(filas);
     if (!valid.valido) throw new Error(valid.errores.join(' '));
 
@@ -581,10 +588,11 @@ export async function applyAjusteCobertura(params: {
     origenObjetivoReten?: { id: string; nombre: string };
 }): Promise<string> {
     const {
-        empresaId, creadoPor, ausenciaId, guardiaAusenteId, guardiaAusenteNombre,
+        empresaId: rawEmpresaId, creadoPor, ausenciaId, guardiaAusenteId, guardiaAusenteNombre,
         startDate, endDate, objectiveId, objectiveNombre, motivo, estrategia,
         filasCompaneros = [], retenExterno, origenObjetivoReten,
     } = params;
+    const empresaId = resolveEmpresaId(rawEmpresaId);
 
     if (await existsActiveAjusteAusencia(empresaId, ausenciaId)) {
         throw new Error('Esta ausencia ya tiene un ajuste activo.');
@@ -802,9 +810,10 @@ export async function applyCoberturaAusenciaAutomatica(params: {
     motivo?: string;
 }): Promise<string> {
     const {
-        empresaId, creadoPor, ausenciaId, employeeId, employeeName,
+        empresaId: rawEmpresaId, creadoPor, ausenciaId, employeeId, employeeName,
         startDate, endDate, tipo, estrategia = 'COMPRIMIR_12H', motivo,
     } = params;
+    const empresaId = resolveEmpresaId(rawEmpresaId);
 
     const ctx = await resolveAusenciaCoberturaContext(employeeId, startDate, endDate);
     if (!ctx) {
@@ -874,7 +883,8 @@ export async function applyCoberturaPendientesMasivo(params: {
     estrategia?: EstrategiaCobertura;
     onProgress?: (msg: string) => void;
 }): Promise<CoberturaMasivoResult> {
-    const { empresaId, creadoPor, ausencias, estrategia = 'COMPRIMIR_12H', onProgress } = params;
+    const { empresaId: rawEmpresaId, creadoPor, ausencias, estrategia = 'COMPRIMIR_12H', onProgress } = params;
+    const empresaId = resolveEmpresaId(rawEmpresaId);
     let aplicadas = 0;
     let omitidas = 0;
     const errores: string[] = [];
@@ -1097,9 +1107,10 @@ export async function applyAjusteOperativoMasivo(params: {
     onProgress?: (msg: string) => void;
 }): Promise<AjusteOperativoMasivoResult> {
     const {
-        empresaId, creadoPor, fechaInicio, fechaFin, objectiveIds, objetivoNombres,
+        empresaId: rawEmpresaId, creadoPor, fechaInicio, fechaFin, objectiveIds, objetivoNombres,
         motivo, destinoObjetivoId, destinoObjetivoNombre, onProgress,
     } = params;
+    const empresaId = resolveEmpresaId(rawEmpresaId);
 
     const dias = eachDayInRange(fechaInicio, fechaFin);
     let retenesLiberados = 0;
@@ -1194,4 +1205,39 @@ export function mapAbsenceTypeToCobertura(tipo: string): 'VACACIONES' | 'LICENCI
     if (t.includes('ENFER') || t === 'E') return 'ENFERMEDAD';
     if (t.includes('LIC') || t === 'L') return 'LICENCIA';
     return 'AUSENCIA';
+}
+
+export type CoberturaAusenciaInput = {
+    id: string;
+    employeeId: string;
+    employeeName: string;
+    startDate: Date;
+    endDate: Date;
+    tipo: 'VACACIONES' | 'LICENCIA' | 'AUSENCIA' | 'ENFERMEDAD';
+};
+
+/** Normaliza ausencia / novedad al contrato del modal de cobertura. */
+export function coberturaAusenciaFromRecord(data: {
+    id?: string;
+    ausenciaId?: string;
+    employeeId?: string;
+    employeeName?: string;
+    startDate?: string | Date;
+    endDate?: string | Date;
+    type?: string;
+}): CoberturaAusenciaInput | null {
+    const id = String(data.ausenciaId || data.id || '').trim();
+    const employeeId = String(data.employeeId || '').trim();
+    if (!id || !employeeId) return null;
+    const startStr = String(data.startDate || '').slice(0, 10);
+    const endStr = String(data.endDate || data.startDate || '').slice(0, 10);
+    if (!startStr) return null;
+    return {
+        id,
+        employeeId,
+        employeeName: String(data.employeeName || employeeId),
+        startDate: new Date(`${startStr}T12:00:00`),
+        endDate: new Date(`${endStr || startStr}T12:00:00`),
+        tipo: mapAbsenceTypeToCobertura(data.type || ''),
+    };
 }

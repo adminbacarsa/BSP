@@ -23,6 +23,7 @@ export declare const registrarFichadaManual: functions.HttpsFunction & functions
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
+export declare const activateAndSetPassword: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';

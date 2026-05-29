@@ -39,6 +39,9 @@ let AbsenceService = class AbsenceService {
         }
         startDateObj.setHours(0, 0, 0, 0);
         endDateObj.setHours(23, 59, 59, 999);
+        if (endDateObj.getTime() < startDateObj.getTime()) {
+            throw new Error('La fecha fin no puede ser anterior a la fecha inicio.');
+        }
         const conflictingShifts = await this.workloadService.checkShiftOverlap(payload.employeeId, startDateObj, endDateObj);
         const db = this.getDb();
         const batch = db.batch();

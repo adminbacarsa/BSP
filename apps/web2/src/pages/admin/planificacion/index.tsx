@@ -46,6 +46,8 @@ import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
+import AjustarCronoCoberturaModal from '@/components/admin/rrhh/AjustarCronoCoberturaModal';
+import { coberturaAusenciaFromRecord, type CoberturaAusenciaInput } from '@/lib/ajustesCrono/ajustesCronoService';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -94,7 +96,7 @@ const SHIFT_STYLES: any = {
     'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
     'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
     'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
-    'V':   'bg-teal-600 text-white border-teal-700 font-black shadow-sm',
+    'V':   'bg-red-600 text-white border-red-700 font-black shadow-sm',
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
@@ -408,6 +410,9 @@ export default function PlanificacionPage() {
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
+    const [showCoberturaCronoModal, setShowCoberturaCronoModal] = useState(false);
+    const [coberturaCronoAusencia, setCoberturaCronoAusencia] = useState<CoberturaAusenciaInput | null>(null);
+    const [coberturaCronoReadOnly, setCoberturaCronoReadOnly] = useState(false);
     const [autoV2Loading, setAutoV2Loading] = useState(false);
     const [autoV2Generating, setAutoV2Generating] = useState(false);
     /** Barra de progreso en el modal de automatización (viabilidad / generar). */
@@ -1146,6 +1151,7 @@ export default function PlanificacionPage() {
 
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
+            if (absencesMap[key]) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -1179,6 +1185,7 @@ export default function PlanificacionPage() {
         const codeCounts: Record<string, number> = {};
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
+            if (absencesMap[key]) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
             const code = String(shift.code || '').toUpperCase();
@@ -1210,7 +1217,7 @@ export default function PlanificacionPage() {
             schemeLabel: units.schemeLabel,
             isPositionClosed: units.required > 0 && units.closed >= units.required,
         };
-    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective, autoCycles]);
+    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, absencesMap, positionStructure, selectedObjective, autoCycles]);
 
     const coverageCyclesForObjective = autoSelectedCyclesRef.current?.length
         ? autoSelectedCyclesRef.current
@@ -1222,6 +1229,7 @@ export default function PlanificacionPage() {
         displayedEmployees,
         (empId, ds) => {
             const key = `${empId}_${ds}`;
+            if (absencesMap[key]) return { isDeleted: true };
             const pending = pendingChanges[key];
             if (pending?.isDeleted) return { isDeleted: true };
             const shift = pending ? pending : shiftsMap[key];
@@ -1251,7 +1259,7 @@ export default function PlanificacionPage() {
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
-    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
+    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, absencesMap, coverageCyclesForObjective, dominantPosition]);
 
     const getPositionDailyCoverage = (dateStr: string, positionName: string) => {
         return calculateCoverageStats(dateStr, positionName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
@@ -1742,6 +1750,18 @@ export default function PlanificacionPage() {
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
     // ============================================================================
 
+    const openCoberturaCronoModal = (data: any, readOnly = false) => {
+        const rec = coberturaAusenciaFromRecord(data);
+        if (!rec) {
+            toast.error('No se pudo abrir el ajuste: falta el registro de ausencia.');
+            return false;
+        }
+        setCoberturaCronoAusencia(rec);
+        setCoberturaCronoReadOnly(readOnly);
+        setShowCoberturaCronoModal(true);
+        return true;
+    };
+
     // 🛑 V8.20: Handler Restaurado
     const handleNotificationClick = async (notif: any) => {
         setShowNotifications(false);
@@ -1808,14 +1828,22 @@ export default function PlanificacionPage() {
                             const absence = absencesMap[key];
 
                             const absHandled = shift && ['V','L','PG','A','E','AA'].includes(shift.code || '');
-                            if (isVacancyAbsence && !absHandled) {
-                                setVacancyData(absence ? { ...absence, source: 'AUSENCIA' } : { ...notif, source: 'AUSENCIA' });
+                            const ausenciaPayload = absence
+                                ? { ...absence, employeeId: targetEmp.id, employeeName: targetEmp.name, ausenciaId: absence.id || notif.ausenciaId }
+                                : { ...notif, employeeId: targetEmp.id, employeeName: targetEmp.name };
+                            const coberturaGestionada = absence?.coberturaEstado === 'GESTIONADA' || absence?.coberturaEstado === 'VACANTE';
+                            if (isVacancyAbsence && (notif.ausenciaId || absence?.id)) {
+                                openCoberturaCronoModal(ausenciaPayload, coberturaGestionada);
+                            } else if (isVacancyAbsence && !absHandled) {
+                                setVacancyData({ ...ausenciaPayload, source: 'AUSENCIA' });
                                 setSelectedReplacement('');
                                 setShowVacancyModal(true);
                             } else if ((shift && absence) || (shift && shift.hasNovedad)) {
                                 findNeighbors(shift, dateStr);
-                                if (absence && absence.type) {
-                                    setVacancyData({ ...absence, source: 'AUSENCIA' });
+                                if (absence && absence.type && (absence.id || notif.ausenciaId)) {
+                                    openCoberturaCronoModal(ausenciaPayload, coberturaGestionada);
+                                } else if (absence && absence.type) {
+                                    setVacancyData({ ...ausenciaPayload, source: 'AUSENCIA' });
                                     setSelectedReplacement('');
                                     setShowVacancyModal(true);
                                 } else {
@@ -1836,20 +1864,22 @@ export default function PlanificacionPage() {
                             toast.info(`Navegando a: ${targetEmp.name}`);
                         }, didNavigate ? 700 : 300);
                     } else if (isVacancyAbsence) {
-                        // Empleado no visible en la grilla actual: navegar mes y abrir modal igual
                         setTimeout(() => {
-                            setVacancyData({ ...notif, source: 'AUSENCIA' });
-                            setSelectedReplacement('');
-                            setShowVacancyModal(true);
+                            if (!openCoberturaCronoModal({ ...notif, source: 'AUSENCIA' })) {
+                                setVacancyData({ ...notif, source: 'AUSENCIA' });
+                                setSelectedReplacement('');
+                                setShowVacancyModal(true);
+                            }
                         }, 150);
                     }
                 }
             } catch (e) { console.error("Error navegando", e); }
         } else if (isVacancyAbsence) {
-            // Sin fecha: abrir modal directamente
-            setVacancyData({ ...notif, source: 'AUSENCIA' });
-            setSelectedReplacement('');
-            setShowVacancyModal(true);
+            if (!openCoberturaCronoModal({ ...notif, source: 'AUSENCIA' })) {
+                setVacancyData({ ...notif, source: 'AUSENCIA' });
+                setSelectedReplacement('');
+                setShowVacancyModal(true);
+            }
         }
     };
 
@@ -4026,7 +4056,7 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; hasConflict = false; }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
@@ -5064,7 +5094,7 @@ export default function PlanificacionPage() {
                 {/* MODALES Y MENÚS DE CONTEXTO (V9.10 - EXPANDIDOS Y ORDENADOS) */}
 
                 {/* 1. MODAL SELECTOR DE TURNOS */}
-                {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
+                {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !showCoberturaCronoModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
                         <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
@@ -5216,18 +5246,40 @@ export default function PlanificacionPage() {
                                                                 Esta novedad viene de RRHH (ausencias). No se edita desde Planificación.
                                                             </div>
                                                         )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (
+                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (absence.id || absence.ausenciaId) && (
                                                             <button
                                                                 onClick={() => {
-                                                                    const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName };
+                                                                    const payload = {
+                                                                        ...absence,
+                                                                        employeeId: selectedCell.empId,
+                                                                        employeeName,
+                                                                        ausenciaId: absence.id || absence.ausenciaId,
+                                                                    };
                                                                     setSelectedCell(null);
-                                                                    setVacancyData(vd);
+                                                                    openCoberturaCronoModal(
+                                                                        payload,
+                                                                        absence.coberturaEstado === 'GESTIONADA' || absence.coberturaEstado === 'VACANTE',
+                                                                    );
+                                                                }}
+                                                                className="mt-2 w-full py-2 rounded-xl bg-violet-600 text-white font-black text-xs hover:bg-violet-700 flex items-center justify-center gap-1.5"
+                                                            >
+                                                                <CalendarCheck size={14} />
+                                                                {absence.coberturaEstado === 'GESTIONADA' || absence.coberturaEstado === 'VACANTE'
+                                                                    ? 'Ver ajuste crono'
+                                                                    : 'Ajustar crono automático'}
+                                                            </button>
+                                                        )}
+                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && !absence.id && !absence.ausenciaId && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedCell(null);
+                                                                    setVacancyData({ ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName });
                                                                     setSelectedReplacement('');
                                                                     setShowVacancyModal(true);
                                                                 }}
                                                                 className="mt-2 w-full py-2 rounded-xl bg-amber-600 text-white font-black text-xs hover:bg-amber-700"
                                                             >
-                                                                Re-procesar cobertura
+                                                                Asignar suplente manual
                                                             </button>
                                                         )}
                                                         {isRRHHCode && !isPastClosed && !isConsolidated && !pending && !absence && (
@@ -5744,6 +5796,20 @@ export default function PlanificacionPage() {
                                     {selectedReplacement ? 'Asignar reemplazo' : 'Marcar vacante'}
                                 </button>
                             </div>
+                            {(vacancyData?.ausenciaId || vacancyData?.id) && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const payload = { ...vacancyData, ausenciaId: vacancyData.ausenciaId || vacancyData.id };
+                                        setShowVacancyModal(false);
+                                        openCoberturaCronoModal(payload);
+                                    }}
+                                    className="mt-3 w-full py-2.5 rounded-xl border-2 border-violet-200 bg-violet-50 text-violet-800 font-black text-xs hover:bg-violet-100 flex items-center justify-center gap-1.5"
+                                >
+                                    <CalendarCheck size={14} />
+                                    Preferir ajuste crono automático
+                                </button>
+                            )}
                             <p className="text-[10px] text-slate-400 text-center mt-3">Los cambios quedan pendientes — recordá guardar el cronograma.</p>
                         </div>
                     </div>
@@ -6921,7 +6987,7 @@ export default function PlanificacionPage() {
                 <AjustarCronoOperativoModal
                     open={showAjustarCronoModal}
                     onClose={() => setShowAjustarCronoModal(false)}
-                    empresaId={empresaId || ''}
+                    empresaId={empresaId || 'bacarsa'}
                     fechaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)}
                     fechaHastaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)}
                     objetivoInicial={selectedObjective && selectedObjectiveData
@@ -6930,6 +6996,20 @@ export default function PlanificacionPage() {
                     clients={clients}
                     gridSnapshot={{ shiftsMap, pendingChanges }}
                 />
+
+                {showCoberturaCronoModal && coberturaCronoAusencia && empresaId && (
+                    <AjustarCronoCoberturaModal
+                        open={showCoberturaCronoModal}
+                        onClose={() => {
+                            setShowCoberturaCronoModal(false);
+                            setCoberturaCronoAusencia(null);
+                        }}
+                        empresaId={empresaId || 'bacarsa'}
+                        ausencia={coberturaCronoAusencia}
+                        clients={clients}
+                        readOnly={coberturaCronoReadOnly}
+                    />
+                )}
 
             </div>
 
