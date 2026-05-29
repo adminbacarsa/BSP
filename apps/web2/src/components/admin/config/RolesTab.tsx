@@ -155,6 +155,10 @@ export default function RolesTab() {
                                         <tr key={mod.key} className="border-t dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/50">
                                             <td className="p-4 font-bold text-slate-700 dark:text-slate-300">{mod.label}</td>
                                             {PERMISSION_ACTIONS.map(act => {
+                                                const applies = !act.onlyModules || act.onlyModules.includes(mod.key);
+                                                if (!applies) {
+                                                    return <td key={act.key} className="p-4 text-center"><span className="block w-8 h-8 mx-auto rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-200 dark:border-slate-700"/></td>;
+                                                }
                                                 const active = (matrix[mod.key] || []).includes(act.key);
                                                 return (
                                                     <td key={act.key} className="p-4 text-center">

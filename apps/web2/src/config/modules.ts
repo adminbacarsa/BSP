@@ -12,10 +12,10 @@ export const SYSTEM_MODULES = [
     { key: 'CONFIG', label: '⚙️ Configuración Global' }
 ];
 
-export const PERMISSION_ACTIONS = [
+export const PERMISSION_ACTIONS: { key: string; label: string; onlyModules?: string[] }[] = [
     { key: 'read',   label: 'Ver' },
     { key: 'create', label: 'Crear' },
     { key: 'update', label: 'Editar' },
     { key: 'delete', label: 'Borrar' },
-    { key: 'adjust', label: 'Ajustar' },
+    { key: 'adjust', label: 'Ajustar', onlyModules: ['RRHH'] },
 ];
