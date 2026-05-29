@@ -56,6 +56,7 @@ import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions, assignUnassignedWorkDayEmployeesToGaps, repairPositionDayTripletGaps, tryAssignEmployeeToDayGap } from './demandDrivenSchedule';
+import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
@@ -260,6 +261,10 @@ export interface V2EngineContext {
      * Si > 0 y < cF: el empleado está a mitad de su bloque de descanso y junio arranca con franco.
      */
     prevMonthTrailingRestDays?: Record<string, number>;
+    /** Código del último día del mes anterior (M/T/N/F…) — ancla ciclo 24d M→T→N. */
+    prevMonthLastShiftByEmp?: Record<string, string>;
+    /** Última banda M/T/N antes del bloque de F al cierre de mayo (si el 31 es F). */
+    prevMonthLastWorkBandBeforeRest?: Record<string, string>;
     /**
      * Mapa empId → código de turno fijo (M/T/N/D12/N12) asignado por el operador
      * desde el selector "puesto prefijado + turno". Si está presente, el empleado
@@ -316,6 +321,10 @@ export interface V2EngineContext {
     allowFrancoWorkedRescue?: boolean;
     /** Si true: 6+2 estricto — sin flex 5+1/6+1 ni F→turno agresivo en cierre SLA. */
     strictSixTwo?: boolean;
+    /**
+     * Etapa 3 pura: solo ciclo + péndulo + francos. Sin fillScheduleFromDemand ni forceClose SLA.
+     */
+    cycleBaseOnly?: boolean;
     /** Fase de offset 0..cycleLen-1 (solo bandas fijas; búsqueda de cobertura). */
     fixedBandOffsetPhase?: number;
     /** Escalonado global M/T/N (interno, bandas fijas). */
@@ -2092,49 +2101,64 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     const useDemandDriven = shouldUseDemandDrivenScheduling(ctx);
+    const cycleBaseOnly = ctx.cycleBaseOnly === true;
     // Rotativo ON → demand-driven + péndulo. Rotativo OFF → loop clásico banda fija (abajo).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let dayDemandsFromFill: any[] = [];
     if (useDemandDriven) {
         seedDemandDrivenCycleFrancos(ctx, cycleWorkDays, assignments, runtime);
-        dayDemandsFromFill = fillScheduleFromDemand({
-            ctx,
-            positionGroups,
-            cycleWorkDays,
-            customCoverEmps,
-            limitedEmpIds,
-            assignments,
-            stats,
-            runtime,
-            cutoffDay,
-            shiftHoursH,
-            writeAssignment,
-            passesAgreementRest,
-            empMeta,
-            isCustomCoverPosition,
-            expectedShiftForDay,
-            retDesignateSet,
-            flexSchemeEmpIds: flexSchemeEmpSet,
-        });
-        fillDemandGapsBeforeFrancos({
-            ctx,
-            positionGroups,
-            cycleWorkDays,
-            customCoverEmps,
-            limitedEmpIds,
-            assignments,
-            stats,
-            runtime,
-            cutoffDay,
-            shiftHoursH,
-            writeAssignment,
-            passesAgreementRest,
-            empMeta,
-            isCustomCoverPosition,
-            expectedShiftForDay,
-            retDesignateSet,
-            flexSchemeEmpIds: flexSchemeEmpSet,
-        }, dayDemandsFromFill);
+        if (cycleBaseOnly) {
+            fillCycleBaseRotativeAssignments({
+                ctx,
+                assignments,
+                runtime,
+                cycleWorkDays,
+                empAssignedTo,
+                cutoffDay,
+                isCustomCoverPosition,
+                expectedShiftForDay,
+                tryAssignBandSlot,
+            });
+        } else {
+            dayDemandsFromFill = fillScheduleFromDemand({
+                ctx,
+                positionGroups,
+                cycleWorkDays,
+                customCoverEmps,
+                limitedEmpIds,
+                assignments,
+                stats,
+                runtime,
+                cutoffDay,
+                shiftHoursH,
+                writeAssignment,
+                passesAgreementRest,
+                empMeta,
+                isCustomCoverPosition,
+                expectedShiftForDay,
+                retDesignateSet,
+                flexSchemeEmpIds: flexSchemeEmpSet,
+            });
+            fillDemandGapsBeforeFrancos({
+                ctx,
+                positionGroups,
+                cycleWorkDays,
+                customCoverEmps,
+                limitedEmpIds,
+                assignments,
+                stats,
+                runtime,
+                cutoffDay,
+                shiftHoursH,
+                writeAssignment,
+                passesAgreementRest,
+                empMeta,
+                isCustomCoverPosition,
+                expectedShiftForDay,
+                retDesignateSet,
+                flexSchemeEmpIds: flexSchemeEmpSet,
+            }, dayDemandsFromFill);
+        }
     }
 
     // ── GENERACIÓN clásica (banda fija por empleado) ──────────────────────────
@@ -2665,7 +2689,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     stats.suvicoWeekBillableOver48 = suvicoWeekBillableOver48;
 
     let gapFillParamsForFallback: Parameters<typeof fillDemandGapsBeforeFrancos>[0] | null = null;
-    if (useDemandDriven && dayDemandsFromFill.length > 0) {
+    if (useDemandDriven && !cycleBaseOnly && dayDemandsFromFill.length > 0) {
         gapFillParamsForFallback = {
             ctx,
             positionGroups,
@@ -2792,6 +2816,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
 
+            if (cycleBaseOnly && isWorkDayInCycle) {
+                continue;
+            }
+
             assignments.push({
                 empId: emp.id,
                 dateStr,
@@ -2810,7 +2838,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     restoreRotativeCycleFrancos(assignments, ctx, expectedShiftForDay, defaultPos);
 
     let gapFillFinal: Parameters<typeof fillDemandGapsBeforeFrancos>[0] | null = null;
-    if (useDemandDriven && dayDemandsFromFill.length > 0 && ctx.rotateShifts !== false) {
+    if (useDemandDriven && !cycleBaseOnly && dayDemandsFromFill.length > 0 && ctx.rotateShifts !== false) {
         gapFillFinal = {
             ctx,
             positionGroups,

@@ -67,6 +67,8 @@ import {
 } from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
+import { runStrictSixTwoPipeline } from '@/lib/planificacion/planningPipeline';
+import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
     buildPlannerContextFromAutoRun,
@@ -3052,12 +3054,26 @@ export default function PlanificacionPage() {
             });
             const prevMonthTrailingWorkDays: Record<string, number> = {};
             const prevMonthTrailingRestDays: Record<string, number> = {};
+            const prevMonthLastShiftByEmp: Record<string, string> = {};
+            const prevMonthLastWorkBandBeforeRest: Record<string, string> = {};
             const lastDayStr = getDateKey(prevMonthEndDate);
             displayedEmployees.forEach((emp: any) => {
                 const empShifts = prevTrailByEmp[emp.id] || {};
                 const lastCode = empShifts[lastDayStr];
                 if (!lastCode) return; // sin datos, el motor usará offset distribuido
                 if (lastCode === 'RET') return;
+                prevMonthLastShiftByEmp[emp.id] = lastCode;
+                if (FRANCO_CODES_SET.has(lastCode)) {
+                    for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
+                        const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
+                        const c = empShifts[ds];
+                        if (!c) break;
+                        if (!FRANCO_CODES_SET.has(c)) {
+                            prevMonthLastWorkBandBeforeRest[emp.id] = c;
+                            break;
+                        }
+                    }
+                }
                 const isFrancoLast = FRANCO_CODES_SET.has(lastCode);
                 let count = 0;
                 for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
@@ -3157,13 +3173,25 @@ export default function PlanificacionPage() {
                 apretarCronoDays: genBrain.modo12DaysEngine,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
+                prevMonthLastShiftByEmp,
+                prevMonthLastWorkBandBeforeRest,
                 globalRetPool,
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            await bumpAutoV2Progress(40, 'Generando cronograma (V4)…');
+            await bumpAutoV2Progress(40, genBrain.strictSixTwo
+                ? 'Generando cronograma (ciclo 24d + continuidad mayo)…'
+                : 'Generando cronograma (V4)…');
             await new Promise<void>((r) => setTimeout(r, 0));
-            const gen = generateScheduleV4(baseGenCtx);
+            const useStrictPipeline = genBrain.strictSixTwo === true;
+            const strictPipeline = useStrictPipeline && canUseFixedBandFloater(baseGenCtx)
+                ? runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false })
+                : null;
+            const useFloaterPipeline = !!strictPipeline;
+            const gen = strictPipeline?.generation ?? generateScheduleV4({
+                ...baseGenCtx,
+                ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
+            });
 
             await bumpAutoV2Progress(58, 'Verificando cobertura…');
             // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.
@@ -3208,30 +3236,7 @@ export default function PlanificacionPage() {
                 setOver200AuthPin('');
                 setOver200AuthError('');
             }
-            // Guardamos las stats post-generación para el panel "Capacidad CCT"
-            setAutoV2GenStats({
-                employeeMonthlyHours: gen.stats.employeeMonthlyHours,
-                employeeCycleHours: gen.stats.employeeCycleHours,
-                targetHours: gen.stats.targetHours,
-                totalBillableHours: gen.stats.totalBillableHours,
-                uncoveredSlots: gen.stats.uncoveredSlots,
-                idleEmployeeIds: gen.stats.idleEmployeeIds,
-                primaryShiftByEmp: gen.stats.primaryShiftByEmp,
-                positionGroups: gen.stats.positionGroups,
-                employeeRetCount: gen.stats.employeeRetCount,
-                employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
-                totalRetCount: gen.stats.totalRetCount,
-                totalRetHoursPotential: gen.stats.totalRetHoursPotential,
-                overCoverageRetDays: gen.stats.overCoverageRetDays,
-                maxRetConcurrent: gen.stats.maxRetConcurrent,
-                ajustarCrono: gen.stats.ajustarCrono,
-                apretarCronoDays: gen.stats.apretarCronoDays,
-                uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
-                excessPositionEmployees: gen.stats.excessPositionEmployees,
-                slaDeficitRemaining: gen.stats.slaDeficitRemaining,
-                slaHoursClosed: gen.stats.slaHoursClosed,
-            });
-
+            // Guardamos las stats post-generación para el panel "Capacidad CCT" (tras verify si pipeline ciclo)
             await bumpAutoV2Progress(78, 'Verificando cobertura y reglas (descansos, licencias)…');
             // ── Verificación de cobertura (slots, descansos, licencias, >200h) ──
             const verifyCtx = {
@@ -3246,17 +3251,51 @@ export default function PlanificacionPage() {
                 getDateKey,
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
+                prevMonthLastShiftByEmp,
             } as any;
             let finalAssignments = gen.assignments;
-            let coverage = verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
+            let coverage = strictPipeline?.verification
+                ?? verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
 
-            // ── Auto-reproceso: loop hasta converger (slots + descansos + licencias) ──
+            setAutoV2GenStats({
+                employeeMonthlyHours: gen.stats.employeeMonthlyHours,
+                employeeCycleHours: gen.stats.employeeCycleHours,
+                targetHours: gen.stats.targetHours,
+                totalBillableHours: useFloaterPipeline
+                    ? (coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours)
+                    : gen.stats.totalBillableHours,
+                uncoveredSlots: useFloaterPipeline
+                    ? coverage.coverage.uncoveredSlots
+                    : (gen.stats.uncoveredSlots ?? 0),
+                idleEmployeeIds: gen.stats.idleEmployeeIds,
+                primaryShiftByEmp: gen.stats.primaryShiftByEmp,
+                positionGroups: gen.stats.positionGroups,
+                employeeRetCount: gen.stats.employeeRetCount,
+                employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
+                totalRetCount: gen.stats.totalRetCount,
+                totalRetHoursPotential: gen.stats.totalRetHoursPotential,
+                overCoverageRetDays: gen.stats.overCoverageRetDays,
+                maxRetConcurrent: gen.stats.maxRetConcurrent,
+                ajustarCrono: gen.stats.ajustarCrono,
+                apretarCronoDays: gen.stats.apretarCronoDays,
+                uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
+                excessPositionEmployees: gen.stats.excessPositionEmployees,
+                slaDeficitRemaining: useFloaterPipeline
+                    ? Math.max(0, Math.round((slaVendidas - (coverage.hours?.billableHoursGenerated ?? 0)) * 10) / 10)
+                    : gen.stats.slaDeficitRemaining,
+                slaHoursClosed: useFloaterPipeline
+                    ? coverage.coverage.uncoveredSlots <= 0
+                        && (slaVendidas <= 0 || (coverage.hours?.billableHoursGenerated ?? 0) >= slaVendidas - 0.5)
+                    : gen.stats.slaHoursClosed,
+            });
+
+            // ── Auto-reproceso: solo en flujo legacy (demanda + parches). Etapa A+B: verify puro. ──
             const NON_BILLABLE_FIX = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
             const countIssues = (r: typeof coverage) =>
                 r.coverage.uncoveredSlots + r.restViolations.length + r.licenseConflicts.length;
 
             let prevIssues = countIssues(coverage);
-            const MAX_REPRO_PASSES = coverage.coverage.uncoveredSlots > 0 ? 5 : 0;
+            const MAX_REPRO_PASSES = !useFloaterPipeline && coverage.coverage.uncoveredSlots > 0 ? 5 : 0;
             for (let pass = 0; pass < MAX_REPRO_PASSES && prevIssues > 0; pass++) {
                 await bumpAutoV2Progress(
                     Math.min(97, 88 + pass * 2),
@@ -3300,18 +3339,21 @@ export default function PlanificacionPage() {
             setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
             setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
 
-            const geminiOut = await runAutoV2PlanningAgentGemini(
-                finalAssignments,
-                coverage,
-                verifyCtx,
-                gen.stats,
-                newChanges,
-                false,
-                true,
-            );
-            finalAssignments = geminiOut.assignments;
-            coverage = geminiOut.coverage;
-            const finalChanges = { ...geminiOut.changes };
+            let finalChanges = newChanges;
+            if (!useFloaterPipeline) {
+                const geminiOut = await runAutoV2PlanningAgentGemini(
+                    finalAssignments,
+                    coverage,
+                    verifyCtx,
+                    gen.stats,
+                    newChanges,
+                    false,
+                    true,
+                );
+                finalAssignments = geminiOut.assignments;
+                coverage = geminiOut.coverage;
+                finalChanges = { ...geminiOut.changes };
+            }
 
             let formReport = verifyScheduleForm(verifyCtx, finalAssignments, gen.stats, {
                 strictSixTwo: genBrain.strictSixTwo,
@@ -3331,7 +3373,7 @@ export default function PlanificacionPage() {
                 || formReport.metrics.over192Count > 0
                 || formReport.metrics.over200Count > 0
                 || formReport.metrics.under168Count > 0;
-            if (slaClosed && hourFormIssues) {
+            if (!useFloaterPipeline && slaClosed && hourFormIssues) {
                 await bumpAutoV2Progress(94, 'Rebalanceando forma (swaps horas)…');
                 await new Promise<void>((r) => setTimeout(r, 0));
                 const reb = rebalanceScheduleForm(verifyCtx, finalAssignments, statsAfterForm, coverage, {
@@ -6411,7 +6453,7 @@ export default function PlanificacionPage() {
                                             <span className="uppercase text-[9px] opacity-80">Balance · </span>
                                             {autoPlanningBrainReport.diagnosis.balanceLabel}
                                             {autoPlanningBrainReport.strictSixTwo && (
-                                                <span className="block mt-0.5 text-emerald-800">6+2 estricto activo — sin flex ni F→turno</span>
+                                                <span className="block mt-0.5 text-emerald-800">6+2 estricto — ciclo M→T→N + continuidad mes anterior</span>
                                             )}
                                         </div>
                                         <p className="text-[10px] font-bold text-indigo-900 leading-snug">{autoPlanningBrainReport.diagnosis.resolution}</p>

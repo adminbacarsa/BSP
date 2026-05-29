@@ -183,6 +183,15 @@ function resolveRotateShifts(
     if (!has24 || !feasibilityOk) return false;
     if (cycleKey === '4+2') return false;
     if (peopleAvailable < 4) return false;
+
+    const slotsPerDay = computeDailyServiceSlots(positions, '8').slotsPerDay;
+    const plantilla6x2 = Math.ceil(slotsPerDay * ((6 + 2) / 6));
+    const all24Qty1 = positions.filter(is24hs).every(p => Math.max(1, Number(p.qty) || 1) === 1);
+
+    // 16 = 12 servicio + 4 franco: bandas fijas + flotante (no péndulo M→T→N).
+    if (cycleKey === '6+2' && all24Qty1 && peopleAvailable === plantilla6x2) {
+        return false;
+    }
     return true;
 }
 
@@ -298,7 +307,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
                 modo12DayCount: modo12DaysAuto.length,
                 pickedCycle: '6+2',
             });
-            warnings.push('Balance JUSTO: esquema bloqueado en 6+2 estricto (sin flex ni F→turno).');
+            warnings.push('Balance JUSTO: 6+2 estricto con bandas fijas + flotante (rotativo OFF).');
         }
     }
 

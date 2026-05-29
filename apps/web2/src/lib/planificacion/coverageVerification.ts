@@ -42,6 +42,13 @@ export interface UncoveredSlot {
     shiftCode: string;
     qtyRequested: number;
     qtyAssigned: number;
+    /** Causa raíz del hueco (verificación estricta). */
+    cause?: 'missing_assignment' | 'partial_qty';
+}
+
+export interface CoverageVerificationOptions {
+    /** Si false, no infiere T cubierto por D12+N12 adyacentes (default true). */
+    inferModo12TCoverage?: boolean;
 }
 
 export interface RestViolation {
@@ -162,7 +169,9 @@ export function verifyScheduleCoverage(
     ctx: V2EngineContext,
     assignments: V2Assignment[],
     stats: V2GenerateStats,
+    options?: CoverageVerificationOptions,
 ): CoverageVerificationReport {
+    const inferModo12T = options?.inferModo12TCoverage !== false;
     // 1. Demanda esperada (filtrada por ciclo elegido)
     const demand = buildDemandSlots(ctx);
     const totalSlots = demand.reduce((s, d) => s + d.qty, 0);
@@ -209,28 +218,28 @@ export function verifyScheduleCoverage(
         realCount[k] = (realCount[k] || 0) + 1;
     });
 
-    // Inferencia de extensión: si D12 cubre M qty Y N12 cubre N qty ese día,
-    // la franja T (14-22) queda físicamente cubierta (D12 07→19, N12 19→07).
-    // Solo aplica con 12 h reales (D12+N12), NO con M+N de 8 h que dejan un hueco.
-    const ext12Count: Record<string, number> = {};
-    assignments.forEach((a) => {
-        const c = String(a.code || '').toUpperCase();
-        if (!a.positionName || (c !== 'D12' && c !== 'N12')) return;
-        const k = `${a.dateStr}__${a.positionName}__${c}`;
-        ext12Count[k] = (ext12Count[k] || 0) + 1;
-    });
-    ctx.positions.forEach((pos) => {
-        const pqty = Math.max(1, Number(pos.qty) || 1);
-        ctx.daysInMonth.forEach((d) => {
-            const dateStr = ctx.getDateKey(d);
-            const kD12 = `${dateStr}__${pos.positionName}__D12`;
-            const kN12 = `${dateStr}__${pos.positionName}__N12`;
-            const kT   = `${dateStr}__${pos.positionName}__T`;
-            if ((ext12Count[kD12] ?? 0) >= pqty && (ext12Count[kN12] ?? 0) >= pqty && !(realCount[kT] > 0)) {
-                realCount[kT] = pqty;
-            }
+    // Inferencia Modo 12 (opcional): D12+N12 no cubren la franja T (14-22) sin solape real.
+    if (inferModo12T) {
+        const ext12Count: Record<string, number> = {};
+        assignments.forEach((a) => {
+            const c = String(a.code || '').toUpperCase();
+            if (!a.positionName || (c !== 'D12' && c !== 'N12')) return;
+            const k = `${a.dateStr}__${a.positionName}__${c}`;
+            ext12Count[k] = (ext12Count[k] || 0) + 1;
         });
-    });
+        ctx.positions.forEach((pos) => {
+            const pqty = Math.max(1, Number(pos.qty) || 1);
+            ctx.daysInMonth.forEach((d) => {
+                const dateStr = ctx.getDateKey(d);
+                const kD12 = `${dateStr}__${pos.positionName}__D12`;
+                const kN12 = `${dateStr}__${pos.positionName}__N12`;
+                const kT   = `${dateStr}__${pos.positionName}__T`;
+                if ((ext12Count[kD12] ?? 0) >= pqty && (ext12Count[kN12] ?? 0) >= pqty && !(realCount[kT] > 0)) {
+                    realCount[kT] = pqty;
+                }
+            });
+        });
+    }
 
     const uncovered: UncoveredSlot[] = [];
     let coveredCount = 0;
@@ -247,6 +256,7 @@ export function verifyScheduleCoverage(
                 shiftCode: slot.shiftCode,
                 qtyRequested: slot.qty,
                 qtyAssigned: have,
+                cause: have <= 0 ? 'missing_assignment' : 'partial_qty',
             });
         }
     });

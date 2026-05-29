@@ -163,7 +163,8 @@ export function buildPlanningOperationalDiagnosis(params: {
     if (strictSixTwo) {
         resolution =
             `${peopleAvailable} guardias = ${servicio} servicio + ${poolFrancos} franco (6+2). `
-            + 'Usar 6+2 estricto rotativo M/T/N. No degradar a 5+1/6+1 ni convertir F→turno para cerrar SLA.';
+            + 'Bandas fijas M/T/N + flotante por puesto (sin péndulo rotativo). '
+            + 'No degradar a 5+1/6+1 ni convertir F→turno para cerrar SLA.';
     } else if (balance === 'short' || balance === 'hours_short') {
         resolution =
             'Dotación o capacidad horaria insuficiente. Evaluar refuerzo, Modo 12 en más días, '
