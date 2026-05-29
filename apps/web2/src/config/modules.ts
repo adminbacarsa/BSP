@@ -13,8 +13,9 @@ export const SYSTEM_MODULES = [
 ];
 
 export const PERMISSION_ACTIONS = [
-    { key: 'read', label: 'Ver' },
+    { key: 'read',   label: 'Ver' },
     { key: 'create', label: 'Crear' },
     { key: 'update', label: 'Editar' },
-    { key: 'delete', label: 'Borrar' }
+    { key: 'delete', label: 'Borrar' },
+    { key: 'adjust', label: 'Ajustar' },
 ];

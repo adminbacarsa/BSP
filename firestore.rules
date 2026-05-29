@@ -400,5 +400,12 @@ service cloud.firestore {
     match /platform_credentials/{docId} {
       allow read, write: if isSuperAdmin();
     }
+
+    match /ajustes_horas/{docId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }

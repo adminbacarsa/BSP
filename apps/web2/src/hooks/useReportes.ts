@@ -282,7 +282,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             const empRows = Object.keys(empGroups).map(empId => {
                 const shifts = empGroups[empId];
                 const stats = calculateStatsExact(shifts, holidaysData);
-                
+
                 const ftCount = shifts.filter((s:any) => s.isFrancoTrabajado || s.code === 'FT').length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
 
@@ -306,7 +306,26 @@ export const useReportes = (forcedClientId?: string | null) => {
                     rawShifts: shifts
                 };
             });
-            setEmployeeReport(empRows.sort((a,b) => b.total - a.total));
+
+            // Ajustes de horas manuales — sumar/restar del total teórico del empleado
+            const ajustesSnap = await getDocs(
+                query(collection(db, 'ajustes_horas'), where('empresaId', '==', empresaId))
+            );
+            const ajustesByEmp: Record<string, number> = {};
+            ajustesSnap.docs.forEach(d => {
+                const data = d.data();
+                if (data.tipo !== 'AJUSTE_HORAS') return;
+                const fechaDate = data.fecha?.toDate ? data.fecha.toDate() : null;
+                if (!fechaDate || fechaDate < startDate || fechaDate > endDate) return;
+                ajustesByEmp[data.employeeId] = (ajustesByEmp[data.employeeId] || 0) + (data.horas || 0);
+            });
+            const finalEmpRows = empRows.map(row => {
+                const adj = ajustesByEmp[row.id] || 0;
+                if (adj === 0) return row;
+                return { ...row, total: row.total + adj, horasTeoricas: row.horasTeoricas + adj };
+            });
+
+            setEmployeeReport(finalEmpRows.sort((a,b) => b.total - a.total));
 
             // 4. Procesamiento por Objetivo
             const objGroups: any = {};
