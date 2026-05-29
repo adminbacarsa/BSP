@@ -1587,7 +1587,7 @@ export default function PlanificacionPage() {
             const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
         }, (e) => console.error('[plan] clients error:', e));
-        const unsubAg = onSnapshot(collection(db, 'convenios'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
+        const unsubAg = onSnapshot(collection(db, 'convenios_colectivos'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
         const unsubE = onSnapshot(empleadosQ, snap => {
             const map = (s: typeof snap) => s.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
