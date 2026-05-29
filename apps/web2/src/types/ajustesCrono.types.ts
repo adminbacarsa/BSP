@@ -92,8 +92,15 @@ export interface AjustarCronoOperativoProps {
     empresaId: string;
     /** Fecha pre-cargada si se abre desde el grid de planificación */
     fechaInicial?: Date;
+    /** Fin de rango pre-cargado (ej. fin de mes visible) */
+    fechaHastaInicial?: Date;
     /** Objetivo pre-cargado si se abre desde la fila de un servicio */
     objetivoInicial?: { id: string; nombre: string };
+    /** Misma fuente que la grilla — preview coherente con lo visible */
+    gridSnapshot?: {
+        shiftsMap: Record<string, any>;
+        pendingChanges: Record<string, any>;
+    };
 }
 
 export interface AjustarCronoCoberturaProps {

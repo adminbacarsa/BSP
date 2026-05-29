@@ -45,6 +45,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -406,6 +407,7 @@ export default function PlanificacionPage() {
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
+    const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [autoV2Loading, setAutoV2Loading] = useState(false);
     const [autoV2Generating, setAutoV2Generating] = useState(false);
     /** Barra de progreso en el modal de automatización (viabilidad / generar). */
@@ -4640,6 +4642,15 @@ export default function PlanificacionPage() {
                                     </button>
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
+                                <button
+                                    onClick={() => setShowAjustarCronoModal(true)}
+                                    disabled={!selectedObjective}
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-violet-50 hover:text-violet-600 transition-colors flex items-center gap-1.5 px-2.5 disabled:opacity-40"
+                                    title="Comprimir este servicio a 12h y liberar guardias a RET"
+                                >
+                                    <CalendarCheck size={18}/>
+                                    <span className="text-[10px] font-black text-violet-700 uppercase tracking-tight hidden sm:inline">Ajustar Crono</span>
+                                </button>
                                 <div className="flex items-center gap-0.5">
                                     <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
@@ -6906,6 +6917,19 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 , document.body)}
+
+                <AjustarCronoOperativoModal
+                    open={showAjustarCronoModal}
+                    onClose={() => setShowAjustarCronoModal(false)}
+                    empresaId={empresaId || ''}
+                    fechaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)}
+                    fechaHastaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)}
+                    objetivoInicial={selectedObjective && selectedObjectiveData
+                        ? { id: selectedObjective, nombre: selectedObjectiveData.name || selectedObjectiveData.nombre || selectedObjective }
+                        : undefined}
+                    clients={clients}
+                    gridSnapshot={{ shiftsMap, pendingChanges }}
+                />
 
             </div>
 

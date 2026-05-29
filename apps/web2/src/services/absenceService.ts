@@ -19,6 +19,8 @@ export interface Absence {
   alternativePeriodStart?: string;
   alternativePeriodEnd?: string;
   source?: string;
+  ajusteCronoId?: string;
+  coberturaEstado?: 'PENDIENTE' | 'GESTIONADA' | 'VACANTE';
 }
 
 const toDateStr = (val: any): string => {

@@ -407,5 +407,12 @@ service cloud.firestore {
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
+
+    match /ajustes_crono/{docId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }
