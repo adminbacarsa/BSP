@@ -3215,12 +3215,6 @@ export default function PlanificacionPage() {
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
             const canFloater = canUseFixedBandFloater(baseGenCtx);
-            if (!canFloater) {
-                console.log('[COSP] canFloater=false — diagnóstico:', {
-                    positions: baseGenCtx.positions.map(p => ({ name: p.positionName, cov: p.coverageType, qty: p.qty })),
-                    employees: baseGenCtx.employees.length,
-                });
-            }
             await bumpAutoV2Progress(40, canFloater
                 ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
                 : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
