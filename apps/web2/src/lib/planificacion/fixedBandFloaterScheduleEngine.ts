@@ -163,7 +163,7 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext): Record<string, number> {
     return out;
 }
 
-/** true si cada puesto 24hs qty=1 tiene 3 o 4 guardias (ciclo 24d soporta ambos tamaños). */
+/** true si cada puesto 24hs qty=1 tiene entre 3 y 6 guardias (ciclo 24d soporta todos). */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
     const groups = positionGroups ?? buildPositionGroups(ctx);
     let counted = 0;
@@ -171,7 +171,7 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         if (!is24hs(pos)) continue;
         if (Math.max(1, Number(pos.qty) || 1) !== 1) return false;
         const g = groups[pos.positionName] || [];
-        if (g.length < 3 || g.length > 4) return false;
+        if (g.length < 3 || g.length > 6) return false;
         counted += g.length;
     }
     return counted > 0 && counted === ctx.employees.length;
