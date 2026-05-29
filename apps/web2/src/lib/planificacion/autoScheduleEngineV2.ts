@@ -442,6 +442,56 @@ export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL
     return { key: '6+1', cL: 6, cF: 1 };
 }
 
+/**
+ * Con N guardias y ciclo L días: ~N/L por offset → 4 francos/día en plantilla 16×6+2.
+ * Sin esto, cada puesto repite el mismo offset y 8 guardias descansan el mismo día.
+ */
+function balanceGlobalCycleOffsets(
+    pool: string[],
+    empGroupIdx: Record<string, number>,
+    cycleLen: number,
+    hasTrailing?: (empId: string) => boolean,
+): void {
+    if (pool.length === 0 || cycleLen <= 0) return;
+    const target = Math.max(1, Math.floor(pool.length / cycleLen));
+    const buckets = new Map<number, string[]>();
+    for (const id of pool) {
+        const o = ((empGroupIdx[id] ?? 0) % cycleLen + cycleLen) % cycleLen;
+        empGroupIdx[id] = o;
+        if (!buckets.has(o)) buckets.set(o, []);
+        buckets.get(o)!.push(id);
+    }
+    const pickMovable = (ids: string[]): string | undefined => {
+        const idx = ids.findIndex(id => !hasTrailing?.(id));
+        if (idx >= 0) return ids.splice(idx, 1)[0];
+        return ids.pop();
+    };
+    for (let guard = 0; guard < pool.length * cycleLen; guard++) {
+        let moved = false;
+        for (let o = 0; o < cycleLen; o++) {
+            const ids = buckets.get(o) || [];
+            while (ids.length > target) {
+                let placed = false;
+                for (let t = 0; t < cycleLen; t++) {
+                    const other = buckets.get(t) || [];
+                    if (other.length >= target) continue;
+                    const empId = pickMovable(ids);
+                    if (!empId) break;
+                    empGroupIdx[empId] = t;
+                    other.push(empId);
+                    buckets.set(t, other);
+                    buckets.set(o, ids);
+                    moved = true;
+                    placed = true;
+                    break;
+                }
+                if (!placed) break;
+            }
+        }
+        if (!moved) break;
+    }
+}
+
 /** Reserva flex por puesto: 6+1 (stagger 1) y opcional 5+1 (stagger 2) para cerrar SLA. */
 function pickFlexSchemeEmployees(
     ctx: V2EngineContext,
@@ -1436,7 +1486,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const bandOff = bandBase % eCycleLen;
         const staggerRotating = shiftCodes.length > 1;
         group.filter(id => desiredByEmp.has(id)).forEach(empId => {
-            // Trailing mayo/junio previo manda: no pisar con stagger demand-driven.
             assignedOffsets.set(empId, desiredByEmp.get(empId)!);
         });
         group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
@@ -1554,29 +1603,22 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
-    // ── DEDUP TRAILING: empleados con datos históricos en el mismo puesto ──────
-    // Los empleados sin trailing ya recibieron el base de su banda (offset idéntico = correcto).
-    // Los empleados con trailing pueden coincidir si trabajaron la misma racha el mes anterior;
-    // en ese caso se desplazan hacia adelante para evitar que el motor los trate como un solo bloque.
-    // Bandas fijas: offsets globales por M/T/N — no re-dedup por puesto (rompe 6+5+5).
-    if (ctx.rotateShifts !== false) {
-        Object.entries(positionGroups).forEach(([, empIds]) => {
+    if (ctx.rotateShifts !== false && shouldUseDemandDrivenScheduling(ctx)) {
+        const rotPool: string[] = [];
+        for (const pos of ctx.positions) {
+            if (isCustomCoverPosition(pos)) continue;
+            const cov = String(pos.coverageType || '').toLowerCase();
+            if (cov !== '24hs' && cov !== '24' && cov !== '24h') continue;
+            for (const id of positionGroups[pos.positionName] || []) {
+                if (!rotPool.includes(id)) rotPool.push(id);
+            }
+        }
+        if (rotPool.length > 0) {
             const hasTrail = (id: string) =>
                 ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
                 ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
-            const trailEmps = empIds.filter(hasTrail);
-            if (trailEmps.length <= 1) return;
-            const eCycleLen2 = empCycleLen[trailEmps[0]] ?? cycleLen;
-            const usedSlots = new Set<number>();
-            const sorted = [...trailEmps].sort((a, b) => (empGroupIdx[a] ?? 0) - (empGroupIdx[b] ?? 0));
-            sorted.forEach(empId => {
-                let off = empGroupIdx[empId] ?? 0;
-                let tries = 0;
-                while (usedSlots.has(off) && tries < eCycleLen2) { off = (off + 1) % eCycleLen2; tries++; }
-                usedSlots.add(off);
-                empGroupIdx[empId] = off;
-            });
-        });
+            balanceGlobalCycleOffsets(rotPool, empGroupIdx, cycleLen, hasTrail);
+        }
     }
 
     // Rotativo 24hs demand-driven: slot de péndulo desfasado +1 respecto al stagger del
@@ -2741,6 +2783,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         assignments,
         ctx,
         priorAssignments: syntheticPrevAssignments,
+        cycleWorkDays,
     });
     stats.francoGuardConvertedToRet = francoGuard.convertedToRet;
     stats.francoGuardRejectedMissing48h = francoGuard.rejectedMissing48h;

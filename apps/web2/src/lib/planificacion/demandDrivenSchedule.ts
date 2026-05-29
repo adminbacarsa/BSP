@@ -30,6 +30,15 @@ function mayConvertFrancoToWork(ctx: V2EngineContext): boolean {
     return ctx.strictSixTwo !== true;
 }
 
+/** En 6+2 estricto: solo el 2° F consecutivo (6+1 local) puede cubrir un hueco SLA. */
+function mayStrictCompressibleFrancoRescue(ctx: V2EngineContext): boolean {
+    return ctx.strictSixTwo === true;
+}
+
+function mayFrancoRescueForGap(ctx: V2EngineContext): boolean {
+    return mayConvertFrancoToWork(ctx) || mayStrictCompressibleFrancoRescue(ctx);
+}
+
 function canAssignBand(
     params: DemandDrivenFillParams,
     empId: string,
@@ -151,6 +160,7 @@ function tryFillSlotFromFrancoRescue(
         if (ctx.absences[empId]?.has(dateStr)) return false;
         const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
         if (!a || !isFrancoAssignment(a)) return false;
+        if (ctx.strictSixTwo === true && !isCompressibleFrancoDay(params, empId, dateStr)) return false;
         if (!options?.allowSlaClose && !isCompressibleFrancoDay(params, empId, dateStr)) return false;
         if (rotate && !options?.ignorePendulum) {
             const exp = params.expectedShiftForDay!(empId, dateStr, pos.positionName);
@@ -457,6 +467,7 @@ function tryPromoteRetToSlot(
     const retIds = global24hsEmployeePool(params).filter(empId => {
         if (params.retDesignateSet?.has(empId)) return false;
         if (params.ctx.ajustarCrono === true) return false;
+        if (params.ctx.strictSixTwo === true && !params.cycleWorkDays[empId]?.has(dateStr)) return false;
         const slotCode = normBand(code);
         if (isModo12Day(dateStr, params.ctx) && slotCode !== 'D12' && slotCode !== 'N12') {
             return false;
@@ -912,7 +923,7 @@ export function fillDemandGapsBeforeFrancos(
                             have++;
                             continue;
                         }
-                        if (!apretarDay && pass >= 6 && mayConvertFrancoToWork(ctx)
+                        if (!apretarDay && pass >= 6 && mayFrancoRescueForGap(ctx)
                             && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                             have++;
                             continue;
@@ -1081,10 +1092,10 @@ function trySwapBandOnSamePosition(
     if (sEnd) donor.endTime = sEnd;
 
     const filled =
-        tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
+        (mayFrancoRescueForGap(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
             ignorePendulum: true,
             allowSlaClose: true,
-        })
+        }))
         || (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, dateStr, dayLetter, freedCode, inCurrent, {
             ignorePendulum: true,
             allowSlaClose: true,
@@ -1358,7 +1369,7 @@ export function repairPositionDayTripletGaps(
                     const eff = effectiveMtnCoverage(params.assignments, day.dateStr, pd.positionName, qty);
                     if (eff[code] >= needed) continue;
 
-                    if (mayConvertFrancoToWork(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                    if (mayFrancoRescueForGap(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                         ignorePendulum: true,
                         allowSlaClose: true,
                     })) {
@@ -1456,7 +1467,7 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
-                        if (mayConvertFrancoToWork(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        if (mayFrancoRescueForGap(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                             ignorePendulum: true,
                             allowSlaClose: true,
                         })) {

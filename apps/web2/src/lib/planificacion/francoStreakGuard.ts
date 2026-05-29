@@ -75,8 +75,10 @@ export function enforceFrancoStreakRules(args: {
     assignments: FrancoGuardAssignment[];
     ctx: FrancoGuardContext;
     priorAssignments?: FrancoGuardAssignment[];
+    /** Días laborables del ciclo 6+2 por empleado — F fuera de este set es descanso programado. */
+    cycleWorkDays?: Record<string, Set<string>>;
 }): EnforceFrancoStreakResult {
-    const { assignments, ctx, priorAssignments = [] } = args;
+    const { assignments, ctx, priorAssignments = [], cycleWorkDays } = args;
     const result: EnforceFrancoStreakResult = {
         convertedToRet: 0,
         rejectedMissing48h: 0,
@@ -106,20 +108,28 @@ export function enforceFrancoStreakRules(args: {
 
             if (!isPlainFrancoCell(a)) continue;
 
+            const isScheduledCycleRest = cycleWorkDays?.[emp.id]
+                ? !cycleWorkDays[emp.id].has(dateStr)
+                : false;
+
             let reject = false;
 
             if (consecPlainF === 0) {
-                const dayBefore = addDaysStr(dateStr, -1);
-                const streak = workStreakStatsBackward(emp.id, dayBefore, (eid, ds) => {
-                    const sh = getShift(eid, ds);
-                    if (!sh) return null;
-                    return { code: sh.code, hours: sh.hours, startTime: sh.startTime, endTime: sh.endTime };
-                });
-                if (!streakQualifiesForFranco(streak)) {
-                    reject = true;
-                    result.rejectedMissing48h++;
-                } else {
+                if (isScheduledCycleRest) {
                     consecPlainF = 1;
+                } else {
+                    const dayBefore = addDaysStr(dateStr, -1);
+                    const streak = workStreakStatsBackward(emp.id, dayBefore, (eid, ds) => {
+                        const sh = getShift(eid, ds);
+                        if (!sh) return null;
+                        return { code: sh.code, hours: sh.hours, startTime: sh.startTime, endTime: sh.endTime };
+                    });
+                    if (!streakQualifiesForFranco(streak)) {
+                        reject = true;
+                        result.rejectedMissing48h++;
+                    } else {
+                        consecPlainF = 1;
+                    }
                 }
             } else {
                 consecPlainF += 1;
