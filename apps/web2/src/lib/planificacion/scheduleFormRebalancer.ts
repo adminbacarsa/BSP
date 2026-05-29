@@ -236,7 +236,7 @@ export function rebalanceScheduleForm(
     assignments: V2Assignment[],
     stats: V2GenerateStats,
     coverageReport: CoverageVerificationReport,
-    options?: { strictSixTwo?: boolean; rotateShifts?: boolean; maxSwaps?: number },
+    options?: { strictSixTwo?: boolean; rotateShifts?: boolean; maxSwaps?: number; cycleWorkDays?: Record<string, Set<string>> },
 ): FormRebalanceResult {
     const maxSwaps = options?.maxSwaps ?? 40;
     const cfg = makeRestCfg(ctx);
@@ -251,6 +251,12 @@ export function rebalanceScheduleForm(
         return { assignments: current, formReport: form, coverageReport: coverage, stats: currentStats, swapsApplied: 0, log, improved: false };
     }
     if (!hasHourImbalance(form)) {
+        return { assignments: current, formReport: form, coverageReport: coverage, stats: currentStats, swapsApplied: 0, log, improved: false };
+    }
+    const isSixTwo = ctx.autoCycles.includes('6+2')
+        || (() => { const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles); return cL === 6 && cF === 2; })();
+    // Swaps trabajo↔F el mismo día desincronizan la fase 6+2 — no aplicar en esquema 6+2.
+    if (options?.strictSixTwo === true || isSixTwo) {
         return { assignments: current, formReport: form, coverageReport: coverage, stats: currentStats, swapsApplied: 0, log, improved: false };
     }
 

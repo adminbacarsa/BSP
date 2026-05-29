@@ -1435,14 +1435,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const assignedOffsets = new Map<string, number>();
         const bandOff = bandBase % eCycleLen;
         const staggerRotating = shiftCodes.length > 1;
-        const ddStagger = shouldUseDemandDrivenScheduling(ctx);
         group.filter(id => desiredByEmp.has(id)).forEach(empId => {
-            const ddOff = ctx.demandDrivenStaggerByEmp?.[empId];
-            if (ddStagger && ddOff !== undefined && staggerRotating) {
-                assignedOffsets.set(empId, (bandOff + ddOff) % eCycleLen);
-            } else {
-                assignedOffsets.set(empId, desiredByEmp.get(empId)!);
-            }
+            // Trailing mayo/junio previo manda: no pisar con stagger demand-driven.
+            assignedOffsets.set(empId, desiredByEmp.get(empId)!);
         });
         group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
             const idxInGroup = group.indexOf(empId);
@@ -1564,7 +1559,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Los empleados con trailing pueden coincidir si trabajaron la misma racha el mes anterior;
     // en ese caso se desplazan hacia adelante para evitar que el motor los trate como un solo bloque.
     // Bandas fijas: offsets globales por M/T/N — no re-dedup por puesto (rompe 6+5+5).
-    if (!shouldUseDemandDrivenScheduling(ctx) && ctx.rotateShifts !== false) {
+    if (ctx.rotateShifts !== false) {
         Object.entries(positionGroups).forEach(([, empIds]) => {
             const hasTrail = (id: string) =>
                 ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
@@ -1756,23 +1751,37 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // vea la racha real que viene del mes previo y evite violaciones cross-mes.
     // No se incluyen en el array assignments devuelto al caller.
     const syntheticPrevAssignments: V2Assignment[] = [];
-    const skipSyntheticPrev = shouldUseDemandDrivenScheduling(ctx) || ctx.rotateShifts === false;
+    const skipSyntheticPrev = ctx.rotateShifts === false;
     if (ctx.daysInMonth.length > 0 && !skipSyntheticPrev) {
         const _fmd = ctx.daysInMonth[0];
         ctx.employees.forEach(emp => {
-            const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
-            if (!tw || tw <= 0) return;
             const eCLsyn = empCL_map[emp.id] ?? cL;
+            const eCycleLenSyn = empCycleLen[emp.id] ?? cycleLen;
+            const eCFsyn = eCycleLenSyn - eCLsyn;
+            const tw = ctx.prevMonthTrailingWorkDays?.[emp.id];
+            const tr = ctx.prevMonthTrailingRestDays?.[emp.id];
             const scSyn = (empPrimaryShift[emp.id] || 'M').toUpperCase();
             const hSyn = SHIFT_HRS_DEFAULT[scSyn] ?? 8;
             const stSyn = DEFAULT_SHIFT_TIMES[scSyn] || '07:00';
-            for (let i = 1; i <= Math.min(tw, eCLsyn); i++) {
-                const pd = new Date(_fmd.getFullYear(), _fmd.getMonth(), _fmd.getDate() - i);
-                syntheticPrevAssignments.push({
-                    empId: emp.id, dateStr: ctx.getDateKey(pd),
-                    positionName: '', code: scSyn, name: scSyn,
-                    hours: hSyn, startTime: stSyn,
-                });
+            if (tw && tw > 0) {
+                for (let i = 1; i <= Math.min(tw, eCLsyn); i++) {
+                    const pd = new Date(_fmd.getFullYear(), _fmd.getMonth(), _fmd.getDate() - i);
+                    syntheticPrevAssignments.push({
+                        empId: emp.id, dateStr: ctx.getDateKey(pd),
+                        positionName: '', code: scSyn, name: scSyn,
+                        hours: hSyn, startTime: stSyn,
+                    });
+                }
+            }
+            if (tr && tr > 0) {
+                for (let i = 1; i <= Math.min(tr, eCFsyn); i++) {
+                    const pd = new Date(_fmd.getFullYear(), _fmd.getMonth(), _fmd.getDate() - i);
+                    syntheticPrevAssignments.push({
+                        empId: emp.id, dateStr: ctx.getDateKey(pd),
+                        positionName: '', code: 'F', name: 'Franco',
+                        hours: 0, startTime: '00:00', isFranco: true,
+                    });
+                }
             }
         });
     }

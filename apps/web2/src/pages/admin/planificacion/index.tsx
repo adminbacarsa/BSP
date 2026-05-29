@@ -6575,7 +6575,9 @@ export default function PlanificacionPage() {
                                             || autoV2FormReport.metrics.over192Count > 0
                                             || autoV2FormReport.metrics.under168Count > 0)
                                             && (autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0
-                                            && autoWizardStep === 'done' && (
+                                            && autoWizardStep === 'done'
+                                            && !autoPlanningBrainRef.current?.strictSixTwo
+                                            && !autoSelectedCyclesRef.current?.includes('6+2') && (
                                             <button
                                                 type="button"
                                                 onClick={() => void rebalanceAutoForm()}
