@@ -446,47 +446,6 @@ export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL
  * Asignación determinística de fases 6+2 para plantilla justa (16 guardias / 8 slots = 2 por fase).
  * Prioriza trailing de mayo si el bucket tiene cupo; completa cuarteto para 4 francos/día.
  */
-function assignStrictSixTwoOffsets(
-    pool: string[],
-    empGroupIdx: Record<string, number>,
-    cycleLen: number,
-    cL: number,
-    cF: number,
-    ctx: V2EngineContext,
-): void {
-    if (pool.length === 0 || cycleLen <= 0) return;
-    const target = Math.max(1, Math.floor(pool.length / cycleLen));
-    const buckets: string[][] = Array.from({ length: cycleLen }, () => []);
-    const unassigned: string[] = [];
-
-    for (const id of pool) {
-        const tw = ctx.prevMonthTrailingWorkDays?.[id];
-        const tr = ctx.prevMonthTrailingRestDays?.[id];
-        let preferred: number | null = null;
-        if (tw !== undefined && tw > 0) preferred = tw % cycleLen;
-        else if (tr !== undefined && tr > 0 && tr < cF) preferred = (cL + tr) % cycleLen;
-
-        if (preferred !== null && buckets[preferred].length < target) {
-            buckets[preferred].push(id);
-            empGroupIdx[id] = preferred;
-        } else {
-            unassigned.push(id);
-        }
-    }
-
-    unassigned.sort((a, b) =>
-        (ctx.demandDrivenStaggerByEmp?.[a] ?? 0) - (ctx.demandDrivenStaggerByEmp?.[b] ?? 0),
-    );
-    for (const id of unassigned) {
-        let best = 0;
-        for (let o = 1; o < cycleLen; o++) {
-            if (buckets[o].length < buckets[best].length) best = o;
-        }
-        buckets[best].push(id);
-        empGroupIdx[id] = best;
-    }
-}
-
 /**
  * Con N guardias y ciclo L días: ~N/L por offset → 4 francos/día en plantilla 16×6+2.
  * Sin esto, cada puesto repite el mismo offset y 8 guardias descansan el mismo día.
@@ -1530,11 +1489,12 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const assignedOffsets = new Map<string, number>();
         const bandOff = bandBase % eCycleLen;
         const staggerRotating = shiftCodes.length > 1;
-        group.filter(id => desiredByEmp.has(id)).forEach(empId => {
-            assignedOffsets.set(empId, desiredByEmp.get(empId)!);
-        });
-        group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
-            const idxInGroup = group.indexOf(empId);
+        const spreadStep = ctx.strictSixTwo === true
+            ? Math.max(1, Math.floor(eCycleLen / Math.max(1, group.length)))
+            : 1;
+        const usedOffsets = new Set<number>();
+
+        const pickSpreadOffset = (empId: string, idxInGroup: number): number => {
             const staggerIdx = ctx.rotateShifts === false
                 ? ctx.fixedBandGlobalStaggerByEmp?.[empId]
                 : ctx.demandDrivenStaggerByEmp?.[empId];
@@ -1542,12 +1502,27 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const fixedBandOff = ctx.rotateShifts === false && empBand
                 ? ({ N: 0, N12: 1, T: 2, D12: 4, M: 5 }[empBand] ?? bandOff) % eCycleLen
                 : bandOff;
-            assignedOffsets.set(
-                empId,
-                staggerRotating
-                    ? (fixedBandOff + (staggerIdx !== undefined ? staggerIdx : idxInGroup)) % eCycleLen
-                    : fixedBandOff,
-            );
+            if (!staggerRotating) return fixedBandOff;
+            let off = (fixedBandOff + spreadStep * (staggerIdx !== undefined ? staggerIdx : idxInGroup)) % eCycleLen;
+            if (ctx.strictSixTwo === true) {
+                let guard = 0;
+                while (usedOffsets.has(off) && guard < eCycleLen) {
+                    off = (off + spreadStep) % eCycleLen;
+                    guard++;
+                }
+            }
+            return off;
+        };
+
+        group.filter(id => desiredByEmp.has(id)).forEach(empId => {
+            const off = desiredByEmp.get(empId)! % eCycleLen;
+            assignedOffsets.set(empId, off);
+            usedOffsets.add(off);
+        });
+        group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
+            const off = pickSpreadOffset(empId, group.indexOf(empId));
+            assignedOffsets.set(empId, off);
+            usedOffsets.add(off);
         });
         group.forEach(empId => {
             empGroupIdx[empId] = assignedOffsets.get(empId) ?? 0;
@@ -1658,15 +1633,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 if (!rotPool.includes(id)) rotPool.push(id);
             }
         }
-        if (rotPool.length > 0) {
-            if (ctx.strictSixTwo === true) {
-                assignStrictSixTwoOffsets(rotPool, empGroupIdx, cycleLen, cL, cF, ctx);
-            } else {
-                const hasTrail = (id: string) =>
-                    ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
-                    ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
-                balanceGlobalCycleOffsets(rotPool, empGroupIdx, cycleLen, hasTrail);
-            }
+        if (rotPool.length > 0 && ctx.strictSixTwo !== true) {
+            const hasTrail = (id: string) =>
+                ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
+                ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
+            balanceGlobalCycleOffsets(rotPool, empGroupIdx, cycleLen, hasTrail);
         }
     }
 
