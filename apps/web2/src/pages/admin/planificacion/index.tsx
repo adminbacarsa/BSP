@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -68,7 +68,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, inferWorkShiftForAbsenceDay, RRHH_ABSENCE_LABEL_TO_CODE } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { runStrictSixTwoPipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
@@ -1118,6 +1118,18 @@ export default function PlanificacionPage() {
     // 5. MOTORES DE CÁLCULO (NIVEL 4 - SLA INTELLIGENCE V9.00)
     // ============================================================================
 
+    const RRHH_ABSENCE_GRID_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA']);
+
+    const isAbsentOnGridDay = (empId: string, dateStr: string, changes: any, existing: any) => {
+        const key = `${empId}_${dateStr}`;
+        if (absencesMap[key]) return true;
+        const pending = changes[key];
+        if (pending && !pending.isDeleted) {
+            return RRHH_ABSENCE_GRID_CODES.has(String(pending.code || '').toUpperCase());
+        }
+        return false;
+    };
+
     const calculateCoverageStats = (dateStr: string, positionName: string, structure: any[], employeesList: any[], changes: any, existing: any) => {
         const posConfig = structure.find((p: any) => p.positionName === positionName) || structure[0] || { qty: 1, shifts: [], coverageType: '24hs' };
         const pax = Number(posConfig.qty) > 0 ? Number(posConfig.qty) : 1;
@@ -1151,7 +1163,7 @@ export default function PlanificacionPage() {
 
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
-            if (absencesMap[key]) return;
+            if (isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -1160,6 +1172,28 @@ export default function PlanificacionPage() {
                 }
             }
         });
+
+        employeesList.forEach((emp: any) => {
+            const absKey = `${emp.id}_${dateStr}`;
+            if (!isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
+            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || dominant?.positionName || 'General';
+            if (titularPos !== positionName) return;
+            const titularName = String(emp.name || '').trim();
+            if (!titularName) return;
+            employeesList.forEach((other: any) => {
+                if (other.id === emp.id) return;
+                const oKey = `${other.id}_${dateStr}`;
+                const osh = changes[oKey] ? (changes[oKey].isDeleted ? null : changes[oKey]) : existing[oKey];
+                if (!osh || !(osh.objectiveId === selectedObjective || changes[oKey])) return;
+                const oshPos = osh.positionName || dominant?.positionName || 'General';
+                if (oshPos === titularPos) return;
+                if (!String(osh.comments || '').includes(`Cubriendo a ${titularName}`)) return;
+                const code = String(osh.code || '').toUpperCase();
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                current += calcShiftHours(osh, slaCodeHoursHint);
+            });
+        });
+
         return { current, target, pax, isActiveDay: isDayActive };
     };
 
@@ -1183,16 +1217,43 @@ export default function PlanificacionPage() {
             positionStructure[0] || { qty: 1, positionName: 'General' },
         );
         const codeCounts: Record<string, number> = {};
-        employeesList.forEach((emp: any) => {
-            const key = `${emp.id}_${dateStr}`;
-            if (absencesMap[key]) return;
-            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
+        const posName = String(pos.positionName || 'General');
+
+        const addWorkCode = (shift: any, fromPending: boolean) => {
+            if (!shift || !(shift.objectiveId === selectedObjective || fromPending)) return;
             const code = String(shift.code || '').toUpperCase();
             if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
-            if (shiftPos !== pos.positionName) return;
+            if (shiftPos !== posName) return;
             codeCounts[code] = (codeCounts[code] || 0) + 1;
+        };
+
+        employeesList.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            if (isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
+            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
+            addWorkCode(shift, !!changes[key]);
+        });
+
+        // Suplente asignado por vacaciones: sumar al puesto del titular aunque positionName venga mal
+        employeesList.forEach((emp: any) => {
+            const absKey = `${emp.id}_${dateStr}`;
+            if (!isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
+            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || dominant?.positionName || 'General';
+            if (titularPos !== posName) return;
+            const titularName = String(emp.name || '').trim();
+            if (!titularName) return;
+            employeesList.forEach((other: any) => {
+                if (other.id === emp.id) return;
+                const oKey = `${other.id}_${dateStr}`;
+                const osh = changes[oKey] ? (changes[oKey].isDeleted ? null : changes[oKey]) : existing[oKey];
+                if (!osh) return;
+                const comments = String(osh.comments || '');
+                if (!comments.includes(`Cubriendo a ${titularName}`)) return;
+                const oshPos = osh.positionName || dominant?.positionName || 'General';
+                if (oshPos === titularPos) return;
+                addWorkCode(osh, !!changes[oKey]);
+            });
         });
 
         return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles);
@@ -1223,24 +1284,51 @@ export default function PlanificacionPage() {
         ? autoSelectedCyclesRef.current
         : autoCycles;
 
-    const buildDayCodeCountsByPosition = (dateStr: string) => buildCodeCountsByPositionForDay(
-        positionStructure || [],
-        dateStr,
-        displayedEmployees,
-        (empId, ds) => {
-            const key = `${empId}_${ds}`;
-            if (absencesMap[key]) return { isDeleted: true };
-            const pending = pendingChanges[key];
-            if (pending?.isDeleted) return { isDeleted: true };
-            const shift = pending ? pending : shiftsMap[key];
-            return shift ?? null;
-        },
-        {
-            selectedObjective,
-            dominantPositionName: dominantPosition?.positionName || 'General',
-            isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
-        },
-    );
+    const buildDayCodeCountsByPosition = (dateStr: string) => {
+        const byPos = buildCodeCountsByPositionForDay(
+            positionStructure || [],
+            dateStr,
+            displayedEmployees,
+            (empId, ds) => {
+                const key = `${empId}_${ds}`;
+                if (absencesMap[key]) return { isDeleted: true };
+                const pending = pendingChanges[key];
+                if (pending?.isDeleted) return { isDeleted: true };
+                if (pending && RRHH_ABSENCE_GRID_CODES.has(String(pending.code || '').toUpperCase())) {
+                    return { isDeleted: true };
+                }
+                const shift = pending ? pending : shiftsMap[key];
+                return shift ?? null;
+            },
+            {
+                selectedObjective,
+                dominantPositionName: dominantPosition?.positionName || 'General',
+                isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+            },
+        );
+        const domName = dominantPosition?.positionName || 'General';
+        displayedEmployees.forEach((emp: any) => {
+            if (!isAbsentOnGridDay(emp.id, dateStr, pendingChanges, shiftsMap)) return;
+            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || domName;
+            const titularName = String(emp.name || '').trim();
+            if (!titularName) return;
+            if (!byPos[titularPos]) byPos[titularPos] = {};
+            displayedEmployees.forEach((other: any) => {
+                if (other.id === emp.id) return;
+                const oKey = `${other.id}_${dateStr}`;
+                const pending = pendingChanges[oKey];
+                const osh = pending?.isDeleted ? null : (pending ?? shiftsMap[oKey]);
+                if (!osh || !(osh.objectiveId === selectedObjective || pending)) return;
+                const oshPos = osh.positionName || domName;
+                if (oshPos === titularPos) return;
+                if (!String(osh.comments || '').includes(`Cubriendo a ${titularName}`)) return;
+                const code = String(osh.code || '').toUpperCase();
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                byPos[titularPos][code] = (byPos[titularPos][code] || 0) + 1;
+            });
+        });
+        return byPos;
+    };
 
     const objectiveCoverageGapReport = useMemo(() => {
         if (!selectedObjective || !(positionStructure?.length)) return null;
@@ -2218,24 +2306,69 @@ export default function PlanificacionPage() {
         setShowRRHHModal(false);
         setSelectedCell(null);
     };
-    const handleProcessVacancy = () => { if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; } if (!vacancyData) return; const replacementEmp = selectedReplacement ? employees.find(e => e.id === selectedReplacement) : null; const newChanges = { ...pendingChanges }; const [sY, sM, sD] = (vacancyData.startDate || '').split('-').map(Number); const [eY, eM, eD] = (vacancyData.endDate || vacancyData.startDate || '').split('-').map(Number); if (!sY || !eY) { toast.error('Datos de ausencia incompletos'); return; } let current = new Date(sY, sM - 1, sD); const end = new Date(eY, eM - 1, eD); const ABSENCE_TYPE_CODES: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG', 'Injustificada': 'AA' }; const absCode = ABSENCE_TYPE_CODES[vacancyData.type] || 'AA'; const NON_WORK_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET']);
-                        // Turno típico de la titular (para cubrir cuando no hay shift previo asignado)
-                        const getTypicalShift = (empId: string) => {
-                            const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
-                            const days = new Date(yr, mo + 1, 0).getDate();
-                            const freq: Record<string, { count: number; shift: any }> = {};
-                            for (let d = 1; d <= days; d++) {
-                                const k = `${empId}_${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                                const s = shiftsMap[k];
-                                if (s?.code && !NON_WORK_CODES.has(s.code)) {
-                                    if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
-                                    freq[s.code].count++;
-                                }
-                            }
-                            const best = Object.values(freq).sort((a, b) => b.count - a.count)[0];
-                            return best?.shift || null;
-                        };
-                        let count = 0; let covered = 0; while (current <= end) { const dateStr = getDateKey(current); const titularKey = `${vacancyData.employeeId}_${dateStr}`; const existingShift = shiftsMap[titularKey]; const workShift = (existingShift && existingShift.code && !NON_WORK_CODES.has(existingShift.code)) ? existingShift : getTypicalShift(vacancyData.employeeId); newChanges[titularKey] = { code: absCode, name: vacancyData.type, isTemp: true, hours: 0, startTime: '00:00', comments: `${vacancyData.type} — gestionado desde planificador`, coveredBy: replacementEmp ? replacementEmp.name : null }; if (replacementEmp && workShift) { const suplenteKey = `${replacementEmp.id}_${dateStr}`; newChanges[suplenteKey] = { code: workShift.code, name: workShift.code, isTemp: true, objectiveId: workShift.objectiveId || selectedObjective, hours: workShift.hours || 8, startTime: workShift.startTime || '00:00', positionName: workShift.positionName || activePosition || 'General', comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})` }; covered++; } count++; current.setDate(current.getDate() + 1); } setPendingChanges(newChanges); setShowVacancyModal(false); setVacancyData(null); toast.success(replacementEmp ? `${absCode} en ${count} día(s) — ${covered} turno(s) asignados a ${replacementEmp.name}. Guardá los cambios.` : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`);
+    const handleProcessVacancy = () => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (!vacancyData) return;
+        const replacementEmp = selectedReplacement ? employees.find(e => e.id === selectedReplacement) : null;
+        const newChanges = { ...pendingChanges };
+        const [sY, sM, sD] = (vacancyData.startDate || '').split('-').map(Number);
+        const [eY, eM, eD] = (vacancyData.endDate || vacancyData.startDate || '').split('-').map(Number);
+        if (!sY || !eY) { toast.error('Datos de ausencia incompletos'); return; }
+        let current = new Date(sY, sM - 1, sD);
+        const end = new Date(eY, eM - 1, eD);
+        const absCode = RRHH_ABSENCE_LABEL_TO_CODE[vacancyData.type] || 'AA';
+        const NON_WORK_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET']);
+        const titularPos = empDefaultPos[`${vacancyData.employeeId}___${selectedObjective}`]
+            || activePosition
+            || (positionStructure[0]?.positionName ?? 'General');
+        let count = 0;
+        let covered = 0;
+        while (current <= end) {
+            const dateStr = getDateKey(current);
+            const titularKey = `${vacancyData.employeeId}_${dateStr}`;
+            const workShift = inferWorkShiftForAbsenceDay(
+                vacancyData.employeeId,
+                dateStr,
+                shiftsMap,
+                pendingChanges,
+                NON_WORK_CODES,
+            );
+            newChanges[titularKey] = {
+                code: absCode,
+                name: vacancyData.type,
+                isTemp: true,
+                hours: 0,
+                startTime: '00:00',
+                objectiveId: selectedObjective,
+                positionName: titularPos,
+                comments: `${vacancyData.type} — gestionado desde planificador`,
+                coveredBy: replacementEmp ? replacementEmp.name : null,
+            };
+            if (replacementEmp && workShift) {
+                const suplenteKey = `${replacementEmp.id}_${dateStr}`;
+                newChanges[suplenteKey] = {
+                    code: workShift.code,
+                    name: workShift.code,
+                    isTemp: true,
+                    objectiveId: workShift.objectiveId || selectedObjective,
+                    hours: workShift.hours || 8,
+                    startTime: workShift.startTime || '00:00',
+                    positionName: titularPos,
+                    comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})`,
+                };
+                covered++;
+            }
+            count++;
+            current.setDate(current.getDate() + 1);
+        }
+        setPendingChanges(newChanges);
+        setShowVacancyModal(false);
+        setVacancyData(null);
+        toast.success(
+            replacementEmp
+                ? `${absCode} en ${count} día(s) — ${covered} turno(s) a ${replacementEmp.name} (${titularPos}). Guardá los cambios.`
+                : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`,
+        );
     };
     
     // 🛑 FIX: Inyección de Puesto en Bulk
@@ -3211,13 +3344,18 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            await bumpAutoV2Progress(40, genBrain.strictSixTwo
+            const canFloater = canUseFixedBandFloater(baseGenCtx);
+            await bumpAutoV2Progress(40, (genBrain.strictSixTwo || canFloater)
                 ? 'Generando cronograma (ciclo 24d + continuidad mayo)…'
                 : 'Generando cronograma (V4)…');
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
-            const strictPipeline = useStrictPipeline && canUseFixedBandFloater(baseGenCtx)
-                ? runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false })
+            // Usar el pipeline rápido de bandas fijas siempre que el layout lo permita
+            // (4 guardias × puesto 24hs qty=1), no solo cuando el brain detecta condiciones perfectas.
+            // Esto evita el fallback V4 lento (8 fases × 1200 iter) en servicios con ausencias o
+            // ligeras variaciones de horas que no cumplen el umbral hoursGap<=1 del brain.
+            const strictPipeline = canFloater
+                ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
                 : null;
             const useFloaterPipeline = !!strictPipeline;
             const gen = strictPipeline?.generation ?? generateScheduleV4({
