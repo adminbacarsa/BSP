@@ -443,9 +443,30 @@ export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL
 }
 
 /**
- * Asignación determinística de fases 6+2 para plantilla justa (16 guardias / 8 slots = 2 por fase).
- * Prioriza trailing de mayo si el bucket tiene cupo; completa cuarteto para 4 francos/día.
+ * Slot del ciclo 6+2 que debe tener el guardia el día 1 del mes, según racha de mayo.
+ * tw = días consecutivos de trabajo al cierre; tr = días consecutivos de F al cierre.
  */
+function openingCycleSlotFromMayTrail(
+    empId: string,
+    cL: number,
+    cF: number,
+    ctx: V2EngineContext,
+): number | null {
+    const tw = ctx.prevMonthTrailingWorkDays?.[empId];
+    const tr = ctx.prevMonthTrailingRestDays?.[empId];
+    if (tw !== undefined && tw > 0) {
+        return tw >= cL ? cL : tw;
+    }
+    if (tr !== undefined && tr > 0) {
+        return tr >= cF ? 0 : cL + tr;
+    }
+    return null;
+}
+
+function offsetFromOpeningCycleSlot(openingSlot: number, absDay: number, cycleLen: number): number {
+    return ((openingSlot - absDay) % cycleLen + cycleLen) % cycleLen;
+}
+
 /**
  * Con N guardias y ciclo L días: ~N/L por offset → 4 francos/día en plantilla 16×6+2.
  * Sin esto, cada puesto repite el mismo offset y 8 guardias descansan el mismo día.
@@ -1479,51 +1500,85 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         shiftCodes: string[],
     ) => {
         const eCycleLen = eCL + eCF;
-        const desiredByEmp = new Map<string, number>();
-        group.forEach(empId => {
-            const tw = ctx.prevMonthTrailingWorkDays?.[empId];
-            const tr = ctx.prevMonthTrailingRestDays?.[empId];
-            if (tw !== undefined && tw > 0) desiredByEmp.set(empId, tw % eCycleLen);
-            else if (tr !== undefined && tr > 0 && tr < eCF) desiredByEmp.set(empId, (eCL + tr) % eCycleLen);
-        });
         const assignedOffsets = new Map<string, number>();
         const bandOff = bandBase % eCycleLen;
         const staggerRotating = shiftCodes.length > 1;
         const spreadStep = ctx.strictSixTwo === true
             ? Math.max(1, Math.floor(eCycleLen / Math.max(1, group.length)))
             : 1;
-        const usedOffsets = new Set<number>();
+        const absDay0 = monthStartGlobalDayIndex;
 
-        const pickSpreadOffset = (empId: string, idxInGroup: number): number => {
-            const staggerIdx = ctx.rotateShifts === false
-                ? ctx.fixedBandGlobalStaggerByEmp?.[empId]
-                : ctx.demandDrivenStaggerByEmp?.[empId];
-            const empBand = String(empPrimaryShift[empId] || '').toUpperCase();
-            const fixedBandOff = ctx.rotateShifts === false && empBand
-                ? ({ N: 0, N12: 1, T: 2, D12: 4, M: 5 }[empBand] ?? bandOff) % eCycleLen
-                : bandOff;
-            if (!staggerRotating) return fixedBandOff;
-            let off = (fixedBandOff + spreadStep * (staggerIdx !== undefined ? staggerIdx : idxInGroup)) % eCycleLen;
-            if (ctx.strictSixTwo === true) {
+        if (ctx.strictSixTwo === true && staggerRotating && group.length > 0) {
+            let anchorSlot = bandOff % eCycleLen;
+            for (const id of group) {
+                const trailSlot = openingCycleSlotFromMayTrail(id, eCL, eCF, ctx);
+                if (trailSlot !== null) {
+                    anchorSlot = trailSlot;
+                    break;
+                }
+            }
+            const openingSlots = group.map((_, i) => (anchorSlot + spreadStep * i) % eCycleLen);
+            const usedSlots = new Set<number>();
+
+            const trailFirst = [...group].sort((a, b) => {
+                const ta = openingCycleSlotFromMayTrail(a, eCL, eCF, ctx);
+                const tb = openingCycleSlotFromMayTrail(b, eCL, eCF, ctx);
+                if (ta !== null && tb === null) return -1;
+                if (tb !== null && ta === null) return 1;
+                return (ctx.demandDrivenStaggerByEmp?.[a] ?? group.indexOf(a))
+                    - (ctx.demandDrivenStaggerByEmp?.[b] ?? group.indexOf(b));
+            });
+
+            for (const empId of trailFirst) {
+                const want = openingCycleSlotFromMayTrail(empId, eCL, eCF, ctx);
+                let slot = openingSlots.find(s => !usedSlots.has(s) && want !== null && s === want);
+                if (slot === undefined) {
+                    slot = openingSlots.find(s => !usedSlots.has(s));
+                }
+                if (slot === undefined) continue;
+                usedSlots.add(slot);
+                assignedOffsets.set(empId, offsetFromOpeningCycleSlot(slot, absDay0, eCycleLen));
+            }
+        } else {
+            const desiredByEmp = new Map<string, number>();
+            group.forEach(empId => {
+                const slot = openingCycleSlotFromMayTrail(empId, eCL, eCF, ctx);
+                if (slot !== null) {
+                    desiredByEmp.set(empId, offsetFromOpeningCycleSlot(slot, absDay0, eCycleLen));
+                }
+            });
+            const usedOffsets = new Set<number>();
+
+            const pickSpreadOffset = (empId: string, idxInGroup: number): number => {
+                const staggerIdx = ctx.rotateShifts === false
+                    ? ctx.fixedBandGlobalStaggerByEmp?.[empId]
+                    : ctx.demandDrivenStaggerByEmp?.[empId];
+                const empBand = String(empPrimaryShift[empId] || '').toUpperCase();
+                const fixedBandOff = ctx.rotateShifts === false && empBand
+                    ? ({ N: 0, N12: 1, T: 2, D12: 4, M: 5 }[empBand] ?? bandOff) % eCycleLen
+                    : bandOff;
+                if (!staggerRotating) return fixedBandOff;
+                let off = (fixedBandOff + spreadStep * (staggerIdx !== undefined ? staggerIdx : idxInGroup)) % eCycleLen;
                 let guard = 0;
                 while (usedOffsets.has(off) && guard < eCycleLen) {
                     off = (off + spreadStep) % eCycleLen;
                     guard++;
                 }
-            }
-            return off;
-        };
+                return off;
+            };
 
-        group.filter(id => desiredByEmp.has(id)).forEach(empId => {
-            const off = desiredByEmp.get(empId)! % eCycleLen;
-            assignedOffsets.set(empId, off);
-            usedOffsets.add(off);
-        });
-        group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
-            const off = pickSpreadOffset(empId, group.indexOf(empId));
-            assignedOffsets.set(empId, off);
-            usedOffsets.add(off);
-        });
+            group.filter(id => desiredByEmp.has(id)).forEach(empId => {
+                const off = desiredByEmp.get(empId)!;
+                assignedOffsets.set(empId, off);
+                usedOffsets.add(off);
+            });
+            group.filter(id => !desiredByEmp.has(id)).forEach((empId) => {
+                const off = pickSpreadOffset(empId, group.indexOf(empId));
+                assignedOffsets.set(empId, off);
+                usedOffsets.add(off);
+            });
+        }
+
         group.forEach(empId => {
             empGroupIdx[empId] = assignedOffsets.get(empId) ?? 0;
             empCycleLen[empId] = eCycleLen;

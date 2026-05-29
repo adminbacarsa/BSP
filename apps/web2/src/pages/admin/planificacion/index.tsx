@@ -3042,6 +3042,7 @@ export default function PlanificacionPage() {
             const FRANCO_CODES_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
             prevTrailSnap.docs.forEach(d => {
                 const data = d.data() as any;
+                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
                 if (!data.employeeId || !data.startTime) return;
                 const dt: Date = (data.startTime as Timestamp).toDate();
                 const dateStr = getDateKey(dt);
@@ -3056,6 +3057,7 @@ export default function PlanificacionPage() {
                 const empShifts = prevTrailByEmp[emp.id] || {};
                 const lastCode = empShifts[lastDayStr];
                 if (!lastCode) return; // sin datos, el motor usará offset distribuido
+                if (lastCode === 'RET') return;
                 const isFrancoLast = FRANCO_CODES_SET.has(lastCode);
                 let count = 0;
                 for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
