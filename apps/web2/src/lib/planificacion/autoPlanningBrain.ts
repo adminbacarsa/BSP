@@ -14,12 +14,17 @@
  */
 
 import {
+    checkFeasibility,
     pickOptimalAutoCycles,
     type V2AbsenceMap,
     type V2EngineContext,
     type V2FeasibilityReport,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import {
+    buildPlanningOperationalDiagnosis,
+    type PlanningOperationalDiagnosis,
+} from './planningOperationalDiagnosis';
 import {
     MODO12_ABSENCE_CODES,
     PLANNING_COVERAGE_RULES,
@@ -32,6 +37,7 @@ import {
 
 export { MODO12_ABSENCE_CODES as MODO12_AUTO_ABSENCE_CODES, PLANNING_COVERAGE_RULES };
 export type { Modo12DayCheck as ContingencyDayCheck, PlanningCoverageRule };
+export type { PlanningOperationalDiagnosis, PlanningBalanceKind } from './planningOperationalDiagnosis';
 
 const CYCLE_MAP: Record<string, [number, number]> = {
     '4+2': [4, 2],
@@ -74,6 +80,10 @@ export interface AutoPlanningBrainResult {
     rotateShifts: boolean;
     ajustarCrono: boolean;
     warnings: string[];
+    /** Demanda → oferta → balance → resolución (F1). */
+    diagnosis: PlanningOperationalDiagnosis;
+    /** Si true: motor sin flex 5+1/6+1 ni F→turno agresivo. */
+    strictSixTwo: boolean;
 }
 
 function is24hs(pos: V2PositionDef): boolean {
@@ -201,8 +211,22 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     const monthDateStrs = input.daysInMonth.map(d => input.getDateKey(d));
 
     const picked = pickOptimalAutoCycles({ ...input, autoCycles: [] });
-    const cycleKey = picked.pickedKey;
-    const staffing = computeDailyStaffingModel(
+    let cycleKey = picked.pickedKey;
+    let cycles = picked.cycles;
+    let feasibility = picked.feasibility;
+
+    const staffingRef6x2Model = computeDailyStaffingModel(
+        input.positions,
+        '6+2',
+        input.slaVendidas,
+    );
+    const staffingRef6x2: import('./planningOperationalDiagnosis').PlanningStaffingRef = {
+        servicioDiarioModo8: staffingRef6x2Model.servicioDiarioModo8,
+        structuralHoras: staffingRef6x2Model.structuralHoras,
+        cycleKey: '6+2',
+    };
+
+    const staffingPrelim = computeDailyStaffingModel(
         input.positions,
         cycleKey,
         input.slaVendidas,
@@ -216,7 +240,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     const contingencyDaysManual = [...(input.contingencyDaysManual ?? [])].sort();
 
     const contingency = validateContingencyCoverage({
-        staffing,
+        staffing: staffingPrelim,
         contingencyDays: contingencyDaysManual,
         absences: input.absences,
         employeeIds,
@@ -225,7 +249,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     });
 
     const absenceModo12 = validateAbsenceModo12Days({
-        staffing,
+        staffing: staffingPrelim,
         modo12DaysAuto,
         absences: input.absences,
         employeeIds,
@@ -242,17 +266,52 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
             input.positions,
             input.employees.length,
             cycleKey,
-            picked.feasibility.ok,
+            feasibility.ok,
         );
 
     const ajustarCrono = input.ajustarCronoOverride === true;
 
     warnings.push(...contingency.messages);
 
+    let diagnosis = buildPlanningOperationalDiagnosis({
+        positions: input.positions,
+        feasibility,
+        staffing: staffingRef6x2,
+        peopleAvailable: input.employees.length,
+        soldHours: input.slaVendidas,
+        modo12DayCount: modo12DaysAuto.length,
+        pickedCycle: cycleKey,
+    });
+
+    if (diagnosis.strictSixTwo && !ajustarCrono) {
+        const feas62 = checkFeasibility({ ...input, autoCycles: ['6+2'] });
+        if (feas62.ok) {
+            cycleKey = '6+2';
+            cycles = ['6+2'];
+            feasibility = feas62;
+            diagnosis = buildPlanningOperationalDiagnosis({
+                positions: input.positions,
+                feasibility: feas62,
+                staffing: staffingRef6x2,
+                peopleAvailable: input.employees.length,
+                soldHours: input.slaVendidas,
+                modo12DayCount: modo12DaysAuto.length,
+                pickedCycle: '6+2',
+            });
+            warnings.push('Balance JUSTO: esquema bloqueado en 6+2 estricto (sin flex ni F→turno).');
+        }
+    }
+
+    const staffing = computeDailyStaffingModel(
+        input.positions,
+        cycleKey,
+        input.slaVendidas,
+    );
+
     return {
         pickedCycle: cycleKey,
-        cycles: picked.cycles,
-        feasibility: picked.feasibility,
+        cycles,
+        feasibility,
         staffing,
         modo12DaysAuto,
         contingencyDaysManual,
@@ -266,5 +325,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         rotateShifts,
         ajustarCrono,
         warnings,
+        diagnosis,
+        strictSixTwo: diagnosis.strictSixTwo && !ajustarCrono,
     };
 }

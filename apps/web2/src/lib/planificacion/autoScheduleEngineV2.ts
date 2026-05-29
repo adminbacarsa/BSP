@@ -314,6 +314,8 @@ export interface V2EngineContext {
      * para cerrar huecos. Default false — Contingencia y ausencias usan Modo 12, no francos.
      */
     allowFrancoWorkedRescue?: boolean;
+    /** Si true: 6+2 estricto — sin flex 5+1/6+1 ni F→turno agresivo en cierre SLA. */
+    strictSixTwo?: boolean;
     /** Fase de offset 0..cycleLen-1 (solo bandas fijas; búsqueda de cobertura). */
     fixedBandOffsetPhase?: number;
     /** Escalonado global M/T/N (interno, bandas fijas). */
@@ -446,6 +448,8 @@ function pickFlexSchemeEmployees(
     positionGroups: Record<string, string[]>,
     staggerByEmp: Record<string, number> | undefined,
 ): { sixOne: string[]; fiveOne: string[]; fourTwo: string[] } {
+    const empty = { sixOne: [] as string[], fiveOne: [] as string[], fourTwo: [] as string[] };
+    if (ctx.strictSixTwo === true) return empty;
     const sixOne: string[] = [];
     const fiveOne: string[] = [];
     const fourTwo: string[] = [];

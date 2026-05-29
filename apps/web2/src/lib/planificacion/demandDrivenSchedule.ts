@@ -22,7 +22,12 @@ const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT']);
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
 
 function mayUseFrancoWorkedRescue(ctx: V2EngineContext): boolean {
+    if (ctx.strictSixTwo === true) return false;
     return ctx.allowFrancoWorkedRescue === true;
+}
+
+function mayConvertFrancoToWork(ctx: V2EngineContext): boolean {
+    return ctx.strictSixTwo !== true;
 }
 
 function canAssignBand(
@@ -217,6 +222,7 @@ export function fillDemandGapsWithFlexibleCycle(
     dayDemands: ObjectiveDayDemand[],
 ): void {
     const { ctx, isCustomCoverPosition } = params;
+    if (ctx.strictSixTwo === true) return;
     if (ctx.rotateShifts === false) return;
 
     const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
@@ -906,7 +912,7 @@ export function fillDemandGapsBeforeFrancos(
                             have++;
                             continue;
                         }
-                        if (!apretarDay && pass >= 6
+                        if (!apretarDay && pass >= 6 && mayConvertFrancoToWork(ctx)
                             && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                             have++;
                             continue;
@@ -1352,20 +1358,20 @@ export function repairPositionDayTripletGaps(
                     const eff = effectiveMtnCoverage(params.assignments, day.dateStr, pd.positionName, qty);
                     if (eff[code] >= needed) continue;
 
-                    if (tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                    if (mayConvertFrancoToWork(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                         ignorePendulum: true,
                         allowSlaClose: true,
                     })) {
                         progress = true;
                         continue;
                     }
-                    if (bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                    if (mayConvertFrancoToWork(params.ctx) && bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                         progress = true;
                         continue;
                     }
                     if (tryCrossPositionTwoWorkerSwapForGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)
                         || tryMoveSameBandWorkerToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)
-                        || tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                        || (mayConvertFrancoToWork(params.ctx) && tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent))) {
                         progress = true;
                     }
                 }
@@ -1440,7 +1446,7 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
-                        if (tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                        if (mayConvertFrancoToWork(params.ctx) && tryPromoteCycleWorkFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                             have++;
                             progress = true;
                             continue;
@@ -1450,7 +1456,7 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
-                        if (tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        if (mayConvertFrancoToWork(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                             ignorePendulum: true,
                             allowSlaClose: true,
                         })) {
@@ -1458,7 +1464,7 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
-                        if (mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
+                        if (mayConvertFrancoToWork(params.ctx) && mayUseFrancoWorkedRescue(params.ctx) && tryFillSlotFromFrancoRescue(params, pos, day.dateStr, day.dayLetter, code, inCurrent, {
                             ignorePendulum: true,
                             allowSlaClose: true,
                         })) {
@@ -1476,7 +1482,7 @@ export function forceCloseRemainingSlaGaps(
                             progress = true;
                             continue;
                         }
-                        if (bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
+                        if (mayConvertFrancoToWork(params.ctx) && bruteForceFrancoToGap(params, pos, day.dateStr, day.dayLetter, code, inCurrent)) {
                             have++;
                             progress = true;
                             continue;

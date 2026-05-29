@@ -74,6 +74,8 @@ import {
     shouldRunGeminiOptimizeStep,
 } from '@/lib/planificacion/planningAgentPipeline';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
+import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
+import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
 import {
     buildPlanningSnapshotFromGrid,
     diffPlanningSnapshots,
@@ -440,6 +442,9 @@ export default function PlanificacionPage() {
     const [showCapacityModal, setShowCapacityModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
     const [autoV2Coverage, setAutoV2Coverage] = useState<import('@/lib/planificacion/coverageVerification').CoverageVerificationReport | null>(null);
+    const [autoV2FormReport, setAutoV2FormReport] = useState<import('@/lib/planificacion/scheduleFormValidator').ScheduleFormValidationReport | null>(null);
+    const [autoV2RebalanceLog, setAutoV2RebalanceLog] = useState<FormRebalanceLogEntry[]>([]);
+    const [autoV2Rebalancing, setAutoV2Rebalancing] = useState(false);
     const [autoV2Suggestions, setAutoV2Suggestions] = useState<import('@/lib/planificacion/scheduleOptimizationSuggestions').ScheduleChangeSuggestion[] | null>(null);
     const [showCoverageModal, setShowCoverageModal] = useState(false);
     // Snapshot de la última generación para reprocesar errores sin volver a llamar al motor
@@ -2874,6 +2879,7 @@ export default function PlanificacionPage() {
             autoPlanningBrainRef.current = null;
             setAutoV2Report(null);
             setAutoPlanningBrainReport(null);
+            setAutoV2FormReport(null);
             setAutoRotateForce(null);
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
@@ -3150,6 +3156,7 @@ export default function PlanificacionPage() {
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
                 globalRetPool,
+                strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
             await bumpAutoV2Progress(40, 'Generando cronograma (V4)…');
@@ -3302,12 +3309,72 @@ export default function PlanificacionPage() {
             coverage = geminiOut.coverage;
             const finalChanges = { ...geminiOut.changes };
 
+            let formReport = verifyScheduleForm(verifyCtx, finalAssignments, gen.stats, {
+                strictSixTwo: genBrain.strictSixTwo,
+                rotateShifts: genBrain.rotateShifts,
+            });
+            setAutoV2RebalanceLog([]);
+
             const verifiedBillable = coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours;
             const verifiedUncovered = coverage.coverage.uncoveredSlots;
             const hrsDeficit = slaVendidas > 0
                 ? Math.max(0, Math.round((slaVendidas - verifiedBillable) * 10) / 10)
                 : 0;
             const slaClosed = slaVendidas <= 0 || (hrsDeficit <= 0.5 && verifiedUncovered <= 0);
+
+            let statsAfterForm = gen.stats;
+            const hourFormIssues = formReport.metrics.hoursSpread > 24
+                || formReport.metrics.over192Count > 0
+                || formReport.metrics.over200Count > 0
+                || formReport.metrics.under168Count > 0;
+            if (slaClosed && hourFormIssues) {
+                await bumpAutoV2Progress(94, 'Rebalanceando forma (swaps horas)…');
+                await new Promise<void>((r) => setTimeout(r, 0));
+                const reb = rebalanceScheduleForm(verifyCtx, finalAssignments, statsAfterForm, coverage, {
+                    strictSixTwo: genBrain.strictSixTwo,
+                    rotateShifts: genBrain.rotateShifts,
+                });
+                if (reb.improved && reb.swapsApplied > 0) {
+                    finalAssignments = reb.assignments;
+                    coverage = reb.coverageReport;
+                    formReport = reb.formReport;
+                    statsAfterForm = reb.stats;
+                    setAutoV2RebalanceLog(reb.log);
+                    const touched = new Set<string>();
+                    for (const entry of reb.log) {
+                        touched.add(`${entry.fromEmpId}__${entry.dateStr}`);
+                        touched.add(`${entry.toEmpId}__${entry.dateStr}`);
+                    }
+                    for (const touchKey of touched) {
+                        const sep = touchKey.indexOf('__');
+                        const empId = touchKey.slice(0, sep);
+                        const dateStr = touchKey.slice(sep + 2);
+                        const a = finalAssignments.find(x => x.empId === empId && x.dateStr === dateStr);
+                        if (!a || isDateLocked(dateStr)) continue;
+                        finalChanges[`${empId}_${dateStr}`] = {
+                            isTemp: true,
+                            employeeId: empId,
+                            objectiveId: selectedObjective,
+                            positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
+                            code: a.code,
+                            name: a.name,
+                            hours: a.hours,
+                            startTime: a.startTime,
+                            ...(a.endTime ? { endTime: a.endTime } : {}),
+                            ...(a.isFranco ? { isFranco: true } : {}),
+                            ...(a.isReten ? { isReten: true } : {}),
+                        };
+                    }
+                    setAutoV2GenStats((prev) => prev ? {
+                        ...prev,
+                        employeeMonthlyHours: reb.stats.employeeMonthlyHours,
+                    } : prev);
+                }
+            }
+            setAutoV2FormReport(formReport);
+
+            const verifiedBillableFinal = coverage.hours?.billableHoursGenerated ?? statsAfterForm.totalBillableHours;
+            const verifiedUncoveredFinal = coverage.coverage.uncoveredSlots;
 
             let gridBillableHours = 0;
             displayedEmployees.forEach((emp: any) => {
@@ -3328,16 +3395,16 @@ export default function PlanificacionPage() {
 
             setAutoV2GenStats((prev) => prev ? {
                 ...prev,
-                totalBillableHours: verifiedBillable,
+                totalBillableHours: verifiedBillableFinal,
                 gridBillableHours,
                 cellsSkippedOverwrite: skipped,
-                uncoveredSlots: verifiedUncovered,
+                uncoveredSlots: verifiedUncoveredFinal,
                 slaDeficitRemaining: hrsDeficit,
                 slaHoursClosed: slaClosed,
             } : prev);
             setAutoV2Coverage(coverage);
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
-            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, statsAfterForm));
+            setAutoV2LastRun({ assignments: finalAssignments, stats: statsAfterForm, ctx: verifyCtx });
 
             // Vista previa en grilla siempre (aunque el SLA quede abierto) para poder diagnosticar.
             setPendingChanges(finalChanges);
@@ -3346,7 +3413,7 @@ export default function PlanificacionPage() {
             await bumpAutoV2Progress(100, slaClosed ? 'Listo' : 'SLA sin cerrar — vista previa');
             await new Promise<void>((r) => setTimeout(r, 180));
 
-            const gridGap = Math.abs(verifiedBillable - gridBillableHours);
+            const gridGap = Math.abs(verifiedBillableFinal - gridBillableHours);
 
             if (!slaClosed) {
                 const parts: string[] = [];
@@ -3371,18 +3438,18 @@ export default function PlanificacionPage() {
             } else if (!autoOverwrite && skipped > 0) {
                 toast.warning(
                     `Solo se volcaron ${written} celdas; ${skipped} quedaron con datos viejos. ` +
-                    `La grilla muestra ~${Math.round(gridBillableHours)}h, no ${Math.round(verifiedBillable)}h. Activá Sobreescribir.`,
+                    `La grilla muestra ~${Math.round(gridBillableHours)}h, no ${Math.round(verifiedBillableFinal)}h. Activá Sobreescribir.`,
                     { duration: 10000 },
                 );
                 setAutoWizardStep('done');
             } else if (gridGap > 16) {
                 toast.warning(
-                    `El cronograma calculó ${Math.round(verifiedBillable)}h pero la grilla refleja ~${Math.round(gridBillableHours)}h. Revisá celdas mezcladas o guardá tras corregir.`,
+                    `El cronograma calculó ${Math.round(verifiedBillableFinal)}h pero la grilla refleja ~${Math.round(gridBillableHours)}h. Revisá celdas mezcladas o guardá tras corregir.`,
                     { duration: 9000 },
                 );
                 setAutoWizardStep('done');
-            } else if (slaVendidas > 0 && hrsDeficit <= 0.5 && verifiedUncovered <= 0) {
-                toast.success(`Cronograma cerrado: ${Math.round(verifiedBillable)}h = ${slaVendidas}h vendidas.`, { duration: 5000 });
+            } else if (slaVendidas > 0 && hrsDeficit <= 0.5 && verifiedUncoveredFinal <= 0) {
+                toast.success(`Cronograma cerrado: ${Math.round(verifiedBillableFinal)}h = ${slaVendidas}h vendidas.`, { duration: 5000 });
                 setAutoWizardStep('done');
             } else {
                 setAutoWizardStep('done');
@@ -3449,6 +3516,15 @@ export default function PlanificacionPage() {
                 buildScheduleOptimizationSuggestions(autoV2LastRun.ctx, result.assignments, autoV2LastRun.stats),
             );
             setAutoV2LastRun({ ...autoV2LastRun, assignments: result.assignments });
+            setAutoV2FormReport(verifyScheduleForm(
+                autoV2LastRun.ctx,
+                result.assignments,
+                autoV2LastRun.stats,
+                {
+                    strictSixTwo: autoPlanningBrainRef.current?.strictSixTwo,
+                    rotateShifts: autoPlanningBrainRef.current?.rotateShifts,
+                },
+            ));
 
             const s = result.summary;
             const baseMsg = `Reproceso en ${result.iterations} iteración(es). Descansos: -${s.restViolationsFixed}, licencias: -${s.licenseConflictsFixed}, slots: -${s.uncoveredFixed}.`;
@@ -3472,6 +3548,84 @@ export default function PlanificacionPage() {
             toast.error('Error al reprocesar los errores.');
         } finally {
             setAutoV2Fixing(false);
+        }
+    };
+
+    /** Rebalanceo manual de forma: swaps trabajo↔F/RET entre guardias (sin F→turno unilateral). */
+    const rebalanceAutoForm = async () => {
+        if (!autoV2LastRun || !autoV2Coverage || !selectedObjective) {
+            toast.error('No hay una generación reciente para rebalancear.');
+            return;
+        }
+        if (autoV2Coverage.coverage.uncoveredSlots > 0) {
+            toast.error('Cerrá la cobertura antes de rebalancear forma.');
+            return;
+        }
+        setAutoV2Rebalancing(true);
+        try {
+            const reb = rebalanceScheduleForm(
+                autoV2LastRun.ctx,
+                autoV2LastRun.assignments,
+                autoV2LastRun.stats,
+                autoV2Coverage,
+                {
+                    strictSixTwo: autoPlanningBrainRef.current?.strictSixTwo,
+                    rotateShifts: autoPlanningBrainRef.current?.rotateShifts,
+                },
+            );
+            if (!reb.improved || reb.swapsApplied === 0) {
+                toast.info('No se encontraron swaps que mejoren el balance horario sin romper cobertura.');
+                return;
+            }
+
+            const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
+            const touched = new Set<string>();
+            for (const entry of reb.log) {
+                touched.add(`${entry.fromEmpId}__${entry.dateStr}`);
+                touched.add(`${entry.toEmpId}__${entry.dateStr}`);
+            }
+            for (const touchKey of touched) {
+                const sep = touchKey.indexOf('__');
+                const empId = touchKey.slice(0, sep);
+                const dateStr = touchKey.slice(sep + 2);
+                const a = reb.assignments.find(x => x.empId === empId && x.dateStr === dateStr);
+                if (!a || isDateLocked(dateStr)) continue;
+                newChanges[`${empId}_${dateStr}`] = {
+                    isTemp: true,
+                    employeeId: empId,
+                    objectiveId: selectedObjective,
+                    positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
+                    code: a.code,
+                    name: a.name,
+                    hours: a.hours,
+                    startTime: a.startTime,
+                    ...(a.endTime ? { endTime: a.endTime } : {}),
+                    ...(a.isFranco ? { isFranco: true } : {}),
+                    ...(a.isReten ? { isReten: true } : {}),
+                };
+            }
+
+            setPendingChanges(newChanges);
+            setAutoV2Coverage(reb.coverageReport);
+            setAutoV2FormReport(reb.formReport);
+            setAutoV2RebalanceLog(reb.log);
+            setAutoV2LastRun({ ...autoV2LastRun, assignments: reb.assignments, stats: reb.stats });
+            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(autoV2LastRun.ctx, reb.assignments, reb.stats));
+            setAutoV2GenStats((prev) => prev ? {
+                ...prev,
+                employeeMonthlyHours: reb.stats.employeeMonthlyHours,
+            } : prev);
+
+            toast.success(
+                `Rebalanceo: ${reb.swapsApplied} swap(s). Δ ${reb.formReport.metrics.hoursSpread}h · prom ${reb.formReport.metrics.avgBillableHours}h`,
+                { duration: 7000 },
+            );
+            console.info('[rebalanceAutoForm] log:', reb.log);
+        } catch (e: any) {
+            console.error('[rebalanceAutoForm]', e);
+            toast.error('Error al rebalancear forma.');
+        } finally {
+            setAutoV2Rebalancing(false);
         }
     };
 
@@ -6224,6 +6378,42 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
+                                {autoPlanningBrainReport?.diagnosis && (autoWizardStep === 'configure' || autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Loading && !autoV2Generating && (
+                                    <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/80 px-3 py-2.5 space-y-2">
+                                        <p className="text-[10px] font-black text-indigo-800 uppercase tracking-wide">Diagnóstico operativo</p>
+                                        <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                            <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
+                                                <p className="font-black text-slate-500 uppercase text-[9px]">Demanda</p>
+                                                <p className="font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.demand.slotsPerDay} slots/día · {autoPlanningBrainReport.diagnosis.demand.slotsMonth} mes</p>
+                                                <p className="text-slate-600">{Math.round(autoPlanningBrainReport.diagnosis.demand.structuralHours)}h estructura · {Math.round(autoPlanningBrainReport.diagnosis.demand.soldHours)}h vendidas</p>
+                                                {autoPlanningBrainReport.diagnosis.demand.modo12DayCount > 0 && (
+                                                    <p className="text-amber-700 font-bold">{autoPlanningBrainReport.diagnosis.demand.modo12DayCount} día(s) Modo 12</p>
+                                                )}
+                                            </div>
+                                            <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
+                                                <p className="font-black text-slate-500 uppercase text-[9px]">Oferta</p>
+                                                <p className="font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias · {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHours)}h max</p>
+                                                <p className="text-slate-600">T1 {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHoursT1)}h · T2 {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHoursT2)}h</p>
+                                                <p className="text-slate-600">Plantilla 6+2: {autoPlanningBrainReport.diagnosis.supply.servicioDiario}+{autoPlanningBrainReport.diagnosis.supply.poolFrancos6x2}={autoPlanningBrainReport.diagnosis.supply.plantillaRequired6x2}</p>
+                                            </div>
+                                        </div>
+                                        <div className={`rounded-lg px-2 py-1.5 border text-[10px] font-bold ${
+                                            autoPlanningBrainReport.diagnosis.balance === 'exact'
+                                                ? 'bg-emerald-100 border-emerald-300 text-emerald-900'
+                                                : autoPlanningBrainReport.diagnosis.balance === 'surplus'
+                                                    ? 'bg-amber-100 border-amber-300 text-amber-900'
+                                                    : 'bg-rose-100 border-rose-300 text-rose-900'
+                                        }`}>
+                                            <span className="uppercase text-[9px] opacity-80">Balance · </span>
+                                            {autoPlanningBrainReport.diagnosis.balanceLabel}
+                                            {autoPlanningBrainReport.strictSixTwo && (
+                                                <span className="block mt-0.5 text-emerald-800">6+2 estricto activo — sin flex ni F→turno</span>
+                                            )}
+                                        </div>
+                                        <p className="text-[10px] font-bold text-indigo-900 leading-snug">{autoPlanningBrainReport.diagnosis.resolution}</p>
+                                    </div>
+                                )}
+
                                 {autoPlanningBrainReport && (autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Loading && (
                                     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-1.5">
                                         <p className="text-[10px] font-black text-slate-600 uppercase tracking-wide">Cerebro Auto — dotación diaria</p>
@@ -6314,6 +6504,97 @@ export default function PlanificacionPage() {
                                                 {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
                                             </div>
                                         </div>
+                                    </div>
+                                )}
+
+                                {autoV2FormReport && (autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (
+                                    <div className={`rounded-xl border-2 px-3 py-2.5 space-y-2 ${
+                                        autoV2FormReport.ok
+                                            ? 'border-emerald-200 bg-emerald-50/90'
+                                            : autoV2FormReport.warnings
+                                                ? 'border-amber-200 bg-amber-50/90'
+                                                : 'border-rose-200 bg-rose-50/90'
+                                    }`}>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                                                Calidad forma 6+2
+                                            </p>
+                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                                                autoV2FormReport.ok ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                                            }`}>
+                                                {autoV2FormReport.metrics.formCompliantPct}% limpias
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] font-bold text-slate-800 leading-snug">{autoV2FormReport.summary}</p>
+                                        <div className="grid grid-cols-4 gap-1 text-[9px] font-bold text-slate-600">
+                                            <span>Prom {autoV2FormReport.metrics.avgBillableHours}h</span>
+                                            <span>{autoV2FormReport.metrics.minBillableHours}–{autoV2FormReport.metrics.maxBillableHours}h</span>
+                                            <span>Δ {autoV2FormReport.metrics.hoursSpread}h</span>
+                                            <span>&gt;200h: {autoV2FormReport.metrics.over200Count}</span>
+                                        </div>
+                                        {(autoV2FormReport.metrics.workBlockIssues > 0
+                                            || autoV2FormReport.metrics.francoBlockIssues > 0
+                                            || autoV2FormReport.metrics.rotationStuckCount > 0
+                                            || autoV2FormReport.metrics.weeklyOver48Count > 0) && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {autoV2FormReport.metrics.workBlockIssues > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        bloques ≠6d: {autoV2FormReport.metrics.workBlockIssues}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.francoBlockIssues > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        FF ≠2: {autoV2FormReport.metrics.francoBlockIssues}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.rotationStuckCount > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        banda fija: {autoV2FormReport.metrics.rotationStuckCount}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.weeklyOver48Count > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        sem &gt;48h: {autoV2FormReport.metrics.weeklyOver48Count}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {autoV2FormReport.issues.length > 0 && (
+                                            <ul className="max-h-28 overflow-y-auto text-[9px] font-bold text-slate-700 space-y-0.5 border-t border-slate-200/80 pt-1.5">
+                                                {autoV2FormReport.issues.slice(0, 12).map((issue, i) => (
+                                                    <li key={`${issue.empId}-${issue.kind}-${i}`} className={issue.severity === 'error' ? 'text-rose-800' : 'text-amber-800'}>
+                                                        {issue.empName || issue.empId.slice(-6)}: {issue.message}
+                                                    </li>
+                                                ))}
+                                                {autoV2FormReport.issues.length > 12 && (
+                                                    <li className="text-slate-500">… y {autoV2FormReport.issues.length - 12} más</li>
+                                                )}
+                                            </ul>
+                                        )}
+                                        {(autoV2FormReport.metrics.hoursSpread > 24
+                                            || autoV2FormReport.metrics.over192Count > 0
+                                            || autoV2FormReport.metrics.under168Count > 0)
+                                            && (autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0
+                                            && autoWizardStep === 'done' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => void rebalanceAutoForm()}
+                                                disabled={autoV2Rebalancing || autoV2Generating}
+                                                className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                                            >
+                                                {autoV2Rebalancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowLeftRight className="w-3 h-3" />}
+                                                Rebalancear forma (swaps)
+                                            </button>
+                                        )}
+                                        {autoV2RebalanceLog.length > 0 && (
+                                            <ul className="max-h-20 overflow-y-auto text-[9px] font-bold text-indigo-800 space-y-0.5 border-t border-indigo-200/80 pt-1.5">
+                                                {autoV2RebalanceLog.slice(-6).map((entry, i) => (
+                                                    <li key={`${entry.dateStr}-${entry.fromEmpId}-${i}`}>
+                                                        {entry.dateStr}: {entry.detail}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
                                     </div>
                                 )}
 
