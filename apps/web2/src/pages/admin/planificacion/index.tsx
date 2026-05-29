@@ -143,6 +143,9 @@ const SHIFT_RANGES: Record<string, string> = {
 
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 
+/** Versión del motor de planificación — visible en UI durante generación para verificar deploy. */
+const PLANNING_ENGINE_VERSION = '2.7';
+
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
 };
@@ -3066,10 +3069,17 @@ export default function PlanificacionPage() {
                     prevMonthLastShiftByEmp[emp.id] = 'RET';
                     let workCount = 1;
                     let foundBand: string | null = null;
+                    let consGap = 0;
                     for (let d = prevMonthEndDate.getDate() - 1; d >= 1; d--) {
                         const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
                         const c = empShifts[ds];
-                        if (!c) break;
+                        if (!c) {
+                            consGap++;
+                            if (consGap > 1) break;
+                            workCount++;
+                            continue;
+                        }
+                        consGap = 0;
                         if (FRANCO_CODES_SET.has(c)) break;
                         if (c !== 'RET' && !foundBand) foundBand = c;
                         workCount++;
@@ -3093,10 +3103,18 @@ export default function PlanificacionPage() {
                 }
                 const isFrancoLast = FRANCO_CODES_SET.has(lastCode);
                 let count = 0;
+                let consecutiveMissing = 0;
                 for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
                     const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
                     const c = empShifts[ds];
-                    if (!c) break;
+                    if (!c) {
+                        // Día sin datos: probable RET en otro objetivo — puente de hasta 1 día consecutivo
+                        consecutiveMissing++;
+                        if (consecutiveMissing > 1) break;
+                        count++;
+                        continue;
+                    }
+                    consecutiveMissing = 0;
                     const isFranco = FRANCO_CODES_SET.has(c);
                     if (isFrancoLast && isFranco) { count++; }
                     else if (!isFrancoLast && !isFranco) { count++; }
@@ -3196,13 +3214,16 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            await bumpAutoV2Progress(40, genBrain.strictSixTwo
-                ? 'Generando cronograma (ciclo 24d + continuidad mayo)…'
-                : 'Generando cronograma (V4)…');
+            const canFloater = canUseFixedBandFloater(baseGenCtx);
+            await bumpAutoV2Progress(40, canFloater
+                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
+                : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
-            const strictPipeline = useStrictPipeline && canUseFixedBandFloater(baseGenCtx)
-                ? runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false })
+            // Usar pipeline rápido bandas fijas si el layout lo permite (4 guardias × puesto 24hs qty=1),
+            // sin requerir strictSixTwo (que falla con ausencias o leve variación de horas en producción).
+            const strictPipeline = canFloater
+                ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
                 : null;
             const useFloaterPipeline = !!strictPipeline;
             const gen = strictPipeline?.generation ?? generateScheduleV4({
