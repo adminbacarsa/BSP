@@ -138,28 +138,48 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     return positionGroups;
 }
 
-function resolveOpeningSlotByEmp(ctx: V2EngineContext): Record<string, number> {
+// Los cold-starts se asignan POR GRUPO para evitar colisiones de slot dentro del mismo grupo.
+// (Asignación global causaba que índice 0 e índice 4 del sort recibieran el mismo slot M
+//  si caían en el mismo grupo → dos guardias en M, nadie en F → 90 slots sin cubrir.)
+function resolveOpeningSlotByEmp(ctx: V2EngineContext, positionGroups: Record<string, string[]>): Record<string, number> {
     const out: Record<string, number> = {};
-    const withoutTrail: string[] = [];
 
-    for (const emp of ctx.employees) {
-        const slot = inferJune1CycleSlot(
-            ctx.prevMonthLastShiftByEmp?.[emp.id],
-            ctx.prevMonthTrailingWorkDays?.[emp.id],
-            ctx.prevMonthTrailingRestDays?.[emp.id],
-            ctx.prevMonthLastWorkBandBeforeRest?.[emp.id],
-        );
-        if (slot !== null) {
-            out[emp.id] = slot;
-        } else {
-            withoutTrail.push(emp.id);
+    for (const groupIds of Object.values(positionGroups)) {
+        const regularIds = groupIds.slice(0, 4);   // Primeros 4: M/T/N/F
+        const floaterIds = groupIds.slice(4);       // 5to+: RET flotante
+
+        // Regulares: inferir desde trailing; cold-start dentro del grupo sin reusar slots ya tomados
+        const withTrail: string[] = [];
+        const withoutTrail: string[] = [];
+        for (const empId of regularIds) {
+            const slot = inferJune1CycleSlot(
+                ctx.prevMonthLastShiftByEmp?.[empId],
+                ctx.prevMonthTrailingWorkDays?.[empId],
+                ctx.prevMonthTrailingRestDays?.[empId],
+                ctx.prevMonthLastWorkBandBeforeRest?.[empId],
+            );
+            if (slot !== null) { out[empId] = slot; withTrail.push(empId); }
+            else withoutTrail.push(empId);
+        }
+        const usedSlots = new Set(withTrail.map(id => out[id]));
+        const available = COLD_START_OPENINGS.filter(s => !usedSlots.has(s));
+        withoutTrail.sort((a, b) => a.localeCompare(b));
+        withoutTrail.forEach((empId, i) => {
+            out[empId] = available[i] ?? COLD_START_OPENINGS[i % 4];
+        });
+
+        // Flotantes: banda da igual (se reemplaza por RET), cualquier slot sirve
+        for (const empId of floaterIds) {
+            const slot = inferJune1CycleSlot(
+                ctx.prevMonthLastShiftByEmp?.[empId],
+                ctx.prevMonthTrailingWorkDays?.[empId],
+                ctx.prevMonthTrailingRestDays?.[empId],
+                ctx.prevMonthLastWorkBandBeforeRest?.[empId],
+            );
+            out[empId] = slot ?? COLD_START_OPENINGS[floaterIds.indexOf(empId) % 4];
         }
     }
 
-    withoutTrail.sort((a, b) => a.localeCompare(b));
-    withoutTrail.forEach((empId, i) => {
-        out[empId] = COLD_START_OPENINGS[i % COLD_START_OPENINGS.length];
-    });
     return out;
 }
 
@@ -185,7 +205,7 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
 
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
     const positionGroups = buildPositionGroups(ctx);
-    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx);
+    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, positionGroups);
     const primaryShiftByEmp: Record<string, string | null> = {};
 
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31

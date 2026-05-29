@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -78,6 +78,7 @@ import {
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
 import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
 import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
+import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
 import {
     buildPlanningSnapshotFromGrid,
     diffPlanningSnapshots,
@@ -279,6 +280,8 @@ export default function PlanificacionPage() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
+    const [, startShowAllTransition] = useTransition();
+    const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -4678,6 +4681,15 @@ export default function PlanificacionPage() {
                                     </button>
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
+                                <button
+                                    onClick={() => setShowAjustarCronoModal(true)}
+                                    disabled={!selectedObjective}
+                                    title="Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días"
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-colors disabled:opacity-40 flex items-center gap-1.5 px-2.5"
+                                >
+                                    <ArrowLeftRight size={16} className="text-rose-600 shrink-0"/>
+                                    <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
+                                </button>
                                 <div className="flex items-center gap-0.5">
                                     <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
@@ -4706,7 +4718,7 @@ export default function PlanificacionPage() {
                                 {customOrderMap[selectedObjective || '__all__'] && (
                                     <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
                                 )}
-                                <button onClick={() => setForceShowAll(!forceShowAll)} className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors ${forceShowAll ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500'}`}>{forceShowAll ? <Eye size={14}/> : <EyeOff size={14}/>} {forceShowAll ? 'Ver Todos' : 'Dotación'}</button>
+                                <button onClick={() => startShowAllTransition(() => setForceShowAll(!forceShowAll))} className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors ${forceShowAll ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500'}`}>{forceShowAll ? <Eye size={14}/> : <EyeOff size={14}/>} {forceShowAll ? 'Ver Todos' : 'Dotación'}</button>
                                 <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
                             </div>
                         </>
@@ -4870,7 +4882,9 @@ export default function PlanificacionPage() {
                 {selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
-                    const empCount = Object.values(sourceHours).filter((v: any) => v > 0).length;
+                    const empCount = displayedEmployees.filter((e: any) =>
+                        (sourceHours[e.id] || 0) > 0 || (empRetDays[e.id] || 0) > 0
+                    ).length;
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
@@ -6944,6 +6958,16 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 , document.body)}
+
+            {showAjustarCronoModal && (
+                <AjustarCronoOperativoModal
+                    open={showAjustarCronoModal}
+                    onClose={() => setShowAjustarCronoModal(false)}
+                    empresaId={empresaId}
+                    objetivoInicial={selectedObjective ? { id: selectedObjective, nombre: selectedObjectiveData?.name ?? selectedObjective } : undefined}
+                    gridSnapshot={{ shiftsMap, pendingChanges }}
+                />
+            )}
 
             </div>
 
