@@ -258,6 +258,7 @@ export default function EmployeesPage() {
   const [fileName, setFileName] = useState('');
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [importStatusMsg, setImportStatusMsg] = useState('');
   
   const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'RESTRICCIONES'>('PERSONAL');
   const initialForm: any = { firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', sizes: { shirt:'', pants:'', shoes:'' }, cuil: '', address: '', lat: null, lng: null, contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200, restriccionesObjetivo: [], restriccionesCliente: [], conflictosEmpleados: [] };
@@ -1058,16 +1059,14 @@ export default function EmployeesPage() {
 
   const confirmImport = async () => {
     setIsImporting(true);
+    setImportStatusMsg('Importando...');
     try {
-      // Usar la empresa seleccionada en el modal (superadmin puede cambiarla)
       const targetEmpresaId = importEmpresaId || empresaId;
-      // Refetch fresco desde Firestore — no confiar en estado React que puede ser stale
       const freshSnap = targetEmpresaId
         ? await getDocs(query(collection(db, 'empleados'), where('empresaId', '==', targetEmpresaId)))
         : await getDocs(collection(db, 'empleados'));
       const current = freshSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
 
-      // Deduplicar dentro del CSV: si hay dos filas con mismo DNI o mismo legajo, quedarse solo con la primera
       const seenDni = new Set<string>();
       const seenLeg = new Set<string>();
       const deduped: any[] = [];
@@ -1082,24 +1081,54 @@ export default function EmployeesPage() {
       }
 
       let created = 0, updated = 0;
+      const toGeocode: { docId: string; address: string }[] = [];
+
       for (const emp of deduped) {
         const existing = current.find(e =>
           (emp.dni && e.dni === emp.dni) ||
           (emp.fileNumber && e.fileNumber === emp.fileNumber)
         );
+        const needsGeo = !!(emp.address && !emp.lat && !emp.lng);
         if (existing) {
           await updateDoc(doc(db, 'empleados', existing.id), emp);
           updated++;
+          if (needsGeo) toGeocode.push({ docId: existing.id, address: emp.address });
         } else {
-          await addDoc(collection(db, 'empleados'), { ...emp, empresaId: targetEmpresaId });
+          const ref = await addDoc(collection(db, 'empleados'), { ...emp, empresaId: targetEmpresaId });
           created++;
+          if (needsGeo) toGeocode.push({ docId: ref.id, address: emp.address });
         }
       }
 
       const skipped = importPreview.length - deduped.length;
+
+      let geoOk = 0, geoFail = 0;
+      if (toGeocode.length > 0) {
+        for (let i = 0; i < toGeocode.length; i++) {
+          setImportStatusMsg(`Geolocalizando ${i + 1}/${toGeocode.length}...`);
+          const { docId, address } = toGeocode[i];
+          try {
+            const result = await geocodeAddress(address);
+            if (result) {
+              await updateDoc(doc(db, 'empleados', docId), { lat: result.lat, lng: result.lon });
+              geoOk++;
+            } else {
+              geoFail++;
+            }
+          } catch {
+            geoFail++;
+          }
+          if (i < toGeocode.length - 1) await new Promise(r => setTimeout(r, 1200));
+        }
+      }
+
       await registrarAuditoria('IMPORT_EMPLOYEES',
-        `CSV: ${created} nuevos, ${updated} actualizados, ${skipped} duplicados en archivo ignorados`);
-      alert(`Importación completa:\n• ${created} empleados nuevos\n• ${updated} actualizados\n• ${skipped} duplicados en el archivo ignorados`);
+        `CSV: ${created} nuevos, ${updated} actualizados, ${skipped} duplicados ignorados${geoOk ? `, ${geoOk} geolocalizados` : ''}`);
+
+      const geoLine = toGeocode.length > 0
+        ? `\n• ${geoOk} dirección${geoOk !== 1 ? 'es' : ''} geolocalizadas automáticamente${geoFail > 0 ? ` (${geoFail} sin resultado)` : ''}`
+        : '';
+      alert(`Importación completa:\n• ${created} empleados nuevos\n• ${updated} actualizados\n• ${skipped} duplicados ignorados${geoLine}`);
       setShowImportModal(false);
       setImportPreview([]); setCsvContent(''); setFileName('');
       await loadData();
@@ -1108,6 +1137,7 @@ export default function EmployeesPage() {
       alert('Error importando');
     } finally {
       setIsImporting(false);
+      setImportStatusMsg('');
     }
   };
 
@@ -2390,7 +2420,7 @@ export default function EmployeesPage() {
                             </div>
                             <div className="pt-6 mt-4 border-t flex justify-end">
                                 <button onClick={confirmImport} disabled={isImporting || importPreview.length === 0} className="px-8 py-4 bg-emerald-600 text-white rounded-xl font-black text-sm shadow-sm hover:bg-emerald-700 transition-transform hover:scale-105 disabled:opacity-50 disabled:scale-100">
-                                    {isImporting ? 'Importando...' : `Confirmar Importación (${importPreview.length})`}
+                                    {isImporting ? (importStatusMsg || 'Importando...') : `Confirmar Importación (${importPreview.length})`}
                                 </button>
                             </div>
                         </div>
