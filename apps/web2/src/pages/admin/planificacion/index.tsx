@@ -45,9 +45,6 @@ import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
-import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
-import AjustarCronoCoberturaModal from '@/components/admin/rrhh/AjustarCronoCoberturaModal';
-import { coberturaAusenciaFromRecord, type CoberturaAusenciaInput } from '@/lib/ajustesCrono/ajustesCronoService';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -68,7 +65,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, inferWorkShiftForAbsenceDay, RRHH_ABSENCE_LABEL_TO_CODE } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { runStrictSixTwoPipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
@@ -96,7 +93,7 @@ const SHIFT_STYLES: any = {
     'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
     'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
     'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
-    'V':   'bg-red-600 text-white border-red-700 font-black shadow-sm',
+    'V':   'bg-teal-600 text-white border-teal-700 font-black shadow-sm',
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
@@ -409,10 +406,6 @@ export default function PlanificacionPage() {
 
     // ── Automatización COSP (viabilidad + motor determinístico) ──
     const [showAutoV2Modal, setShowAutoV2Modal] = useState(false);
-    const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
-    const [showCoberturaCronoModal, setShowCoberturaCronoModal] = useState(false);
-    const [coberturaCronoAusencia, setCoberturaCronoAusencia] = useState<CoberturaAusenciaInput | null>(null);
-    const [coberturaCronoReadOnly, setCoberturaCronoReadOnly] = useState(false);
     const [autoV2Loading, setAutoV2Loading] = useState(false);
     const [autoV2Generating, setAutoV2Generating] = useState(false);
     /** Barra de progreso en el modal de automatización (viabilidad / generar). */
@@ -1118,18 +1111,6 @@ export default function PlanificacionPage() {
     // 5. MOTORES DE CÁLCULO (NIVEL 4 - SLA INTELLIGENCE V9.00)
     // ============================================================================
 
-    const RRHH_ABSENCE_GRID_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA']);
-
-    const isAbsentOnGridDay = (empId: string, dateStr: string, changes: any, existing: any) => {
-        const key = `${empId}_${dateStr}`;
-        if (absencesMap[key]) return true;
-        const pending = changes[key];
-        if (pending && !pending.isDeleted) {
-            return RRHH_ABSENCE_GRID_CODES.has(String(pending.code || '').toUpperCase());
-        }
-        return false;
-    };
-
     const calculateCoverageStats = (dateStr: string, positionName: string, structure: any[], employeesList: any[], changes: any, existing: any) => {
         const posConfig = structure.find((p: any) => p.positionName === positionName) || structure[0] || { qty: 1, shifts: [], coverageType: '24hs' };
         const pax = Number(posConfig.qty) > 0 ? Number(posConfig.qty) : 1;
@@ -1163,7 +1144,6 @@ export default function PlanificacionPage() {
 
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
-            if (isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -1172,28 +1152,6 @@ export default function PlanificacionPage() {
                 }
             }
         });
-
-        employeesList.forEach((emp: any) => {
-            const absKey = `${emp.id}_${dateStr}`;
-            if (!isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
-            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || dominant?.positionName || 'General';
-            if (titularPos !== positionName) return;
-            const titularName = String(emp.name || '').trim();
-            if (!titularName) return;
-            employeesList.forEach((other: any) => {
-                if (other.id === emp.id) return;
-                const oKey = `${other.id}_${dateStr}`;
-                const osh = changes[oKey] ? (changes[oKey].isDeleted ? null : changes[oKey]) : existing[oKey];
-                if (!osh || !(osh.objectiveId === selectedObjective || changes[oKey])) return;
-                const oshPos = osh.positionName || dominant?.positionName || 'General';
-                if (oshPos === titularPos) return;
-                if (!String(osh.comments || '').includes(`Cubriendo a ${titularName}`)) return;
-                const code = String(osh.code || '').toUpperCase();
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                current += calcShiftHours(osh, slaCodeHoursHint);
-            });
-        });
-
         return { current, target, pax, isActiveDay: isDayActive };
     };
 
@@ -1217,43 +1175,15 @@ export default function PlanificacionPage() {
             positionStructure[0] || { qty: 1, positionName: 'General' },
         );
         const codeCounts: Record<string, number> = {};
-        const posName = String(pos.positionName || 'General');
-
-        const addWorkCode = (shift: any, fromPending: boolean) => {
-            if (!shift || !(shift.objectiveId === selectedObjective || fromPending)) return;
+        employeesList.forEach((emp: any) => {
+            const key = `${emp.id}_${dateStr}`;
+            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
+            if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
             const code = String(shift.code || '').toUpperCase();
             if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
-            if (shiftPos !== posName) return;
+            if (shiftPos !== pos.positionName) return;
             codeCounts[code] = (codeCounts[code] || 0) + 1;
-        };
-
-        employeesList.forEach((emp: any) => {
-            const key = `${emp.id}_${dateStr}`;
-            if (isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
-            const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            addWorkCode(shift, !!changes[key]);
-        });
-
-        // Suplente asignado por vacaciones: sumar al puesto del titular aunque positionName venga mal
-        employeesList.forEach((emp: any) => {
-            const absKey = `${emp.id}_${dateStr}`;
-            if (!isAbsentOnGridDay(emp.id, dateStr, changes, existing)) return;
-            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || dominant?.positionName || 'General';
-            if (titularPos !== posName) return;
-            const titularName = String(emp.name || '').trim();
-            if (!titularName) return;
-            employeesList.forEach((other: any) => {
-                if (other.id === emp.id) return;
-                const oKey = `${other.id}_${dateStr}`;
-                const osh = changes[oKey] ? (changes[oKey].isDeleted ? null : changes[oKey]) : existing[oKey];
-                if (!osh) return;
-                const comments = String(osh.comments || '');
-                if (!comments.includes(`Cubriendo a ${titularName}`)) return;
-                const oshPos = osh.positionName || dominant?.positionName || 'General';
-                if (oshPos === titularPos) return;
-                addWorkCode(osh, !!changes[oKey]);
-            });
         });
 
         return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles);
@@ -1278,57 +1208,29 @@ export default function PlanificacionPage() {
             schemeLabel: units.schemeLabel,
             isPositionClosed: units.required > 0 && units.closed >= units.required,
         };
-    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, absencesMap, positionStructure, selectedObjective, autoCycles]);
+    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective, autoCycles]);
 
     const coverageCyclesForObjective = autoSelectedCyclesRef.current?.length
         ? autoSelectedCyclesRef.current
         : autoCycles;
 
-    const buildDayCodeCountsByPosition = (dateStr: string) => {
-        const byPos = buildCodeCountsByPositionForDay(
-            positionStructure || [],
-            dateStr,
-            displayedEmployees,
-            (empId, ds) => {
-                const key = `${empId}_${ds}`;
-                if (absencesMap[key]) return { isDeleted: true };
-                const pending = pendingChanges[key];
-                if (pending?.isDeleted) return { isDeleted: true };
-                if (pending && RRHH_ABSENCE_GRID_CODES.has(String(pending.code || '').toUpperCase())) {
-                    return { isDeleted: true };
-                }
-                const shift = pending ? pending : shiftsMap[key];
-                return shift ?? null;
-            },
-            {
-                selectedObjective,
-                dominantPositionName: dominantPosition?.positionName || 'General',
-                isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
-            },
-        );
-        const domName = dominantPosition?.positionName || 'General';
-        displayedEmployees.forEach((emp: any) => {
-            if (!isAbsentOnGridDay(emp.id, dateStr, pendingChanges, shiftsMap)) return;
-            const titularPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || domName;
-            const titularName = String(emp.name || '').trim();
-            if (!titularName) return;
-            if (!byPos[titularPos]) byPos[titularPos] = {};
-            displayedEmployees.forEach((other: any) => {
-                if (other.id === emp.id) return;
-                const oKey = `${other.id}_${dateStr}`;
-                const pending = pendingChanges[oKey];
-                const osh = pending?.isDeleted ? null : (pending ?? shiftsMap[oKey]);
-                if (!osh || !(osh.objectiveId === selectedObjective || pending)) return;
-                const oshPos = osh.positionName || domName;
-                if (oshPos === titularPos) return;
-                if (!String(osh.comments || '').includes(`Cubriendo a ${titularName}`)) return;
-                const code = String(osh.code || '').toUpperCase();
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                byPos[titularPos][code] = (byPos[titularPos][code] || 0) + 1;
-            });
-        });
-        return byPos;
-    };
+    const buildDayCodeCountsByPosition = (dateStr: string) => buildCodeCountsByPositionForDay(
+        positionStructure || [],
+        dateStr,
+        displayedEmployees,
+        (empId, ds) => {
+            const key = `${empId}_${ds}`;
+            const pending = pendingChanges[key];
+            if (pending?.isDeleted) return { isDeleted: true };
+            const shift = pending ? pending : shiftsMap[key];
+            return shift ?? null;
+        },
+        {
+            selectedObjective,
+            dominantPositionName: dominantPosition?.positionName || 'General',
+            isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+        },
+    );
 
     const objectiveCoverageGapReport = useMemo(() => {
         if (!selectedObjective || !(positionStructure?.length)) return null;
@@ -1347,7 +1249,7 @@ export default function PlanificacionPage() {
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
-    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, absencesMap, coverageCyclesForObjective, dominantPosition]);
+    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
     const getPositionDailyCoverage = (dateStr: string, positionName: string) => {
         return calculateCoverageStats(dateStr, positionName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
@@ -1838,18 +1740,6 @@ export default function PlanificacionPage() {
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
     // ============================================================================
 
-    const openCoberturaCronoModal = (data: any, readOnly = false) => {
-        const rec = coberturaAusenciaFromRecord(data);
-        if (!rec) {
-            toast.error('No se pudo abrir el ajuste: falta el registro de ausencia.');
-            return false;
-        }
-        setCoberturaCronoAusencia(rec);
-        setCoberturaCronoReadOnly(readOnly);
-        setShowCoberturaCronoModal(true);
-        return true;
-    };
-
     // 🛑 V8.20: Handler Restaurado
     const handleNotificationClick = async (notif: any) => {
         setShowNotifications(false);
@@ -1916,22 +1806,14 @@ export default function PlanificacionPage() {
                             const absence = absencesMap[key];
 
                             const absHandled = shift && ['V','L','PG','A','E','AA'].includes(shift.code || '');
-                            const ausenciaPayload = absence
-                                ? { ...absence, employeeId: targetEmp.id, employeeName: targetEmp.name, ausenciaId: absence.id || notif.ausenciaId }
-                                : { ...notif, employeeId: targetEmp.id, employeeName: targetEmp.name };
-                            const coberturaGestionada = absence?.coberturaEstado === 'GESTIONADA' || absence?.coberturaEstado === 'VACANTE';
-                            if (isVacancyAbsence && (notif.ausenciaId || absence?.id)) {
-                                openCoberturaCronoModal(ausenciaPayload, coberturaGestionada);
-                            } else if (isVacancyAbsence && !absHandled) {
-                                setVacancyData({ ...ausenciaPayload, source: 'AUSENCIA' });
+                            if (isVacancyAbsence && !absHandled) {
+                                setVacancyData(absence ? { ...absence, source: 'AUSENCIA' } : { ...notif, source: 'AUSENCIA' });
                                 setSelectedReplacement('');
                                 setShowVacancyModal(true);
                             } else if ((shift && absence) || (shift && shift.hasNovedad)) {
                                 findNeighbors(shift, dateStr);
-                                if (absence && absence.type && (absence.id || notif.ausenciaId)) {
-                                    openCoberturaCronoModal(ausenciaPayload, coberturaGestionada);
-                                } else if (absence && absence.type) {
-                                    setVacancyData({ ...ausenciaPayload, source: 'AUSENCIA' });
+                                if (absence && absence.type) {
+                                    setVacancyData({ ...absence, source: 'AUSENCIA' });
                                     setSelectedReplacement('');
                                     setShowVacancyModal(true);
                                 } else {
@@ -1952,22 +1834,20 @@ export default function PlanificacionPage() {
                             toast.info(`Navegando a: ${targetEmp.name}`);
                         }, didNavigate ? 700 : 300);
                     } else if (isVacancyAbsence) {
+                        // Empleado no visible en la grilla actual: navegar mes y abrir modal igual
                         setTimeout(() => {
-                            if (!openCoberturaCronoModal({ ...notif, source: 'AUSENCIA' })) {
-                                setVacancyData({ ...notif, source: 'AUSENCIA' });
-                                setSelectedReplacement('');
-                                setShowVacancyModal(true);
-                            }
+                            setVacancyData({ ...notif, source: 'AUSENCIA' });
+                            setSelectedReplacement('');
+                            setShowVacancyModal(true);
                         }, 150);
                     }
                 }
             } catch (e) { console.error("Error navegando", e); }
         } else if (isVacancyAbsence) {
-            if (!openCoberturaCronoModal({ ...notif, source: 'AUSENCIA' })) {
-                setVacancyData({ ...notif, source: 'AUSENCIA' });
-                setSelectedReplacement('');
-                setShowVacancyModal(true);
-            }
+            // Sin fecha: abrir modal directamente
+            setVacancyData({ ...notif, source: 'AUSENCIA' });
+            setSelectedReplacement('');
+            setShowVacancyModal(true);
         }
     };
 
@@ -2306,69 +2186,24 @@ export default function PlanificacionPage() {
         setShowRRHHModal(false);
         setSelectedCell(null);
     };
-    const handleProcessVacancy = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
-        if (!vacancyData) return;
-        const replacementEmp = selectedReplacement ? employees.find(e => e.id === selectedReplacement) : null;
-        const newChanges = { ...pendingChanges };
-        const [sY, sM, sD] = (vacancyData.startDate || '').split('-').map(Number);
-        const [eY, eM, eD] = (vacancyData.endDate || vacancyData.startDate || '').split('-').map(Number);
-        if (!sY || !eY) { toast.error('Datos de ausencia incompletos'); return; }
-        let current = new Date(sY, sM - 1, sD);
-        const end = new Date(eY, eM - 1, eD);
-        const absCode = RRHH_ABSENCE_LABEL_TO_CODE[vacancyData.type] || 'AA';
-        const NON_WORK_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET']);
-        const titularPos = empDefaultPos[`${vacancyData.employeeId}___${selectedObjective}`]
-            || activePosition
-            || (positionStructure[0]?.positionName ?? 'General');
-        let count = 0;
-        let covered = 0;
-        while (current <= end) {
-            const dateStr = getDateKey(current);
-            const titularKey = `${vacancyData.employeeId}_${dateStr}`;
-            const workShift = inferWorkShiftForAbsenceDay(
-                vacancyData.employeeId,
-                dateStr,
-                shiftsMap,
-                pendingChanges,
-                NON_WORK_CODES,
-            );
-            newChanges[titularKey] = {
-                code: absCode,
-                name: vacancyData.type,
-                isTemp: true,
-                hours: 0,
-                startTime: '00:00',
-                objectiveId: selectedObjective,
-                positionName: titularPos,
-                comments: `${vacancyData.type} — gestionado desde planificador`,
-                coveredBy: replacementEmp ? replacementEmp.name : null,
-            };
-            if (replacementEmp && workShift) {
-                const suplenteKey = `${replacementEmp.id}_${dateStr}`;
-                newChanges[suplenteKey] = {
-                    code: workShift.code,
-                    name: workShift.code,
-                    isTemp: true,
-                    objectiveId: workShift.objectiveId || selectedObjective,
-                    hours: workShift.hours || 8,
-                    startTime: workShift.startTime || '00:00',
-                    positionName: titularPos,
-                    comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})`,
-                };
-                covered++;
-            }
-            count++;
-            current.setDate(current.getDate() + 1);
-        }
-        setPendingChanges(newChanges);
-        setShowVacancyModal(false);
-        setVacancyData(null);
-        toast.success(
-            replacementEmp
-                ? `${absCode} en ${count} día(s) — ${covered} turno(s) a ${replacementEmp.name} (${titularPos}). Guardá los cambios.`
-                : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`,
-        );
+    const handleProcessVacancy = () => { if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; } if (!vacancyData) return; const replacementEmp = selectedReplacement ? employees.find(e => e.id === selectedReplacement) : null; const newChanges = { ...pendingChanges }; const [sY, sM, sD] = (vacancyData.startDate || '').split('-').map(Number); const [eY, eM, eD] = (vacancyData.endDate || vacancyData.startDate || '').split('-').map(Number); if (!sY || !eY) { toast.error('Datos de ausencia incompletos'); return; } let current = new Date(sY, sM - 1, sD); const end = new Date(eY, eM - 1, eD); const ABSENCE_TYPE_CODES: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG', 'Injustificada': 'AA' }; const absCode = ABSENCE_TYPE_CODES[vacancyData.type] || 'AA'; const NON_WORK_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET']);
+                        // Turno típico de la titular (para cubrir cuando no hay shift previo asignado)
+                        const getTypicalShift = (empId: string) => {
+                            const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
+                            const days = new Date(yr, mo + 1, 0).getDate();
+                            const freq: Record<string, { count: number; shift: any }> = {};
+                            for (let d = 1; d <= days; d++) {
+                                const k = `${empId}_${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                                const s = shiftsMap[k];
+                                if (s?.code && !NON_WORK_CODES.has(s.code)) {
+                                    if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
+                                    freq[s.code].count++;
+                                }
+                            }
+                            const best = Object.values(freq).sort((a, b) => b.count - a.count)[0];
+                            return best?.shift || null;
+                        };
+                        let count = 0; let covered = 0; while (current <= end) { const dateStr = getDateKey(current); const titularKey = `${vacancyData.employeeId}_${dateStr}`; const existingShift = shiftsMap[titularKey]; const workShift = (existingShift && existingShift.code && !NON_WORK_CODES.has(existingShift.code)) ? existingShift : getTypicalShift(vacancyData.employeeId); newChanges[titularKey] = { code: absCode, name: vacancyData.type, isTemp: true, hours: 0, startTime: '00:00', comments: `${vacancyData.type} — gestionado desde planificador`, coveredBy: replacementEmp ? replacementEmp.name : null }; if (replacementEmp && workShift) { const suplenteKey = `${replacementEmp.id}_${dateStr}`; newChanges[suplenteKey] = { code: workShift.code, name: workShift.code, isTemp: true, objectiveId: workShift.objectiveId || selectedObjective, hours: workShift.hours || 8, startTime: workShift.startTime || '00:00', positionName: workShift.positionName || activePosition || 'General', comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})` }; covered++; } count++; current.setDate(current.getDate() + 1); } setPendingChanges(newChanges); setShowVacancyModal(false); setVacancyData(null); toast.success(replacementEmp ? `${absCode} en ${count} día(s) — ${covered} turno(s) asignados a ${replacementEmp.name}. Guardá los cambios.` : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`);
     };
     
     // 🛑 FIX: Inyección de Puesto en Bulk
@@ -3226,7 +3061,24 @@ export default function PlanificacionPage() {
                 const empShifts = prevTrailByEmp[emp.id] || {};
                 const lastCode = empShifts[lastDayStr];
                 if (!lastCode) return; // sin datos, el motor usará offset distribuido
-                if (lastCode === 'RET') return;
+                // RET es día de trabajo en el ciclo CCT — contar como trabajo y buscar banda real
+                if (lastCode === 'RET') {
+                    prevMonthLastShiftByEmp[emp.id] = 'RET';
+                    let workCount = 1;
+                    let foundBand: string | null = null;
+                    for (let d = prevMonthEndDate.getDate() - 1; d >= 1; d--) {
+                        const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
+                        const c = empShifts[ds];
+                        if (!c) break;
+                        if (FRANCO_CODES_SET.has(c)) break;
+                        if (c !== 'RET' && !foundBand) foundBand = c;
+                        workCount++;
+                    }
+                    prevMonthTrailingWorkDays[emp.id] = workCount;
+                    prevMonthTrailingRestDays[emp.id] = 0;
+                    if (foundBand) prevMonthLastWorkBandBeforeRest[emp.id] = foundBand;
+                    return;
+                }
                 prevMonthLastShiftByEmp[emp.id] = lastCode;
                 if (FRANCO_CODES_SET.has(lastCode)) {
                     for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
@@ -3344,18 +3196,13 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            const canFloater = canUseFixedBandFloater(baseGenCtx);
-            await bumpAutoV2Progress(40, (genBrain.strictSixTwo || canFloater)
+            await bumpAutoV2Progress(40, genBrain.strictSixTwo
                 ? 'Generando cronograma (ciclo 24d + continuidad mayo)…'
                 : 'Generando cronograma (V4)…');
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
-            // Usar el pipeline rápido de bandas fijas siempre que el layout lo permita
-            // (4 guardias × puesto 24hs qty=1), no solo cuando el brain detecta condiciones perfectas.
-            // Esto evita el fallback V4 lento (8 fases × 1200 iter) en servicios con ausencias o
-            // ligeras variaciones de horas que no cumplen el umbral hoursGap<=1 del brain.
-            const strictPipeline = canFloater
-                ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
+            const strictPipeline = useStrictPipeline && canUseFixedBandFloater(baseGenCtx)
+                ? runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false })
                 : null;
             const useFloaterPipeline = !!strictPipeline;
             const gen = strictPipeline?.generation ?? generateScheduleV4({
@@ -4194,7 +4041,7 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; hasConflict = false; }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
@@ -4810,15 +4657,6 @@ export default function PlanificacionPage() {
                                     </button>
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
-                                <button
-                                    onClick={() => setShowAjustarCronoModal(true)}
-                                    disabled={!selectedObjective}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-violet-50 hover:text-violet-600 transition-colors flex items-center gap-1.5 px-2.5 disabled:opacity-40"
-                                    title="Comprimir este servicio a 12h y liberar guardias a RET"
-                                >
-                                    <CalendarCheck size={18}/>
-                                    <span className="text-[10px] font-black text-violet-700 uppercase tracking-tight hidden sm:inline">Ajustar Crono</span>
-                                </button>
                                 <div className="flex items-center gap-0.5">
                                     <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
@@ -5232,7 +5070,7 @@ export default function PlanificacionPage() {
                 {/* MODALES Y MENÚS DE CONTEXTO (V9.10 - EXPANDIDOS Y ORDENADOS) */}
 
                 {/* 1. MODAL SELECTOR DE TURNOS */}
-                {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !showCoberturaCronoModal && !pendingAssignment && (
+                {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
                         <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
@@ -5384,40 +5222,18 @@ export default function PlanificacionPage() {
                                                                 Esta novedad viene de RRHH (ausencias). No se edita desde Planificación.
                                                             </div>
                                                         )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (absence.id || absence.ausenciaId) && (
+                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (
                                                             <button
                                                                 onClick={() => {
-                                                                    const payload = {
-                                                                        ...absence,
-                                                                        employeeId: selectedCell.empId,
-                                                                        employeeName,
-                                                                        ausenciaId: absence.id || absence.ausenciaId,
-                                                                    };
+                                                                    const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName };
                                                                     setSelectedCell(null);
-                                                                    openCoberturaCronoModal(
-                                                                        payload,
-                                                                        absence.coberturaEstado === 'GESTIONADA' || absence.coberturaEstado === 'VACANTE',
-                                                                    );
-                                                                }}
-                                                                className="mt-2 w-full py-2 rounded-xl bg-violet-600 text-white font-black text-xs hover:bg-violet-700 flex items-center justify-center gap-1.5"
-                                                            >
-                                                                <CalendarCheck size={14} />
-                                                                {absence.coberturaEstado === 'GESTIONADA' || absence.coberturaEstado === 'VACANTE'
-                                                                    ? 'Ver ajuste crono'
-                                                                    : 'Ajustar crono automático'}
-                                                            </button>
-                                                        )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && !absence.id && !absence.ausenciaId && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    setSelectedCell(null);
-                                                                    setVacancyData({ ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName });
+                                                                    setVacancyData(vd);
                                                                     setSelectedReplacement('');
                                                                     setShowVacancyModal(true);
                                                                 }}
                                                                 className="mt-2 w-full py-2 rounded-xl bg-amber-600 text-white font-black text-xs hover:bg-amber-700"
                                                             >
-                                                                Asignar suplente manual
+                                                                Re-procesar cobertura
                                                             </button>
                                                         )}
                                                         {isRRHHCode && !isPastClosed && !isConsolidated && !pending && !absence && (
@@ -5934,20 +5750,6 @@ export default function PlanificacionPage() {
                                     {selectedReplacement ? 'Asignar reemplazo' : 'Marcar vacante'}
                                 </button>
                             </div>
-                            {(vacancyData?.ausenciaId || vacancyData?.id) && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const payload = { ...vacancyData, ausenciaId: vacancyData.ausenciaId || vacancyData.id };
-                                        setShowVacancyModal(false);
-                                        openCoberturaCronoModal(payload);
-                                    }}
-                                    className="mt-3 w-full py-2.5 rounded-xl border-2 border-violet-200 bg-violet-50 text-violet-800 font-black text-xs hover:bg-violet-100 flex items-center justify-center gap-1.5"
-                                >
-                                    <CalendarCheck size={14} />
-                                    Preferir ajuste crono automático
-                                </button>
-                            )}
                             <p className="text-[10px] text-slate-400 text-center mt-3">Los cambios quedan pendientes — recordá guardar el cronograma.</p>
                         </div>
                     </div>
@@ -7121,33 +6923,6 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 , document.body)}
-
-                <AjustarCronoOperativoModal
-                    open={showAjustarCronoModal}
-                    onClose={() => setShowAjustarCronoModal(false)}
-                    empresaId={empresaId || 'bacarsa'}
-                    fechaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)}
-                    fechaHastaInicial={new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)}
-                    objetivoInicial={selectedObjective && selectedObjectiveData
-                        ? { id: selectedObjective, nombre: selectedObjectiveData.name || selectedObjectiveData.nombre || selectedObjective }
-                        : undefined}
-                    clients={clients}
-                    gridSnapshot={{ shiftsMap, pendingChanges }}
-                />
-
-                {showCoberturaCronoModal && coberturaCronoAusencia && empresaId && (
-                    <AjustarCronoCoberturaModal
-                        open={showCoberturaCronoModal}
-                        onClose={() => {
-                            setShowCoberturaCronoModal(false);
-                            setCoberturaCronoAusencia(null);
-                        }}
-                        empresaId={empresaId || 'bacarsa'}
-                        ausencia={coberturaCronoAusencia}
-                        clients={clients}
-                        readOnly={coberturaCronoReadOnly}
-                    />
-                )}
 
             </div>
 

@@ -34,7 +34,23 @@ export function inferJune1CycleSlot(
 ): number | null {
     if (!lastCode) return null;
     const code = lastCode.toUpperCase();
-    if (code === 'RET' || code === 'R') return null;
+    if (code === 'RET' || code === 'R') {
+        // RET es un día de trabajo en el ciclo CCT — usar la banda real del guardia
+        const effectiveBand = lastWorkBandBeforeRest?.toUpperCase();
+        if (!effectiveBand || !WORK_BANDS.has(effectiveBand)) return null;
+        const need = Math.max(1, trailingWork ?? 1);
+        for (let june1 = 0; june1 < 24; june1++) {
+            const may31 = (june1 - 1 + 24) % 24;
+            if (CYCLE_24_MTN[may31] !== effectiveBand) continue;
+            let ok = 0;
+            for (let b = 0; b < need; b++) {
+                if (CYCLE_24_MTN[(may31 - b + 24) % 24] !== effectiveBand) break;
+                ok++;
+            }
+            if (ok >= need) return june1;
+        }
+        return null;
+    }
 
     for (let june1 = 0; june1 < 24; june1++) {
         const may31 = (june1 - 1 + 24) % 24;
