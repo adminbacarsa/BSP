@@ -66,11 +66,11 @@ export default function LoginPage() {
       const claimType = normalizeRoleKey(String(token.claims.type ?? ''));
 
       if (ADMIN_ROLES.includes(claimRole)) {
-        window.location.href = '/admin/dashboard';
+        window.location.replace('/admin/dashboard');
         return;
       }
       if (EMPLOYEE_ROLES.includes(claimRole) || EMPLOYEE_ROLES.includes(claimType)) {
-        window.location.href = '/empleado/dashboard';
+        window.location.replace('/empleado/dashboard');
         return;
       }
 
@@ -87,7 +87,7 @@ export default function LoginPage() {
       }
 
       if (isAdmin) {
-        window.location.href = '/admin/dashboard';
+        window.location.replace('/admin/dashboard');
         return;
       }
 
@@ -96,7 +96,7 @@ export default function LoginPage() {
           query(collection(db, 'empleados'), where('email', '==', (cred.user.email || '').trim())),
         );
         if (!byEmail.empty) {
-          window.location.href = '/empleado/dashboard';
+          window.location.replace('/empleado/dashboard');
           return;
         }
       } catch (fireErr) {

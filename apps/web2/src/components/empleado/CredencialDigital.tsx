@@ -511,8 +511,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.font = '7px Arial'; ctx.textAlign = 'right';
       ctx.fillText('Válida 12/2026', CARD_W - PAD, CARD_H - 14); ctx.textAlign = 'left';
     } else {
-      // Vertical: header | foto 65% | datos
-      const photoH = Math.round(CARD_H * 0.65);
+      // Vertical: header | foto 58% | datos
+      const photoH = Math.round(CARD_H * 0.58);
       const headerH = 50;
       // Header
       const lw = await drawLogo(PAD, headerH / 2 - 13, 26);
@@ -658,7 +658,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
 
   const photoZoneV = (
     // Vertical: ancho completo, flex 0 0 44%
-    <div ref={photoContRef} style={{ flex: '0 0 65%', position: 'relative', overflow: 'hidden', pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
+    <div ref={photoContRef} style={{ flex: '0 0 58%', position: 'relative', overflow: 'hidden', pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
       {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
       {fotoMostrada ? (
         <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
@@ -689,7 +689,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             onMouseMove={onCardMouseMove}
             style={{
               position: 'relative', width: '100%',
-              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'clamp(600px, min(94vw * 1.9, 820px), 820px)',
+              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'min(calc(100svh - 170px), 580px)',
               transformStyle: 'preserve-3d',
               transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
               transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
@@ -865,7 +865,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             <Pencil size={14}/> Editar foto
           </button>
         )}
-        {(showEditUI || (viewOnly && capturedBlob)) && (capturedBlob || !credGuardada) && (
+        {(capturedBlob || (!credGuardada && !viewOnly)) && (
           <button onClick={guardarFoto} disabled={guardando} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black disabled:opacity-50 transition-all active:scale-95 text-white" style={{ background: `linear-gradient(135deg, ${tema.h1}, ${tema.h2})` }}>
             {guardando ? <RefreshCw size={14} className="animate-spin"/> : <ShieldCheck size={14}/>}
             {credGuardada ? 'Guardar foto' : 'Activar QR'}
