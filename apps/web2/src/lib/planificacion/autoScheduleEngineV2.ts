@@ -443,6 +443,51 @@ export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL
 }
 
 /**
+ * Asignación determinística de fases 6+2 para plantilla justa (16 guardias / 8 slots = 2 por fase).
+ * Prioriza trailing de mayo si el bucket tiene cupo; completa cuarteto para 4 francos/día.
+ */
+function assignStrictSixTwoOffsets(
+    pool: string[],
+    empGroupIdx: Record<string, number>,
+    cycleLen: number,
+    cL: number,
+    cF: number,
+    ctx: V2EngineContext,
+): void {
+    if (pool.length === 0 || cycleLen <= 0) return;
+    const target = Math.max(1, Math.floor(pool.length / cycleLen));
+    const buckets: string[][] = Array.from({ length: cycleLen }, () => []);
+    const unassigned: string[] = [];
+
+    for (const id of pool) {
+        const tw = ctx.prevMonthTrailingWorkDays?.[id];
+        const tr = ctx.prevMonthTrailingRestDays?.[id];
+        let preferred: number | null = null;
+        if (tw !== undefined && tw > 0) preferred = tw % cycleLen;
+        else if (tr !== undefined && tr > 0 && tr < cF) preferred = (cL + tr) % cycleLen;
+
+        if (preferred !== null && buckets[preferred].length < target) {
+            buckets[preferred].push(id);
+            empGroupIdx[id] = preferred;
+        } else {
+            unassigned.push(id);
+        }
+    }
+
+    unassigned.sort((a, b) =>
+        (ctx.demandDrivenStaggerByEmp?.[a] ?? 0) - (ctx.demandDrivenStaggerByEmp?.[b] ?? 0),
+    );
+    for (const id of unassigned) {
+        let best = 0;
+        for (let o = 1; o < cycleLen; o++) {
+            if (buckets[o].length < buckets[best].length) best = o;
+        }
+        buckets[best].push(id);
+        empGroupIdx[id] = best;
+    }
+}
+
+/**
  * Con N guardias y ciclo L días: ~N/L por offset → 4 francos/día en plantilla 16×6+2.
  * Sin esto, cada puesto repite el mismo offset y 8 guardias descansan el mismo día.
  */
@@ -1614,10 +1659,14 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
         if (rotPool.length > 0) {
-            const hasTrail = (id: string) =>
-                ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
-                ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
-            balanceGlobalCycleOffsets(rotPool, empGroupIdx, cycleLen, hasTrail);
+            if (ctx.strictSixTwo === true) {
+                assignStrictSixTwoOffsets(rotPool, empGroupIdx, cycleLen, cL, cF, ctx);
+            } else {
+                const hasTrail = (id: string) =>
+                    ((ctx.prevMonthTrailingWorkDays?.[id] ?? 0) as number) > 0 ||
+                    ((ctx.prevMonthTrailingRestDays?.[id] ?? 0) as number) > 0;
+                balanceGlobalCycleOffsets(rotPool, empGroupIdx, cycleLen, hasTrail);
+            }
         }
     }
 
@@ -2774,6 +2823,14 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         repairPositionDayTripletGaps(gapFillFinal, dayDemandsFromFill);
         assignUnassignedWorkDayEmployeesToGaps(gapFillFinal, dayDemandsFromFill);
         forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
+        if (ctx.strictSixTwo === true && (stats.uncoveredSlots ?? 0) > 0) {
+            for (let strictRound = 0; strictRound < 12 && (stats.uncoveredSlots ?? 0) > 0; strictRound++) {
+                assignUnassignedWorkDayEmployeesToGaps(gapFillFinal, dayDemandsFromFill);
+                repairPositionDayTripletGaps(gapFillFinal, dayDemandsFromFill);
+                forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
+                recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
+            }
+        }
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
     }
 
@@ -2789,9 +2846,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     stats.francoGuardRejectedMissing48h = francoGuard.rejectedMissing48h;
     stats.francoGuardRejectedOverTwoConsecutive = francoGuard.rejectedOverTwoConsecutive;
 
-    if (gapFillFinal && ((stats.uncoveredSlots ?? 0) > 0 || francoGuard.convertedToRet > 0)) {
+    if (gapFillFinal && ((stats.uncoveredSlots ?? 0) > 0 || (!ctx.strictSixTwo && francoGuard.convertedToRet > 0))) {
         fillDemandGapsBeforeFrancos(gapFillFinal, dayDemandsFromFill);
-        fillDemandGapsWithFlexibleCycle(gapFillFinal, dayDemandsFromFill);
+        if (!ctx.strictSixTwo) {
+            fillDemandGapsWithFlexibleCycle(gapFillFinal, dayDemandsFromFill);
+        }
         forceCloseRemainingSlaGaps(gapFillFinal, dayDemandsFromFill);
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
         stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet);

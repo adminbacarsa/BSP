@@ -95,10 +95,36 @@ function analyzeWorkFrancoRuns(
     dayKinds: DayKind[],
     expectedWork: number,
     expectedFranco: number,
+    prefixWork = 0,
+    prefixRest = 0,
 ): { workIssues: number; francoIssues: number } {
     let workIssues = 0;
     let francoIssues = 0;
     let i = 0;
+
+    if (prefixWork > 0 && dayKinds[0] === 'work') {
+        let len = prefixWork;
+        while (i < dayKinds.length && dayKinds[i] === 'work') {
+            len++;
+            i++;
+        }
+        if (len !== expectedWork && len !== expectedWork * 2) {
+            if (len === expectedWork - 1 || len === expectedWork + 1) workIssues++;
+            else if (len % expectedWork !== 0) workIssues += Math.min(2, Math.ceil(Math.abs(len - expectedWork) / expectedWork));
+        }
+    } else if (prefixRest > 0 && dayKinds[0] === 'franco') {
+        let len = prefixRest;
+        while (i < dayKinds.length && dayKinds[i] === 'franco') {
+            len++;
+            i++;
+        }
+        if (len !== expectedFranco && len !== expectedFranco * 2) {
+            if (len === 1 && expectedFranco === 2) francoIssues++;
+            else if (len > expectedFranco) francoIssues += len - expectedFranco;
+            else francoIssues++;
+        }
+    }
+
     while (i < dayKinds.length) {
         if (dayKinds[i] === 'work') {
             let len = 0;
@@ -180,7 +206,11 @@ export function verifyScheduleForm(
         billableByEmp[empId] = billable;
 
         if (isSixTwo || strict) {
-            const { workIssues, francoIssues } = analyzeWorkFrancoRuns(dayKinds, expectedWork, expectedFranco);
+            const prefixWork = ctx.prevMonthTrailingWorkDays?.[empId] ?? 0;
+            const prefixRest = ctx.prevMonthTrailingRestDays?.[empId] ?? 0;
+            const { workIssues, francoIssues } = analyzeWorkFrancoRuns(
+                dayKinds, expectedWork, expectedFranco, prefixWork, prefixRest,
+            );
             if (workIssues > 0) {
                 issues.push({
                     empId,

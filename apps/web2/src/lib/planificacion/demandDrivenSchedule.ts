@@ -30,13 +30,9 @@ function mayConvertFrancoToWork(ctx: V2EngineContext): boolean {
     return ctx.strictSixTwo !== true;
 }
 
-/** En 6+2 estricto: solo el 2° F consecutivo (6+1 local) puede cubrir un hueco SLA. */
-function mayStrictCompressibleFrancoRescue(ctx: V2EngineContext): boolean {
-    return ctx.strictSixTwo === true;
-}
-
 function mayFrancoRescueForGap(ctx: V2EngineContext): boolean {
-    return mayConvertFrancoToWork(ctx) || mayStrictCompressibleFrancoRescue(ctx);
+    // En 6+2 estricto no convertir F→turno (rompe FF); cerrar SLA con swaps y días laborables.
+    return mayConvertFrancoToWork(ctx);
 }
 
 function canAssignBand(

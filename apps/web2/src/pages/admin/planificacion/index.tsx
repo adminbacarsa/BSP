@@ -3242,6 +3242,8 @@ export default function PlanificacionPage() {
                 autoCycles: cyclesForGen,
                 getDayLetter,
                 getDateKey,
+                prevMonthTrailingWorkDays,
+                prevMonthTrailingRestDays,
             } as any;
             let finalAssignments = gen.assignments;
             let coverage = verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
