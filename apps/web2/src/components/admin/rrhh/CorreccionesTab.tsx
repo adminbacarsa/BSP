@@ -42,19 +42,34 @@ interface CorrForm {
   fecha: string;
   tipo: CorrectionType;
   horas: string;
+  minutos: string;
   isPresente: boolean;
   turnoId: string;
   codigoAntes: string;
   codigoDespues: string;
   retencionHoras: string;
+  retencionMinutos: string;
   motivo: string;
 }
 
 const EMPTY_FORM: CorrForm = {
   employeeId: '', fecha: new Date().toISOString().split('T')[0],
-  tipo: 'AJUSTE_HORAS', horas: '', isPresente: true,
+  tipo: 'AJUSTE_HORAS', horas: '', minutos: '0', isPresente: true,
   turnoId: '', codigoAntes: '', codigoDespues: '',
-  retencionHoras: '', motivo: '',
+  retencionHoras: '', retencionMinutos: '0', motivo: '',
+};
+
+const toDecimalHours = (h: string, m: string) =>
+  (parseInt(h || '0', 10) || 0) + (parseInt(m || '0', 10) || 0) / 60;
+
+const fmtHorasMinutos = (h: number) => {
+  const sign = h < 0 ? '-' : '+';
+  const abs = Math.abs(h);
+  const hh = Math.floor(abs);
+  const mm = Math.round((abs - hh) * 60);
+  if (mm === 0) return `${sign}${hh}h`;
+  if (hh === 0) return `${sign}${mm}m`;
+  return `${sign}${hh}h ${mm}m`;
 };
 
 export default function CorreccionesTab({ employees, canAdjust }: Props) {
@@ -139,9 +154,9 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
     if (!form.employeeId)                               { addToast('Seleccioná un empleado', 'error'); return; }
     if (!form.fecha)                                    { addToast('Seleccioná una fecha', 'error'); return; }
     if (!form.motivo.trim())                            { addToast('El motivo es obligatorio', 'error'); return; }
-    if (form.tipo === 'AJUSTE_HORAS' && !form.horas)   { addToast('Ingresá las horas a ajustar', 'error'); return; }
+    if (form.tipo === 'AJUSTE_HORAS' && !form.horas && !form.minutos)   { addToast('Ingresá horas o minutos a ajustar', 'error'); return; }
     if (form.tipo === 'CORRECCION_CODIGO' && !form.codigoDespues) { addToast('Seleccioná el código nuevo', 'error'); return; }
-    if (form.tipo === 'RETENCION_FALTANTE' && !form.retencionHoras) { addToast('Ingresá las horas de retención', 'error'); return; }
+    if (form.tipo === 'RETENCION_FALTANTE' && !form.retencionHoras && !form.retencionMinutos) { addToast('Ingresá la duración de la retención', 'error'); return; }
 
     setSaving(true);
     try {
@@ -161,7 +176,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
       };
 
       if (form.tipo === 'AJUSTE_HORAS') {
-        corrData.horas = parseFloat(form.horas);
+        corrData.horas = toDecimalHours(form.horas, form.minutos);
       }
 
       if (form.tipo === 'CORRECCION_PRESENCIA' && form.turnoId) {
@@ -181,7 +196,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
       }
 
       if (form.tipo === 'RETENCION_FALTANTE') {
-        const retenHoras  = parseFloat(form.retencionHoras);
+        const retenHoras = toDecimalHours(form.retencionHoras, form.retencionMinutos);
         corrData.retencionHoras = retenHoras;
         const baseTurno = turnos[0] as any;
         const baseDate  = new Date(form.fecha + 'T00:00:00');
@@ -306,7 +321,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               <div>
                 <p className="text-[10px] text-slate-400 font-bold uppercase">Ajuste neto</p>
                 <p className={`text-lg font-black ${ajusteNeto >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {ajusteNeto >= 0 ? '+' : ''}{ajusteNeto}hs
+                  {fmtHorasMinutos(ajusteNeto)}
                 </p>
               </div>
             </div>
@@ -363,7 +378,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                       {c.tipo === 'AJUSTE_HORAS' && (
                         <span className={`font-black ${(c.horas || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {(c.horas || 0) >= 0 ? '+' : ''}{c.horas}hs
+                          {fmtHorasMinutos(c.horas || 0)}
                         </span>
                       )}
                       {c.tipo === 'CORRECCION_PRESENCIA' && (
@@ -375,7 +390,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                         <span className="font-black text-amber-700">{c.codigoAntes} → {c.codigoDespues}</span>
                       )}
                       {c.tipo === 'RETENCION_FALTANTE' && (
-                        <span className="font-black text-rose-700">+{c.retencionHoras}hs retención</span>
+                        <span className="font-black text-rose-700">{fmtHorasMinutos(c.retencionHoras || 0)} retención</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate" title={c.motivo}>{c.motivo}</td>
@@ -436,13 +451,34 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               {/* AJUSTE_HORAS */}
               {form.tipo === 'AJUSTE_HORAS' && (
                 <div>
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Horas <span className="text-slate-400 normal-case font-normal">(positivo = sumar, negativo = restar)</span>
-                  </label>
-                  <input type="number" step="0.5" placeholder="Ej: +4 o -2"
-                    value={form.horas} onChange={e => setForm(f => ({ ...f, horas: e.target.value }))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800"
-                  />
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Cantidad</label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">
+                      <button type="button" onClick={() => setForm(f => ({ ...f, horas: f.horas.startsWith('-') ? f.horas : f.horas ? `-${f.horas}` : '-0' }))}
+                        className={`px-3 py-2 text-xs font-black transition-colors ${form.horas.startsWith('-') ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200'}`}>
+                        − Restar
+                      </button>
+                      <button type="button" onClick={() => setForm(f => ({ ...f, horas: f.horas.replace(/^-/, '') }))}
+                        className={`px-3 py-2 text-xs font-black transition-colors ${!form.horas.startsWith('-') ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200'}`}>
+                        + Sumar
+                      </button>
+                    </div>
+                    <input type="number" min="0" max="99" placeholder="0"
+                      value={form.horas.replace(/^-/, '')}
+                      onChange={e => {
+                        const sign = form.horas.startsWith('-') ? '-' : '';
+                        setForm(f => ({ ...f, horas: e.target.value ? `${sign}${e.target.value}` : '' }));
+                      }}
+                      className="w-16 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800 text-center"
+                    />
+                    <span className="text-xs font-bold text-slate-500">hs</span>
+                    <input type="number" min="0" max="59" placeholder="0"
+                      value={form.minutos}
+                      onChange={e => setForm(f => ({ ...f, minutos: e.target.value }))}
+                      className="w-16 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800 text-center"
+                    />
+                    <span className="text-xs font-bold text-slate-500">min</span>
+                  </div>
                 </div>
               )}
 
@@ -513,11 +549,19 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               {/* RETENCION_FALTANTE */}
               {form.tipo === 'RETENCION_FALTANTE' && (
                 <div>
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Horas de retención</label>
-                  <input type="number" step="0.5" min="0.5" max="12" placeholder="Ej: 2"
-                    value={form.retencionHoras} onChange={e => setForm(f => ({ ...f, retencionHoras: e.target.value }))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800"
-                  />
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Duración de la retención</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min="0" max="12" placeholder="0"
+                      value={form.retencionHoras} onChange={e => setForm(f => ({ ...f, retencionHoras: e.target.value }))}
+                      className="w-16 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800 text-center"
+                    />
+                    <span className="text-xs font-bold text-slate-500">hs</span>
+                    <input type="number" min="0" max="59" placeholder="0"
+                      value={form.retencionMinutos} onChange={e => setForm(f => ({ ...f, retencionMinutos: e.target.value }))}
+                      className="w-16 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800 text-center"
+                    />
+                    <span className="text-xs font-bold text-slate-500">min</span>
+                  </div>
                   <p className="text-[10px] text-slate-400 mt-1">Se creará un turno de tipo RET a partir del egreso del turno del día.</p>
                 </div>
               )}
