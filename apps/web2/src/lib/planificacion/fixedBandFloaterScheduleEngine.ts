@@ -163,15 +163,21 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext): Record<string, number> {
     return out;
 }
 
-/** true si cada puesto 24hs qty=1 tiene exactamente 4 guardias (M+T+N+F, cobertura garantizada). */
+/**
+ * true si cada puesto 24hs qty=1 opera los 7 días y tiene 4 ó 5 guardias.
+ * 4 guardias → M+T+N+F (cobertura garantizada).
+ * 5 guardias → ídem + 1 RET flotante (mismo ciclo, días de trabajo → RET).
+ * Puestos con activeDays < 7 (L-V, fines de semana, etc.) usan V4.
+ */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
     const groups = positionGroups ?? buildPositionGroups(ctx);
     let counted = 0;
     for (const pos of ctx.positions) {
         if (!is24hs(pos)) continue;
+        if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) return false;
         if (Math.max(1, Number(pos.qty) || 1) !== 1) return false;
         const g = groups[pos.positionName] || [];
-        if (g.length !== 4) return false;
+        if (g.length !== 4 && g.length !== 5) return false;
         counted += g.length;
     }
     return counted > 0 && counted === ctx.employees.length;
@@ -198,9 +204,15 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const opening = openingSlotByEmp[emp.id];
         if (opening === undefined) continue;
 
-        const posName = Object.entries(positionGroups).find(([, ids]) => ids.includes(emp.id))?.[0] ?? '';
+        const posEntry = Object.entries(positionGroups).find(([, ids]) => ids.includes(emp.id));
+        const posName = posEntry?.[0] ?? '';
+        const posGroup = posEntry?.[1] ?? [];
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
+
+        // El 5to guardia en el grupo (índice ≥ 4) es RET flotante:
+        // misma rueda 24d pero sus bandas de trabajo (M/T/N) se emiten como RET.
+        const isRetFloater = posGroup.indexOf(emp.id) >= 4;
 
         ctx.daysInMonth.forEach((day, di) => {
             const dateStr = ctx.getDateKey(day);
@@ -208,20 +220,22 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const dayLetter = ctx.getDayLetter(dateStr);
             if (!positionIsActiveOn(pos, dayLetter)) return;
 
-            const code = CYCLE_24_MTN[(opening + di) % 24];
-            if (di === 0) primaryShiftByEmp[emp.id] = WORK_BANDS.has(code) ? code : null;
+            const rawCode = CYCLE_24_MTN[(opening + di) % 24];
+            const code = (isRetFloater && WORK_BANDS.has(rawCode)) ? 'RET' : rawCode;
+            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(code)) ? code : null;
 
             const meta = shiftMeta(pos, code);
             const isFranco = code === 'F';
+            const isRet = code === 'RET';
             assignments.push({
                 empId: emp.id,
                 dateStr,
-                positionName: isFranco ? '' : posName,
+                positionName: (isFranco || isRet) ? '' : posName,
                 code,
                 name: meta.name,
                 hours: meta.hours,
                 startTime: meta.startTime,
-                ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                ...(!isRet && meta.endTime ? { endTime: meta.endTime } : {}),
                 ...(isFranco ? { isFranco: true } : {}),
             });
 
