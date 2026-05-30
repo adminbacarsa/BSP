@@ -398,6 +398,7 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
+    const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     /** null = Auto decide; true/false = forzar rotativo ON/OFF */
     const [autoRotateForce, setAutoRotateForce] = useState<boolean | null>(null);
@@ -3218,7 +3219,7 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            const can6x1 = canUseSixPlusOne(baseGenCtx);
+            const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
             await bumpAutoV2Progress(40, can6x1
                 ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
@@ -6348,6 +6349,26 @@ export default function PlanificacionPage() {
                                             })}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'bg-emerald-500' : 'bg-slate-300'}`}>
                                                 <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'translate-x-4' : ''}`}/>
+                                            </button>
+                                        </div>
+
+                                        {/* Ciclo 6+1 */}
+                                        <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border transition-colors ${useSixPlusOne ? 'bg-emerald-50 border-emerald-200' : 'border-transparent'}`}>
+                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
+                                                Ciclo 6+1 · banda fija · 85.7 %
+                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">
+                                                    {displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6
+                                                        ? `${displayedEmployees.length} guardias → ${displayedEmployees.length / 6} grupo${displayedEmployees.length / 6 > 1 ? 's' : ''} de 6 · ~${Math.round(displayedEmployees.length / 6 * 25.7)} días-guardia/mes`
+                                                        : `Requiere múltiplo de 6 guardias (6, 12, 18…) — actual: ${displayedEmployees.length}`}
+                                                </span>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setUseSixPlusOne(p => !p)}
+                                                disabled={!(displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6)}
+                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 disabled:opacity-30 ${useSixPlusOne ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                            >
+                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${useSixPlusOne ? 'translate-x-4' : ''}`}/>
                                             </button>
                                         </div>
 

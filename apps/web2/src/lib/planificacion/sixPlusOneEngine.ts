@@ -116,8 +116,8 @@ function buildBandPairs(guardIds: string[], ctx: V2EngineContext): BandPair[] {
 }
 
 /**
- * true si todos los puestos son 24hs/7d qty=1 y tienen exactamente 6 guardias.
- * 2 por banda (M/T/N) con francos desfasados — ratio 85.7 %.
+ * true si todos los puestos son 24hs/7d y tienen un múltiplo de 6 guardias (6, 12, 18…).
+ * Cada grupo de 6 forma 3 pares banda-fija (M×2, T×2, N×2) con ciclo 6+1.
  */
 export function canUseSixPlusOne(ctx: V2EngineContext): boolean {
     const groups = buildPositionGroups(ctx);
@@ -125,9 +125,8 @@ export function canUseSixPlusOne(ctx: V2EngineContext): boolean {
     for (const pos of ctx.positions) {
         if (!is24hs(pos)) return false;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) return false;
-        if (Math.max(1, Number(pos.qty) || 1) !== 1) return false;
         const g = groups[pos.positionName] || [];
-        if (g.length !== 6) return false;
+        if (g.length === 0 || g.length % 6 !== 0) return false;
         counted += g.length;
     }
     return counted > 0 && counted === ctx.employees.length;
@@ -155,8 +154,11 @@ export function generateSixPlusOneSchedule(ctx: V2EngineContext): V2GenerateResu
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
 
-        const pairs = buildBandPairs(guardIds, ctx);
-
+        // Dividir en grupos de 6: cada grupo forma sus propios 3 pares de banda
+        const numGroups = Math.max(1, Math.floor(guardIds.length / 6));
+        for (let gi = 0; gi < numGroups; gi++) {
+            const groupIds = guardIds.slice(gi * 6, (gi + 1) * 6);
+            const pairs = buildBandPairs(groupIds, ctx);
         for (const { band, guards } of pairs) {
             for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
                 const empId = guards[pairIdx];
@@ -216,9 +218,10 @@ export function generateSixPlusOneSchedule(ctx: V2EngineContext): V2GenerateResu
                         }
                     }
                 });
-            }
-        }
-    }
+            }    // pairIdx
+        }        // band pairs
+        }        // gi (grupo de 6)
+    }            // positionGroups
 
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);
