@@ -194,3 +194,62 @@ export function buildAbsencesMapFromDocs(
 
     return map;
 }
+
+export const PLANNING_ABSENCE_GRID_CODES = new Set([
+    'V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
+]);
+
+export type GridShiftLike = {
+    code?: string;
+    positionName?: string;
+    objectiveId?: string;
+    hours?: number;
+    startTime?: unknown;
+    name?: string;
+};
+
+/** Banda/puesto que cubriría el titular si no estuviera de vacación/licencia. */
+export function inferWorkShiftForAbsenceDay(
+    empId: string,
+    dateStr: string,
+    shiftsMap: Record<string, GridShiftLike>,
+    pendingChanges: Record<string, GridShiftLike & { isDeleted?: boolean }>,
+    nonWorkCodes: Set<string> = PLANNING_ABSENCE_GRID_CODES,
+): GridShiftLike | null {
+    const readKey = (ds: string) => {
+        const k = `${empId}_${ds}`;
+        const p = pendingChanges[k];
+        if (p?.isDeleted) return null;
+        return (p ?? shiftsMap[k]) || null;
+    };
+
+    const direct = readKey(dateStr);
+    const directCode = String(direct?.code || '').toUpperCase();
+    if (direct && directCode && !nonWorkCodes.has(directCode)) return direct;
+
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dim = new Date(y, m - 1, 0).getDate();
+    const targetDow = new Date(y, m - 1, d, 12, 0, 0, 0).getDay();
+
+    for (let dd = 1; dd <= dim; dd++) {
+        const probe = new Date(y, m - 1, dd, 12, 0, 0, 0);
+        if (probe.getDay() !== targetDow) continue;
+        const ds = `${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+        if (ds === dateStr) continue;
+        const s = readKey(ds);
+        const c = String(s?.code || '').toUpperCase();
+        if (s && c && !nonWorkCodes.has(c)) return s;
+    }
+
+    for (let delta = 1; delta <= dim; delta++) {
+        for (const sign of [-1, 1]) {
+            const dd = d + sign * delta;
+            if (dd < 1 || dd > dim) continue;
+            const ds = `${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+            const s = readKey(ds);
+            const c = String(s?.code || '').toUpperCase();
+            if (s && c && !nonWorkCodes.has(c)) return s;
+        }
+    }
+    return null;
+}
