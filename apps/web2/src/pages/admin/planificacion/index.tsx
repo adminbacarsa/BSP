@@ -4890,6 +4890,8 @@ export default function PlanificacionPage() {
                     const empCount = displayedEmployees.filter((e: any) =>
                         (sourceHours[e.id] || 0) > 0 || (empRetDays[e.id] || 0) > 0
                     ).length;
+                    // Para el promedio excluir guardias que solo tienen días RET (0 hs facturables)
+                    const empCountBillable = displayedEmployees.filter((e: any) => (sourceHours[e.id] || 0) > 0).length;
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
@@ -4913,10 +4915,10 @@ export default function PlanificacionPage() {
                                 </p>
                             )}
                         </div>
-                        {displayedEmployees.length > 0 && (
-                            <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado en el ciclo CCT actual.' : 'Promedio de horas por empleado en el mes calendario.'}>
+                        {empCountBillable > 0 && (
+                            <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado con horas facturables en el ciclo CCT (excluye guardias solo-RET).' : 'Promedio de horas por empleado con horas facturables en el mes (excluye guardias solo-RET).'}>
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Prom./Emp.</p>
-                                <p className="text-sm font-black text-slate-500 dark:text-slate-300 leading-tight">{Math.round(totalHrs / displayedEmployees.length)}h</p>
+                                <p className="text-sm font-black text-slate-500 dark:text-slate-300 leading-tight">{Math.round(totalHrs / empCountBillable)}h</p>
                             </div>
                         )}
                         {retCount > 0 && (
