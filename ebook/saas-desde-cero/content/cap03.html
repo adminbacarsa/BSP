@@ -1,0 +1,48 @@
+<h3>Por qué necesitás entender arquitectura aunque no sepas programar</h3>
+<p>No porque necesités saber programar para tomar decisiones de arquitectura. Sino porque las decisiones de arquitectura tienen consecuencias de negocio enormes. El error más caro que cometí en COSP — no diseñar para multiempresa — fue un error de arquitectura.</p>
+<p><strong>No necesitás saber cómo construir la arquitectura. Necesitás entender qué implica cada decisión.</strong></p>
+
+<h3>La analogía del restaurante</h3>
+
+<h4>1. El Frontend — el salón</h4>
+<p>Es todo lo que el usuario ve e interactúa. Las pantallas, los botones, los formularios. En COSP, el coordinador ve el calendario de turnos de la semana, con cada día dividido en servicios activos y empleados asignados. El empleado ve únicamente su propio calendario. El cliente ve el estado de los servicios en sus instalaciones.</p>
+<p><strong>Tres tipos de usuario, tres experiencias completamente diferentes, todos accediendo al mismo sistema.</strong></p>
+<p>Si la interfaz no es obvia, no la adoptan. Preguntate siempre: ¿un usuario nuevo puede entender qué hacer sin que nadie se lo explique?</p>
+
+<h4>2. El Backend — la cocina</h4>
+<p>Cuando un coordinador hace clic en "asignar turno", el backend:</p>
+<ol>
+<li>Verifica que el empleado exista y esté activo</li>
+<li>Consulta el historial de turnos del empleado en la semana en curso</li>
+<li>Calcula cuántas horas ya tiene asignadas</li>
+<li>Verifica contra las reglas del convenio colectivo</li>
+<li>Revisa novedades activas en RRHH (licencia, vacaciones, enfermedad)</li>
+<li>Revisa restricciones de personal del servicio</li>
+<li>Si todo está en orden, confirma la asignación y dispara notificaciones</li>
+</ol>
+<p>En COSP usamos Cloud Functions de Firebase — fragmentos de código que se ejecutan en el servidor cuando ocurre un evento específico.</p>
+
+<h4>3. La Base de Datos — la despensa</h4>
+<p>Donde se guarda toda la información. COSP usa Firestore, base de datos NoSQL de Google Firebase.</p>
+<p>Cada empresa tiene su propio espacio de datos completamente aislado: empleados, servicios, turnos, clientes y configuración.</p>
+<p><strong>Por qué Firestore:</strong></p>
+<ul>
+<li>Escalabilidad automática</li>
+<li>Actualizaciones en tiempo real</li>
+<li>Integración nativa con Firebase Auth</li>
+<li>Modelo de precios por uso</li>
+</ul>
+
+<h4>4. Las APIs — los puentes entre sistemas</h4>
+<p>COSP se comunica con múltiples sistemas externos:</p>
+<ul>
+<li><strong>Gmail API</strong> — notificaciones por email</li>
+<li><strong>Google Maps API</strong> — ubicaciones y distancias</li>
+<li><strong>WhatsApp API</strong> — notificaciones urgentes</li>
+<li><strong>Gemini API</strong> — asistente inteligente integrado</li>
+<li><strong>API de RRHH y liquidación</strong> — flujo automático de datos de turnos</li>
+</ul>
+
+<h3>El momento en que el sistema se volvió indispensable</h3>
+<p>Los coordinadores empezaron a reportar que sin el sistema no sabían cómo planificar. El sistema empezó a detectar incongruencias que el proceso manual nunca hubiera encontrado: horas que no cuadraban con el convenio, empleados en dos servicios simultáneamente, servicios con personal insuficiente.</p>
+<p>Cuando COSP empezó a generar certezas donde antes había presunciones, la plataforma dejó de ser una herramienta y se convirtió en la infraestructura sobre la que operaba el negocio.</p>

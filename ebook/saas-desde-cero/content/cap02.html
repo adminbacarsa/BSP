@@ -1,0 +1,58 @@
+<h3>El error que casi todos cometen</h3>
+<p>Hay un patrón que se repite constantemente: alguien tiene una idea, se entusiasma, empieza a construirla, pasa meses construyéndola, y cuando finalmente tiene algo para mostrar descubre que nadie lo necesita.</p>
+<p>La validación no es una encuesta online. Es entender con datos reales si el problema que querés resolver es suficientemente doloroso como para que estén dispuestas a pagar por una solución.</p>
+
+<h3>Las cuatro preguntas de validación</h3>
+<h4>Pregunta 1: ¿Qué problema concreto y específico resuelve?</h4>
+<p>"Quiero hacer una app para gestionar clientes" no es un problema. Es una solución genérica a un problema que no definiste.</p>
+<p>Para COSP: <em>"Los coordinadores de operaciones de empresas de seguridad privada pierden horas semanales gestionando manualmente la asignación de turnos en Excel, lo que genera errores de liquidación y decisiones operativas sin información completa."</em></p>
+
+<h4>Pregunta 2: ¿Quién tiene ese problema específicamente?</h4>
+<p>Para COSP: coordinadores de operaciones de empresas de servicios con personal operativo mayor a cincuenta empleados, que gestionan múltiples turnos y servicios simultáneamente, en industrias con regulación laboral compleja.</p>
+
+<h4>Pregunta 3: ¿El problema duele lo suficiente como para pagar por resolverlo?</h4>
+<p>El costo de los errores de liquidación, las horas extras mal computadas y las ineficiencias operativas superaba ampliamente el costo de desarrollar e implementar la solución.</p>
+
+<h4>Pregunta 4: ¿Cuánto tiempo o dinero pierde quien tiene el problema sin tu solución?</h4>
+<p>Varias horas semanales de coordinación manual. Errores de liquidación cuantificables en dinero. Ese cálculo fue lo que cerró el argumento de construir la plataforma.</p>
+
+<h3>El mayor error que cometí y sus dos meses de consecuencias</h3>
+<p><strong>Pensé pequeño.</strong> Diseñé COSP para una sola empresa. Cuando la organización decidió desdoblar la operación y crear una SA separada, me encontré con que la arquitectura no soportaba eso. No era un ajuste menor. Era un rediseño fundamental.</p>
+<p>Tuve que rediseñar el master de clientes, separar todas las colecciones de Firestore para multi-tenant, reescribir las Cloud Functions y actualizar todas las reglas de seguridad.</p>
+<p><strong>Resultado: dos meses de retraso.</strong></p>
+
+<h4>La arquitectura correcta desde el principio</h4>
+<p>El ID de la empresa es el primer parámetro de toda la arquitectura. Todo dato, todo usuario, toda configuración existe dentro del contexto de una empresa.</p>
+<div class="code-block">empresas/
+  {empresaId}/
+    empleados/
+      {empleadoId}/
+    turnos/
+      {turnoId}/
+    configuracion/
+    convenios/</div>
+<p>La lección: <strong>el costo de diseñar bien desde el principio es menor que el costo de rediseñar cuando el error ya está en producción.</strong></p>
+
+<h3>El stack — cómo elegí las herramientas</h3>
+<p><strong>El principio guía:</strong> No existe el stack perfecto en abstracto. Existe el stack que resuelve tu problema específico, en tu contexto específico, con los recursos que tenés disponibles hoy.</p>
+<p>No llegué a CronApp de entrada. Hice varios ensayos con distintas plataformas. Cada ensayo fallido fue información.</p>
+<p>CronApp resolvió el problema específico: manejar la complejidad de las reglas de negocio — convenios colectivos, restricciones de horas, múltiples unidades operativas — sin requerir que yo escribiera cada línea de código desde cero.</p>
+
+<h4>El mapa de decisión para elegir tu stack</h4>
+<ul>
+<li><strong>Empezando solo, sin experiencia técnica:</strong> low-code. CronApp, Bubble o Webflow según el tipo de producto.</li>
+<li><strong>Alguna experiencia técnica:</strong> combiná low-code para el frontend con Cloud Functions para la lógica compleja.</li>
+<li><strong>Equipo técnico:</strong> React o Vue + Node.js o Python + Firestore o PostgreSQL.</li>
+<li><strong>En todos los casos:</strong> Firebase para autenticación, almacenamiento y base de datos. No construyas tu propio sistema de autenticación.</li>
+</ul>
+
+<h3>El motor de reglas de negocio</h3>
+<p>La parte que tardó más en construirse y que más valor entrega. En COSP maneja:</p>
+<ul>
+<li>Horas máximas de trabajo diario y semanal por categoría de empleado</li>
+<li>Descansos mínimos obligatorios entre turnos</li>
+<li>Adicionales por trabajo nocturno, fin de semana y feriados</li>
+<li>Restricciones de asignación basadas en el historial reciente del empleado</li>
+<li>Alertas cuando una asignación planificada generaría una infracción al convenio</li>
+</ul>
+<p>Estas reglas no están hardcodeadas. Se alimentan dinámicamente desde el módulo de RRHH. Un cambio en un convenio colectivo no requiere modificar el código del sistema.</p>

@@ -1,0 +1,514 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --bg-deep: #050810;
+  --bg-page: #0a1020;
+  --bg-card: #0f1a2e;
+  --neon-cyan: #00e5ff;
+  --neon-blue: #0080ff;
+  --neon-purple: #6366f1;
+  --text-primary: #e8f4ff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-glow: rgba(0, 229, 255, 0.35);
+  --border-subtle: rgba(0, 229, 255, 0.15);
+  --page-width: 210mm;
+  --page-height: 297mm;
+  --margin-x: 22mm;
+  --margin-y: 24mm;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  font-size: 11pt;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #1a1a2e;
+  color: var(--text-primary);
+  line-height: 1.65;
+}
+
+/* ── Screen preview ── */
+@media screen {
+  body { padding: 2rem 0; }
+  .page, .content-flow {
+    width: var(--page-width);
+    margin: 0 auto 2rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px var(--accent-glow);
+  }
+  .page { min-height: var(--page-height); }
+  .content-flow {
+    min-height: auto;
+    padding: var(--margin-y) var(--margin-x);
+    background: var(--bg-page);
+  }
+}
+
+/* ── Print / PDF ── */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  body { background: white; padding: 0; }
+  .page {
+    width: var(--page-width);
+    min-height: var(--page-height);
+    margin: 0;
+    box-shadow: none;
+    page-break-after: always;
+    break-after: page;
+  }
+  .page:last-child { page-break-after: auto; }
+  .content-flow {
+    width: var(--page-width);
+    margin: 0;
+    box-shadow: none;
+    page-break-after: auto;
+    padding: var(--margin-y) var(--margin-x);
+    background: var(--bg-page);
+  }
+  .content-flow .content-block {
+    page-break-inside: avoid;
+  }
+  .no-print { display: none !important; }
+}
+
+.page {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-page);
+  padding: var(--margin-y) var(--margin-x);
+}
+
+/* ── Cover ── */
+.page-cover {
+  background: var(--bg-deep);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 30mm 20mm;
+}
+
+.page-cover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 20%, rgba(0, 128, 255, 0.25) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(0, 229, 255, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 30% at 10% 70%, rgba(99, 102, 241, 0.15) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.page-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+}
+
+.page-cover .cover-glow {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.page-cover .cover-icon {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 1.5rem;
+  opacity: 0.9;
+}
+
+.cover-badge {
+  position: relative;
+  z-index: 1;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  border: 1px solid var(--border-subtle);
+  padding: 0.5rem 1.2rem;
+  border-radius: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.cover-title {
+  position: relative;
+  z-index: 1;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 3.2rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #ffffff 0%, var(--neon-cyan) 50%, var(--neon-blue) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: none;
+  filter: drop-shadow(0 0 30px rgba(0, 229, 255, 0.4));
+  margin-bottom: 1.2rem;
+}
+
+.cover-subtitle {
+  position: relative;
+  z-index: 1;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  max-width: 85%;
+  line-height: 1.5;
+  margin-bottom: 3rem;
+}
+
+.cover-author {
+  position: relative;
+  z-index: 1;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  margin-top: auto;
+}
+
+.cover-line {
+  position: relative;
+  z-index: 1;
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+  margin: 1.5rem auto;
+}
+
+.cover-edition {
+  position: relative;
+  z-index: 1;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  margin-top: 1rem;
+}
+
+/* ── Chapter opener ── */
+.page-chapter-opener {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--bg-deep);
+  padding: 40mm 25mm;
+}
+
+.page-chapter-opener::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-blue), var(--neon-purple));
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.chapter-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  margin-bottom: 1rem;
+}
+
+.chapter-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 2.4rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+  max-width: 90%;
+}
+
+.chapter-title span {
+  display: block;
+  background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Section opener (Prólogo, Intro, etc.) ── */
+.section-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  margin-bottom: 0.75rem;
+}
+
+.section-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+  line-height: 1.2;
+}
+
+/* ── Body content ── */
+.content h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--neon-cyan);
+  margin: 1.4rem 0 0.6rem;
+}
+
+.content h4 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 1.2rem 0 0.5rem;
+}
+
+.content p {
+  margin-bottom: 0.85rem;
+  color: var(--text-secondary);
+  text-align: justify;
+  hyphens: auto;
+}
+
+.content p.lead {
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+
+.content ul, .content ol {
+  margin: 0.5rem 0 1rem 1.2rem;
+  color: var(--text-secondary);
+}
+
+.content li {
+  margin-bottom: 0.35rem;
+}
+
+.content strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.content em {
+  color: var(--neon-cyan);
+  font-style: normal;
+}
+
+/* ── Prompt boxes ── */
+.prompt-box {
+  background: var(--bg-card);
+  border-left: 3px solid var(--neon-cyan);
+  border-radius: 0 8px 8px 0;
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+  box-shadow: 0 0 15px rgba(0, 229, 255, 0.08);
+}
+
+.prompt-box .prompt-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  margin-bottom: 0.5rem;
+}
+
+.prompt-box p {
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--text-primary);
+  margin: 0;
+  text-align: left;
+}
+
+/* ── Code / structure blocks ── */
+.code-block {
+  background: #060a14;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--neon-cyan);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ── Tool cards ── */
+.tool-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+}
+
+.tool-card h4 {
+  margin: 0 0 0.4rem;
+  color: var(--neon-cyan);
+}
+
+.tool-card p {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+/* ── Flow diagram ── */
+.flow-line {
+  text-align: center;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.85rem;
+  color: var(--neon-cyan);
+  padding: 0.8rem;
+  margin: 1rem 0;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Glossary ── */
+.glossary-term {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  color: var(--neon-cyan);
+}
+
+.glossary-def {
+  color: var(--text-secondary);
+}
+
+.glossary-item {
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.glossary-item:last-child { border-bottom: none; }
+
+/* ── TOC ── */
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.55rem 0;
+  border-bottom: 1px dotted var(--border-subtle);
+  font-size: 0.92rem;
+}
+
+.toc-list li span:first-child {
+  color: var(--text-secondary);
+}
+
+.toc-list li span.num {
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--neon-cyan);
+  font-weight: 600;
+  min-width: 2rem;
+}
+
+.toc-section {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--neon-blue);
+  margin: 1.5rem 0 0.5rem;
+}
+
+/* ── Page footer ── */
+.page-footer {
+  position: absolute;
+  bottom: 15mm;
+  left: var(--margin-x);
+  right: var(--margin-x);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.5rem;
+}
+
+.page-num {
+  font-family: 'Space Grotesk', sans-serif;
+  color: var(--neon-cyan);
+}
+
+/* ── Print toolbar ── */
+.print-toolbar {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.print-toolbar button {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.65rem 1.2rem;
+  border: 1px solid var(--neon-cyan);
+  background: rgba(0, 229, 255, 0.1);
+  color: var(--neon-cyan);
+  border-radius: 6px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s;
+}
+
+.print-toolbar button:hover {
+  background: rgba(0, 229, 255, 0.25);
+  box-shadow: 0 0 20px var(--accent-glow);
+}

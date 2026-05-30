@@ -1,0 +1,12 @@
+{
+  "name": "saas-desde-cero-ebook",
+  "private": true,
+  "scripts": {
+    "build": "node build-ebook.mjs",
+    "preview": "node build-ebook.mjs && npx --yes serve . -p 3456",
+    "pdf": "node export-pdf.mjs"
+  },
+  "dependencies": {
+    "puppeteer": "^25.1.0"
+  }
+}

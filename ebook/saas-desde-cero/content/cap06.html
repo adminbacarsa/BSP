@@ -1,0 +1,42 @@
+<h3>Por qué la seguridad no puede ser "para después"</h3>
+<p>En el mundo digital, la seguridad que se agrega después no es tan robusta como la que se diseña desde el principio. En COSP manejábamos legajos de empleados, horarios, ubicaciones de servicios y datos de clientes.</p>
+
+<h3>El sistema de roles — la primera línea de defensa</h3>
+
+<div class="tool-card">
+<h4>SuperAdmin</h4>
+<p>Opera por encima de todas las empresas. Puede ver información de cualquier empresa, gestionar configuración y agregar empresas. Cada acción queda registrada en el log del sistema.</p>
+</div>
+
+<div class="tool-card">
+<h4>Coordinador</h4>
+<p>Usuario operativo principal. Ve y gestiona empleados de su empresa, crea y modifica turnos, planifica servicios. NO puede ver otras empresas ni modificar convenios.</p>
+</div>
+
+<div class="tool-card">
+<h4>Empleado</h4>
+<p>Ve su propio cronograma, confirma asistencia, recibe notificaciones. NO puede ver cronogramas de compañeros ni modificar turnos.</p>
+</div>
+
+<div class="tool-card">
+<h4>Cliente</h4>
+<p>Ve el estado de los servicios en sus instalaciones — empleados asignados, confirmaciones de presencia — sin acceder a información interna.</p>
+</div>
+
+<h3>Firestore Security Rules</h3>
+<p>La seguridad se implementa directamente en la base de datos. Incluso si alguien manipula el frontend, las Security Rules impiden acceso no autorizado.</p>
+<ul>
+<li>Un empleado solo puede leer sus propios documentos</li>
+<li>Un coordinador solo opera dentro de su empresa</li>
+<li>Ningún usuario puede modificar su propio rol</li>
+<li>El superadmin tiene acceso de lectura global con acciones registradas</li>
+</ul>
+
+<h3>Firebase Authentication</h3>
+<p>No construimos nuestro propio sistema de autenticación. Firebase Auth maneja registro, login, verificación de email y recuperación de contraseña. Para roles de alto privilegio, la autenticación de dos factores está activa.</p>
+
+<h3>Variables de entorno</h3>
+<p><strong>Regla sin excepciones:</strong> ninguna clave de API, contraseña o token va en el código que se sube a GitHub. Se configuran en el entorno del servidor.</p>
+
+<h3>Backups</h3>
+<p>Firestore tiene backups automáticos configurables. En COSP se ejecutan diariamente. La confianza de un sistema que "nunca pierde datos" se construye con backups desde el primer día.</p>

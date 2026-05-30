@@ -1,0 +1,78 @@
+<h3>El equipo que no sabía que tenía</h3>
+<p>Cuando arranqué el análisis de procesos en la empresa, no tenía un equipo de desarrollo. No tenía un programador a disposición. No tenía presupuesto para contratar una consultora de tecnología.</p>
+<p>Tenía una computadora, acceso a los datos de la empresa, y la necesidad urgente de encontrar una solución real a un problema real.</p>
+<p>Y tenía algo que hace cuatro años no existía de la forma en que existe hoy: inteligencia artificial accesible, potente y capaz de actuar como socio estratégico y técnico en el desarrollo de un producto digital.</p>
+<p><strong>Las herramientas de IA fueron mi equipo.</strong></p>
+<p>Pero hay algo que nadie te cuenta cuando empezás a usar IA para construir cosas: la IA no hace el trabajo por vos. Lo que hace es multiplicar tu capacidad. Te permite hacer en semanas lo que antes requería meses y un equipo completo. Pero para eso tenés que saber qué pedirle, cómo pedirlo y cuándo confiar en la respuesta y cuándo cuestionar.</p>
+<p>Eso es lo que vas a aprender en este capítulo.</p>
+
+<div class="tool-card">
+<h4>Claude — El arquitecto estratégico</h4>
+<p>Claude es la herramienta de Anthropic que más uso para las decisiones complejas de COSP. Lo que me diferencia de mucha gente que usa IA es que no le pido respuestas generales — le doy contexto específico y le pido que piense con ese contexto.</p>
+</div>
+<p>Claude es particularmente bueno para:</p>
+<ul>
+<li><strong>Diseño de arquitectura:</strong> Cuando necesitás pensar cómo va a estar estructurado tu sistema — qué base de datos usar, cómo organizar las colecciones de datos, cómo separar la lógica de negocio.</li>
+<li><strong>Revisión de decisiones técnicas:</strong> Antes de implementar algo grande, le cuento lo que voy a hacer y le pregunto qué problemas podría tener.</li>
+<li><strong>Documentación y estructura:</strong> Para escribir especificaciones técnicas, documentar procesos y crear guías para el equipo.</li>
+<li><strong>Resolución de problemas complejos:</strong> Cuando algo no funciona y no sé por qué, Claude puede analizar el problema y proponer soluciones.</li>
+</ul>
+
+<div class="prompt-box">
+<div class="prompt-label">El prompt que marcó el principio de COSP</div>
+<p>"Tengo un reporte con los horarios y asignaciones de los custodios de una empresa de seguridad privada. El proceso actual toma varias horas semanales y genera errores en la liquidación de sueldos. Los coordinadores manejan todo en Excel sin datos en tiempo real. Actuá como un Arquitecto de Software especializado en sistemas corporativos y proponeme una estructura lógica para automatizar este proceso en una plataforma web low-code. Considerá que la empresa tiene múltiples unidades de negocio y que el sistema podría escalar a otras empresas del sector."</p>
+</div>
+<p>La respuesta a ese prompt fue el primer borrador de la arquitectura de COSP. No era perfecta, no era definitiva, pero era un punto de partida sólido que me ahorró semanas de dar vueltas en círculos.</p>
+
+<h3>El arte del prompting</h3>
+<p>Un prompt es la instrucción que le das a la IA. La calidad del prompt determina la calidad de la respuesta tanto o más que la capacidad de la herramienta.</p>
+<p><strong>Los principios del buen prompting:</strong></p>
+<ul>
+<li><strong>Sé específico sobre tu rol y contexto</strong> — No digas "soy emprendedor". Di "soy emprendedor sin experiencia en programación, con cinco años de experiencia en gestión operativa de empresas de servicios, intentando resolver el problema X para el público Y".</li>
+<li><strong>Define el rol de la IA</strong> — "Actuá como..." seguido de un rol específico hace que la respuesta sea cualitativamente diferente.</li>
+<li><strong>Incluí restricciones</strong> — "Explicame esto en términos que pueda entender alguien sin conocimientos técnicos" cambia completamente el formato y la utilidad de la respuesta.</li>
+<li><strong>Iterá</strong> — El primer prompt raramente da el resultado final. Tomás la respuesta, la evaluás, y refinás.</li>
+</ul>
+
+<h4>Librería de prompts reales usados en COSP</h4>
+<div class="prompt-box">
+<div class="prompt-label">Prompt 1 — Validación de arquitectura</div>
+<p>"Estoy diseñando una plataforma de gestión de turnos para empresas de seguridad. Mi arquitectura actual es [descripción]. ¿Qué problemas potenciales identificás si en el futuro quiero que el sistema soporte múltiples empresas con datos completamente separados?"</p>
+</div>
+<div class="prompt-box">
+<div class="prompt-label">Prompt 2 — Diseño de reglas de negocio</div>
+<p>"Necesito modelar las reglas de un convenio colectivo de trabajo en un sistema digital. Las reglas incluyen: horas máximas diarias, descanso mínimo entre turnos, adicionales por horario nocturno, francos compensatorios. ¿Cómo estructurarías estas reglas en una base de datos para que sean configurables sin tocar el código?"</p>
+</div>
+<div class="prompt-box">
+<div class="prompt-label">Prompt 3 — Resolución de conflictos de datos</div>
+<p>"Mi sistema tiene una colección de empleados y una colección de turnos. Cuando un empleado tiene una licencia médica activa, no debería ser elegible para ningún turno en ese período. ¿Cómo implementarías esta verificación en las reglas de seguridad de Firestore?"</p>
+</div>
+<div class="prompt-box">
+<div class="prompt-label">Prompt 4 — Diseño de roles y permisos</div>
+<p>"Tengo cuatro tipos de usuarios: superadmin (acceso total), coordinador (gestiona turnos de su empresa), empleado (ve sus propios turnos), y cliente (ve el estado de los servicios en sus instalaciones). ¿Cómo estructurarías el sistema de roles y permisos para que cada usuario solo pueda hacer lo que le corresponde?"</p>
+</div>
+
+<div class="tool-card">
+<h4>Gemini — El analista de datos</h4>
+<p>Google Gemini tiene una ventaja específica: está integrado nativamente con el ecosistema de Google. En el análisis inicial de COSP, Gemini procesó los datos de turnos históricos, identificó patrones de inasistencias y calculó el costo real de las horas extras no planificadas.</p>
+</div>
+<p><strong>Usá Gemini cuando:</strong> tenés datos en Google Sheets, necesitás procesar documentos de Google Docs, o el análisis de datos es la tarea central.</p>
+<p><strong>Usá Claude cuando:</strong> necesitás razonamiento profundo sobre arquitectura, el contexto es largo y complejo, o la tarea requiere múltiples iteraciones de refinamiento.</p>
+
+<div class="tool-card">
+<h4>ChatGPT — El generador de ideas</h4>
+<p>Excelente para brainstorming de funcionalidades, nombres y comunicación, y exploración rápida de alternativas técnicas. Claude tiende a ser más preciso en contextos técnicos complejos; ChatGPT es más ágil para tareas creativas.</p>
+</div>
+
+<div class="tool-card">
+<h4>Cursor y GitHub Copilot — Los programadores en tiempo real</h4>
+<p>Cursor es un editor de código completo con IA integrada. En COSP, cuando necesité escribir Cloud Functions complejas para manejar las reglas del convenio colectivo, Cursor convirtió descripciones en lenguaje natural en código funcional que pude revisar, entender y ajustar.</p>
+</div>
+
+<div class="tool-card">
+<h4>Canva IA — El diseñador</h4>
+<p>Para COSP usé Canva para presentaciones de resultados, materiales de capacitación, documentación visual del proceso de planificación — y este libro que estás leyendo.</p>
+</div>
+
+<h3>El flujo completo que usé en COSP</h3>
+<div class="flow-line">Análisis (Sheets + Gemini) → Arquitectura (Claude) → Construcción (CronApp + Cursor) → Conexiones (APIs de Gmail, Maps, WhatsApp, Gemini) → Presentación (Canva IA) → Iteración continua</div>

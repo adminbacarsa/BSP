@@ -1,0 +1,30 @@
+<h3>El momento en que "funciona bien" no es suficiente</h3>
+<p>Las páginas tardan más en cargar. La base de datos responde más lento en horas pico. Aparecen errores que no existían antes. Bienvenido al problema de escala — un buen problema para tener.</p>
+
+<h3>El principio más importante del escalado</h3>
+<p><strong>No optimices antes de tener el problema.</strong> Construí. Lanzá. Medí. Cuando los números te digan que hay un problema de performance, ahí optimizás — con datos reales, no con suposiciones.</p>
+
+<h3>Las señales de que necesitás escalar</h3>
+<ul>
+<li>Tiempo de respuesta mayor a dos o tres segundos</li>
+<li>Errores en horas pico que no existían antes</li>
+<li>Colas de espera en el backend</li>
+<li>Costo de infraestructura creciendo más rápido que los usuarios</li>
+</ul>
+
+<h3>Caching — no procesar lo mismo dos veces</h3>
+<p>Si cien coordinadores piden el mismo reporte, calculás una vez, guardás en caché (Redis o el caching del SDK de Firestore) y servís el resultado guardado a los demás.</p>
+
+<h3>Colas de trabajo — no bloquear al usuario</h3>
+<p>Operaciones pesadas (generar reportes, planificación masiva, notificaciones masivas) van a una cola de segundo plano. El usuario recibe confirmación inmediata y una notificación cuando termina. Firebase Cloud Tasks es la solución nativa de Firebase.</p>
+
+<h3>Monitoreo y alertas</h3>
+<ul>
+<li><strong>Sentry:</strong> captura errores no manejados con alertas en tiempo real</li>
+<li><strong>UptimeRobot:</strong> monitorea disponibilidad cada cinco minutos</li>
+<li><strong>Firebase Performance Monitoring:</strong> trackea tiempos de carga y operaciones lentas</li>
+</ul>
+
+<h3>El equipo — cuándo dejar de hacer todo solo</h3>
+<p>Señales: soporte que tarda demasiado, funcionalidades que tardan el triple, errores acumulados sin resolver, crecimiento limitado por falta de tiempo para vender.</p>
+<p>Secuencia típica: primero externalizar soporte, después desarrollo, después ventas. Pero todo eso viene después. Primero: construir algo que funcione y que la gente necesite.</p>

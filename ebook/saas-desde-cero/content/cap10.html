@@ -1,0 +1,50 @@
+<h3>Por qué los prompts importan más de lo que creés</h3>
+<p>La diferencia entre usar IA de forma mediocre y multiplicar tu capacidad está en cómo le hablás. Acá van prompts reales que usé en COSP — no plantillas genéricas.</p>
+
+<h3>Prompts de arquitectura y diseño</h3>
+
+<div class="prompt-box">
+<div class="prompt-label">Diseño inicial de base de datos multiempresa</div>
+<p>"Estoy construyendo una plataforma SaaS de gestión de turnos para empresas de servicios con personal operativo. La plataforma debe soportar múltiples empresas con datos completamente aislados entre ellas. Cada empresa tiene empleados, servicios, turnos y clientes. Usaré Firestore de Firebase. Diseñame la estructura de colecciones considerando: aislamiento total entre empresas, reglas de seguridad que permitan a cada empleado ver solo sus propios datos, soporte para superadmin, y eficiencia en las consultas más frecuentes."</p>
+</div>
+
+<div class="prompt-box">
+<div class="prompt-label">Diseño de sistema de roles</div>
+<p>"Necesito diseñar un sistema de roles y permisos para una plataforma de gestión de turnos corporativa. Los roles son: SuperAdmin, Admin de empresa, Coordinador, Empleado, Cliente. Para cada rol, describí qué puede ver, crear, modificar y eliminar. Considerá el principio de mínimo privilegio."</p>
+</div>
+
+<h3>Prompts de lógica de negocio</h3>
+
+<div class="prompt-box">
+<div class="prompt-label">Modelado de convenios colectivos</div>
+<p>"Necesito modelar las reglas de un convenio colectivo de trabajo en un sistema de base de datos. Las reglas incluyen: límite de horas diarias según categoría, descanso mínimo entre turnos, adicional por trabajo nocturno (21:00 a 06:00), adicional por domingo y feriados, límite semanal de horas extras. Las reglas deben poder modificarse sin cambiar el código. Diseñame la estructura de datos y la lógica de verificación."</p>
+</div>
+
+<div class="prompt-box">
+<div class="prompt-label">Autoplanificación de turnos</div>
+<p>"Estoy construyendo un algoritmo de autoplanificación de turnos para una empresa de seguridad privada. Debe asignar empleados a servicios maximizando cobertura sin generar horas extras. Restricciones: disponibilidad, límite semanal del convenio, descanso mínimo entre turnos, restricciones de clientes, distribución equitativa de horas. Describime el algoritmo en pseudocódigo y señalá los casos edge más complejos."</p>
+</div>
+
+<h3>Prompts de resolución de problemas</h3>
+
+<div class="prompt-box">
+<div class="prompt-label">Debug de Firestore Security Rules</div>
+<p>"Mis Firestore Security Rules no están funcionando como espero. La regla que escribí es [pegar la regla]. Lo que quiero lograr es [comportamiento esperado]. Lo que está pasando es [comportamiento actual]. ¿Cuál es el error y cómo lo corrijo?"</p>
+</div>
+
+<div class="prompt-box">
+<div class="prompt-label">Optimización de consultas</div>
+<p>"Tengo una consulta a Firestore que es lenta cuando hay muchos documentos. La consulta es [descripción]. Los índices que tengo son [descripción]. ¿Cómo puedo optimizar esta consulta?"</p>
+</div>
+
+<h3>Prompts de gestión de producto</h3>
+
+<div class="prompt-box">
+<div class="prompt-label">Priorización con RICE</div>
+<p>"Tengo una lista de funcionalidades pendientes para mi SaaS: [lista]. Mi producto tiene actualmente [estado]. Mis usuarios principales son [descripción]. El principal problema que reportan es [descripción]. Ayudame a priorizar usando el framework RICE."</p>
+</div>
+
+<div class="prompt-box">
+<div class="prompt-label">Análisis de churn</div>
+<p>"Tres de mis clientes cancelaron este mes. Las razones: [razones]. Mis hipótesis: [hipótesis]. ¿Qué acciones concretas puedo tomar para entender mejor las causas del churn y reducirlo?"</p>
+</div>
