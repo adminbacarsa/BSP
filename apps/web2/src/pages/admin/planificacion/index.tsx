@@ -67,8 +67,9 @@ import {
 } from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
-import { runStrictSixTwoPipeline } from '@/lib/planificacion/planningPipeline';
+import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
+import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
     buildPlannerContextFromAutoRun,
@@ -145,7 +146,7 @@ const SHIFT_RANGES: Record<string, string> = {
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 
 /** Versión del motor de planificación — visible en UI durante generación para verificar deploy. */
-const PLANNING_ENGINE_VERSION = '2.7';
+const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
@@ -3217,17 +3218,20 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            const canFloater = canUseFixedBandFloater(baseGenCtx);
-            await bumpAutoV2Progress(40, canFloater
-                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
-                : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
+            const can6x1 = canUseSixPlusOne(baseGenCtx);
+            const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
+            await bumpAutoV2Progress(40, can6x1
+                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
+                : canFloater
+                    ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
+                    : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
-            // Usar pipeline rápido bandas fijas si el layout lo permite (4 guardias × puesto 24hs qty=1),
-            // sin requerir strictSixTwo (que falla con ausencias o leve variación de horas en producción).
-            const strictPipeline = canFloater
-                ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
-                : null;
+            const strictPipeline = can6x1
+                ? (() => { try { return runSixPlusOnePipeline(baseGenCtx); } catch { return null; } })()
+                : canFloater
+                    ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
+                    : null;
             const useFloaterPipeline = !!strictPipeline;
             const gen = strictPipeline?.generation ?? generateScheduleV4({
                 ...baseGenCtx,

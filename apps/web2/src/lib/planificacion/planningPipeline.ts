@@ -1,8 +1,9 @@
 /**
  * Orquestación planificador — etapas separadas (ciclo vs cobertura).
  *
- * A) bandas fijas + flotante (6+2 exacto, 24hs qty=1) — algebraico
- * B) verifyScheduleCoverage — verificación pura (sin fix)
+ * A1) 6+1 bandas fijas (6 guardias × puesto 24hs, ratio 85.7 %)
+ * A2) 6+2 bandas fijas + flotante (4-5 guardias × puesto 24hs, ratio 75 %)
+ * B)  verifyScheduleCoverage — verificación pura (sin fix)
  */
 
 import {
@@ -15,16 +16,38 @@ import {
     canUseFixedBandFloater,
     generateFixedBandFloaterSchedule,
 } from './fixedBandFloaterScheduleEngine';
+import {
+    canUseSixPlusOne,
+    generateSixPlusOneSchedule,
+} from './sixPlusOneEngine';
 
 export type StrictSixTwoPipelineResult = {
-    pipeline: 'fixedBandFloater';
+    pipeline: 'fixedBandFloater' | 'sixPlusOne';
     generation: V2GenerateResult;
     verification: CoverageVerificationReport;
 };
 
 export type StrictSixTwoPipelineOptions = CoverageVerificationOptions;
 
-/** Etapa A + B: cuarteto M/T/N/flotante y verificación sin parches. */
+/** Pipeline 6+1: 6 guardias × puesto 24hs, 2 por banda, francos desfasados. */
+export function runSixPlusOnePipeline(
+    ctx: V2EngineContext,
+    verifyOptions?: StrictSixTwoPipelineOptions,
+): StrictSixTwoPipelineResult {
+    if (!canUseSixPlusOne(ctx)) {
+        throw new Error('sixPlusOne: layout inválido (requiere 6 guardias × puesto 24hs qty=1)');
+    }
+    const generation = generateSixPlusOneSchedule(ctx);
+    const verification = verifyScheduleCoverage(
+        ctx,
+        generation.assignments,
+        generation.stats,
+        { inferModo12TCoverage: false, ...verifyOptions },
+    );
+    return { pipeline: 'sixPlusOne', generation, verification };
+}
+
+/** Pipeline 6+2: cuarteto M/T/N/flotante y verificación sin parches. */
 export function runStrictSixTwoPipeline(
     ctx: V2EngineContext,
     verifyOptions?: StrictSixTwoPipelineOptions,
