@@ -3220,7 +3220,9 @@ export default function PlanificacionPage() {
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
-            const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
+            // Floater (ciclo 24d bandas fijas) cierra slots SLA pero no el pie 4/4 (M+T+N por puesto/día).
+            // Solo aplica con rotativo OFF; si el cerebro pide rotativo, usar V4 demand-driven.
+            const canFloater = !can6x1 && genBrain.rotateShifts === false && canUseFixedBandFloater(baseGenCtx);
             await bumpAutoV2Progress(40, can6x1
                 ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
                 : canFloater

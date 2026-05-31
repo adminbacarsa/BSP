@@ -190,6 +190,7 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, positionGroups: Record<st
  * Puestos con activeDays < 7 (L-V, fines de semana, etc.) usan V4.
  */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
+    if (ctx.rotateShifts === true) return false;
     const groups = positionGroups ?? buildPositionGroups(ctx);
     let counted = 0;
     for (const pos of ctx.positions) {
