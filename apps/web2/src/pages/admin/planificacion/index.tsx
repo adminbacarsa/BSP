@@ -67,9 +67,9 @@ import {
 } from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
-import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
+import { runStrictSixTwoPipeline, runBandPairPipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
-import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
+import { canUseBandPairCycle, BAND_PAIR_CYCLE_INFO, type BandPairCycle } from '@/lib/planificacion/bandPairEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
     buildPlannerContextFromAutoRun,
@@ -146,7 +146,7 @@ const SHIFT_RANGES: Record<string, string> = {
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 
 /** Versión del motor de planificación — visible en UI durante generación para verificar deploy. */
-const PLANNING_ENGINE_VERSION = '2.8';
+const PLANNING_ENGINE_VERSION = '2.9';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
@@ -398,7 +398,7 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
-    const [useSixPlusOne, setUseSixPlusOne] = useState(false);
+    const [selectedBandPairCycle, setSelectedBandPairCycle] = useState<BandPairCycle | null>(null);
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     /** null = Auto decide; true/false = forzar rotativo ON/OFF */
     const [autoRotateForce, setAutoRotateForce] = useState<boolean | null>(null);
@@ -3219,19 +3219,19 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
-            const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
+            const canBandPair = selectedBandPairCycle !== null && canUseBandPairCycle(baseGenCtx);
             // Floater (ciclo 24d bandas fijas) cierra slots SLA pero no el pie 4/4 (M+T+N por puesto/día).
             // Solo aplica con rotativo OFF; si el cerebro pide rotativo, usar V4 demand-driven.
-            const canFloater = !can6x1 && genBrain.rotateShifts === false && canUseFixedBandFloater(baseGenCtx);
-            await bumpAutoV2Progress(40, can6x1
-                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
+            const canFloater = !canBandPair && genBrain.rotateShifts === false && canUseFixedBandFloater(baseGenCtx);
+            await bumpAutoV2Progress(40, canBandPair
+                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo ${selectedBandPairCycle})…`
                 : canFloater
                     ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
                     : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
-            const strictPipeline = can6x1
-                ? (() => { try { return runSixPlusOnePipeline(baseGenCtx); } catch { return null; } })()
+            const strictPipeline = canBandPair
+                ? (() => { try { return runBandPairPipeline(baseGenCtx, selectedBandPairCycle!); } catch { return null; } })()
                 : canFloater
                     ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
                     : null;
@@ -6356,25 +6356,57 @@ export default function PlanificacionPage() {
                                             </button>
                                         </div>
 
-                                        {/* Ciclo 6+1 */}
-                                        <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border transition-colors ${useSixPlusOne ? 'bg-emerald-50 border-emerald-200' : 'border-transparent'}`}>
-                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Ciclo 6+1 · banda fija · 85.7 %
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">
-                                                    {displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6
-                                                        ? `${displayedEmployees.length} guardias → ${displayedEmployees.length / 6} grupo${displayedEmployees.length / 6 > 1 ? 's' : ''} de 6 · ~${Math.round(displayedEmployees.length / 6 * 25.7)} días-guardia/mes`
-                                                        : `Requiere múltiplo de 6 guardias (6, 12, 18…) — actual: ${displayedEmployees.length}`}
-                                                </span>
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setUseSixPlusOne(p => !p)}
-                                                disabled={!(displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 disabled:opacity-30 ${useSixPlusOne ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                                            >
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${useSixPlusOne ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
+                                        {/* Panel ciclo de trabajo */}
+                                        {(() => {
+                                            const pos24hs = positionStructure.filter((p: any) => {
+                                                const cov = String(p.coverageType || '').toLowerCase();
+                                                return cov === '24hs' || cov === '24' || cov === '24h';
+                                            });
+                                            const numPos = pos24hs.length || 1;
+                                            const guardsPerPos = displayedEmployees.length / numPos;
+                                            const bandPairViable = Number.isInteger(guardsPerPos) && guardsPerPos > 0 && guardsPerPos % 6 === 0;
+                                            const cycles: Array<{ key: BandPairCycle | null; label: string; ratio: string; hours: string; color: string }> = [
+                                                { key: null,  label: '6+2', ratio: '75 %',    hours: '~180h/mes', color: 'slate' },
+                                                { key: '5+1', label: '5+1', ratio: '83.3 %',  hours: '200h exactas', color: 'sky' },
+                                                { key: '6+1', label: '6+1', ratio: '85.7 %',  hours: '~206h/mes', color: 'emerald' },
+                                            ];
+                                            return (
+                                                <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-2 space-y-1">
+                                                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Ciclo de trabajo</p>
+                                                    {cycles.map(c => {
+                                                        const isBandPair = c.key !== null;
+                                                        const active = selectedBandPairCycle === c.key;
+                                                        const disabled = isBandPair && !bandPairViable;
+                                                        const hint = isBandPair
+                                                            ? bandPairViable
+                                                                ? `${displayedEmployees.length} guardias / ${numPos} puesto${numPos > 1 ? 's' : ''} = ${guardsPerPos} c/u`
+                                                                : guardsPerPos % 6 !== 0
+                                                                    ? `Necesitás múltiplo de 6 por puesto (tenés ${guardsPerPos % 1 === 0 ? guardsPerPos : guardsPerPos.toFixed(1)})`
+                                                                    : `Requiere puestos 24hs/7d`
+                                                            : 'siempre disponible';
+                                                        const activeClass = active
+                                                            ? c.key === null ? 'bg-slate-100 border-slate-300' : c.key === '5+1' ? 'bg-sky-50 border-sky-300' : 'bg-emerald-50 border-emerald-300'
+                                                            : 'border-transparent hover:border-slate-200';
+                                                        return (
+                                                            <button
+                                                                key={String(c.key)}
+                                                                type="button"
+                                                                disabled={disabled}
+                                                                onClick={() => setSelectedBandPairCycle(active && c.key !== null ? null : c.key)}
+                                                                className={`w-full flex items-center gap-2 rounded px-2 py-1 border transition-colors text-left disabled:opacity-35 ${activeClass}`}
+                                                            >
+                                                                <span className={`text-[10px] font-black w-6 shrink-0 ${active ? (c.key === '5+1' ? 'text-sky-700' : c.key === '6+1' ? 'text-emerald-700' : 'text-slate-700') : 'text-slate-600'}`}>{c.label}</span>
+                                                                <span className="text-[9px] font-bold text-slate-600 flex-1 leading-snug">
+                                                                    {c.ratio} · {c.hours}
+                                                                    <span className="block text-[8.5px] font-semibold text-slate-400 normal-case">{hint}</span>
+                                                                </span>
+                                                                {active && <span className="text-[8px] font-black text-slate-500 uppercase">activo</span>}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })()}
 
                                         <div className="rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2 space-y-1.5">
                                             <p className="text-[10px] font-black text-violet-900 uppercase tracking-wide">

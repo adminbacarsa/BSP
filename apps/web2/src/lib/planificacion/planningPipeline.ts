@@ -1,7 +1,7 @@
 /**
  * Orquestación planificador — etapas separadas (ciclo vs cobertura).
  *
- * A1) 6+1 bandas fijas (6 guardias × puesto 24hs, ratio 85.7 %)
+ * A1) Banda par genérico (5+1 / 6+1): 6 guardias × puesto 24hs, 2 por banda
  * A2) 6+2 bandas fijas + flotante (4-5 guardias × puesto 24hs, ratio 75 %)
  * B)  verifyScheduleCoverage — verificación pura (sin fix)
  */
@@ -17,34 +17,37 @@ import {
     generateFixedBandFloaterSchedule,
 } from './fixedBandFloaterScheduleEngine';
 import {
-    canUseSixPlusOne,
-    generateSixPlusOneSchedule,
-} from './sixPlusOneEngine';
+    canUseBandPairCycle,
+    generateBandPairSchedule,
+    type BandPairCycle,
+} from './bandPairEngine';
 
 export type StrictSixTwoPipelineResult = {
-    pipeline: 'fixedBandFloater' | 'sixPlusOne';
+    pipeline: 'fixedBandFloater' | 'bandPair';
+    bandPairCycle?: BandPairCycle;
     generation: V2GenerateResult;
     verification: CoverageVerificationReport;
 };
 
 export type StrictSixTwoPipelineOptions = CoverageVerificationOptions;
 
-/** Pipeline 6+1: 6 guardias × puesto 24hs, 2 por banda, francos desfasados. */
-export function runSixPlusOnePipeline(
+/** Pipeline banda par: 6 guardias × puesto 24hs, 2 por banda, francos desfasados. */
+export function runBandPairPipeline(
     ctx: V2EngineContext,
+    cycle: BandPairCycle,
     verifyOptions?: StrictSixTwoPipelineOptions,
 ): StrictSixTwoPipelineResult {
-    if (!canUseSixPlusOne(ctx)) {
-        throw new Error('sixPlusOne: layout inválido (requiere 6 guardias × puesto 24hs qty=1)');
+    if (!canUseBandPairCycle(ctx)) {
+        throw new Error(`bandPair ${cycle}: layout inválido (requiere múltiplo de 6 guardias × puesto 24hs)`);
     }
-    const generation = generateSixPlusOneSchedule(ctx);
+    const generation = generateBandPairSchedule(ctx, cycle);
     const verification = verifyScheduleCoverage(
         ctx,
         generation.assignments,
         generation.stats,
         { inferModo12TCoverage: false, ...verifyOptions },
     );
-    return { pipeline: 'sixPlusOne', generation, verification };
+    return { pipeline: 'bandPair', bandPairCycle: cycle, generation, verification };
 }
 
 /** Pipeline 6+2: cuarteto M/T/N/flotante y verificación sin parches. */
@@ -68,6 +71,14 @@ export function runStrictSixTwoPipeline(
         { inferModo12TCoverage: false, ...verifyOptions },
     );
     return { pipeline: 'fixedBandFloater', generation, verification };
+}
+
+/** @deprecated Usar runBandPairPipeline con cycle='6+1' */
+export function runSixPlusOnePipeline(
+    ctx: V2EngineContext,
+    verifyOptions?: StrictSixTwoPipelineOptions,
+): StrictSixTwoPipelineResult {
+    return runBandPairPipeline(ctx, '6+1', verifyOptions);
 }
 
 /** @deprecated Usar runStrictSixTwoPipeline */
