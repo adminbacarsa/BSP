@@ -26,10 +26,7 @@ const NON_BILL = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'V', 'L', 'A', 'E', 'AA'
 
 async function main() {
     const oid = '1768936428905';
-    const slaSnap = await db.collection('servicios_sla').where('objectiveId', '==', oid).limit(1).get();
-    if (slaSnap.empty) throw new Error(`Sin SLA para objectiveId=${oid}`);
-    const sla = slaSnap.docs[0].data() as any;
-    console.log('SLA doc:', slaSnap.docs[0].id);
+    const sla = (await db.collection('servicios_sla').doc('wVE9l8qxMNUYlCRznj3N').get()).data() as any;
     const employees = (await db.collection('empleados').where('preferredObjectiveId', '==', oid).get()).docs
         .filter(d => d.data().status !== 'inactivo')
         .map(d => ({ id: d.id, nombre: String(d.data().nombre || d.data().name) }));
