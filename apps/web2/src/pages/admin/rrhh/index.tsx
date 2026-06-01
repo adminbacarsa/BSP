@@ -276,6 +276,8 @@ export default function EmployeesPage() {
   const [showManualCoords, setShowManualCoords] = useState(false);
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState(0);
   const [authPinModal, setAuthPinModal] = useState<{ absenceId: string; absence: Absence } | null>(null);
   const [authPinValue, setAuthPinValue] = useState('');
   const [authPinError, setAuthPinError] = useState('');
@@ -977,16 +979,26 @@ export default function EmployeesPage() {
   const handleBulkDeleteAbsences = async () => {
     if (selectedAbsenceIds.size === 0) return;
     if (!confirm(`¿Eliminar ${selectedAbsenceIds.size} ausencia(s) seleccionada(s)? Esta acción no se puede deshacer.`)) return;
+    const ids = [...selectedAbsenceIds];
+    setBulkDeleting(true);
+    setBulkDeleteProgress(0);
     try {
-      await Promise.all([...selectedAbsenceIds].map(id =>
-        absenceService.delete(id, { empresaId, migracionCompleta })
-          .then(() => eliminarReplicasPlanificador(id))
-      ));
-      await registrarAuditoria('DELETE_ABSENCE', `Eliminó ${selectedAbsenceIds.size} ausencias (bulk)`);
+      let done = 0;
+      for (const id of ids) {
+        await absenceService.delete(id, { empresaId, migracionCompleta });
+        await eliminarReplicasPlanificador(id);
+        done++;
+        setBulkDeleteProgress(Math.round((done / ids.length) * 100));
+      }
+      await registrarAuditoria('DELETE_ABSENCE', `Eliminó ${ids.length} ausencias (bulk)`);
       setSelectedAbsenceIds(new Set());
       loadAbsences();
+      addToast(`${ids.length} ausencia(s) eliminada(s)`, 'success');
     } catch (e) {
       addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar ausencias', 'error');
+    } finally {
+      setBulkDeleting(false);
+      setBulkDeleteProgress(0);
     }
   };
   const handleAuthorizePinSubmit = async () => {
@@ -2789,6 +2801,18 @@ export default function EmployeesPage() {
                             <UserX size={15}/> Confirmar baja
                         </button>
                     </div>
+                </div>
+            </div>
+        )}
+        {bulkDeleting && (
+            <div className="fixed inset-0 bg-black/70 z-[400] flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-sm flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-rose-600 border-t-transparent rounded-full animate-spin"/>
+                    <p className="text-base font-black text-slate-900 dark:text-white uppercase">Eliminando novedades...</p>
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
+                        <div className="bg-rose-600 h-3 rounded-full transition-all duration-300" style={{width:`${bulkDeleteProgress}%`}}/>
+                    </div>
+                    <p className="text-xs font-bold text-slate-500">{bulkDeleteProgress}% completado</p>
                 </div>
             </div>
         )}
