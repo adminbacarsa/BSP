@@ -3406,6 +3406,7 @@ export default function PlanificacionPage() {
                 prevMonthLastWorkBandBeforeRest,
                 globalRetPool,
                 strictSixTwo: genBrain.strictSixTwo,
+                noFlexSchemeEmployees: autoForceSixTwo,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);

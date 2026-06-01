@@ -348,6 +348,8 @@ export interface V2EngineContext {
     allowFrancoWorkedRescue?: boolean;
     /** Si true: 6+2 estricto — sin flex 5+1/6+1 ni F→turno agresivo en cierre SLA. */
     strictSixTwo?: boolean;
+    /** Si true: todos los empleados usan el mismo ciclo global (sin mezcla 5+1/6+1). */
+    noFlexSchemeEmployees?: boolean;
     /**
      * Etapa 3 pura: solo ciclo + péndulo + francos. Sin fillScheduleFromDemand ni forceClose SLA.
      */
@@ -560,7 +562,7 @@ function pickFlexSchemeEmployees(
     staggerByEmp: Record<string, number> | undefined,
 ): { sixOne: string[]; fiveOne: string[]; fourTwo: string[] } {
     const empty = { sixOne: [] as string[], fiveOne: [] as string[], fourTwo: [] as string[] };
-    if (ctx.strictSixTwo === true) return empty;
+    if (ctx.strictSixTwo === true || ctx.noFlexSchemeEmployees === true) return empty;
     const sixOne: string[] = [];
     const fiveOne: string[] = [];
     const fourTwo: string[] = [];
@@ -1754,8 +1756,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const { sixOne: flexSixOne, fiveOne: flexFiveOne, fourTwo: flexFourTwo } = pickFlexSchemeEmployees(
         ctx, positionGroups, ctx.demandDrivenStaggerByEmp,
     );
-    const fixedFlexSixOne = fixedBandPlan?.flexSixOne ?? [];
-    const fixedFlexFiveOne = fixedBandPlan?.flexFiveOne ?? [];
+    const fixedFlexSixOne = ctx.noFlexSchemeEmployees ? [] : (fixedBandPlan?.flexSixOne ?? []);
+    const fixedFlexFiveOne = ctx.noFlexSchemeEmployees ? [] : (fixedBandPlan?.flexFiveOne ?? []);
     const flexSchemeEmpIds = [
         ...flexFourTwo,
         ...flexSixOne,
