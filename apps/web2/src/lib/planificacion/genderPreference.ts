@@ -35,6 +35,18 @@ export function normalizePreferenciaGenero(raw: unknown): PreferenciaGeneroObjet
     return 'INDISTINTO';
 }
 
+export function normalizeGeneroImport(raw: unknown): GeneroEmpleado {
+    const s = String(raw || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '');
+    if (!s) return '';
+    if (['m', 'masculino', 'male', 'hombre', 'varon', 'h', 'masc'].includes(s) || s.startsWith('masc')) return 'M';
+    if (['f', 'femenino', 'female', 'mujer', 'fem'].includes(s) || s.startsWith('fem')) return 'F';
+    return '';
+}
+
 export function checkGeneroPuesto(
     empleadoGenero: GeneroEmpleado | string | undefined | null,
     puestoPreferencia: PreferenciaGeneroPuesto | string | undefined | null,

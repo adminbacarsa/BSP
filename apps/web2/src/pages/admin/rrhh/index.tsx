@@ -29,6 +29,7 @@ import {
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import { normalizeArgPhone } from '@/lib/whatsapp';
 import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { normalizeGeneroImport } from '@/lib/planificacion/genderPreference';
 
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -152,6 +153,7 @@ const createEmployeeObject = (data: any, objectivesList: any[]) => {
         maxHours: 200,
         preferredClientId: '', 
         preferredObjectiveId: objId,
+        genero: normalizeGeneroImport(data.genero),
         createdAt: new Date().toISOString(),
         sizes: data.sizes || { shirt: '', pants: '', shoes: '' }
     };
@@ -1034,7 +1036,7 @@ export default function EmployeesPage() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setFileName(file.name); const reader = new FileReader(); reader.onload = (evt) => { if (evt.target?.result) { setCsvContent(evt.target.result as string); } }; reader.readAsText(file, 'ISO-8859-1'); };
   
   // FUNCION DESCARGAR PLANTILLA
-  const handleDownloadTemplate = () => { const headers = [ "Legajo", "Apellido, Nombre", "CUIL", "Email", "Telefono", "Direccion", "Categoria", "Convenio", "Estado", "Fecha Ingreso", "Periodo", "Inicio Ciclo", "Objetivo" ]; const example = [ "1020", "PEREZ, Juan", "20-12345678-9", "juan@email.com", "3511234567", "Av Colon 1234", "VIGILADOR", "422/05", "activo", "01/01/2024", "Mensual", "26", "Planta Industrial" ]; const csvString = headers.join(';') + '\n' + example.join(';'); const blob = new Blob(["\uFEFF" + csvString], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.setAttribute("download", "Plantilla_Nomina_CronoApp.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
+  const handleDownloadTemplate = () => { const headers = [ "Legajo", "Apellido, Nombre", "CUIL", "Email", "Telefono", "Direccion", "Genero", "Categoria", "Convenio", "Estado", "Fecha Ingreso", "Periodo", "Inicio Ciclo", "Objetivo" ]; const example = [ "1020", "PEREZ, Juan", "20-12345678-9", "juan@email.com", "3511234567", "Av Colon 1234", "M", "VIGILADOR", "422/05", "activo", "01/01/2024", "Mensual", "26", "Planta Industrial" ]; const csvString = headers.join(';') + '\n' + example.join(';'); const blob = new Blob(["\uFEFF" + csvString], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.setAttribute("download", "Plantilla_Nomina_CronoApp.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
   
   const handleProcessCSV = () => { 
       try { 
@@ -1059,8 +1061,10 @@ export default function EmployeesPage() {
               const keyStatus = findKey(['estado']);
               const keyPeriod = findKey(['periodo']);
               const keyCycle = findKey(['ciclo', 'inicio']);
+              const normHeader = (k: string) => k.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+              const keyGenero = keys.find(k => ['genero', 'sexo', 'gender'].some(v => normHeader(k).includes(v)));
 
-              let fname = 'Sin Nombre'; let lname = 'Sin Apellido'; 
+              let fname = 'Sin Nombre'; let lname = 'Sin Apellido';
               if (keyApellidoNombre && row[keyApellidoNombre]) { 
                   const rawName = row[keyApellidoNombre]; 
                   if (rawName.includes(',')) { 
@@ -1103,7 +1107,8 @@ export default function EmployeesPage() {
                   periodType: keyPeriod ? row[keyPeriod] : 'Mensual', 
                   cycleStartDay: keyCycle ? row[keyCycle] : '26', 
                   preferredObjectiveId: '', 
-                  objectiveName: keyObj ? row[keyObj] : '' 
+                  objectiveName: keyObj ? row[keyObj] : '',
+                  genero: keyGenero ? normalizeGeneroImport(row[keyGenero]) : '',
               }; 
               return createEmployeeObject(rawData, allObjectives); 
           }).filter(x => x.dni && x.dni.length > 5); 
@@ -1201,11 +1206,12 @@ export default function EmployeesPage() {
   };
 
   const handleExport = () => {
-      const headers = ['Legajo', 'Apellido', 'Nombre', 'DNI', 'CUIL', 'Email', 'Teléfono', 'Convenio', 'Categoría', 'Objetivo Preferido', 'Estado'];
+      const headers = ['Legajo', 'Apellido', 'Nombre', 'DNI', 'CUIL', 'Email', 'Teléfono', 'Genero', 'Convenio', 'Categoría', 'Objetivo Preferido', 'Estado'];
       const csvRows = [headers.join(';')];
 
       employees.forEach(emp => {
           const objName = allObjectives.find(o => o.id === emp.preferredObjectiveId)?.name || '';
+          const generoLabel = (emp as any).genero === 'M' ? 'M' : (emp as any).genero === 'F' ? 'F' : '';
           const row = [
               emp.fileNumber,
               `"${emp.lastName}"`,
@@ -1214,6 +1220,7 @@ export default function EmployeesPage() {
               emp.cuil,
               emp.email,
               emp.phone,
+              generoLabel,
               `"${emp.laborAgreement}"`,
               `"${emp.category}"`,
               `"${objName}"`,
@@ -2444,6 +2451,7 @@ export default function EmployeesPage() {
                                             <th className="p-3">DNI / CUIL</th>
                                             <th className="p-3">Convenio</th>
                                             <th className="p-3">Cat.</th>
+                                            <th className="p-3">Género</th>
                                             {/* COLUMNAS ADICIONALES SOLICITADAS */}
                                             <th className="p-3">Objetivo</th>
                                             <th className="p-3">Contacto</th>
@@ -2460,6 +2468,7 @@ export default function EmployeesPage() {
                                                 <td className="p-3">{row.dni}</td>
                                                 <td className="p-3">{row.laborAgreement}</td>
                                                 <td className="p-3">{row.category}</td>
+                                                <td className="p-3 font-mono">{row.genero === 'M' ? 'M' : row.genero === 'F' ? 'F' : '-'}</td>
                                                 {/* DATA EXTRA */}
                                                 <td className="p-3">
                                                     {/* Mostrar check si encontró ID, o el nombre crudo si no */}
