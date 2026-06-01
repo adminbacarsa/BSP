@@ -37,6 +37,7 @@ export interface ServiceSLA {
   positions: ServicePosition[];
   totalMonthlyHours: number;
   status: 'active' | 'inactive' | 'expired';
+  excludedDates?: string[];  // YYYY-MM-DD: días sin servicio dentro del período del contrato
 }
 
 export const slaService = {

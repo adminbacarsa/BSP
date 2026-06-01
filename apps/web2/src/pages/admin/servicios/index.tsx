@@ -111,6 +111,7 @@ export default function ServiciosSLAPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
+  const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
   const savedSelfRef = useRef(false); // evita falsos positivos por nuestros propios guardados
   // Código del turno que se está editando (null = modo "agregar nuevo")
   const [editingShiftCode, setEditingShiftCode] = useState<string | null>(null);
@@ -355,7 +356,7 @@ export default function ServiciosSLAPage() {
     return `${r(min)}–${r(max)} hs/día`;
   };
 
-  const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string) => {
+  const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string, excludedDates?: string[]) => {
     const startNorm = (startStr || '').trim().slice(0, 10);
     const endNorm = (endStr || '').trim().slice(0, 10);
     if (!startNorm || !endNorm || positions.length === 0) return [];
@@ -364,8 +365,10 @@ export default function ServiciosSLAPage() {
     const end = parseYmdToLocalDate(endNorm);
     if (!current || !end) return [];
 
-    const monthAccumulator: Record<string, { 
-        name: string, days: number, totalHours: number, nightHours: number, weekendHours: number 
+    const excluded = new Set(excludedDates || []);
+
+    const monthAccumulator: Record<string, {
+        name: string, days: number, totalHours: number, nightHours: number, weekendHours: number
     }> = {};
 
     while (current <= end) {
@@ -375,24 +378,27 @@ export default function ServiciosSLAPage() {
         const monthName = current.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
         const dayIdx = current.getDay();
         const dayCode = WEEK_DAY_CODES[dayIdx];
-        const isWeekend = (dayIdx === 0 || dayIdx === 6); // D y S
+        const isWeekend = (dayIdx === 0 || dayIdx === 6);
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
 
         if (!monthAccumulator[monthKey]) {
-            monthAccumulator[monthKey] = { 
-                name: monthName.charAt(0).toUpperCase() + monthName.slice(1), 
+            monthAccumulator[monthKey] = {
+                name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
                 days: 0, totalHours: 0, nightHours: 0, weekendHours: 0
             };
         }
-        
+
         monthAccumulator[monthKey].days++;
 
-        positions.forEach(pos => {
-            const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
-            const q = pos.quantity;
-            monthAccumulator[monthKey].totalHours += (dayTotal * q);
-            monthAccumulator[monthKey].nightHours += (dayNight * q);
-            if (isWeekend) monthAccumulator[monthKey].weekendHours += (dayTotal * q);
-        });
+        if (!excluded.has(dateStr)) {
+            positions.forEach(pos => {
+                const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
+                const q = pos.quantity;
+                monthAccumulator[monthKey].totalHours += (dayTotal * q);
+                monthAccumulator[monthKey].nightHours += (dayNight * q);
+                if (isWeekend) monthAccumulator[monthKey].weekendHours += (dayTotal * q);
+            });
+        }
         current.setDate(current.getDate() + 1);
     }
     return Object.entries(monthAccumulator)
@@ -401,8 +407,8 @@ export default function ServiciosSLAPage() {
   };
 
   const monthlyBreakdown = useMemo(
-    () => calculateMonthlyBreakdown(form.positions, form.startDate, form.endDate),
-    [form.positions, form.startDate, form.endDate]
+    () => calculateMonthlyBreakdown(form.positions, form.startDate, form.endDate, form.excludedDates),
+    [form.positions, form.startDate, form.endDate, form.excludedDates]
   );
   const totalContractHours = useMemo(
     () => Math.round(monthlyBreakdown.reduce((acc, curr) => acc + curr.totalHours, 0)),
@@ -425,7 +431,7 @@ export default function ServiciosSLAPage() {
     services
       .filter(s => s.clientId === form.clientId && s.objectiveId === form.objectiveId && s.id !== form.id)
       .forEach(srv => {
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((m) => {
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((m) => {
           const sk = m.monthKey;
           if (!map[sk]) map[sk] = { ...m, isCurrent: false, sortKey: sk, serviceId: srv.id };
         });
@@ -443,7 +449,7 @@ export default function ServiciosSLAPage() {
   const serviceTotals = useMemo(() => {
     const map = new Map<string, number>();
     services.forEach((srv) => {
-      const breakdown = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate);
+      const breakdown = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates);
       const fromBreakdown = Math.round(breakdown.reduce((acc, curr) => acc + curr.totalHours, 0));
       const total = fromBreakdown > 0 ? fromBreakdown : Math.round(Number(srv.totalMonthlyHours) || 0);
       map.set(serviceSlaRowKey(srv), total);
@@ -887,7 +893,7 @@ export default function ServiciosSLAPage() {
         positions += (srv.positions || []).length;
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
         (srv.positions || []).forEach(p => {
-          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate).forEach((mb) => {
+          calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
             if (mb.monthKey === sk) {
               const pax = p.quantity || 1;
               const minRot = p.coverageType === '24hs' ? pax * 2 : pax;
@@ -895,7 +901,7 @@ export default function ServiciosSLAPage() {
             }
           });
         });
-        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb) => {
+        calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
           if (mb.monthKey === sk) hours += mb.totalHours;
         });
       });
@@ -923,7 +929,7 @@ export default function ServiciosSLAPage() {
       if (sStart > mEnd || sEnd < mStart) return 0;
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let hours = 0;
-      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate).forEach((mb) => {
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
         if (mb.monthKey === sk) hours += mb.totalHours;
       });
       return Math.round(hours);
@@ -935,7 +941,7 @@ export default function ServiciosSLAPage() {
     (srv: ServiceSLA & { id: string }) => {
       const kpiH = getServiceHoursForKpiMonth(srv);
       if (kpiH > 0) return { sla: kpiH, note: null as string | null };
-      const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate);
+      const bd = calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates);
       if (!bd.length) {
         const stored = Math.round(Number(srv.totalMonthlyHours) || 0);
         if (stored > 0) {
@@ -1335,7 +1341,7 @@ export default function ServiciosSLAPage() {
                 {/* Análisis Operativo */}
                 {srv.positions.length > 0 && (() => {
                   const viabilityBase = srv.positions.map(pos => {
-                    const bd = calculateMonthlyBreakdown([pos], srv.startDate, srv.endDate);
+                    const bd = calculateMonthlyBreakdown([pos], srv.startDate, srv.endDate, srv.excludedDates);
                     const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                     return { pos, avgH: Math.round(avgH) };
                   });
@@ -1470,7 +1476,121 @@ export default function ServiciosSLAPage() {
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
-                 
+
+                 {/* Días excluidos */}
+                 {(() => {
+                     const excluded = new Set(form.excludedDates || []);
+                     const toggleDate = (ds: string) => {
+                         const next = new Set(excluded);
+                         if (next.has(ds)) next.delete(ds); else next.add(ds);
+                         setForm({ ...form, excludedDates: Array.from(next).sort() });
+                     };
+                     // Generar meses entre startDate y endDate
+                     const months: Array<{ year: number; month: number; label: string; days: Array<{ date: Date; ds: string }> }> = [];
+                     const start = parseYmdToLocalDate(form.startDate);
+                     const end = parseYmdToLocalDate(form.endDate);
+                     if (start && end) {
+                         let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+                         const endMo = new Date(end.getFullYear(), end.getMonth(), 1);
+                         while (cur <= endMo) {
+                             const y = cur.getFullYear();
+                             const m = cur.getMonth();
+                             const label = cur.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+                             const days: Array<{ date: Date; ds: string }> = [];
+                             const daysInMo = new Date(y, m + 1, 0).getDate();
+                             for (let d = 1; d <= daysInMo; d++) {
+                                 const date = new Date(y, m, d);
+                                 if (date < start || date > end) { days.push({ date, ds: '' }); continue; }
+                                 const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                 days.push({ date, ds });
+                             }
+                             months.push({ year: y, month: m, label, days });
+                             cur.setMonth(cur.getMonth() + 1);
+                         }
+                     }
+                     // Resumen por día de semana
+                     const WD_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+                     const countByWd: Record<number, number> = {};
+                     excluded.forEach(ds => {
+                         if (!ds) return;
+                         const [y, m, d] = ds.split('-').map(Number);
+                         const wd = new Date(y, m - 1, d).getDay();
+                         countByWd[wd] = (countByWd[wd] || 0) + 1;
+                     });
+                     const summary = Object.entries(countByWd)
+                         .sort(([a], [b]) => Number(a) - Number(b))
+                         .map(([wd, cnt]) => `${cnt} ${WD_NAMES[Number(wd)].toLowerCase()}${cnt > 1 ? 's' : ''}`)
+                         .join(', ');
+                     return (
+                         <div className="rounded-xl border dark:border-slate-700 overflow-hidden">
+                             <button
+                                 type="button"
+                                 onClick={() => setShowExcludedDatesPicker(p => !p)}
+                                 className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                             >
+                                 <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                     <span className={`w-4 h-4 rounded flex items-center justify-center text-[8px] font-black ${excluded.size > 0 ? 'bg-rose-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>{excluded.size}</span>
+                                     Días excluidos del servicio
+                                 </span>
+                                 <span className="text-slate-400 text-xs">{showExcludedDatesPicker ? '▲' : '▼'}</span>
+                             </button>
+                             {excluded.size > 0 && !showExcludedDatesPicker && (
+                                 <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/20 border-t border-rose-100 dark:border-rose-900">
+                                     <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{summary}</p>
+                                 </div>
+                             )}
+                             {showExcludedDatesPicker && months.length > 0 && (
+                                 <div className="p-4 bg-white dark:bg-slate-900 border-t dark:border-slate-700 space-y-4">
+                                     {months.map(({ year, month, label, days }) => {
+                                         const firstDow = new Date(year, month, 1).getDay();
+                                         const WD_HDR = ['L','M','X','J','V','S','D'];
+                                         const padded = Array(firstDow === 0 ? 6 : firstDow - 1).fill(null).concat(days);
+                                         return (
+                                             <div key={`${year}-${month}`}>
+                                                 <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2">{label}</p>
+                                                 <div className="grid grid-cols-7 gap-0.5">
+                                                     {WD_HDR.map(h => <span key={h} className="text-center text-[8px] font-black text-slate-400 py-0.5">{h}</span>)}
+                                                     {padded.map((cell, i) => {
+                                                         if (!cell) return <span key={`pad-${i}`}/>;
+                                                         const { date, ds } = cell;
+                                                         if (!ds) return <span key={`out-${i}`} className="text-center text-[9px] text-slate-200 dark:text-slate-700 py-1">{date.getDate()}</span>;
+                                                         const isExcluded = excluded.has(ds);
+                                                         const isWe = date.getDay() === 0 || date.getDay() === 6;
+                                                         return (
+                                                             <button
+                                                                 key={ds}
+                                                                 type="button"
+                                                                 title={ds}
+                                                                 onClick={() => toggleDate(ds)}
+                                                                 className={`text-center text-[9px] font-bold py-1 rounded transition-colors leading-none
+                                                                     ${isExcluded
+                                                                         ? 'bg-rose-500 text-white'
+                                                                         : isWe
+                                                                             ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                                                                             : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                                                                     }`}
+                                                             >{date.getDate()}</button>
+                                                         );
+                                                     })}
+                                                 </div>
+                                             </div>
+                                         );
+                                     })}
+                                     {excluded.size > 0 && (
+                                         <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700">
+                                             <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{summary}</p>
+                                             <button type="button" onClick={() => setForm({ ...form, excludedDates: [] })} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase">Limpiar</button>
+                                         </div>
+                                     )}
+                                 </div>
+                             )}
+                             {showExcludedDatesPicker && months.length === 0 && (
+                                 <p className="px-4 py-3 text-[10px] text-slate-400 border-t dark:border-slate-700">Completá las fechas del contrato primero.</p>
+                             )}
+                         </div>
+                     );
+                 })()}
+
                  <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border dark:border-slate-700/50">
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-2"><Table size={12}/> Proyección de Costos</h4>
