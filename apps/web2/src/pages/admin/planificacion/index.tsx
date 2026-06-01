@@ -281,7 +281,8 @@ export default function PlanificacionPage() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
-    const [, startShowAllTransition] = useTransition();
+    const [isShowAllPending, startShowAllTransition] = useTransition();
+    const [isFilterPending, startFilterTransition] = useTransition();
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
@@ -517,23 +518,123 @@ export default function PlanificacionPage() {
         return days; 
     }, [currentDate]);
 
-    // 🛑 ESTE HELPER DEBE IR ANTES DE displayedEmployees
-    const getEmployeeShiftCount = (empId: string) => { 
-        let count = 0; 
-        daysInMonth.forEach(day => { 
-            const key = `${empId}_${getDateKey(day)}`; 
-            const pending = pendingChanges[key]; 
-            const existing = shiftsMap[key]; 
-            if (pending) { 
-                if (!pending.isDeleted) count++; 
-            } else if (existing) { 
-                if (existing.objectiveId === selectedObjective) count++; 
-            } 
-        }); 
-        return count; 
+    const getObjectiveName = (objId: string) => {
+        if (!objId) return 'Desconocido';
+        for (const client of clients) {
+            if (client.objetivos) {
+                const found = client.objetivos.find((o: any) => (o.id || o.name) === objId);
+                if (found) return found.name;
+            }
+        }
+        return objId;
     };
 
-    const getObjectiveName = (objId: string) => { if (!objId) return 'Desconocido'; for (const client of clients) { if (client.objetivos) { const found = client.objetivos.find((o: any) => (o.id || o.name) === objId); if (found) return found.name; } } return objId; };
+    // 🛑 Helpers de dotación — stats precalculados evitan re-escaneos O(n×días) en cada filtro/orden
+    const BAND_FILTERABLE = useMemo(() => new Set(['M', 'T', 'N', 'D12', 'N12', 'RET']), []);
+
+    const activeGuestIdsForObjective = useMemo(() => {
+        if (!selectedObjective) return new Set<string>();
+        const ids = new Set<string>();
+        for (const shift of Object.values(shiftsMap) as any[]) {
+            if (shift?.objectiveId === selectedObjective && shift?.employeeId) {
+                ids.add(shift.employeeId);
+            }
+        }
+        return ids;
+    }, [shiftsMap, selectedObjective]);
+
+    const dotacionBaseEmployees = useMemo(() => {
+        if (!selectedObjective && !forceShowAll) return [];
+        let list = employees.filter(e => e.status !== 'inactivo');
+        if (selectedObjective && !forceShowAll) {
+            list = list.filter(e =>
+                e.preferredObjectiveId === selectedObjective ||
+                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
+                activeGuestIdsForObjective.has(e.id),
+            );
+        }
+        return list;
+    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective]);
+
+    const employeeMonthStats = useMemo(() => {
+        const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
+        for (const emp of dotacionBaseEmployees) {
+            const counts: Record<string, number> = {};
+            let shiftCount = 0;
+            for (const day of daysInMonth) {
+                const key = `${emp.id}_${getDateKey(day)}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                const sh = pending && !pending.isDeleted ? pending : existing;
+                if (!sh) continue;
+                if (pending) {
+                    if (!pending.isDeleted) shiftCount++;
+                } else if (existing && existing.objectiveId === selectedObjective) {
+                    shiftCount++;
+                }
+                const code = String(sh.code || sh.shiftCode || '').toUpperCase();
+                if (BAND_FILTERABLE.has(code)) counts[code] = (counts[code] ?? 0) + 1;
+            }
+            stats[emp.id] = {
+                shiftCount,
+                dominantBand: Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+            };
+        }
+        return stats;
+    }, [dotacionBaseEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, BAND_FILTERABLE]);
+
+    const displayedEmployees = useMemo(() => {
+        let list = dotacionBaseEmployees;
+        if (searchTerm) {
+            const q = searchTerm.toLowerCase();
+            list = list.filter(e => e.name.toLowerCase().includes(q));
+        }
+        if (bandFilter) {
+            list = list.filter(e => employeeMonthStats[e.id]?.dominantBand === bandFilter);
+        }
+        const orderKey = selectedObjective || '__all__';
+        const customOrder = customOrderMap[orderKey];
+        if (customOrder && customOrder.length > 0) {
+            const orderMap: Record<string, number> = {};
+            customOrder.forEach((id: string, i: number) => { orderMap[id] = i; });
+            return [...list].sort((a: any, b: any) => {
+                const ai = orderMap[a.id] !== undefined ? orderMap[a.id] : 9999;
+                const bi = orderMap[b.id] !== undefined ? orderMap[b.id] : 9999;
+                return ai - bi;
+            });
+        }
+        const BAND_ORDER: Record<string, number> = { M: 0, T: 1, N: 2, D12: 3, N12: 4, RET: 5 };
+        const dir = sortDir === 'asc' ? 1 : -1;
+        return [...list].sort((a, b) => {
+            if (sortBy === 'activity') {
+                const countA = employeeMonthStats[a.id]?.shiftCount ?? 0;
+                const countB = employeeMonthStats[b.id]?.shiftCount ?? 0;
+                if (countA !== countB) return (countB - countA) * dir;
+            }
+            if (sortBy === 'client') {
+                const clientA = getObjectiveName(a.preferredObjectiveId);
+                const clientB = getObjectiveName(b.preferredObjectiveId);
+                const cmp = clientA.localeCompare(clientB);
+                if (cmp !== 0) return cmp * dir;
+            }
+            if (sortBy === 'band') {
+                const bandA = employeeMonthStats[a.id]?.dominantBand;
+                const bandB = employeeMonthStats[b.id]?.dominantBand;
+                const oa = bandA ? (BAND_ORDER[bandA] ?? 99) : 99;
+                const ob = bandB ? (BAND_ORDER[bandB] ?? 99) : 99;
+                if (oa !== ob) return (oa - ob) * dir;
+            }
+            if (sortBy === 'position') {
+                const posA = empDefaultPos[`${a.id}___${selectedObjective}`] ?? '';
+                const posB = empDefaultPos[`${b.id}___${selectedObjective}`] ?? '';
+                if (!posA && posB) return 1;
+                if (posA && !posB) return -1;
+                const cmp = posA.localeCompare(posB);
+                if (cmp !== 0) return cmp * dir;
+            }
+            return a.name.localeCompare(b.name) * dir;
+        });
+    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients]);
 
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
@@ -550,88 +651,6 @@ export default function PlanificacionPage() {
         const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
-
-    // ============================================================================
-    // 3. LISTA MAESTRA DE EMPLEADOS (NIVEL 2)
-    // ============================================================================
-    const displayedEmployees = useMemo(() => {
-        if (!selectedObjective && !forceShowAll) return [];
-        // Excluir empleados inactivos (dados de baja)
-        let list = employees.filter(e => e.status !== 'inactivo');
-        if (selectedObjective && !forceShowAll) {
-            // Solo shifts guardados en Firestore determinan si un invitado/desvinculado sigue visible.
-            // Los pendingChanges no cuentan: agregar esa dependencia aquí haría recalcular
-            // displayedEmployees en cada cambio de borrador, lo que dispara re-registros rápidos
-            // de onSnapshot y produce el assert interno de Firestore (ID: ca9).
-            const activeGuestIds = new Set();
-            Object.values(shiftsMap).forEach((shift: any) => { if (shift.objectiveId === selectedObjective) activeGuestIds.add(shift.employeeId); });
-            list = list.filter(e =>
-                e.preferredObjectiveId === selectedObjective ||
-                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
-                activeGuestIds.has(e.id)
-            );
-        }
-        if (searchTerm) list = list.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()));
-        const BAND_FILTERABLE = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET']);
-        const getDominantBand = (empId: string): string | null => {
-            const counts: Record<string, number> = {};
-            daysInMonth.forEach(day => {
-                const key = `${empId}_${getDateKey(day)}`;
-                const sh = (pendingChanges[key] && !pendingChanges[key].isDeleted)
-                    ? pendingChanges[key] : shiftsMap[key];
-                if (!sh) return;
-                const code = String(sh.code || sh.shiftCode || '').toUpperCase();
-                if (BAND_FILTERABLE.has(code)) counts[code] = (counts[code] ?? 0) + 1;
-            });
-            return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-        };
-        if (bandFilter) {
-            list = list.filter(e => getDominantBand(e.id) === bandFilter);
-        }
-        // If there's a custom order for this objective, apply it
-        const orderKey = selectedObjective || '__all__';
-        const customOrder = customOrderMap[orderKey];
-        if (customOrder && customOrder.length > 0) {
-            const orderMap: Record<string, number> = {};
-            customOrder.forEach((id: string, i: number) => { orderMap[id] = i; });
-            return list.sort((a: any, b: any) => {
-                const ai = orderMap[a.id] !== undefined ? orderMap[a.id] : 9999;
-                const bi = orderMap[b.id] !== undefined ? orderMap[b.id] : 9999;
-                return ai - bi;
-            });
-        }
-        const BAND_ORDER: Record<string, number> = { M: 0, T: 1, N: 2, D12: 3, N12: 4, RET: 5 };
-        const dir = sortDir === 'asc' ? 1 : -1;
-        return list.sort((a, b) => {
-            if (sortBy === 'activity') {
-                const countA = getEmployeeShiftCount(a.id);
-                const countB = getEmployeeShiftCount(b.id);
-                if (countA !== countB) return (countB - countA) * dir;
-            }
-            if (sortBy === 'client') {
-                const clientA = getObjectiveName(a.preferredObjectiveId);
-                const clientB = getObjectiveName(b.preferredObjectiveId);
-                const cmp = clientA.localeCompare(clientB);
-                if (cmp !== 0) return cmp * dir;
-            }
-            if (sortBy === 'band') {
-                const bandA = getDominantBand(a.id);
-                const bandB = getDominantBand(b.id);
-                const oa = bandA ? (BAND_ORDER[bandA] ?? 99) : 99;
-                const ob = bandB ? (BAND_ORDER[bandB] ?? 99) : 99;
-                if (oa !== ob) return (oa - ob) * dir;
-            }
-            if (sortBy === 'position') {
-                const posA = empDefaultPos[`${a.id}___${selectedObjective}`] ?? '';
-                const posB = empDefaultPos[`${b.id}___${selectedObjective}`] ?? '';
-                if (!posA && posB) return 1;
-                if (posA && !posB) return -1;
-                const cmp = posA.localeCompare(posB);
-                if (cmp !== 0) return cmp * dir;
-            }
-            return a.name.localeCompare(b.name) * dir;
-        });
-    }, [employees, selectedObjective, forceShowAll, searchTerm, bandFilter, shiftsMap, pendingChanges, sortBy, sortDir, daysInMonth, slaIdToObjId, customOrderMap, empDefaultPos]);
 
     // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
     // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
@@ -1225,7 +1244,7 @@ export default function PlanificacionPage() {
     const buildDayCodeCountsByPosition = (dateStr: string) => buildCodeCountsByPositionForDay(
         positionStructure || [],
         dateStr,
-        displayedEmployees,
+        dotacionBaseEmployees,
         (empId, ds) => {
             const key = `${empId}_${ds}`;
             const pending = pendingChanges[key];
@@ -1257,7 +1276,7 @@ export default function PlanificacionPage() {
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
-    }, [selectedObjective, positionStructure, daysInMonth, displayedEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
+    }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
     const getPositionDailyCoverage = (dateStr: string, positionName: string) => {
         return calculateCoverageStats(dateStr, positionName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
@@ -4155,7 +4174,7 @@ export default function PlanificacionPage() {
                         (positionStructure || []).forEach((pos: any) => {
                             const units = countPositionClosedUnits(
                                 dateStr, pos, dayLetter,
-                                displayedEmployees, pendingChanges, shiftsMap,
+                                dotacionBaseEmployees, pendingChanges, shiftsMap,
                                 cyclesForCoverage,
                             );
                             requiredPax += units.required;
@@ -4696,8 +4715,8 @@ export default function PlanificacionPage() {
                                     <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
                                 </button>
                                 <div className="flex items-center gap-0.5">
-                                    <button onClick={() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
-                                    <button onClick={() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
+                                    <button onClick={() => startFilterTransition(() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
+                                    <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
                                 </div>
                                 <div className="flex items-center gap-0.5" title="Filtrar por banda horaria">
                                     {[null,'M','T','N','D12','N12','RET'].map(b => {
@@ -4713,7 +4732,7 @@ export default function PlanificacionPage() {
                                         };
                                         const cls = b ? colors[b] : 'text-slate-600 border-slate-300 bg-slate-100';
                                         return (
-                                            <button key={label} onClick={() => setBandFilter(b)}
+                                            <button key={label} onClick={() => startFilterTransition(() => setBandFilter(b))}
                                                 className={`px-1.5 py-1 text-[9px] font-black uppercase border transition-colors first:rounded-l-lg last:rounded-r-lg ${active ? cls + ' shadow-inner' : 'border-transparent bg-slate-100 text-slate-400 hover:' + cls}`}
                                                 title={b ? { M: 'Mañana', T: 'Tarde', N: 'Noche', D12: 'Diurno 12h', N12: 'Nocturno 12h', RET: 'Retén' }[b] ?? b : 'Ver todas las bandas'}
                                             >{label}</button>
@@ -4818,7 +4837,7 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40">
+                            <div className={`h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''}`}>
                                 {renderGrid(false)}
                             </div>
                         )}
