@@ -24,6 +24,7 @@ const labor_agreement_service_1 = require("./data-management/labor-agreement.ser
 const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
 const assistantInteractionLog_1 = require("./assistant/assistantInteractionLog");
 const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
+const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -1459,6 +1460,15 @@ exports.detectarAusencias = functions
         const startMs = shift.startTime?.toMillis?.() ?? 0;
         if (!startMs)
             continue;
+        const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
+        if (planningOrigins.has(shift.origin) && shift.objectiveId) {
+            const { year: chkYear, month: chkMonth } = (0, planificacionEstadoKeys_1.ymCordobaParts)(new Date(startMs));
+            const empId = shiftEmpresaId(shift);
+            const docIds = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empId, shift.objectiveId, chkYear, chkMonth);
+            const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
+            if (!planDocs.some(s => s.exists))
+                continue;
+        }
         const elapsedMin = (nowMs - startMs) / 60000;
         if (elapsedMin >= 30) {
             if (shift.absenceDetectedAt)

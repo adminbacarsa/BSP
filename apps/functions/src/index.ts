@@ -43,6 +43,7 @@ import {
   writeAssistantInteractionLog,
 } from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
+import { ymCordobaParts, planificacionEstadoLookupDocIds } from './assistant/planificacionEstadoKeys';
 
 // Inicialización de Firebase Admin
 if (!admin.apps.length) {
@@ -1793,6 +1794,19 @@ export const detectarAusencias = functions
 
       const startMs: number = shift.startTime?.toMillis?.() ?? 0;
       if (!startMs) continue;
+
+      // Turnos de planificación (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
+      // si el cronograma del objetivo/mes está publicado; RETEN y OPERATIONS_COVERAGE son
+      // operativos explícitos y siempre se procesan.
+      const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
+      if (planningOrigins.has(shift.origin) && shift.objectiveId) {
+        const { year: chkYear, month: chkMonth } = ymCordobaParts(new Date(startMs));
+        const empId = shiftEmpresaId(shift);
+        const docIds = planificacionEstadoLookupDocIds(empId, shift.objectiveId, chkYear, chkMonth);
+        const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
+        if (!planDocs.some(s => s.exists)) continue; // cronograma no publicado → no generar ausencia
+      }
+
       const elapsedMin = (nowMs - startMs) / 60000;
 
       // ── AUSENTE: T+30 sin marcar presente → ausencia automática AA ──

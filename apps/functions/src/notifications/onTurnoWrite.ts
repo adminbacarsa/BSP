@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -61,6 +62,22 @@ export const onTurnoWrite = functions
 
     // No notificar turnos en borrador (se notificará cuando se publique)
     if (after?.draft === true) return;
+
+    // Turnos de planificación (SLA_VIRTUAL, PLANIFICADOR, sin origin): no notificar si el
+    // cronograma del objetivo/mes no está publicado. RETEN y OPERATIONS_COVERAGE son
+    // asignaciones operativas explícitas y siempre se notifican.
+    const turn = after || before;
+    const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
+    if (turn && planningOrigins.has(turn.origin) && turn.objectiveId) {
+      const startMs: number = turn.startTime?.toMillis?.() ?? (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
+      if (startMs) {
+        const { year, month } = ymCordobaParts(new Date(startMs));
+        const empId = String(turn.empresaId ?? '').trim();
+        const docIds = planificacionEstadoLookupDocIds(empId, turn.objectiveId, year, month);
+        const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
+        if (!planDocs.some(s => s.exists)) return; // cronograma no publicado → no notificar
+      }
+    }
 
     // Determinar tipo de evento
     let eventType: string;

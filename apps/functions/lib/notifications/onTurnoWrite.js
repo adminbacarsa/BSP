@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onTurnoWrite = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -63,6 +64,19 @@ exports.onTurnoWrite = functions
     const before = change.before.exists ? change.before.data() : null;
     if (after?.draft === true)
         return;
+    const turn = after || before;
+    const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
+    if (turn && planningOrigins.has(turn.origin) && turn.objectiveId) {
+        const startMs = turn.startTime?.toMillis?.() ?? (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
+        if (startMs) {
+            const { year, month } = (0, planificacionEstadoKeys_1.ymCordobaParts)(new Date(startMs));
+            const empId = String(turn.empresaId ?? '').trim();
+            const docIds = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empId, turn.objectiveId, year, month);
+            const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
+            if (!planDocs.some(s => s.exists))
+                return;
+        }
+    }
     let eventType;
     const employeeId = (after || before)?.employeeId;
     if (!employeeId)
