@@ -4066,7 +4066,6 @@ export default function PlanificacionPage() {
                                         let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
                                         let absence = absencesMap[key];
-                                        // AA (injustificada) solo es visible cuando el cronograma está publicado
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
                                         const absAlreadyHandled = effectiveCode && ['V','L','PG','A','E','AA'].includes(effectiveCode) && !!absence;
