@@ -3886,10 +3886,10 @@ export default function PlanificacionPage() {
     ) => {
         const gridEmployees = employeesForRows ?? displayedEmployees;
         return (
-        <table className="border-collapse w-full text-xs">
+        <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 <tr className="h-6">
-                    <th rowSpan={2} className="sticky left-0 z-40 bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
                         <div
                             className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-indigo-400/60 transition-colors"
@@ -3966,7 +3966,7 @@ export default function PlanificacionPage() {
                                         onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
                                         title="Clic para seleccionar fila completa"
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
-                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-sm h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
+                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
                                             const empLat = Number(emp.lat ?? emp.latitude ?? 0);
@@ -4094,7 +4094,7 @@ export default function PlanificacionPage() {
                             {/* FILA SNAPSHOT (HISTÓRICA) - Solo se muestra si hay snapshotData y estamos en modo snapshot */}
                             {isSnapshotView && snapshotData && (
                                 <tr className="bg-amber-50 border-b-2 border-amber-200">
-                                    <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-sm h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                                    <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                                         <span className="text-[9px] font-black uppercase text-amber-700 flex items-center gap-1"><History size={10}/> {emp.name} (Hist)</span>
                                     </td>
                                     {daysInMonth.map((day) => {
@@ -4120,7 +4120,7 @@ export default function PlanificacionPage() {
             </tbody>
             <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
                 <tr>
-                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-sm h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
                             <button
                                 type="button"
@@ -4204,7 +4204,7 @@ export default function PlanificacionPage() {
     return (
         <DashboardLayout>
             <Head><title>Planificador</title></Head>
-            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
+            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <Toaster position="top-center" />
             {coverageTooltip && (
                 <div
@@ -4330,9 +4330,9 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out ${selectedClient ? 'h-full p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 z-40 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
                             <div className="flex items-center gap-4">
@@ -4731,7 +4731,7 @@ export default function PlanificacionPage() {
                 </div>
 
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
-                <div className={`flex-1 overflow-hidden relative custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
+                <div className={`flex-1 min-h-0 overflow-hidden relative custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
                     {isProcessing && <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={40}/></div>}
                     
                     {!selectedObjective ? (
@@ -4818,7 +4818,7 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="h-full min-h-0 overflow-y-auto overflow-x-auto custom-scrollbar">
+                            <div className="h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40">
                                 {renderGrid(false)}
                             </div>
                         )}
