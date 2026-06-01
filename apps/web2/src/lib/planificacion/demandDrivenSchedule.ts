@@ -2422,6 +2422,9 @@ export function restoreRotativeCycleFrancos(
     for (const a of assignments) {
         if (String(a.code || '').toUpperCase() !== 'RET') continue;
         if (isContingencyApretarDay(a.dateStr, ctx)) continue;
+        // RET en día Modo12 fue asignado intencionalmente (turno T absorbido por D12/N12):
+        // no convertir a F o se generan francos consecutivos que rompen el bloque 6+2 CCT.
+        if (isModo12Day(a.dateStr, ctx)) continue;
         const posName = defaultPosByEmp[a.empId] || a.positionName || ctx.positions[0]?.positionName || '';
         const exp = expectedShiftForDay(a.empId, a.dateStr, posName);
         if (exp) continue;
