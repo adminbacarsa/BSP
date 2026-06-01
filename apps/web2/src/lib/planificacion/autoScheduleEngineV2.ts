@@ -527,7 +527,9 @@ function balanceGlobalCycleOffsets(
     const pickMovable = (ids: string[]): string | undefined => {
         const idx = ids.findIndex(id => !hasTrailing?.(id));
         if (idx >= 0) return ids.splice(idx, 1)[0];
-        return ids.pop();
+        // No mover empleados con datos de cola del mes anterior:
+        // su offset fue derivado de la racha real y moverlos quiebra la continuidad CCT.
+        return undefined;
     };
     for (let guard = 0; guard < pool.length * cycleLen; guard++) {
         let moved = false;

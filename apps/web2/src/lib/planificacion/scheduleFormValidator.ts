@@ -123,6 +123,15 @@ function analyzeWorkFrancoRuns(
             else if (len > expectedFranco) francoIssues += len - expectedFranco;
             else francoIssues++;
         }
+    } else {
+        // Sin datos del mes anterior: el primer bloque puede ser un bloque parcial
+        // que arranca del mes previo → no lo chequeamos (no tenemos contexto suficiente).
+        if (i < dayKinds.length) {
+            const firstKind = dayKinds[i];
+            if (firstKind === 'work' || firstKind === 'franco') {
+                while (i < dayKinds.length && dayKinds[i] === firstKind) i++;
+            }
+        }
     }
 
     while (i < dayKinds.length) {
@@ -132,7 +141,9 @@ function analyzeWorkFrancoRuns(
                 len++;
                 i++;
             }
-            if (len !== expectedWork) {
+            // Último bloque del mes: puede ser parcial porque el ciclo continúa en el mes siguiente.
+            const isLastBlock = i >= dayKinds.length;
+            if (!isLastBlock && len !== expectedWork) {
                 if (len === expectedWork - 1 || len === expectedWork + 1) workIssues++;
                 else workIssues += 2;
             }
@@ -142,7 +153,8 @@ function analyzeWorkFrancoRuns(
                 len++;
                 i++;
             }
-            if (len !== expectedFranco) {
+            const isLastBlock = i >= dayKinds.length;
+            if (!isLastBlock && len !== expectedFranco) {
                 if (len === 1 && expectedFranco === 2) francoIssues++;
                 else if (len > expectedFranco) francoIssues += len - expectedFranco;
                 else francoIssues++;
