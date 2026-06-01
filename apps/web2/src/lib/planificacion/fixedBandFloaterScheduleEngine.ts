@@ -102,16 +102,18 @@ function shiftMeta(pos: V2PositionDef, code: string): Pick<V2Assignment, 'name' 
             ...(sh.endTime ? { endTime: sh.endTime } : {}),
         };
     }
-    const defaults: Record<string, { startTime: string; endTime?: string }> = {
+    const defaults: Record<string, { startTime: string; endTime?: string; hours?: number }> = {
         M: { startTime: '07:00', endTime: '15:00' },
         T: { startTime: '15:00', endTime: '23:00' },
         N: { startTime: '23:00', endTime: '07:00' },
-        F: { startTime: '00:00' },
+        D12: { startTime: '07:00', endTime: '19:00', hours: 12 },
+        N12: { startTime: '19:00', endTime: '07:00', hours: 12 },
+        F: { startTime: '00:00', hours: 0 },
     };
     const d = defaults[upper] ?? defaults.M;
     return {
         name: upper === 'F' ? 'Franco' : upper,
-        hours: upper === 'F' ? 0 : 8,
+        hours: d.hours ?? 8,
         startTime: d.startTime,
         ...(d.endTime ? { endTime: d.endTime } : {}),
     };
@@ -213,6 +215,113 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
     return counted > 0 && counted === ctx.employees.length;
 }
 
+/**
+ * Cubre brechas de cobertura causadas por ausencias/vacaciones.
+ * Prioridad: (1) empleado RET del grupo → emitir como la banda faltante;
+ *            (2) empleado en F ese día → emitir como D12 (o N12 si la banda era N).
+ */
+function patchAbsencesWithRetAndD12(
+    ctx: V2EngineContext,
+    assignments: V2Assignment[],
+    openingSlotByEmp: Record<string, number>,
+    positionGroups: Record<string, string[]>,
+    employeeMonthlyHours: Record<string, number>,
+    employeeCycleHours: { current: Record<string, number>; next: Record<string, number> },
+    cutoffDay: number,
+): void {
+    const aIdx = new Map<string, number>();
+    assignments.forEach((a, i) => aIdx.set(`${a.empId}__${a.dateStr}`, i));
+
+    for (const [posName, groupIds] of Object.entries(positionGroups)) {
+        const pos = ctx.positions.find(p => p.positionName === posName);
+        if (!pos) continue;
+        const regularIds = groupIds.slice(0, 4);
+        const floaterIds = groupIds.slice(4);
+
+        ctx.daysInMonth.forEach((day, di) => {
+            const dateStr = ctx.getDateKey(day);
+            const absentRegulars = regularIds.filter(id => ctx.absences[id]?.has(dateStr));
+            if (!absentRegulars.length) return;
+
+            for (const absentId of absentRegulars) {
+                const opening = openingSlotByEmp[absentId];
+                if (opening === undefined) continue;
+                const neededBand = CYCLE_24_MTN[(opening + di) % 24] as string;
+                if (!WORK_BANDS.has(neededBand)) continue; // habría sido F de todas formas
+
+                // ¿Otro regular cubre esa banda ese día?
+                const alreadyCovered = regularIds.some(id => {
+                    if (id === absentId || ctx.absences[id]?.has(dateStr)) return false;
+                    const op = openingSlotByEmp[id];
+                    return op !== undefined && CYCLE_24_MTN[(op + di) % 24] === neededBand;
+                });
+                if (alreadyCovered) continue;
+
+                // Prioridad 1: RET del mismo grupo primero, luego de otros grupos
+                const allRetCandidates = [
+                    ...floaterIds.filter(id => !ctx.absences[id]?.has(dateStr)),
+                    ...Object.values(positionGroups)
+                        .flatMap(gIds => gIds.slice(4))
+                        .filter(id => !floaterIds.includes(id) && !ctx.absences[id]?.has(dateStr)),
+                ];
+
+                let patched = false;
+                for (const retId of allRetCandidates) {
+                    const ai = aIdx.get(`${retId}__${dateStr}`);
+                    if (ai === undefined) continue;
+                    if (assignments[ai].code !== 'RET') continue; // ya cubrió otra brecha
+                    const meta = shiftMeta(pos, neededBand);
+                    assignments[ai] = {
+                        empId: retId,
+                        dateStr,
+                        positionName: posName,
+                        code: neededBand,
+                        name: meta.name,
+                        hours: meta.hours,
+                        startTime: meta.startTime,
+                        ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                    };
+                    // RET no es facturable → delta = meta.hours completos
+                    employeeMonthlyHours[retId] = (employeeMonthlyHours[retId] || 0) + meta.hours;
+                    const inCurrent = day.getDate() <= cutoffDay;
+                    if (inCurrent) employeeCycleHours.current[retId] = (employeeCycleHours.current[retId] || 0) + meta.hours;
+                    else employeeCycleHours.next[retId] = (employeeCycleHours.next[retId] || 0) + meta.hours;
+                    patched = true;
+                    break;
+                }
+                if (patched) continue;
+
+                // Prioridad 2: compañero en F ese día → D12 (día/tarde) o N12 (noche)
+                const francoId = regularIds.find(id => {
+                    if (ctx.absences[id]?.has(dateStr)) return false;
+                    const op = openingSlotByEmp[id];
+                    return op !== undefined && CYCLE_24_MTN[(op + di) % 24] === 'F';
+                });
+                if (!francoId) continue;
+                const fallbackCode = neededBand === 'N' ? 'N12' : 'D12';
+                const ai = aIdx.get(`${francoId}__${dateStr}`);
+                if (ai === undefined) continue;
+                const meta = shiftMeta(pos, fallbackCode);
+                assignments[ai] = {
+                    empId: francoId,
+                    dateStr,
+                    positionName: posName,
+                    code: fallbackCode,
+                    name: meta.name,
+                    hours: meta.hours,
+                    startTime: meta.startTime,
+                    ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                };
+                // F no era facturable → delta = meta.hours completos
+                employeeMonthlyHours[francoId] = (employeeMonthlyHours[francoId] || 0) + meta.hours;
+                const inCurrentF = day.getDate() <= cutoffDay;
+                if (inCurrentF) employeeCycleHours.current[francoId] = (employeeCycleHours.current[francoId] || 0) + meta.hours;
+                else employeeCycleHours.next[francoId] = (employeeCycleHours.next[francoId] || 0) + meta.hours;
+            }
+        });
+    }
+}
+
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
     const positionGroups = buildPositionGroups(ctx);
     const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, positionGroups);
@@ -280,6 +389,11 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             }
         });
     }
+
+    patchAbsencesWithRetAndD12(
+        ctx, assignments, openingSlotByEmp, positionGroups,
+        employeeMonthlyHours, employeeCycleHours, cutoffDay,
+    );
 
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);

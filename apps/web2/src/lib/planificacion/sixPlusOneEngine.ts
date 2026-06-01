@@ -34,14 +34,89 @@ function shiftMeta(pos: V2PositionDef, code: string) {
         const hours = Number(sh.hours) > 0 ? Number(sh.hours) : 8;
         return { name: sh.name || upper, hours, startTime: sh.startTime || '07:00', ...(sh.endTime ? { endTime: sh.endTime } : {}) };
     }
-    const defaults: Record<string, { startTime: string; endTime?: string }> = {
+    const defaults: Record<string, { startTime: string; endTime?: string; hours?: number }> = {
         M: { startTime: '07:00', endTime: '15:00' },
         T: { startTime: '15:00', endTime: '23:00' },
         N: { startTime: '23:00', endTime: '07:00' },
-        F: { startTime: '00:00' },
+        D12: { startTime: '07:00', endTime: '19:00', hours: 12 },
+        N12: { startTime: '19:00', endTime: '07:00', hours: 12 },
+        F: { startTime: '00:00', hours: 0 },
     };
     const d = defaults[upper] ?? defaults.M;
-    return { name: upper === 'F' ? 'Franco' : upper, hours: upper === 'F' ? 0 : 8, startTime: d.startTime, ...(d.endTime ? { endTime: d.endTime } : {}) };
+    return { name: upper === 'F' ? 'Franco' : upper, hours: d.hours ?? 8, startTime: d.startTime, ...(d.endTime ? { endTime: d.endTime } : {}) };
+}
+
+/**
+ * En ciclo 6+1 no hay RET flotante — fallback directo a D12/N12 del compañero en franco.
+ */
+function patchAbsences6x1(
+    ctx: V2EngineContext,
+    assignments: V2Assignment[],
+    openingSlotByEmp: Record<string, number>,
+    primaryShiftByEmp: Record<string, string | null>,
+    positionGroups: Record<string, string[]>,
+    employeeMonthlyHours: Record<string, number>,
+    employeeCycleHours: { current: Record<string, number>; next: Record<string, number> },
+    cutoffDay: number,
+): void {
+    const aIdx = new Map<string, number>();
+    assignments.forEach((a, i) => aIdx.set(`${a.empId}__${a.dateStr}`, i));
+
+    for (const [posName, guardIds] of Object.entries(positionGroups)) {
+        const pos = ctx.positions.find(p => p.positionName === posName);
+        if (!pos) continue;
+
+        ctx.daysInMonth.forEach((day, di) => {
+            const dateStr = ctx.getDateKey(day);
+            const absentWorkers = guardIds.filter(id => {
+                if (!ctx.absences[id]?.has(dateStr)) return false;
+                const op = openingSlotByEmp[id];
+                return op !== undefined && (op + di) % CYCLE_7 !== FRANCO_POS;
+            });
+            if (!absentWorkers.length) return;
+
+            for (const absentId of absentWorkers) {
+                const neededBand = primaryShiftByEmp[absentId];
+                if (!neededBand || !WORK_BANDS.has(neededBand)) continue;
+
+                // ¿Otro guardia de la misma banda cubre ese día?
+                const alreadyCovered = guardIds.some(id => {
+                    if (id === absentId || ctx.absences[id]?.has(dateStr)) return false;
+                    if (primaryShiftByEmp[id] !== neededBand) return false;
+                    const op = openingSlotByEmp[id];
+                    return op !== undefined && (op + di) % CYCLE_7 !== FRANCO_POS;
+                });
+                if (alreadyCovered) continue;
+
+                // Compañero en F ese día → D12 o N12
+                const francoId = guardIds.find(id => {
+                    if (ctx.absences[id]?.has(dateStr)) return false;
+                    const op = openingSlotByEmp[id];
+                    return op !== undefined && (op + di) % CYCLE_7 === FRANCO_POS;
+                });
+                if (!francoId) continue;
+
+                const fallbackCode = neededBand === 'N' ? 'N12' : 'D12';
+                const ai = aIdx.get(`${francoId}__${dateStr}`);
+                if (ai === undefined) continue;
+                const meta = shiftMeta(pos, fallbackCode);
+                assignments[ai] = {
+                    empId: francoId,
+                    dateStr,
+                    positionName: posName,
+                    code: fallbackCode,
+                    name: meta.name,
+                    hours: meta.hours,
+                    startTime: meta.startTime,
+                    ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                };
+                employeeMonthlyHours[francoId] = (employeeMonthlyHours[francoId] || 0) + meta.hours;
+                const inCurrent = day.getDate() <= cutoffDay;
+                if (inCurrent) employeeCycleHours.current[francoId] = (employeeCycleHours.current[francoId] || 0) + meta.hours;
+                else employeeCycleHours.next[francoId] = (employeeCycleHours.next[francoId] || 0) + meta.hours;
+            }
+        });
+    }
 }
 
 function inferBand(empId: string, ctx: V2EngineContext): string | null {
@@ -222,6 +297,11 @@ export function generateSixPlusOneSchedule(ctx: V2EngineContext): V2GenerateResu
         }        // band pairs
         }        // gi (grupo de 6)
     }            // positionGroups
+
+    patchAbsences6x1(
+        ctx, assignments, openingSlotByEmp, primaryShiftByEmp, positionGroups,
+        employeeMonthlyHours, employeeCycleHours, cutoffDay,
+    );
 
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);
