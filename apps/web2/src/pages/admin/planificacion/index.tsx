@@ -18,6 +18,23 @@ import {
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc } from 'firebase/firestore';
+
+type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
+type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
+
+function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDotacion?: PlanificacionDotacionMap }[]) {
+    const pos: Record<string, string> = {};
+    const shift: Record<string, string> = {};
+    for (const e of employees) {
+        const dot = e.planificacionDotacion;
+        if (!dot) continue;
+        for (const [objId, cfg] of Object.entries(dot)) {
+            if (cfg?.positionName) pos[`${e.id}___${objId}`] = cfg.positionName;
+            if (cfg?.shiftCode) shift[`${e.id}___${objId}`] = cfg.shiftCode;
+        }
+    }
+    return { pos, shift };
+}
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
@@ -318,14 +335,9 @@ export default function PlanificacionPage() {
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | null>(null);
     const longPressTimer = useRef<any>(null);
-    const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>(() => {
-        if (typeof window === 'undefined') return {};
-        try { return JSON.parse(localStorage.getItem('planif_emp_pos') || '{}'); } catch { return {}; }
-    });
-    const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>(() => {
-        if (typeof window === 'undefined') return {};
-        try { return JSON.parse(localStorage.getItem('planif_emp_shift') || '{}'); } catch { return {}; }
-    });
+    const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
+    const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
+    const dotacionMigratedRef = useRef(false);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number } | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -1615,7 +1627,23 @@ export default function PlanificacionPage() {
         const unsubE = onSnapshot(empleadosQ, snap => {
             const map = (s: typeof snap) => s.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => { const data = d.data(); return { id: d.id, name: data.name || data.firstName + ' ' + data.lastName, preferredObjectiveId: data.preferredObjectiveId, laborAgreement: data.laborAgreement, status: data.status || 'activo', lat: data.lat ?? data.latitude ?? null, lng: data.lng ?? data.longitude ?? null, address: data.address || '', restriccionesObjetivo: data.restriccionesObjetivo || [], restriccionesCliente: data.restriccionesCliente || [], conflictosEmpleados: data.conflictosEmpleados || [] }; });
+                .map(d => {
+                    const data = d.data();
+                    return {
+                        id: d.id,
+                        name: data.name || data.firstName + ' ' + data.lastName,
+                        preferredObjectiveId: data.preferredObjectiveId,
+                        planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
+                        laborAgreement: data.laborAgreement,
+                        status: data.status || 'activo',
+                        lat: data.lat ?? data.latitude ?? null,
+                        lng: data.lng ?? data.longitude ?? null,
+                        address: data.address || '',
+                        restriccionesObjetivo: data.restriccionesObjetivo || [],
+                        restriccionesCliente: data.restriccionesCliente || [],
+                        conflictosEmpleados: data.conflictosEmpleados || [],
+                    };
+                });
             setEmployees(map(snap));
         }, (e) => console.error('[plan] empleados error:', e));
 
@@ -1762,6 +1790,39 @@ export default function PlanificacionPage() {
                 }
             }).catch(() => {});
     }, [selectedObjective, currentDate, empresaId]);
+
+    useEffect(() => {
+        const { pos, shift } = buildDotacionMapsFromEmployees(employees);
+        setEmpDefaultPos(pos);
+        setEmpDefaultShift(shift);
+    }, [employees]);
+
+    useEffect(() => {
+        if (dotacionMigratedRef.current || typeof window === 'undefined' || !employees.length) return;
+        dotacionMigratedRef.current = true;
+        try {
+            const lsPos: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_pos') || '{}');
+            const lsShift: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_shift') || '{}');
+            const allKeys = new Set([...Object.keys(lsPos), ...Object.keys(lsShift)]);
+            for (const key of allKeys) {
+                const sep = key.indexOf('___');
+                if (sep <= 0) continue;
+                const empId = key.slice(0, sep);
+                const objId = key.slice(sep + 3);
+                const emp = employees.find((e) => e.id === empId);
+                if (!emp) continue;
+                const existing = emp.planificacionDotacion?.[objId]?.positionName;
+                const positionName = lsPos[key];
+                if (existing || !positionName) continue;
+                const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
+                nextDotacion[objId] = {
+                    positionName,
+                    ...(lsShift[key] ? { shiftCode: lsShift[key] } : {}),
+                };
+                updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion }).catch(() => {});
+            }
+        } catch { /* noop */ }
+    }, [employees]);
 
     // ============================================================================
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
@@ -1917,20 +1978,52 @@ export default function PlanificacionPage() {
 
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
     const getEmpDefaultShift = (empId: string) => empDefaultShift[`${empId}___${selectedObjective}`] || null;
-    const saveEmpPos = (empId: string, posName: string | null, shiftCode?: string | null) => {
+    const saveEmpPos = async (empId: string, posName: string | null, shiftCode?: string | null) => {
+        if (!selectedObjective) return;
         const key = `${empId}___${selectedObjective}`;
+        const emp = employees.find((e) => e.id === empId);
+        const prevPosMap = { ...empDefaultPos };
+        const prevShiftMap = { ...empDefaultShift };
         const newPosMap = { ...empDefaultPos };
         if (posName) { newPosMap[key] = posName; } else { delete newPosMap[key]; }
         setEmpDefaultPos(newPosMap);
-        try { localStorage.setItem('planif_emp_pos', JSON.stringify(newPosMap)); } catch {}
         const newShiftMap = { ...empDefaultShift };
         if (shiftCode) { newShiftMap[key] = shiftCode.toUpperCase(); } else { delete newShiftMap[key]; }
         setEmpDefaultShift(newShiftMap);
-        try { localStorage.setItem('planif_emp_shift', JSON.stringify(newShiftMap)); } catch {}
         setEmpPosPicker(null);
+        try {
+            const nextDotacion: PlanificacionDotacionMap = { ...(emp?.planificacionDotacion || {}) };
+            if (posName) {
+                nextDotacion[selectedObjective] = {
+                    positionName: posName,
+                    ...(shiftCode ? { shiftCode: shiftCode.toUpperCase() } : {}),
+                };
+            } else {
+                delete nextDotacion[selectedObjective];
+            }
+            await updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion });
+        } catch {
+            setEmpDefaultPos(prevPosMap);
+            setEmpDefaultShift(prevShiftMap);
+            toast.error('No se pudo guardar el puesto asignado');
+        }
     };
 
-    const handleUnassignEmployee = async (emp: any) => { if (!selectedObjective) return; if (emp.preferredObjectiveId !== selectedObjective) { toast.error("Error asignación."); return; } if (!confirm(`¿CONFIRMAR DESVINCULACIÓN?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: null }); await addDoc(collection(db, 'audit_logs'), { action: 'DESVINCULACION_OBJETIVO', module: 'PLANIFICADOR', details: `Desvinculó a ${emp.name}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, empresaId }); toast.success("Desvinculado"); } catch (e) { toast.error("Error"); } };
+    const handleUnassignEmployee = async (emp: any) => {
+        if (!selectedObjective) return;
+        if (emp.preferredObjectiveId !== selectedObjective) { toast.error("Error asignación."); return; }
+        if (!confirm(`¿CONFIRMAR DESVINCULACIÓN?`)) return;
+        try {
+            const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
+            delete nextDotacion[selectedObjective];
+            await updateDoc(doc(db, 'empleados', emp.id), {
+                preferredObjectiveId: null,
+                planificacionDotacion: nextDotacion,
+            });
+            await addDoc(collection(db, 'audit_logs'), { action: 'DESVINCULACION_OBJETIVO', module: 'PLANIFICADOR', details: `Desvinculó a ${emp.name}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, empresaId });
+            toast.success("Desvinculado");
+        } catch (e) { toast.error("Error"); }
+    };
     const handleMarkAllRead = async () => { if (!confirm("¿Marcar todas como leídas?")) return; const batch = writeBatch(db); notifications.forEach(n => { if (n.id) { const ref = doc(db, 'novedades', n.id); batch.update(ref, { viewed: true, status: 'read' }); } }); await batch.commit(); setNotifications([]); setHasUnread(false); toast.success("Bandeja limpia"); };
     const handleDeleteAllNotifications = async () => { if (!confirm("¿Eliminar permanentemente todas las notificaciones? Esta acción no se puede deshacer.")) return; const batch = writeBatch(db); notifications.forEach(n => { if (n.id) batch.delete(doc(db, 'novedades', n.id)); }); await batch.commit(); setNotifications([]); setHasUnread(false); toast.success("Notificaciones eliminadas"); };
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), { action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${selectedObjective}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid }); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
