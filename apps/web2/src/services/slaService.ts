@@ -23,6 +23,7 @@ export interface ServicePosition {
   quantity: number;
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];
+  excludedDates?: string[];  // YYYY-MM-DD: días sin servicio solo para este puesto
 }
 
 // Definición de Contrato de Servicio (SLA)

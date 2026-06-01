@@ -161,7 +161,17 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, positionGroups: Record<st
             if (slot !== null) { out[empId] = slot; withTrail.push(empId); }
             else withoutTrail.push(empId);
         }
-        const usedSlots = new Set(withTrail.map(id => out[id]));
+        // Deduplicar slots inferidos: si 2 empleados del mismo grupo tienen el mismo slot
+        // (e.g., ambos terminaron mayo en banda M), mantener solo el primero y mover el resto
+        // a cold-start para evitar colisión de francos → brecha de cobertura.
+        const slotMap: Record<number, string[]> = {};
+        withTrail.forEach(id => { const s = out[id]; (slotMap[s] = slotMap[s] || []).push(id); });
+        for (const ids of Object.values(slotMap)) {
+            if (ids.length > 1) {
+                ids.slice(1).forEach(id => { delete out[id]; withoutTrail.push(id); });
+            }
+        }
+        const usedSlots = new Set(withTrail.filter(id => id in out).map(id => out[id]));
         const available = COLD_START_OPENINGS.filter(s => !usedSlots.has(s));
         withoutTrail.sort((a, b) => a.localeCompare(b));
         withoutTrail.forEach((empId, i) => {
@@ -278,6 +288,8 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     return {
         assignments,
         capOverflowSlots: [],
+        coverageViolations: 0,
+        feasibility: null as any,
         stats: {
             totalAssignments: assignments.length,
             totalBillableHours,

@@ -112,6 +112,7 @@ export default function ServiciosSLAPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
   const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
+  const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
   const savedSelfRef = useRef(false); // evita falsos positivos por nuestros propios guardados
   // Código del turno que se está editando (null = modo "agregar nuevo")
   const [editingShiftCode, setEditingShiftCode] = useState<string | null>(null);
@@ -365,7 +366,7 @@ export default function ServiciosSLAPage() {
     const end = parseYmdToLocalDate(endNorm);
     if (!current || !end) return [];
 
-    const excluded = new Set(excludedDates || []);
+    const slaExcluded = new Set(excludedDates || []);
 
     const monthAccumulator: Record<string, {
         name: string, days: number, totalHours: number, nightHours: number, weekendHours: number
@@ -390,8 +391,11 @@ export default function ServiciosSLAPage() {
 
         monthAccumulator[monthKey].days++;
 
-        if (!excluded.has(dateStr)) {
+        if (!slaExcluded.has(dateStr)) {
             positions.forEach(pos => {
+                // fecha excluida a nivel SLA o a nivel puesto específico
+                const posExcluded = pos.excludedDates && pos.excludedDates.includes(dateStr);
+                if (posExcluded) return;
                 const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
                 const q = pos.quantity;
                 monthAccumulator[monthKey].totalHours += (dayTotal * q);
@@ -1477,15 +1481,52 @@ export default function ServiciosSLAPage() {
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
 
-                 {/* Días excluidos */}
+                 {/* Días excluidos — por puesto o para todos */}
                  {(() => {
-                     const excluded = new Set(form.excludedDates || []);
+                     const WD_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+                     const posNames = form.positions.map(p => p.name || p.id);
+                     // Scope actual: 'ALL' = nivel SLA, o positionName = nivel puesto
+                     const isAll = excludedDatesScope === 'ALL';
+                     const scopePosIdx = isAll ? -1 : form.positions.findIndex(p => (p.name || p.id) === excludedDatesScope);
+                     // Exclusiones activas para el scope seleccionado
+                     const activeDates = isAll
+                         ? new Set(form.excludedDates || [])
+                         : new Set(scopePosIdx >= 0 ? (form.positions[scopePosIdx]?.excludedDates || []) : []);
+                     // Exclusiones a nivel SLA (siempre marcadas, independiente del scope)
+                     const slaGlobal = new Set(form.excludedDates || []);
+
                      const toggleDate = (ds: string) => {
-                         const next = new Set(excluded);
-                         if (next.has(ds)) next.delete(ds); else next.add(ds);
-                         setForm({ ...form, excludedDates: Array.from(next).sort() });
+                         if (isAll) {
+                             const next = new Set(slaGlobal);
+                             if (next.has(ds)) next.delete(ds); else next.add(ds);
+                             setForm({ ...form, excludedDates: Array.from(next).sort() });
+                         } else if (scopePosIdx >= 0) {
+                             const nextPositions = form.positions.map((p, i) => {
+                                 if (i !== scopePosIdx) return p;
+                                 const cur = new Set(p.excludedDates || []);
+                                 if (cur.has(ds)) cur.delete(ds); else cur.add(ds);
+                                 return { ...p, excludedDates: Array.from(cur).sort() };
+                             });
+                             setForm({ ...form, positions: nextPositions });
+                         }
                      };
-                     // Generar meses entre startDate y endDate
+                     const clearScope = () => {
+                         if (isAll) {
+                             setForm({ ...form, excludedDates: [] });
+                         } else if (scopePosIdx >= 0) {
+                             const nextPositions = form.positions.map((p, i) =>
+                                 i === scopePosIdx ? { ...p, excludedDates: [] } : p
+                             );
+                             setForm({ ...form, positions: nextPositions });
+                         }
+                     };
+
+                     // Total excluidos en todos los scopes
+                     const totalExcluded = slaGlobal.size + form.positions.reduce(
+                         (acc, p) => acc + (p.excludedDates?.length || 0), 0
+                     );
+
+                     // Generar meses
                      const months: Array<{ year: number; month: number; label: string; days: Array<{ date: Date; ds: string }> }> = [];
                      const start = parseYmdToLocalDate(form.startDate);
                      const end = parseYmdToLocalDate(form.endDate);
@@ -1493,8 +1534,7 @@ export default function ServiciosSLAPage() {
                          let cur = new Date(start.getFullYear(), start.getMonth(), 1);
                          const endMo = new Date(end.getFullYear(), end.getMonth(), 1);
                          while (cur <= endMo) {
-                             const y = cur.getFullYear();
-                             const m = cur.getMonth();
+                             const y = cur.getFullYear(); const m = cur.getMonth();
                              const label = cur.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
                              const days: Array<{ date: Date; ds: string }> = [];
                              const daysInMo = new Date(y, m + 1, 0).getDate();
@@ -1508,84 +1548,92 @@ export default function ServiciosSLAPage() {
                              cur.setMonth(cur.getMonth() + 1);
                          }
                      }
-                     // Resumen por día de semana
-                     const WD_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-                     const countByWd: Record<number, number> = {};
-                     excluded.forEach(ds => {
-                         if (!ds) return;
-                         const [y, m, d] = ds.split('-').map(Number);
-                         const wd = new Date(y, m - 1, d).getDay();
-                         countByWd[wd] = (countByWd[wd] || 0) + 1;
-                     });
-                     const summary = Object.entries(countByWd)
-                         .sort(([a], [b]) => Number(a) - Number(b))
-                         .map(([wd, cnt]) => `${cnt} ${WD_NAMES[Number(wd)].toLowerCase()}${cnt > 1 ? 's' : ''}`)
-                         .join(', ');
+
+                     const makeSummary = (dates: Set<string>) => {
+                         const countByWd: Record<number, number> = {};
+                         dates.forEach(ds => {
+                             if (!ds) return;
+                             const [y, m, d] = ds.split('-').map(Number);
+                             countByWd[new Date(y, m - 1, d).getDay()] = (countByWd[new Date(y, m - 1, d).getDay()] || 0) + 1;
+                         });
+                         return Object.entries(countByWd).sort(([a],[b]) => +a - +b)
+                             .map(([wd, cnt]) => `${cnt} ${WD_NAMES[+wd].toLowerCase()}${cnt > 1 ? 's' : ''}`).join(', ');
+                     };
+
                      return (
                          <div className="rounded-xl border dark:border-slate-700 overflow-hidden">
-                             <button
-                                 type="button"
-                                 onClick={() => setShowExcludedDatesPicker(p => !p)}
-                                 className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                             >
+                             <button type="button" onClick={() => setShowExcludedDatesPicker(p => !p)}
+                                 className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                                  <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                                     <span className={`w-4 h-4 rounded flex items-center justify-center text-[8px] font-black ${excluded.size > 0 ? 'bg-rose-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>{excluded.size}</span>
-                                     Días excluidos del servicio
+                                     <span className={`w-4 h-4 rounded flex items-center justify-center text-[8px] font-black ${totalExcluded > 0 ? 'bg-rose-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>{totalExcluded}</span>
+                                     Días excluidos
                                  </span>
                                  <span className="text-slate-400 text-xs">{showExcludedDatesPicker ? '▲' : '▼'}</span>
                              </button>
-                             {excluded.size > 0 && !showExcludedDatesPicker && (
-                                 <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/20 border-t border-rose-100 dark:border-rose-900">
-                                     <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{summary}</p>
+                             {totalExcluded > 0 && !showExcludedDatesPicker && (
+                                 <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/20 border-t border-rose-100 dark:border-rose-900 space-y-0.5">
+                                     {slaGlobal.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobal)}</p>}
+                                     {form.positions.map(p => (p.excludedDates?.length ?? 0) > 0 && (
+                                         <p key={p.id} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id}: {makeSummary(new Set(p.excludedDates))}</p>
+                                     ))}
                                  </div>
                              )}
-                             {showExcludedDatesPicker && months.length > 0 && (
-                                 <div className="p-4 bg-white dark:bg-slate-900 border-t dark:border-slate-700 space-y-4">
-                                     {months.map(({ year, month, label, days }) => {
-                                         const firstDow = new Date(year, month, 1).getDay();
-                                         const WD_HDR = ['L','M','X','J','V','S','D'];
-                                         const padded = Array(firstDow === 0 ? 6 : firstDow - 1).fill(null).concat(days);
-                                         return (
-                                             <div key={`${year}-${month}`}>
-                                                 <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2">{label}</p>
-                                                 <div className="grid grid-cols-7 gap-0.5">
-                                                     {WD_HDR.map(h => <span key={h} className="text-center text-[8px] font-black text-slate-400 py-0.5">{h}</span>)}
-                                                     {padded.map((cell, i) => {
-                                                         if (!cell) return <span key={`pad-${i}`}/>;
-                                                         const { date, ds } = cell;
-                                                         if (!ds) return <span key={`out-${i}`} className="text-center text-[9px] text-slate-200 dark:text-slate-700 py-1">{date.getDate()}</span>;
-                                                         const isExcluded = excluded.has(ds);
-                                                         const isWe = date.getDay() === 0 || date.getDay() === 6;
-                                                         return (
-                                                             <button
-                                                                 key={ds}
-                                                                 type="button"
-                                                                 title={ds}
-                                                                 onClick={() => toggleDate(ds)}
-                                                                 className={`text-center text-[9px] font-bold py-1 rounded transition-colors leading-none
-                                                                     ${isExcluded
-                                                                         ? 'bg-rose-500 text-white'
-                                                                         : isWe
-                                                                             ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
-                                                                             : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50 dark:hover:bg-rose-950/30'
-                                                                     }`}
-                                                             >{date.getDate()}</button>
-                                                         );
-                                                     })}
+                             {showExcludedDatesPicker && (
+                                 <div className="border-t dark:border-slate-700">
+                                     {/* Selector de scope */}
+                                     <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 flex items-center gap-2 flex-wrap border-b dark:border-slate-700">
+                                         <span className="text-[9px] font-black uppercase text-slate-400">Aplica a:</span>
+                                         {(['ALL', ...posNames] as string[]).map(scope => (
+                                             <button key={scope} type="button"
+                                                 onClick={() => setExcludedDatesScope(scope)}
+                                                 className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${excludedDatesScope === scope ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
+                                                 {scope === 'ALL' ? 'Todos los puestos' : scope}
+                                             </button>
+                                         ))}
+                                     </div>
+                                     {months.length > 0 ? (
+                                         <div className="p-4 bg-white dark:bg-slate-900 space-y-4">
+                                             {months.map(({ year, month, label, days }) => {
+                                                 const firstDow = new Date(year, month, 1).getDay();
+                                                 const padded = Array(firstDow === 0 ? 6 : firstDow - 1).fill(null).concat(days);
+                                                 return (
+                                                     <div key={`${year}-${month}`}>
+                                                         <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2">{label}</p>
+                                                         <div className="grid grid-cols-7 gap-0.5">
+                                                             {['L','M','X','J','V','S','D'].map(h => <span key={h} className="text-center text-[8px] font-black text-slate-400 py-0.5">{h}</span>)}
+                                                             {padded.map((cell, i) => {
+                                                                 if (!cell) return <span key={`pad-${i}`}/>;
+                                                                 const { date, ds } = cell;
+                                                                 if (!ds) return <span key={`out-${i}`} className="text-center text-[9px] text-slate-200 dark:text-slate-700 py-1">{date.getDate()}</span>;
+                                                                 const isActive = activeDates.has(ds);
+                                                                 const isGlobal = !isAll && slaGlobal.has(ds); // excluido para todos
+                                                                 const isWe = date.getDay() === 0 || date.getDay() === 6;
+                                                                 return (
+                                                                     <button key={ds} type="button" title={isGlobal ? 'Excluido para todos los puestos' : ds}
+                                                                         onClick={() => !isGlobal && toggleDate(ds)}
+                                                                         className={`text-center text-[9px] font-bold py-1 rounded transition-colors leading-none
+                                                                             ${isActive || isGlobal
+                                                                                 ? isGlobal ? 'bg-rose-300 dark:bg-rose-800 text-white cursor-not-allowed' : 'bg-rose-500 text-white'
+                                                                                 : isWe ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50' : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50'
+                                                                             }`}
+                                                                     >{date.getDate()}</button>
+                                                                 );
+                                                             })}
+                                                         </div>
+                                                     </div>
+                                                 );
+                                             })}
+                                             {activeDates.size > 0 && (
+                                                 <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700">
+                                                     <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{makeSummary(activeDates)}</p>
+                                                     <button type="button" onClick={clearScope} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase">Limpiar</button>
                                                  </div>
-                                             </div>
-                                         );
-                                     })}
-                                     {excluded.size > 0 && (
-                                         <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700">
-                                             <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{summary}</p>
-                                             <button type="button" onClick={() => setForm({ ...form, excludedDates: [] })} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase">Limpiar</button>
+                                             )}
                                          </div>
+                                     ) : (
+                                         <p className="px-4 py-3 text-[10px] text-slate-400">Completá las fechas del contrato primero.</p>
                                      )}
                                  </div>
-                             )}
-                             {showExcludedDatesPicker && months.length === 0 && (
-                                 <p className="px-4 py-3 text-[10px] text-slate-400 border-t dark:border-slate-700">Completá las fechas del contrato primero.</p>
                              )}
                          </div>
                      );
