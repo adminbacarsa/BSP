@@ -230,6 +230,7 @@ export type PlanningPositionRow = {
   activeDays: string[];
   coverageType: string;
   excludedDates?: string[];
+  preferenciaGenero?: string;
   _serviceId?: string;
   _serviceRange?: string;
 };
@@ -290,6 +291,7 @@ export function buildPlanningPositionStructure(
         qty: parsePlanningPositionQty(pos),
         activeDays: (pos.activeDays as string[]) ?? ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
         coverageType: String(pos.coverageType ?? srv.coverageType ?? '24hs'),
+        ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         _serviceId: srv.id,
         _serviceRange: slaServiceRangeLabel(srv),

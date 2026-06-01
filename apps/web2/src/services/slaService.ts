@@ -24,6 +24,7 @@ export interface ServicePosition {
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];
   excludedDates?: string[];  // YYYY-MM-DD: días sin servicio solo para este puesto
+  preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
 }
 
 // Definición de Contrato de Servicio (SLA)

@@ -249,10 +249,10 @@ export default function CRMPage() {
   const EMPTY_SVC_FORM = { open: false, sourceId: null as string | null, objectiveName: '', startDate: '', endDate: '', draftPositions: [] as any[] };
   const [serviceVersionForm, setServiceVersionForm] = useState(EMPTY_SVC_FORM);
   const [editingPositionIdx, setEditingPositionIdx] = useState<{ serviceId: string; idx: number } | null>(null);
-  const [positionForm, setPositionForm] = useState({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [] as any[] });
+  const [positionForm, setPositionForm] = useState({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [] as any[], preferenciaGenero: 'INDISTINTO' as string });
   const [addingPositionToService, setAddingPositionToService] = useState<string | null>(null);
   // draft positions editor dentro del form de nuevo servicio / nueva versión
-  const [draftPosForm, setDraftPosForm] = useState({ positionName: '', coverageType: '24hs', quantity: 1 });
+  const [draftPosForm, setDraftPosForm] = useState({ positionName: '', coverageType: '24hs', quantity: 1, preferenciaGenero: 'INDISTINTO' as string });
   const [editingDraftPosIdx, setEditingDraftPosIdx] = useState<number | null>(null);
   const [addingDraftPos, setAddingDraftPos] = useState(false);
 
@@ -751,7 +751,7 @@ export default function CRMPage() {
   const handleSavePosition = async (serviceId: string, positions: any[], idx: number | null) => {
     if (!selectedClient?.id) return;
     const updated = [...positions];
-    const payload = { ...positionForm };
+    const payload = { ...positionForm, name: positionForm.positionName || (positionForm as any).name || '' };
     if (idx === null) updated.push(payload);
     else updated[idx] = payload;
     try {
@@ -759,7 +759,7 @@ export default function CRMPage() {
       await loadClientFullData(selectedClient.id);
       setEditingPositionIdx(null);
       setAddingPositionToService(null);
-      setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [] });
+      setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO' });
       toast.success('Puesto guardado');
     } catch (e) {
       console.error(e);
@@ -2043,7 +2043,7 @@ export default function CRMPage() {
                       <div className="flex items-center justify-between">
                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Puestos / Posiciones</p>
                         {!addingDraftPos && editingDraftPosIdx === null && (
-                          <button onClick={() => { setAddingDraftPos(true); setDraftPosForm({ positionName: '', coverageType: '24hs', quantity: 1 }); }} className="flex items-center gap-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase">
+                          <button onClick={() => { setAddingDraftPos(true); setDraftPosForm({ positionName: '', coverageType: '24hs', quantity: 1, preferenciaGenero: 'INDISTINTO' }); }} className="flex items-center gap-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase">
                             <Plus size={11} /> Agregar puesto
                           </button>
                         )}
@@ -2077,6 +2077,14 @@ export default function CRMPage() {
                                     <input type="number" min={1} className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={draftPosForm.quantity} onChange={(e) => setDraftPosForm({ ...draftPosForm, quantity: Number(e.target.value) })} />
                                   </div>
                                 </div>
+                                <div>
+                                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Género requerido</label>
+                                  <select className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={draftPosForm.preferenciaGenero || 'INDISTINTO'} onChange={(e) => setDraftPosForm({ ...draftPosForm, preferenciaGenero: e.target.value })}>
+                                    <option value="INDISTINTO">Indistinto</option>
+                                    <option value="M">Masculino</option>
+                                    <option value="F">Femenino</option>
+                                  </select>
+                                </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => {
                                     const updated = [...serviceVersionForm.draftPositions];
@@ -2097,7 +2105,7 @@ export default function CRMPage() {
                                   <p className="text-[10px] font-bold text-slate-400">{COVERAGE_LABELS[pos.coverageType] || pos.coverageType} · {pos.quantity || 1} guardia{(pos.quantity || 1) !== 1 ? 's' : ''}</p>
                                 </div>
                                 <div className="flex gap-1">
-                                  <button onClick={() => { setEditingDraftPosIdx(idx); setDraftPosForm({ positionName: pos.positionName || pos.name || '', coverageType: pos.coverageType || '24hs', quantity: pos.quantity || 1 }); }} className="p-1 hover:bg-indigo-50 text-indigo-400 rounded transition-colors"><Edit2 size={11} /></button>
+                                  <button onClick={() => { setEditingDraftPosIdx(idx); setDraftPosForm({ positionName: pos.positionName || pos.name || '', coverageType: pos.coverageType || '24hs', quantity: pos.quantity || 1, preferenciaGenero: pos.preferenciaGenero || 'INDISTINTO' }); }} className="p-1 hover:bg-indigo-50 text-indigo-400 rounded transition-colors"><Edit2 size={11} /></button>
                                   <button onClick={() => setServiceVersionForm({ ...serviceVersionForm, draftPositions: serviceVersionForm.draftPositions.filter((_: any, i: number) => i !== idx) })} className="p-1 hover:bg-rose-50 text-rose-400 rounded transition-colors"><Trash2 size={11} /></button>
                                 </div>
                               </div>
@@ -2126,10 +2134,18 @@ export default function CRMPage() {
                                 <input type="number" min={1} className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={draftPosForm.quantity} onChange={(e) => setDraftPosForm({ ...draftPosForm, quantity: Number(e.target.value) })} />
                               </div>
                             </div>
+                            <div>
+                              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Género requerido</label>
+                              <select className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={draftPosForm.preferenciaGenero || 'INDISTINTO'} onChange={(e) => setDraftPosForm({ ...draftPosForm, preferenciaGenero: e.target.value })}>
+                                <option value="INDISTINTO">Indistinto</option>
+                                <option value="M">Masculino</option>
+                                <option value="F">Femenino</option>
+                              </select>
+                            </div>
                             <div className="flex gap-2">
                               <button onClick={() => {
-                                setServiceVersionForm({ ...serviceVersionForm, draftPositions: [...serviceVersionForm.draftPositions, { positionName: draftPosForm.positionName, coverageType: draftPosForm.coverageType, quantity: draftPosForm.quantity, allowedShiftTypes: [] }] });
-                                setDraftPosForm({ positionName: '', coverageType: '24hs', quantity: 1 });
+                                setServiceVersionForm({ ...serviceVersionForm, draftPositions: [...serviceVersionForm.draftPositions, { positionName: draftPosForm.positionName, coverageType: draftPosForm.coverageType, quantity: draftPosForm.quantity, preferenciaGenero: draftPosForm.preferenciaGenero || 'INDISTINTO', allowedShiftTypes: [] }] });
+                                setDraftPosForm({ positionName: '', coverageType: '24hs', quantity: 1, preferenciaGenero: 'INDISTINTO' });
                                 setAddingDraftPos(false);
                               }} className="bg-emerald-500 text-white px-4 py-1.5 rounded-lg font-black uppercase text-[10px]">Agregar</button>
                               <button onClick={() => setAddingDraftPos(false)} className="text-slate-400 border border-slate-200 px-4 py-1.5 rounded-lg font-black uppercase text-[10px]">Cancelar</button>
@@ -2264,7 +2280,7 @@ export default function CRMPage() {
                                       <div className="flex items-center justify-between mb-1">
                                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Puestos / Posiciones</p>
                                         <button
-                                          onClick={() => { setAddingPositionToService(s.id); setEditingPositionIdx(null); setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [] }); }}
+                                          onClick={() => { setAddingPositionToService(s.id); setEditingPositionIdx(null); setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO' }); }}
                                           className="flex items-center gap-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase"
                                         >
                                           <Plus size={12} /> Agregar puesto
@@ -2293,6 +2309,8 @@ export default function CRMPage() {
                                                   <p className="text-[10px] font-bold text-slate-400">{COVERAGE_LABELS[pos.coverageType] || pos.coverageType} · {pos.quantity || pos.qty || 1} guardia{(pos.quantity || pos.qty || 1) !== 1 ? 's' : ''}</p>
                                                 </div>
                                                 <div className="flex items-center gap-1 flex-shrink-0">
+                                                  {pos.preferenciaGenero === 'M' && <span className="text-[9px] font-black text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded" title="Solo masculino">♂</span>}
+                                                  {pos.preferenciaGenero === 'F' && <span className="text-[9px] font-black text-pink-700 bg-pink-100 px-1.5 py-0.5 rounded" title="Solo femenino">♀</span>}
                                                   {pos.activeDays && pos.activeDays.length < 7 && (
                                                     <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
                                                       {pos.activeDays.join('')}
@@ -2307,6 +2325,7 @@ export default function CRMPage() {
                                                         coverageType: pos.coverageType || '24hs',
                                                         quantity: pos.quantity || pos.qty || 1,
                                                         allowedShiftTypes: pos.allowedShiftTypes || [],
+                                                        preferenciaGenero: pos.preferenciaGenero || 'INDISTINTO',
                                                       });
                                                     }}
                                                     className="p-1 hover:bg-indigo-50 text-indigo-400 hover:text-indigo-600 rounded transition-colors"
@@ -2338,6 +2357,14 @@ export default function CRMPage() {
                                                     <div>
                                                       <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Cant. guardias</label>
                                                       <input type="number" min={1} className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={positionForm.quantity} onChange={(e) => setPositionForm({ ...positionForm, quantity: Number(e.target.value) })} />
+                                                    </div>
+                                                    <div>
+                                                      <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Género requerido</label>
+                                                      <select className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={positionForm.preferenciaGenero || 'INDISTINTO'} onChange={(e) => setPositionForm({ ...positionForm, preferenciaGenero: e.target.value })}>
+                                                        <option value="INDISTINTO">Indistinto</option>
+                                                        <option value="M">Masculino</option>
+                                                        <option value="F">Femenino</option>
+                                                      </select>
                                                     </div>
                                                   </div>
                                                   <div className="flex gap-2 pt-1">
@@ -2372,10 +2399,18 @@ export default function CRMPage() {
                                                 <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Cant. guardias</label>
                                                 <input type="number" min={1} className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={positionForm.quantity} onChange={(e) => setPositionForm({ ...positionForm, quantity: Number(e.target.value) })} />
                                               </div>
+                                              <div>
+                                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Género requerido</label>
+                                                <select className="w-full p-2 rounded-lg border border-slate-200 bg-white font-bold text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400" value={positionForm.preferenciaGenero || 'INDISTINTO'} onChange={(e) => setPositionForm({ ...positionForm, preferenciaGenero: e.target.value })}>
+                                                  <option value="INDISTINTO">Indistinto</option>
+                                                  <option value="M">Masculino</option>
+                                                  <option value="F">Femenino</option>
+                                                </select>
+                                              </div>
                                             </div>
                                             <div className="flex gap-2 pt-1">
                                               <button onClick={() => handleSavePosition(s.id, positions, null)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-1.5 rounded-lg font-black uppercase text-[10px] transition-colors">Agregar</button>
-                                              <button onClick={() => { setAddingPositionToService(null); setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [] }); }} className="bg-white hover:bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-lg font-black uppercase text-[10px] transition-colors">Cancelar</button>
+                                              <button onClick={() => { setAddingPositionToService(null); setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO' }); }} className="bg-white hover:bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-lg font-black uppercase text-[10px] transition-colors">Cancelar</button>
                                             </div>
                                           </div>
                                         )}

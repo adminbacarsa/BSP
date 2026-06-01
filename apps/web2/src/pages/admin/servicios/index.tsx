@@ -100,7 +100,7 @@ export default function ServiciosSLAPage() {
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [positionForm, setPositionForm] = useState<ServicePosition>({
     id: '', name: 'Puesto 1', code: '', coverageType: '24hs', quantity: 1,
-    activeDays: ['L','M','X','J','V','S','D'], allowedShiftTypes: []
+    activeDays: ['L','M','X','J','V','S','D'], allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO',
   });
 
   const [newCustomShift, setNewCustomShift] = useState<{
@@ -1685,6 +1685,8 @@ export default function ServiciosSLAPage() {
                               <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{pos.quantity} PAX</span></div>
                               <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
+                                {pos.preferenciaGenero === 'M' && <span className="text-[10px] font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded" title="Solo masculino">♂ M</span>}
+                                {pos.preferenciaGenero === 'F' && <span className="text-[10px] font-black text-pink-700 bg-pink-100 px-2 py-0.5 rounded" title="Solo femenino">♀ F</span>}
                                 <span className="text-[10px] font-black text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800" title="Horas de cobertura por día (un puesto). Rango si cambia según el día de la semana.">
                                   {formatPositionDailyCoverageLabel(pos)}
                                 </span>
@@ -1766,6 +1768,14 @@ export default function ServiciosSLAPage() {
                             <option value="12hs_diurno">12 HORAS DIURNO</option>
                             <option value="12hs_nocturno">12 HORAS NOCTURNO</option>
                             <option value="custom">PERSONALIZADO / TURNOS ESPECÍFICOS</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Género requerido en el puesto</label>
+                        <select className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold dark:text-white" value={positionForm.preferenciaGenero || 'INDISTINTO'} onChange={e => setPositionForm({ ...positionForm, preferenciaGenero: e.target.value as ServicePosition['preferenciaGenero'] })}>
+                            <option value="INDISTINTO">Indistinto</option>
+                            <option value="M">Solo masculino</option>
+                            <option value="F">Solo femenino</option>
                         </select>
                     </div>
 

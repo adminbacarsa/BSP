@@ -101,6 +101,16 @@ import {
     buildPlanningSnapshotFromGrid,
     diffPlanningSnapshots,
 } from '@/lib/planificacion/planningSnapshotDiff';
+import {
+    buildDeploymentShiftConfig,
+    cellLabelForDeployment,
+    deploymentFieldsForFirestore,
+    deploymentShiftHours,
+    isDeploymentSurplusCode,
+    shiftCountsForEmployeeCronoHours,
+} from '@/lib/planificacion/deploymentRoles';
+import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure } from '@/lib/planificacion/genderPreference';
+import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 
 // --- CONFIGURACIÓN VISUAL ---
 const SHIFT_STYLES: any = {
@@ -117,6 +127,8 @@ const SHIFT_STYLES: any = {
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
     'RET': 'bg-white text-amber-800 border-amber-500 font-black',
+    'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
+    'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
     'PAST':   'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed',
@@ -135,6 +147,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'N12': 'Jornada Nocturna 12hs',
     'F': 'Franco Compensatorio',
     'RET': 'Guardia Retén',
+    'REF': 'Refuerzo (no cuenta cobertura SLA)',
+    'ESC': 'Escuela / formación en objetivo',
     'PU': 'Puesto Único / Especial',
     'A': 'ART',
     'V': 'Vacaciones',
@@ -166,7 +180,7 @@ const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'C': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'ESC': 8, 'C': 8,
 };
 
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
@@ -175,6 +189,7 @@ const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number => {
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
+    if (isDeploymentSurplusCode(code)) return deploymentShiftHours(shift);
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
     const stored = Number(shift.hours);
     if (stored > 0) return stored;
@@ -339,6 +354,7 @@ export default function PlanificacionPage() {
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
     const dotacionMigratedRef = useRef(false);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number } | null>(null);
+    const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [hasUnread, setHasUnread] = useState(false);
@@ -543,7 +559,7 @@ export default function PlanificacionPage() {
     };
 
     // 🛑 Helpers de dotación — stats precalculados evitan re-escaneos O(n×días) en cada filtro/orden
-    const BAND_FILTERABLE = useMemo(() => new Set(['M', 'T', 'N', 'D12', 'N12', 'RET']), []);
+    const BAND_FILTERABLE = useMemo(() => new Set(['M', 'T', 'N', 'D12', 'N12', 'RET', 'REF', 'ESC']), []);
 
     const activeGuestIdsForObjective = useMemo(() => {
         if (!selectedObjective) return new Set<string>();
@@ -702,7 +718,7 @@ export default function PlanificacionPage() {
                     if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
                         String(activeShift.objectiveId) !== String(selectedObjective)) return;
                 } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
+                if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
                 total += calcShiftHours(activeShift, slaCodeHoursHint);
             });
             result[emp.id] = total;
@@ -792,7 +808,7 @@ export default function PlanificacionPage() {
                 if (activeShift && !turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
             }
             if (!activeShift) return;
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
+            if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
             result[empId] = (result[empId] || 0) + calcShiftHours(activeShift, slaCodeHoursHint);
         };
         displayedEmployees.forEach((emp: any) => {
@@ -1635,6 +1651,8 @@ export default function PlanificacionPage() {
                         name: data.name || data.firstName + ' ' + data.lastName,
                         preferredObjectiveId: data.preferredObjectiveId,
                         planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
+                        genero: data.genero || '',
+                        experienciaObjetivos: data.experienciaObjetivos || {},
                         laborAgreement: data.laborAgreement,
                         status: data.status || 'activo',
                         lat: data.lat ?? data.latitude ?? null,
@@ -1664,7 +1682,13 @@ export default function PlanificacionPage() {
                         isExtended: data.isExtended, isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
                         isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
                         swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
-                        positionName: data.positionName
+                        positionName: data.positionName,
+                        deploymentRole: data.deploymentRole,
+                        deploymentBand: data.deploymentBand,
+                        surplusIntent: data.surplusIntent,
+                        countsForCoverage: data.countsForCoverage,
+                        isRefuerzo: data.isRefuerzo,
+                        isEscuela: data.isEscuela,
                     };
                 }
             });
@@ -2173,6 +2197,7 @@ export default function PlanificacionPage() {
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
                             draft: correctionMode ? false : !isPublished,
+                            ...deploymentFieldsForFirestore(change),
                         }, empresaId));
 
                         logData.push({ empId, date: dateStr, action: correctionMode ? 'CORRECCION_SUPERADMIN' : actionType });
@@ -2191,6 +2216,28 @@ export default function PlanificacionPage() {
 
                 await addDoc(collection(db, 'planificaciones_historial'), { timestamp: serverTimestamp(), user: realActorName, period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`, objectiveId: selectedObjective, changes: logData, count, snapshot: JSON.stringify(snapshotData) });
                 await batch.commit();
+                const experienciaPatches = new Map<string, Record<string, unknown>>();
+                for (const [key, change] of Object.entries(pendingChanges)) {
+                    if (change.isDeleted) continue;
+                    const code = String(change.code || '').toUpperCase();
+                    if (code !== 'REF' && code !== 'ESC') continue;
+                    const empId = key.split('_')[0];
+                    const empObj = employees.find(e => e.id === empId);
+                    if (!empObj || !selectedObjective) continue;
+                    const prev = (empObj.experienciaObjetivos || {}) as Record<string, unknown>;
+                    const next = patchExperienciaForTurno(
+                        prev as any,
+                        selectedObjective,
+                        { ...change, ...deploymentFieldsForFirestore(change) },
+                        empObj.preferredObjectiveId,
+                    );
+                    experienciaPatches.set(empId, next);
+                }
+                await Promise.all(
+                    [...experienciaPatches.entries()].map(([empId, exp]) =>
+                        updateDoc(doc(db, 'empleados', empId), { experienciaObjetivos: exp }).catch(() => {}),
+                    ),
+                );
                 // Guardar ausencias pendientes (novedades RRHH)
                 for (const novedad of Object.values(pendingNovedades)) {
                     await addDoc(collection(db, 'ausencias'), stampEmpresaId({ ...novedad, createdAt: serverTimestamp() }, empresaId));
@@ -2348,15 +2395,22 @@ export default function PlanificacionPage() {
         let markAsFT = false;
         if (francosReplaced > 0) { if(confirm(`⚠️ Estás sobrescribiendo ${francosReplaced} Francos.\n¿Deseas marcarlos como FT?`)) { markAsFT = true; } }
         const blockedEmps = new Set<string>();
-        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; const empPos = getEmpPos(emp); for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const dateStr = getDateKey(day); const key = `${emp.id}_${dateStr}`; const existing = shiftsMap[key]; if (isShiftConsolidated(existing)) continue; if (shiftConfig === null) { newChanges[key] = { isDeleted: true }; count++; } else { const { blocked, warnings } = checkRestricciones(emp, dateStr); if (blocked) { blockedEmps.add(emp.name); continue; } if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 })); let cellIsFT = false; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { cellIsFT = markAsFT; } newChanges[key] = { ...shiftConfig, isTemp: true, oldObjectiveId: existing?.objectiveId, isFrancoTrabajado: cellIsFT, positionName: empPos }; count++; } } }
+        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; const empPos = getEmpPos(emp); for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const dateStr = getDateKey(day); const key = `${emp.id}_${dateStr}`; const existing = shiftsMap[key]; if (isShiftConsolidated(existing)) continue; if (shiftConfig === null) { newChanges[key] = { isDeleted: true }; count++; } else { const assignPos = shiftConfig.positionName || empPos; const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos); if (blocked) { blockedEmps.add(emp.name); continue; } if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 })); let cellIsFT = false; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { cellIsFT = markAsFT; } newChanges[key] = { ...shiftConfig, isTemp: true, oldObjectiveId: existing?.objectiveId, isFrancoTrabajado: cellIsFT, positionName: assignPos }; count++; } } }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
         setPendingChanges(newChanges);
         toast.info(`${count} celdas`);
     };
 
-    const checkRestricciones = (emp: any, dateStr: string): { blocked: boolean; warnings: string[] } => {
+    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null): { blocked: boolean; warnings: string[] } => {
         const warnings: string[] = [];
         const currentObjName = getObjectiveName(selectedObjective);
+        const posForGenero = positionName || activePosition || selectedCell?.currentShift?.positionName || null;
+        const prefGenero = getPreferenciaGeneroFromPositionStructure(positionStructure, posForGenero);
+        const generoCheck = checkGeneroPuesto(emp.genero, prefGenero);
+        if (generoCheck.blocked && generoCheck.message) {
+            const posLabel = posForGenero ? ` (${posForGenero})` : '';
+            warnings.push(`🚫 ${emp.name}${posLabel}: ${generoCheck.message}`);
+        }
         // Objetivo excluido (match por id o nombre como fallback)
         const objRestr = (emp.restriccionesObjetivo || []).find((r: any) =>
             r.objectiveId === selectedObjective || r.objectiveName === currentObjName
@@ -2384,14 +2438,15 @@ export default function PlanificacionPage() {
                 }
             });
         }
-        return { blocked: !!(objRestr || clientRestr), warnings };
+        return { blocked: !!(objRestr || clientRestr || generoCheck.blocked), warnings };
     };
 
     const applyToPending = (config: any) => {
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
         if (emp && config && !config.isDeleted) {
-            const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr);
+            const assignPos = config.positionName || activePosition || 'General';
+            const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr, assignPos);
             if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 10000 }));
             if (blocked) return;
         }
@@ -2422,7 +2477,22 @@ export default function PlanificacionPage() {
         toast.info("Cambio aplicado");
     };
 
-    const handleAssignShift = async (shiftConfig: any, positionName: string) => { 
+    const handleAssignDeployment = (intent: 'SURPLUS' | 'TRAINING') => {
+        if (!activePosition || activePosition === 'General' || activePosition === 'Retén') {
+            toast.error('Seleccioná un puesto en la grilla antes de asignar refuerzo o escuela');
+            return;
+        }
+        setDeployBandPicker(intent);
+    };
+
+    const confirmDeploymentBand = (band: string) => {
+        if (!deployBandPicker || !selectedCell) return;
+        const config = buildDeploymentShiftConfig(deployBandPicker, band, activePosition || 'General');
+        setDeployBandPicker(null);
+        handleAssignShift(config, activePosition || 'General');
+    };
+
+    const handleAssignShift = async (shiftConfig: any, positionName: string) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selectedCell) return; 
         if (isDateLocked(selectedCell.dateStr)) { toast.error("Periodo cerrado."); return; } 
@@ -4179,8 +4249,12 @@ export default function PlanificacionPage() {
                                         );
                                         const swapStyle = swapPending ? SHIFT_STYLES['SWAP_PENDING'] : SHIFT_STYLES['SWAP'];
                                         if (isLockedDate) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; } 
-                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; } } }
+                                        else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
                                         else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content=s.code; } } }
+                                        const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
+                                        if (content === 'REF' || content === 'ESC') {
+                                            content = cellLabelForDeployment(String(content), _deployBand);
+                                        }
                                         if (isExtended) { style += ' ring-2 ring-violet-600 z-10'; }
                                         if (isEarly) { style += ' ring-2 ring-cyan-500 z-10'; }
                                         if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; } 
@@ -5705,6 +5779,22 @@ export default function PlanificacionPage() {
                                                         >
                                                             <span>RET</span><span className="text-[8px]">Retén</span>
                                                         </button>
+                                                        <button
+                                                            onClick={() => handleAssignDeployment('SURPLUS')}
+                                                            disabled={isServiceLocked || !activePosition || activePosition === 'General' || activePosition === 'Retén'}
+                                                            className="p-2 bg-violet-100 text-violet-800 border border-violet-300 rounded-lg flex flex-col items-center justify-center font-black disabled:opacity-40"
+                                                            title="Refuerzo — puesto ya cubierto; no suma cobertura SLA"
+                                                        >
+                                                            <span>REF</span><span className="text-[8px]">Refuerzo</span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleAssignDeployment('TRAINING')}
+                                                            disabled={isServiceLocked || !activePosition || activePosition === 'General' || activePosition === 'Retén'}
+                                                            className="p-2 bg-sky-100 text-sky-800 border border-sky-300 rounded-lg flex flex-col items-center justify-center font-black disabled:opacity-40"
+                                                            title="Escuela — formación en objetivo (3 turnos = conocido)"
+                                                        >
+                                                            <span>ESC</span><span className="text-[8px]">Escuela</span>
+                                                        </button>
                                                     </div>
                                                 </>
                                             );
@@ -5736,6 +5826,23 @@ export default function PlanificacionPage() {
                                             operatorName: activeActorName || operatorName
                                         });
                                     }} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Autorizar con PIN</button></div></div></div></div>, document.body)}
+                {deployBandPicker && createPortal(
+                    <div className="fixed inset-0 z-[9100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setDeployBandPicker(null)}>
+                        <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl w-full max-w-xs border dark:border-slate-700" onClick={e => e.stopPropagation()}>
+                            <h3 className="font-black text-sm uppercase mb-1 text-slate-800 dark:text-white">
+                                {deployBandPicker === 'TRAINING' ? 'Escuela — elegir banda' : 'Refuerzo — elegir banda'}
+                            </h3>
+                            <p className="text-[10px] text-slate-500 mb-4">Puesto: <span className="font-bold text-indigo-600">{activePosition}</span></p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {['M', 'T', 'N', 'D12', 'N12'].map(b => (
+                                    <button key={b} onClick={() => confirmDeploymentBand(b)} className={`p-3 rounded-lg border font-black text-sm ${SHIFT_STYLES[b] || 'bg-slate-100'}`}>{b}</button>
+                                ))}
+                            </div>
+                            <button onClick={() => setDeployBandPicker(null)} className="w-full mt-4 py-2 text-xs font-bold text-slate-400 hover:text-slate-600">Cancelar</button>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
                 {showConflictModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-rose-900/20 backdrop-blur-sm"><div className="bg-white p-6 rounded-xl shadow-2xl w-[400px] border-2 border-rose-100"><div className="text-center mb-6"><div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3"><Siren size={24}/></div><h3 className="text-lg font-black text-slate-800">Conflicto Detectado</h3><p className="text-xs text-slate-500 mt-1">Hay una superposición entre Novedad y Turno.</p></div><div className="space-y-3"><button onClick={() => resolveConflict('SPLIT')} className="w-full p-3 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-200 hover:bg-indigo-700 flex items-center justify-center gap-2"><Split size={16}/> Dividir Turno (Extensión + Adelanto)</button><button onClick={() => resolveConflict('FULL_COVERAGE')} className="w-full p-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-50 flex items-center justify-center gap-2"><Shield size={16}/> Cobertura Total (Franco Trabajado)</button><button onClick={() => setShowConflictModal(false)} className="w-full p-3 text-slate-400 font-bold text-xs hover:text-slate-600">Cancelar</button></div></div></div>)}
                 {showSwapModal && (
                     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -5835,7 +5942,7 @@ export default function PlanificacionPage() {
                             const s = shiftsMap[key];
                             const sh = p && !p.isDeleted ? p : s;
                             if (!sh?.code) continue;
-                            if (OBJECTIVE_NON_BILLABLE_CODES.has(String(sh.code).toUpperCase())) continue;
+                            if (!shiftCountsForEmployeeCronoHours(sh)) continue;
                             h += calcShiftHours(sh);
                         }
                         return h;
@@ -5858,8 +5965,24 @@ export default function PlanificacionPage() {
                     );
                     const candidatos = employees
                         .filter(e => e.id !== vacancyData?.employeeId)
-                        .map(e => ({ ...e, monthHours: getEmpMonthHours(e.id), dayStatus: getEmpStatusOnDate(e.id), isObjectiveGuard: objectiveEmpIds.has(e.id) }))
-                        .sort((a, b) => a.monthHours - b.monthHours);
+                        .map(e => ({
+                            ...e,
+                            monthHours: getEmpMonthHours(e.id),
+                            dayStatus: getEmpStatusOnDate(e.id),
+                            isObjectiveGuard: objectiveEmpIds.has(e.id),
+                            expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
+                        }))
+                        .sort((a, b) => {
+                            const rank = (x: typeof a) => {
+                                if (x.expBadge.startsWith('★')) return 0;
+                                if (x.expBadge.startsWith('◆')) return 1;
+                                if (x.expBadge.startsWith('◇')) return 2;
+                                return 3;
+                            };
+                            const dr = rank(a) - rank(b);
+                            if (dr !== 0) return dr;
+                            return a.monthHours - b.monthHours;
+                        });
                     // Orden: 1° objetivo, 2° retenes externos, 3° sin turno externos, 4° con horas, 5° resto
                     const objetivoCandidatos = candidatos.filter(e => e.isObjectiveGuard);
                     const retenCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'RETEN');
@@ -5887,13 +6010,13 @@ export default function PlanificacionPage() {
                                 <select className="w-full p-3 rounded-lg border text-sm font-bold bg-white" value={selectedReplacement} onChange={e => setSelectedReplacement(e.target.value)}>
                                     <option value="">Sin cobertura — dejar vacante</option>
                                     {objetivoCandidatos.length > 0 && <optgroup label={`🏢 Guardias del objetivo (${objetivoCandidatos.length})`}>
-                                        {objetivoCandidatos.map(e => <option key={e.id} value={e.id}>{e.name} — {e.monthHours}h este mes{e.dayStatus === 'RETEN' ? ' ★ Retén' : e.dayStatus === 'FREE' ? ' ◎ Libre hoy' : ''}</option>)}
+                                        {objetivoCandidatos.map(e => <option key={e.id} value={e.id}>{e.expBadge} {e.name} — {e.monthHours}h{e.dayStatus === 'RETEN' ? ' · Retén' : e.dayStatus === 'FREE' ? ' · Libre' : ''}</option>)}
                                     </optgroup>}
                                     {retenCandidatos.length > 0 && <optgroup label={`🔶 RETÉN externo — En disponibilidad (${retenCandidatos.length})`}>
                                         {retenCandidatos.map(e => <option key={e.id} value={e.id}>★ {e.name} — Retén ({e.monthHours}h)</option>)}
                                     </optgroup>}
                                     {sinTurnoCandidatos.length > 0 && <optgroup label={`🟢 Sin turno hoy — disponibles (${sinTurnoCandidatos.length})`}>
-                                        {sinTurnoCandidatos.map(e => <option key={e.id} value={e.id}>◎ {e.name} — Libre ({e.monthHours}h)</option>)}
+                                        {sinTurnoCandidatos.map(e => <option key={e.id} value={e.id}>{e.expBadge} {e.name} — Libre ({e.monthHours}h)</option>)}
                                     </optgroup>}
                                     {retCandidatos.length > 0 && <optgroup label={`Con horas disponibles (${retCandidatos.length})`}>
                                         {retCandidatos.map(e => <option key={e.id} value={e.id}>{e.name} — {e.monthHours}h ({(e.maxHours||200) - e.monthHours}h libres)</option>)}

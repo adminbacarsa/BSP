@@ -6,7 +6,7 @@
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
-    'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET',
+    'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC',
 ]);
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
