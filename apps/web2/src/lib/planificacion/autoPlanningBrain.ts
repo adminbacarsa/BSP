@@ -84,6 +84,8 @@ export interface AutoPlanningBrainResult {
     diagnosis: PlanningOperationalDiagnosis;
     /** Si true: motor sin flex 5+1/6+1 ni F→turno agresivo. */
     strictSixTwo: boolean;
+    /** Ciclo alternativo viable que el usuario puede elegir manualmente (ej. '5+1'). */
+    recommendedAlternative?: string;
 }
 
 function is24hs(pos: V2PositionDef): boolean {
@@ -209,6 +211,8 @@ export type AutoPlanningBrainInput = Omit<
     /** Override manual (personalizar wizard); si undefined, decide el cerebro. */
     rotateShiftsOverride?: boolean;
     ajustarCronoOverride?: boolean;
+    /** Forzar un ciclo específico (ej. '5+1') sin pasar por pickOptimalAutoCycles. */
+    cycleOverride?: string;
 };
 
 /**
@@ -219,7 +223,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     const employeeIds = input.employees.map(e => e.id);
     const monthDateStrs = input.daysInMonth.map(d => input.getDateKey(d));
 
-    const picked = pickOptimalAutoCycles({ ...input, autoCycles: [] });
+    const picked = pickOptimalAutoCycles({ ...input, autoCycles: input.cycleOverride ? [input.cycleOverride] : [] });
     let cycleKey = picked.pickedKey;
     let cycles = picked.cycles;
     let feasibility = picked.feasibility;
@@ -336,5 +340,6 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         warnings,
         diagnosis,
         strictSixTwo: diagnosis.strictSixTwo && !ajustarCrono,
+        recommendedAlternative: picked.recommendedAlternative,
     };
 }

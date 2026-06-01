@@ -78,8 +78,8 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
-/** Preferencia auto: más descanso con M/T/N 8h; 4+2 solo si no cierra con 8h. */
-const AUTO_CYCLE_PREFERENCE = ['6+2', '5+1', '6+1', '4+2'] as const;
+/** Preferencia auto: 6+2 por defecto; 5+1 nunca se elige automáticamente (solo se sugiere). */
+const AUTO_CYCLE_PREFERENCE = ['6+2', '6+1', '4+2'] as const;
 /** Ajustar crono: maximizar horas/guardia (4+2→5+1→6+1); evita 6+2 para liberar RET. */
 const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['4+2', '5+1', '6+1'] as const;
 
@@ -115,13 +115,29 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
     pickedKey: string;
     evaluated: Array<{ cycleKey: string; ok: boolean; score: number }>;
     ajustarCrono?: boolean;
+    recommendedAlternative?: string;
 } {
     const ajustarCrono = ctx.ajustarCrono === true;
+
+    // Ciclo forzado externamente (override desde UI): usar directamente sin auto-selección
+    if (ctx.autoCycles && ctx.autoCycles.length > 0) {
+        const key = ctx.autoCycles[0];
+        const feas = checkFeasibility({ ...ctx, autoCycles: [key] });
+        return {
+            cycles: [key],
+            feasibility: feas,
+            pickedKey: key,
+            ajustarCrono,
+            evaluated: [{ cycleKey: key, ok: feas.ok, score: Math.round(scoreAutoCycleFeasibility(feas, key, ajustarCrono)) }],
+            recommendedAlternative: undefined,
+        };
+    }
+
     const evaluated = AUTO_CYCLE_PREFERENCE.map((key) => {
         const feas = checkFeasibility({ ...ctx, autoCycles: [key] });
         return { cycleKey: key, ok: feas.ok, score: scoreAutoCycleFeasibility(feas, key, ajustarCrono), feas };
     });
-    const eightHour = new Set(['6+2', '5+1', '6+1']);
+    const eightHour = new Set(['6+2', '6+1']);
     const intensiveSet = new Set<string>(AJUSTAR_CRONO_CYCLE_PREFERENCE);
     const firstViableIntensive = ajustarCrono
         ? evaluated.find(e => e.ok && intensiveSet.has(e.cycleKey))
@@ -131,11 +147,20 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
         : undefined;
     const firstViableAny = evaluated.find(e => e.ok);
     const pick = firstViableIntensive ?? firstViable8h ?? firstViableAny ?? [...evaluated].sort((a, b) => b.score - a.score)[0];
+
+    // 5+1 no se elige automáticamente pero se sugiere si es viable
+    let recommendedAlternative: string | undefined;
+    if (!ajustarCrono) {
+        const feas51 = checkFeasibility({ ...ctx, autoCycles: ['5+1'] });
+        if (feas51.ok) recommendedAlternative = '5+1';
+    }
+
     return {
         cycles: [pick.cycleKey],
         feasibility: pick.feas,
         pickedKey: pick.cycleKey,
         ajustarCrono,
+        recommendedAlternative,
         evaluated: evaluated.map(e => ({ cycleKey: e.cycleKey, ok: e.ok, score: Math.round(e.score) })),
     };
 }

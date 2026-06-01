@@ -420,6 +420,7 @@ export default function PlanificacionPage() {
     const [autoContingenciaDias, setAutoContingenciaDias] = useState<Set<string>>(() => new Set());
     const [autoPlanningBrainReport, setAutoPlanningBrainReport] = useState<AutoPlanningBrainResult | null>(null);
     const autoPlanningBrainRef = React.useRef<AutoPlanningBrainResult | null>(null);
+    const autoPlanningBrainInputRef = React.useRef<Parameters<typeof resolveAutoPlanningBrain>[0] | null>(null);
 
     useEffect(() => {
         if (autoRotateForce === false && autoAjustarCrono) setAutoAjustarCrono(false);
@@ -2930,6 +2931,7 @@ export default function PlanificacionPage() {
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
             };
+            autoPlanningBrainInputRef.current = brainInput;
             const brain = resolveAutoPlanningBrain(brainInput);
             autoPlanningBrainRef.current = brain;
             setAutoPlanningBrainReport(brain);
@@ -2999,6 +3001,7 @@ export default function PlanificacionPage() {
             setAutoWizardPersonalize(true);
             autoV2ReportRef.current = null;
             autoPlanningBrainRef.current = null;
+            autoPlanningBrainInputRef.current = null;
             setAutoV2Report(null);
             setAutoPlanningBrainReport(null);
             setAutoV2FormReport(null);
@@ -6677,6 +6680,24 @@ export default function PlanificacionPage() {
                                                 Contingencia: {autoPlanningBrainReport.contingencyDaysManual.length} día(s)
                                                 {autoPlanningBrainReport.contingencyOk ? ' · viable' : ' · no viable'}
                                             </p>
+                                        )}
+                                        {autoPlanningBrainReport.recommendedAlternative && !autoAjustarCrono && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const alt = autoPlanningBrainReport.recommendedAlternative!;
+                                                    const baseInput = autoPlanningBrainInputRef.current;
+                                                    if (!baseInput) return;
+                                                    const newBrain = resolveAutoPlanningBrain({ ...baseInput, cycleOverride: alt });
+                                                    autoPlanningBrainRef.current = newBrain;
+                                                    setAutoPlanningBrainReport(newBrain);
+                                                    autoSelectedCyclesRef.current = newBrain.cycles;
+                                                    setAutoCycles(newBrain.cycles);
+                                                }}
+                                                className="w-full text-left text-[10px] font-bold rounded px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
+                                            >
+                                                💡 <strong>{autoPlanningBrainReport.recommendedAlternative}</strong> también es viable — clic para aplicar
+                                            </button>
                                         )}
                                     </div>
                                 )}
