@@ -1707,7 +1707,7 @@ exports.triggerBackup = functions
     .runWith({ timeoutSeconds: 540, memory: '512MB' })
     .https.onCall(async (data, context) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
-    const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
+    const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
     if (!folderId)
         throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
     const db = admin.firestore();
@@ -1722,7 +1722,7 @@ exports.triggerBackup = functions
     }
     const scopeEmpresa = !!empresaId;
     try {
-        const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa });
+        const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup' });
         return result;
     }
     catch (e) {
@@ -1990,9 +1990,17 @@ exports.scheduledBackup = functions
         });
         return null;
     }
+    const jobLogRef = db.collection('scheduled_job_logs').doc('scheduledBackup');
     try {
-        const result = await (0, backup_service_1.runBackup)(folderId);
+        const result = await (0, backup_service_1.runBackup)(folderId, { source: 'scheduledBackup' });
         console.log(`[scheduledBackup] OK: ${result.fileName} — ${result.totalDocs} docs`);
+        await jobLogRef.set({
+            lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastStatus: 'ok',
+            lastFileName: result.fileName,
+            totalDocs: result.totalDocs,
+            error: null,
+        }, { merge: true });
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -2001,8 +2009,14 @@ exports.scheduledBackup = functions
             status: 'error',
             error: msg.slice(0, 500),
             source: 'scheduledBackup',
+            backupScope: 'platform',
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        await jobLogRef.set({
+            lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastStatus: 'error',
+            error: msg.slice(0, 500),
+        }, { merge: true });
     }
     return null;
 });

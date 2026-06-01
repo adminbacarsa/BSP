@@ -1,6 +1,7 @@
 export interface BackupOptions {
     empresaId?: string;
     scopeEmpresa?: boolean;
+    source?: string;
 }
 export interface BackupResult {
     id: string;

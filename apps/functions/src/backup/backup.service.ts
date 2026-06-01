@@ -19,6 +19,8 @@ const MAX_DOCS_PER_COLLECTION = 50000;
 export interface BackupOptions {
   empresaId?: string;
   scopeEmpresa?: boolean;
+  /** scheduledBackup | triggerBackup */
+  source?: string;
 }
 
 function docBelongsToEmpresa(data: Record<string, unknown>, empresaId: string, scopeEmpresa: boolean): boolean {
@@ -171,6 +173,8 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     driveBackupFolderId: folderId,
     createdAt: FieldValue.serverTimestamp(),
     status: 'ok',
+    backupScope: scopeEmpresa ? 'empresa' : 'platform',
+    ...(opts.source ? { source: opts.source } : {}),
     ...(empresaId ? { empresaId } : {}),
     ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
   };

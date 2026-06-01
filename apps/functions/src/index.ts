@@ -2094,7 +2094,7 @@ export const triggerBackup = functions
   .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
 
-    const folderId = process.env.DRIVE_BACKUP_FOLDER_ID;
+    const folderId = await resolveDriveBackupFolderId();
     if (!folderId) throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
 
     const db = admin.firestore();
@@ -2110,7 +2110,7 @@ export const triggerBackup = functions
     const scopeEmpresa = !!empresaId;
 
     try {
-      const result = await runBackup(folderId, { empresaId, scopeEmpresa });
+      const result = await runBackup(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup' });
       return result;
     } catch (e: any) {
       const errDoc = {
@@ -2412,9 +2412,17 @@ export const scheduledBackup = functions
       });
       return null;
     }
+    const jobLogRef = db.collection('scheduled_job_logs').doc('scheduledBackup');
     try {
-      const result = await runBackup(folderId);
+      const result = await runBackup(folderId, { source: 'scheduledBackup' });
       console.log(`[scheduledBackup] OK: ${result.fileName} — ${result.totalDocs} docs`);
+      await jobLogRef.set({
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastStatus: 'ok',
+        lastFileName: result.fileName,
+        totalDocs: result.totalDocs,
+        error: null,
+      }, { merge: true });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error('[scheduledBackup] Error:', e);
@@ -2422,8 +2430,14 @@ export const scheduledBackup = functions
         status: 'error',
         error: msg.slice(0, 500),
         source: 'scheduledBackup',
+        backupScope: 'platform',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      await jobLogRef.set({
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastStatus: 'error',
+        error: msg.slice(0, 500),
+      }, { merge: true });
     }
     return null;
   });

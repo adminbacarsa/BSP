@@ -136,6 +136,8 @@ async function runBackup(folderId, opts = {}) {
         driveBackupFolderId: folderId,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
         status: 'ok',
+        backupScope: scopeEmpresa ? 'empresa' : 'platform',
+        ...(opts.source ? { source: opts.source } : {}),
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
     };

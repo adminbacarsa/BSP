@@ -13,7 +13,7 @@ const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
  *    para que coincida con IP DHCP sin tocar .env.
  * 3) Si abres por localhost/127.0.0.1, usa localhost.
  */
-function getEmulatorHost(): string {
+export function getEmulatorHost(): string {
   const explicit = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST?.trim();
   if (explicit) return explicit;
   // El suite Firebase corre en esta PC; aunque abras :3000 por IP LAN, los emuladores están en loopback.

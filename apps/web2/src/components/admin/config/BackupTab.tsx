@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { db, functions, storage, auth } from '@/lib/firebase';
+import { db, functions, storage, auth, getEmulatorHost } from '@/lib/firebase';
+import { toast } from 'sonner';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, doc as fsDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
-import { shouldScopeQueriesToEmpresa, filterRowsByEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const STORAGE_KEY = 'emulator_loaded_backup';
 
@@ -23,8 +24,25 @@ function docMatchesEmpresa(doc: any, empId: string): boolean {
   return docEmpId === empId || (empId === 'bacarsa' && docEmpId === '');
 }
 
+function emulatorBaseUrl(): string {
+  return `http://${getEmulatorHost()}:8080`;
+}
+
+async function assertEmulatorReachable(): Promise<void> {
+  try {
+    const res = await fetch(`${emulatorBaseUrl()}/`, { method: 'GET' });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch {
+    throw new Error(
+      'No se pudo conectar al emulador Firestore (:8080). Ejecutá npm run emulators y recargá la página.',
+    );
+  }
+}
+
 async function emulatorQueryAndDeleteByEmpresa(colName: string, empId: string): Promise<number> {
-  const url = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+  const url = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
@@ -46,7 +64,7 @@ async function emulatorQueryAndDeleteByEmpresa(colName: string, empId: string): 
   const rows: Array<{ document?: { name: string } }> = await res.json();
   const names = rows.filter(r => r.document?.name).map(r => r.document!.name);
   if (names.length === 0) return 0;
-  const batchUrl = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
+  const batchUrl = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
   for (let i = 0; i < names.length; i += 400) {
     const chunk = names.slice(i, i + 400);
     await fetch(batchUrl, {
@@ -87,6 +105,8 @@ interface BackupRecord {
   error?: string;
   empresaId?: string;
   scopeEmpresa?: boolean;
+  source?: string;
+  backupScope?: 'platform' | 'empresa';
 }
 
 const fmt = (bytes: number) => {
@@ -227,7 +247,7 @@ function toFsFields(obj: Record<string, unknown>): Record<string, unknown> {
 async function emulatorBatchWrite(
   writes: Array<{ name: string; fields: Record<string, unknown> }>,
 ) {
-  const url = `http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
+  const url = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -242,6 +262,19 @@ async function emulatorBatchWrite(
     const body = await res.text();
     throw new Error(`emulatorBatchWrite HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
+}
+
+function backupVisibleInTab(
+  b: BackupRecord,
+  empresaId: string,
+  scopeEmpresa: boolean,
+  isSuperAdmin: boolean,
+): boolean {
+  if (!scopeEmpresa) return true;
+  if (b.backupScope === 'platform' || b.source === 'scheduledBackup') return true;
+  if (!b.empresaId) return true;
+  if (isSuperAdmin) return true;
+  return String(b.empresaId ?? '').trim().toLowerCase() === String(empresaId ?? '').trim().toLowerCase();
 }
 
 export default function BackupTab() {
@@ -264,6 +297,7 @@ export default function BackupTab() {
     sourceEmpresaId?: string;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [loadingLocal, setLoadingLocal] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
   const [loadedVersion, setLoadedVersion] = useState<LoadedVersion | null>(null);
@@ -284,14 +318,14 @@ export default function BackupTab() {
     setLoading(true);
     setBackups([]);
 
-    const q = scopeEmpresa
+    const q = scopeEmpresa && !isSuperAdmin
       ? query(collection(db, 'system_backups'), where('empresaId', '==', empresaId), limit(40))
-      : query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(20));
+      : query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(40));
 
     const unsub = onSnapshot(q, snap => {
       let rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as BackupRecord));
       if (scopeEmpresa) {
-        rows = filterRowsByEmpresa(rows, empresaId, true);
+        rows = rows.filter(b => backupVisibleInTab(b, empresaId, scopeEmpresa, isSuperAdmin));
         rows.sort((a, b) => {
           const ta = a.createdAt instanceof Timestamp ? a.createdAt.toMillis() : new Date(a.createdAt ?? 0).getTime();
           const tb = b.createdAt instanceof Timestamp ? b.createdAt.toMillis() : new Date(b.createdAt ?? 0).getTime();
@@ -302,7 +336,7 @@ export default function BackupTab() {
       setLoading(false);
     }, () => setLoading(false));
     return unsub;
-  }, [empresaId, scopeEmpresa]);
+  }, [empresaId, scopeEmpresa, isSuperAdmin]);
 
   const handleRunBackup = async () => {
     setRunning(true); setLastResult(null);
@@ -367,30 +401,72 @@ export default function BackupTab() {
 
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
 
+  const countImportableDocs = (
+    backup: Record<string, unknown>,
+    isEmpresaMode: boolean,
+    targetEmpresaId: string,
+  ): number => {
+    const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, unknown[]][];
+    let total = 0;
+    for (const [colName, docs] of cols) {
+      if (!Array.isArray(docs) || docs.length === 0) continue;
+      if (!isEmpresaMode) {
+        total += docs.filter((d: any) => d?._id).length;
+        continue;
+      }
+      if (colName === 'empresas') {
+        total += docs.filter((d: any) => d?._id === targetEmpresaId).length;
+      } else if (EMPRESA_SCOPED_COLS.has(colName)) {
+        total += docs.filter((d: any) => docMatchesEmpresa(d, targetEmpresaId)).length;
+      }
+    }
+    return total;
+  };
+
   // Carga un backup JSON local directo al emulador desde el browser
   const handleLoadLocalFile = async (file: File) => {
+    if (loadingLocal) return;
     setLastResult(null);
-    setProgress({ done: 0, total: 0, phase: 'Leyendo archivo...' });
+    setLoadingLocal(true);
+    setProgress({ done: 0, total: 0, phase: `Leyendo ${file.name}…` });
+    await new Promise<void>(r => requestAnimationFrame(() => r()));
     const isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
     try {
+      if (isEmpresaMode && !empresaId) {
+        throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
+      }
+      await assertEmulatorReachable();
+
+      setProgress({ done: 0, total: 0, phase: 'Parseando JSON…' });
+      await new Promise<void>(r => requestAnimationFrame(() => r()));
       const text = await file.text();
       const backup = JSON.parse(text);
       validateBackupJsonForEmpresa(backup as Record<string, unknown>);
 
+      const importable = countImportableDocs(backup, isEmpresaMode, empresaId);
+      if (importable === 0) {
+        const detected = detectDominantEmpresaInPayload(backup as Record<string, unknown>);
+        const hint = isEmpresaMode && detected.empresaId && detected.empresaId !== empresaId
+          ? ` El backup parece ser de «${detected.empresaId}» y tenés seleccionada «${empresaId}».`
+          : isEmpresaMode
+            ? ' Probá «Plataforma completa» (superadmin) o verificá el selector de empresa.'
+            : '';
+        throw new Error(`Ningún documento coincide con el alcance elegido.${hint}`);
+      }
+
       const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, any[]][];
 
       if (!isEmpresaMode) {
-        // Modo plataforma: borra todo y restaura todo
-        setProgress({ done: 0, total: 0, phase: 'Limpiando emulador (plataforma completa)...' });
-        await fetch(`http://localhost:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
+        setProgress({ done: 0, total: importable, phase: 'Limpiando emulador (plataforma completa)…' });
+        await fetch(`${emulatorBaseUrl()}/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
           method: 'DELETE',
         });
       } else {
-        setProgress({ done: 0, total: 0, phase: `Limpiando datos de ${empresaId}…` });
+        setProgress({ done: 0, total: importable, phase: `Limpiando datos de ${empresaId}…` });
       }
 
       let written = 0;
-      const totalDocs = cols.reduce((acc, [, docs]) => acc + (docs?.length ?? 0), 0);
+      const totalDocs = importable;
 
       for (const [colName, docs] of cols) {
         if (!Array.isArray(docs) || docs.length === 0) continue;
@@ -461,10 +537,15 @@ export default function BackupTab() {
       setLoadedVersion(version);
 
       const scope = isEmpresaMode ? ` (solo ${empresaId})` : ' (plataforma completa)';
-      setLastResult({ ok: true, msg: `Emulador actualizado${scope} — ${written.toLocaleString()} docs. Recargá la página (F5) para restaurar la sesión.` });
+      const okMsg = `Emulador actualizado${scope} — ${written.toLocaleString()} docs. Recargá la página (F5) para ver los datos.`;
+      setLastResult({ ok: true, msg: okMsg });
+      toast.success(okMsg);
     } catch (e: any) {
-      setLastResult({ ok: false, msg: e?.message || 'Error al cargar el archivo' });
+      const msg = e?.message || 'Error al cargar el archivo';
+      setLastResult({ ok: false, msg });
+      toast.error(msg);
     } finally {
+      setLoadingLocal(false);
       setProgress(null);
     }
   };
@@ -596,6 +677,11 @@ export default function BackupTab() {
           <div>
             <h2 className="font-black text-lg text-slate-800 dark:text-white">Backup de Base de Datos</h2>
             <p className="text-xs text-slate-500 font-bold uppercase">Google Drive · Colecciones Firestore</p>
+            {!IS_EMULATOR && (
+              <p className="text-[11px] text-slate-400 font-bold mt-1">
+                Backup automático diario a las 03:00 (AR) — plataforma completa en Drive
+              </p>
+            )}
           </div>
         </div>
         {!IS_EMULATOR && (
@@ -691,31 +777,34 @@ export default function BackupTab() {
                 )}
               </div>
 
-              {progress ? (
+              {progress || loadingLocal ? (
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs font-bold text-amber-800">
-                    <span>{progress.phase}</span>
-                    <span>{progress.done.toLocaleString()} / {progress.total.toLocaleString()}</span>
+                    <span>{progress?.phase ?? 'Preparando…'}</span>
+                    <span>{(progress?.done ?? 0).toLocaleString()} / {(progress?.total ?? 0).toLocaleString()}</span>
                   </div>
                   <div className="h-2.5 bg-amber-100 rounded-full overflow-hidden">
                     <div className="h-full bg-amber-500 transition-all duration-300 rounded-full"
-                      style={{ width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%` }} />
+                      style={{ width: `${(progress?.total ?? 0) > 0 ? Math.round(((progress?.done ?? 0) / (progress?.total ?? 1)) * 100) : 8}%` }} />
                   </div>
                   <p className="text-[10px] text-amber-600">
-                    {progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}% completado
+                    {(progress?.total ?? 0) > 0
+                      ? `${Math.round(((progress?.done ?? 0) / (progress?.total ?? 1)) * 100)}% completado`
+                      : 'Archivos grandes pueden tardar unos segundos en parsearse…'}
                   </p>
                 </div>
               ) : (
                 <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-sm cursor-pointer transition-colors shadow">
                   <Upload size={15} />
                   Seleccionar backup .json
-                  <input ref={fileInputRef} type="file" accept=".json" className="hidden"
+                  <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden"
+                    disabled={loadingLocal}
                     onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadLocalFile(f); e.target.value = ''; }} />
                 </label>
               )}
 
               {/* Versión activa cargada en el emulador */}
-              {loadedVersion && !progress && (
+              {loadedVersion && !progress && !loadingLocal && (
                 <div className="mt-4 bg-white border border-amber-200 rounded-xl p-3.5 flex items-start gap-3">
                   <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center shrink-0">
                     <Tag size={14} className="text-amber-600" />
@@ -789,6 +878,9 @@ export default function BackupTab() {
                 <div className="flex items-center gap-2">
                   <p className="font-black text-sm text-slate-800 dark:text-white truncate">{b.fileName}</p>
                   {i === 0 && <span className="text-[9px] font-black uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full shrink-0">Último</span>}
+                  {(b.source === 'scheduledBackup' || b.backupScope === 'platform') && (
+                    <span className="text-[9px] font-black uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">Auto 3am</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 mt-1 flex-wrap">
                   <span className="flex items-center gap-1 text-xs text-slate-500 font-bold"><Clock size={11} /> {fmtDate(b.createdAt)}</span>
