@@ -229,6 +229,7 @@ export type PlanningPositionRow = {
   qty: number;
   activeDays: string[];
   coverageType: string;
+  excludedDates?: string[];
   _serviceId?: string;
   _serviceRange?: string;
 };
@@ -277,6 +278,10 @@ export function buildPlanningPositionStructure(
       const shiftList = pos.allowedShiftTypes ?? pos.shifts;
       const hasShifts = Array.isArray(shiftList) && shiftList.length > 0;
       if (!hasShifts && !slaActive) continue;
+      // Días excluidos: SLA-nivel aplica a todos; posición-nivel solo a este puesto
+      const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
+      const posExcluded: string[] = Array.isArray(pos.excludedDates) ? (pos.excludedDates as string[]) : [];
+      const mergedExcluded = [...new Set([...slaExcluded, ...posExcluded])];
       structure.push({
         positionName: String(pos.name ?? pos.positionName ?? 'General'),
         shifts: hasShifts
@@ -285,6 +290,7 @@ export function buildPlanningPositionStructure(
         qty: parsePlanningPositionQty(pos),
         activeDays: (pos.activeDays as string[]) ?? ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
         coverageType: String(pos.coverageType ?? srv.coverageType ?? '24hs'),
+        ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         _serviceId: srv.id,
         _serviceRange: slaServiceRangeLabel(srv),
       });

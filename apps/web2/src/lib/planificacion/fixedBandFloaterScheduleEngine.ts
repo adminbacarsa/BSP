@@ -330,10 +330,11 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             if (!positionIsActiveOn(pos, dayLetter)) return;
 
             const rawCode = CYCLE_24_MTN[(opening + di) % 24];
-            const code = (isRetFloater && WORK_BANDS.has(rawCode)) ? 'RET' : rawCode;
-            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(code)) ? code : null;
+            const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCode) && !!pos.excludedDates?.includes(dateStr);
+            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(rawCode)) ? 'RET' : rawCode;
+            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(rawCode)) ? rawCode : null;
 
-            const meta = shiftMeta(pos, code);
+            const meta = shiftMeta(pos, isExcludedDay ? rawCode : code);
             const isFranco = code === 'F';
             const isRet = code === 'RET';
             assignments.push({

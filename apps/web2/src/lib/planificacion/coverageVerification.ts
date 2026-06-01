@@ -124,6 +124,7 @@ function buildDemandSlots(
         const dateStr = ctx.getDateKey(d);
         const dayLetter = ctx.getDayLetter(dateStr) || DAY_LETTERS[d.getDay()];
         ctx.positions.forEach((pos) => {
+            if (pos.excludedDates?.includes(dateStr)) return;
             const qty = Number(pos.qty) || 0;
             if (!qty) return;
             const eff = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);

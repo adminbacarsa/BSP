@@ -178,6 +178,8 @@ export interface V2PositionDef {
     activeDays?: string[]; // si <7, manda esta lista
     /** '24hs' = meta 24h × pax/día (no se suman variantes M/T/N + D12/N12). 'custom' u otro = suma de bandas o modalidad elegida. */
     coverageType?: string;
+    /** Fechas YYYY-MM-DD sin servicio para este puesto. El guardia pasa a RET y no se exige cobertura. */
+    excludedDates?: string[];
 }
 
 export interface V2EmployeeDef {

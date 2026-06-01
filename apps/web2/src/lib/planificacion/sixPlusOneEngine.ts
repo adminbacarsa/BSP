@@ -195,18 +195,20 @@ export function generateSixPlusOneSchedule(ctx: V2EngineContext): V2GenerateResu
 
                     const cyclePos = (openingSlot + di) % CYCLE_7;
                     const isFranco = cyclePos === FRANCO_POS;
-                    const code = isFranco ? 'F' : band;
-                    const meta = shiftMeta(pos, code);
+                    const isExcludedDay = !isFranco && !!pos.excludedDates?.includes(dateStr);
+                    const code = isExcludedDay ? 'RET' : isFranco ? 'F' : band;
+                    const isRet = code === 'RET';
+                    const meta = shiftMeta(pos, isExcludedDay ? band : code);
 
                     assignments.push({
                         empId,
                         dateStr,
-                        positionName: isFranco ? '' : posName,
+                        positionName: (isFranco || isRet) ? '' : posName,
                         code,
-                        name: meta.name,
+                        name: isRet ? 'RET' : meta.name,
                         hours: meta.hours,
                         startTime: meta.startTime,
-                        ...(!isFranco && meta.endTime ? { endTime: meta.endTime } : {}),
+                        ...(!isFranco && !isRet && meta.endTime ? { endTime: meta.endTime } : {}),
                         ...(isFranco ? { isFranco: true } : {}),
                     });
 
