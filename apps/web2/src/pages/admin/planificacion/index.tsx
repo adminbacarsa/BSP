@@ -4072,7 +4072,8 @@ export default function PlanificacionPage() {
                                         const absAlreadyHandled = effectiveCode && ['V','L','PG','A','E','AA'].includes(effectiveCode) && !!absence;
                                         let hasConflict = (!absAlreadyHandled && ((s && absence && s.status !== 'ABSENT') || (s && s.hasNovedad)));
                                         let statusIndicator = null;
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
+                                        const _planPublished = !!publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)];
+                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (_planPublished && (s.status === 'ABSENT' || s.isAbsent)) statusIndicator = 'bg-rose-500'; }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
