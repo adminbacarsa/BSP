@@ -75,7 +75,9 @@ function classifyDay(a: V2Assignment | undefined): DayKind {
     if (!a) return 'skip';
     const code = String(a.code || '').toUpperCase();
     if (ABSENCE_CODES.has(code)) return 'skip';
-    if (code === 'RET' || a.isReten) return 'skip';
+    // RET = retén (guardia de punta, standby pagado): día laborable del ciclo CCT.
+    // Cuenta como 'work' para el análisis de bloques 6+2 (no parte la racha).
+    if (code === 'RET' || a.isReten) return 'work';
     if (FRANCO_CODES.has(code) || a.isFranco) {
         if ((a.hours ?? 0) > 0) return 'work';
         return 'franco';

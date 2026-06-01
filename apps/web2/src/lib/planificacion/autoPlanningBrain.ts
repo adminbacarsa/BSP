@@ -245,9 +245,23 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         input.slaVendidas,
     );
 
+    // Excluir empleados con ausencia estructural (todo el mes) del cálculo de días Modo12.
+    // Un empleado en EN/V/L todo el mes no "crea" un hueco inesperado: la dotación base
+    // ya fue planificada sin ellos. Solo ausencias PARCIALES (imprevistos) activan D12/N12.
+    const [cycLmap, cycFmap] = CYCLE_MAP[cycleKey] ?? CYCLE_MAP['6+2'];
+    const maxExpectedWork = Math.ceil((cycLmap / (cycLmap + cycFmap)) * monthDateStrs.length);
+    const modo12EmpIds = employeeIds.filter(id => {
+        const map = input.absences[id];
+        if (!map) return true;
+        let absCount = 0;
+        map.forEach((code, dateStr) => {
+            if (monthDateStrs.includes(dateStr) && MODO12_ABSENCE_CODES.has(String(code || '').toUpperCase())) absCount++;
+        });
+        return absCount <= maxExpectedWork;
+    });
     const modo12DaysAuto = deriveModo12DaysFromAbsences(
         input.absences,
-        employeeIds,
+        modo12EmpIds,
         monthDateStrs,
     );
     const contingencyDaysManual = [...(input.contingencyDaysManual ?? [])].sort();

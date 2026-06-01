@@ -2827,18 +2827,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     else break;
                 }
                 if (isWorkDayInCycle && isAssignedHere) {
-                    const primaryBandFb = assignedPosName
-                        ? normBand(expectedShiftForDay(emp.id, dateStr, assignedPosName) || '')
-                        : '';
-                    // T worker becomes Franco on Modo12 days (D12+N12 covers the 24h)
-                    if (isModo12Day(dateStr, ctx) && primaryBandFb === 'T') {
-                        fallbackCode = 'F';
-                    } else {
-                        fallbackCode = 'RET';
-                    }
+                    // Banda fija: día laborable del ciclo sin slot → RET (preserva bloque 6+2).
+                    fallbackCode = 'RET';
                 } else if (fallbackCode === 'F' && consecF >= 2) {
                     fallbackCode = 'RET';
                 }
+            }
+
+            // Rotativo: empleado 24hs en día de trabajo pero sin asignación por extensionMode
+            // (T slot absorbido por D12/N12) → RET para no partir el bloque 6+2 del CCT.
+            if (ctx.rotateShifts !== false && isModo12Day(dateStr, ctx) && isWorkDayInCycle && is24hsAssigned) {
+                fallbackCode = 'RET';
             }
 
             if (
