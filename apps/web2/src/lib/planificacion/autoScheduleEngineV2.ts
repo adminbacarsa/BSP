@@ -2224,10 +2224,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const bandCodes = dayShifts.map(x => String(x.code || '').toUpperCase());
             let extensionMode = false;
             if (bandCodes.includes('M') && bandCodes.includes('T') && bandCodes.includes('N')) {
-                extensionMode = group.some(eid => {
-                    const primary = expectedShiftForDay(eid, dateStr, pos.positionName);
-                    return primary === 'T' && ctx.absences[eid]?.has(dateStr);
-                });
+                extensionMode = isModo12Day(dateStr, ctx);
             }
 
             for (const sh of dayShifts) {
@@ -2826,7 +2823,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     else break;
                 }
                 if (isWorkDayInCycle && isAssignedHere) {
-                    fallbackCode = 'RET';
+                    const primaryBandFb = assignedPosName
+                        ? normBand(expectedShiftForDay(emp.id, dateStr, assignedPosName) || '')
+                        : '';
+                    // T worker becomes Franco on Modo12 days (D12+N12 covers the 24h)
+                    if (isModo12Day(dateStr, ctx) && primaryBandFb === 'T') {
+                        fallbackCode = 'F';
+                    } else {
+                        fallbackCode = 'RET';
+                    }
                 } else if (fallbackCode === 'F' && consecF >= 2) {
                     fallbackCode = 'RET';
                 }
