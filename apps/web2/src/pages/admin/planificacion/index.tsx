@@ -428,6 +428,8 @@ export default function PlanificacionPage() {
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
+    /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
+    const [autoForceSixTwo, setAutoForceSixTwo] = useState(true);
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     /** null = Auto decide; true/false = forzar rotativo ON/OFF */
     const [autoRotateForce, setAutoRotateForce] = useState<boolean | null>(null);
@@ -3000,6 +3002,7 @@ export default function PlanificacionPage() {
                 contingencyDaysManual: [...autoContingenciaDias],
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
+                cycleOverride: autoForceSixTwo ? '6+2' : undefined,
             };
             autoPlanningBrainInputRef.current = brainInput;
             const brain = resolveAutoPlanningBrain(brainInput);
@@ -3358,6 +3361,7 @@ export default function PlanificacionPage() {
                 contingencyDaysManual: [...autoContingenciaDias],
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
+                cycleOverride: autoForceSixTwo ? '6+2' : undefined,
             });
             autoPlanningBrainRef.current = genBrain;
             setAutoPlanningBrainReport(genBrain);
@@ -6575,6 +6579,20 @@ export default function PlanificacionPage() {
                                             <button type="button" onClick={() => setAutoOverwrite(p => !p)}
                                                 className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
                                                 <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
+                                            </button>
+                                        </div>
+                                        <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border-2 transition-colors ${autoForceSixTwo ? 'border-indigo-200 bg-indigo-50' : 'border-amber-200 bg-amber-50'}`}>
+                                            <span className="text-[10px] font-black flex-1 leading-snug">
+                                                <span className={autoForceSixTwo ? 'text-indigo-800' : 'text-amber-800'}>
+                                                    {autoForceSixTwo ? 'Esquema fijo: 6+2' : 'Esquema automático'}
+                                                </span>
+                                                <span className={`block text-[9px] font-bold normal-case ${autoForceSixTwo ? 'text-indigo-600' : 'text-amber-700'}`}>
+                                                    {autoForceSixTwo ? 'Siempre 6 días trabajo + 2 franco (recomendado)' : 'Cerebro elige entre 6+2 / 6+1 / 4+2 según dotación'}
+                                                </span>
+                                            </span>
+                                            <button type="button" onClick={() => setAutoForceSixTwo(p => !p)}
+                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoForceSixTwo ? 'bg-indigo-500' : 'bg-amber-400'}`}>
+                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoForceSixTwo ? 'translate-x-4' : ''}`}/>
                                             </button>
                                         </div>
                                         <div className="flex items-center gap-2">
