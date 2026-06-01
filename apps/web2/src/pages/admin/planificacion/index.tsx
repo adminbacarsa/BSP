@@ -4089,7 +4089,7 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); if (absCode !== 'AA' || (s || p)) { content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; } }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); if (absCode !== 'AA' || ((s || p) && !!publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) { content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; } }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
