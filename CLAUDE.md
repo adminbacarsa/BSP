@@ -311,24 +311,23 @@ git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
 Firebase Hosting → `https://comtroldata.web.app`
 Firebase project: `comtroldata`
 
-**El dev server en :3000 y los emuladores NO se interrumpen durante el deploy.**
-`USE_EMULATOR=false` se inyecta solo para el proceso de build — `.env.local` no se toca.
+**Deploy no debe tumbar el lab.** Si emuladores (`:8080`/`:9099`) o `npm run dev` (`:3000`) están activos, `npm run deploy` usa automáticamente un **git worktree** en `../cronoapp-deploy`: build y `firebase deploy` corren ahí; esta carpeta (`cronoapp`) no ejecuta `next build`.
+
+Artefactos de producción van a **`build/hosting`** y **`build/.next-prod`** (no `apps/web2/out` ni `.next` del dev server). `.env.local` del lab se copia al worktree solo para credenciales de build (`USE_EMULATOR=false` en el proceso de build).
 
 ```bash
-# Solo hosting (más común)
+# Recomendado con lab corriendo (worktree automático)
 npm run deploy
+npm run deploy -- --functions
 
-# Hosting + functions
-npm run deploy --functions
+# Forzar build en esta carpeta (lab apagado o explícito)
+npm run deploy:here
 
-# Hosting + rules
-npm run deploy --rules
-
-# Todo
-npm run deploy --all
+# Siempre worktree aunque el lab esté apagado
+npm run deploy:worktree
 ```
 
-El script `scripts/deploy.js` maneja el build con la variable de entorno correcta y el deploy selectivo.
+Variable opcional: `COSP_DEPLOY_DIR` (default `../cronoapp-deploy`).
 
 ---
 
