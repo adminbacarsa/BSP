@@ -208,6 +208,7 @@ const NOVEDAD_TYPES = ['Vacaciones', 'Enfermedad', 'ART', 'Injustificada', 'Lice
 export default function EmployeesPage() {
   const { empresaId, empresa, empresas } = useEmpresa();
   const { isSuperAdmin: authIsSuperAdmin, rolePermissions } = useAuth();
+  const isSuperAdmin = authIsSuperAdmin;
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const { addToast } = useToast();
@@ -275,7 +276,10 @@ export default function EmployeesPage() {
   const [showManualCoords, setShowManualCoords] = useState(false);
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [authPinModal, setAuthPinModal] = useState<{ absenceId: string; absence: Absence } | null>(null);
+  const [authPinValue, setAuthPinValue] = useState('');
+  const [authPinError, setAuthPinError] = useState('');
+  const [authPinLoading, setAuthPinLoading] = useState(false);
   const [showBajaModal, setShowBajaModal] = useState(false);
   const [bajaForm, setBajaForm] = useState({ motivo: 'Desvinculación', fecha: new Date().toISOString().split('T')[0], observacion: '' });
   const [showInactive, setShowInactive] = useState(false);
@@ -297,11 +301,8 @@ export default function EmployeesPage() {
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUserName(user.displayName || user.email || "Usuario Sin Nombre");
-        const token = await user.getIdTokenResult();
-        setIsSuperAdmin((token.claims.role as string || '').toLowerCase() === 'superadmin');
       } else {
         setCurrentUserName("No Logueado");
-        setIsSuperAdmin(false);
       }
     });
   }, []);
@@ -988,6 +989,29 @@ export default function EmployeesPage() {
       addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar ausencias', 'error');
     }
   };
+  const handleAuthorizePinSubmit = async () => {
+    if (!authPinModal) return;
+    if (authPinValue.length < 4) { setAuthPinError('PIN mínimo 4 dígitos'); return; }
+    setAuthPinLoading(true); setAuthPinError('');
+    try {
+      const snap = await getDocs(query(collection(db, 'system_users'), where('supervisorPin', '==', authPinValue)));
+      if (snap.empty) { setAuthPinError('PIN incorrecto'); setAuthPinLoading(false); return; }
+      const sup = snap.docs[0].data();
+      const supervisorName = `${sup.firstName} ${sup.lastName}`;
+      const dataToUpdate = { ...authPinModal.absence, status: 'Autorizada' };
+      await absenceService.update(authPinModal.absenceId, dataToUpdate as Partial<Absence>, { empresaId, migracionCompleta });
+      await replicarAusenciaEnPlanificador(authPinModal.absenceId, dataToUpdate as Absence);
+      await registrarAuditoria('AUTHORIZE_ABSENCE', `Autorizó ${authPinModal.absence.type} — ${authPinModal.absence.employeeName} (supervisor: ${supervisorName})`);
+      addToast(`Novedad autorizada por ${supervisorName}`, 'success');
+      setAuthPinModal(null); setAuthPinValue('');
+      loadAbsences();
+    } catch (e) {
+      setAuthPinError('Error al autorizar');
+    } finally {
+      setAuthPinLoading(false);
+    }
+  };
+
   const getAbsenceEmployeeName = (a: Absence) => { if (a.employeeName) return a.employeeName; const emp = employees.find(e => e.id === a.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : 'Desconocido'; };
   const coberturaBadgeClass = (estado?: string) => {
     if (estado === 'GESTIONADA') return 'bg-teal-100 text-teal-700';
@@ -2348,7 +2372,7 @@ export default function EmployeesPage() {
             {activeTab === 'correcciones' && (
                 <CorreccionesTab employees={employees} canAdjust={canAdjust} />
             )}
-            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}</div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr>{isSuperAdmin && <th className="p-4 w-8"><input type="checkbox" className="rounded cursor-pointer" checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))} onChange={e => { const ids = filteredAbsences.map(a => a.id!); setSelectedAbsenceIds(e.target.checked ? new Set(ids) : new Set()); }}/></th>}<th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${selectedAbsenceIds.has(a.id!) ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>{isSuperAdmin && <td className="p-4 w-8"><input type="checkbox" className="rounded cursor-pointer" checked={selectedAbsenceIds.has(a.id!)} onChange={e => { setSelectedAbsenceIds(prev => { const next = new Set(prev); e.target.checked ? next.add(a.id!) : next.delete(a.id!); return next; }); }}/></td>}<td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Autorizada' ? 'bg-teal-100 text-teal-700' : a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : a.status === 'Rechazada' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span></td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <p className="text-[9px] text-slate-400 mt-1 font-bold">Gestionar en Planificación</p>}</td><td className="p-4 text-right flex justify-end gap-2">{a.status === 'Pendiente' && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
+            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}</div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr>{isSuperAdmin && <th className="p-4 w-8"><input type="checkbox" className="rounded cursor-pointer" checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))} onChange={e => { const ids = filteredAbsences.map(a => a.id!); setSelectedAbsenceIds(e.target.checked ? new Set(ids) : new Set()); }}/></th>}<th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${selectedAbsenceIds.has(a.id!) ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>{isSuperAdmin && <td className="p-4 w-8"><input type="checkbox" className="rounded cursor-pointer" checked={selectedAbsenceIds.has(a.id!)} onChange={e => { setSelectedAbsenceIds(prev => { const next = new Set(prev); e.target.checked ? next.add(a.id!) : next.delete(a.id!); return next; }); }}/></td>}<td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center">{a.status === 'Pendiente' ? <button onClick={() => { setAuthPinModal({ absenceId: a.id!, absence: a }); setAuthPinValue(''); setAuthPinError(''); }} className="px-2 py-1 rounded text-[10px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition-colors flex items-center gap-1 mx-auto"><KeyRound size={9}/> Pendiente de Autorizar</button> : <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Autorizada' ? 'bg-teal-100 text-teal-700' : a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : a.status === 'Rechazada' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span>}</td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <p className="text-[9px] text-slate-400 mt-1 font-bold">Gestionar en Planificación</p>}</td><td className="p-4 text-right flex justify-end gap-2">{a.status === 'Pendiente' && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
         </div>
 
         {/* MODAL DE IMPORTACIÓN CSV (AMPLIADO) */}
@@ -2763,6 +2787,38 @@ export default function EmployeesPage() {
                         <button onClick={() => setShowBajaModal(false)} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
                         <button onClick={handleDarDeBaja} className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
                             <UserX size={15}/> Confirmar baja
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        {authPinModal && (
+            <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) { setAuthPinModal(null); setAuthPinValue(''); setAuthPinError(''); } }}>
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-sm">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center"><KeyRound size={18} className="text-amber-600"/></div>
+                        <div>
+                            <h3 className="font-black text-base text-slate-900 dark:text-white uppercase">Autorizar Novedad</h3>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase">{authPinModal.absence.type} — {authPinModal.absence.employeeName}</p>
+                        </div>
+                    </div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-1 ml-1">PIN Supervisor</label>
+                    <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={6}
+                        autoFocus
+                        className="w-full px-4 py-3 border dark:border-slate-600 rounded-xl text-center text-2xl font-black tracking-widest bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-400 mb-1"
+                        value={authPinValue}
+                        onChange={e => { setAuthPinValue(e.target.value.replace(/\D/g, '')); setAuthPinError(''); }}
+                        onKeyDown={e => e.key === 'Enter' && handleAuthorizePinSubmit()}
+                        placeholder="••••"
+                    />
+                    {authPinError && <p className="text-[10px] font-bold text-rose-600 mb-3">{authPinError}</p>}
+                    <div className="flex gap-3 mt-4">
+                        <button onClick={() => { setAuthPinModal(null); setAuthPinValue(''); setAuthPinError(''); }} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-xs uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
+                        <button onClick={handleAuthorizePinSubmit} disabled={authPinLoading || authPinValue.length < 4} className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-black text-xs uppercase transition-colors flex items-center justify-center gap-2">
+                            {authPinLoading ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle2 size={14}/>} Autorizar
                         </button>
                     </div>
                 </div>

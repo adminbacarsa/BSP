@@ -94,9 +94,9 @@ export function inferAbsenceCode(doc: any): string {
 export function isActiveAbsence(doc: any): boolean {
     const st = String(doc?.status || '').toLowerCase().trim();
     if (!st) return true; // legacy: sin status → la respetamos
-    if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') {
-        return false;
-    }
+    if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') return false;
+    // Pendiente de autorización → no mostrar en grilla/planificador hasta que sea autorizada
+    if (st === 'pendiente' || st === 'pending') return false;
     return true;
 }
 
