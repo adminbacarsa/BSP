@@ -41,6 +41,64 @@ export function experienciaNivelLabel(nivel: ExperienciaNivel): string {
     }
 }
 
+function hasExperienciaActivity(entry: ExperienciaObjetivoEntry | undefined): boolean {
+    if (!entry) return false;
+    return (
+        (entry.turnosEscuela ?? 0) +
+        (entry.turnosRegulares ?? 0) +
+        (entry.turnosRefuerzo ?? 0) +
+        (entry.turnosConvocado ?? 0)
+    ) > 0;
+}
+
+export interface ExperienciaDisplayRow {
+    objectiveId: string;
+    objectiveName: string;
+    entry: ExperienciaObjetivoEntry;
+    nivel: ExperienciaNivel;
+    isTitular: boolean;
+}
+
+export function listExperienciaForDisplay(
+    experiencia: ExperienciaObjetivosMap | undefined,
+    preferredObjectiveId: string | null | undefined,
+    objectives: Array<{ id: string; name: string }>,
+): ExperienciaDisplayRow[] {
+    const ids = new Set<string>(Object.keys(experiencia || {}));
+    if (preferredObjectiveId) ids.add(preferredObjectiveId);
+
+    const nivelOrder: Record<ExperienciaNivel, number> = {
+        TITULAR: 0,
+        CONOCIDO: 1,
+        ESCUELA: 2,
+        NINGUNO: 3,
+    };
+
+    return [...ids]
+        .map(objectiveId => {
+            const entry = experiencia?.[objectiveId] || {};
+            const isTitular = preferredObjectiveId === objectiveId;
+            const objectiveName = objectives.find(o => o.id === objectiveId)?.name || objectiveId;
+            return {
+                objectiveId,
+                objectiveName,
+                entry,
+                nivel: computeExperienciaNivel(entry, isTitular),
+                isTitular,
+            };
+        })
+        .filter(row => row.isTitular || hasExperienciaActivity(row.entry))
+        .sort((a, b) => {
+            const nd = nivelOrder[a.nivel] - nivelOrder[b.nivel];
+            if (nd !== 0) return nd;
+            return a.objectiveName.localeCompare(b.objectiveName, 'es');
+        });
+}
+
+export function countExperienciaObjetivos(experiencia: ExperienciaObjetivosMap | undefined): number {
+    return Object.values(experiencia || {}).filter(hasExperienciaActivity).length;
+}
+
 export function experienciaBadgeForReplacement(
     empId: string,
     objectiveId: string,

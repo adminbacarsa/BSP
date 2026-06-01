@@ -1,21 +1,31 @@
 
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import EmployeeLegajoForm from '@/components/admin/employees/EmployeeLegajoForm';
 import { employeeService, Employee } from '@/services/employeeService';
+import { agreementService } from '@/services/agreementService';
 import { auditService } from '@/services/auditService';
 import { db, auth } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { useToast } from '@/context/ToastContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { filterRowsByEmpresa, belongsToEmpresaView, shouldScopeQueriesToEmpresa, stampEmpresaId } from '@/lib/multiempresa';
+import { buildEmployeeSavePayload, initialLegajoForm, mapFirestoreToLegajoForm, normalizeEmployeeStatus } from '@/lib/employees/employeeLegajoDefaults';
 import {
-  Users, Search, Plus, Edit2, Trash2, MapPin,
+  Search, Plus, Edit2, Trash2, MapPin,
   FileBadge, UserCheck, UserX, Send, KeyRound,
   CheckSquare, Square, CheckCircle2, Clock, AlertCircle,
-  Loader2, Mail, ShieldCheck
+  Loader2, Mail, ShieldCheck, LayoutGrid, List
 } from 'lucide-react';
+
+type ListViewMode = 'cards' | 'table';
+
+const isEmployeeActive = (status: string | undefined) => {
+  const s = (status || '').toLowerCase();
+  return s === 'active' || s === 'activo';
+};
 
 export default function EmployeesPage() {
   const { addToast } = useToast();
@@ -23,28 +33,23 @@ export default function EmployeesPage() {
   const migracionCompleta = empresa?.migracionCompleta ?? false;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const [view, setView] = useState<'list' | 'form'>('list');
+  const [listViewMode, setListViewMode] = useState<ListViewMode>('cards');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filteredEmployees, setFilteredEmployees] = useState<Employee[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [loadingEdit, setLoadingEdit] = useState(false);
   const [clients, setClients] = useState<any[]>([]);
   const [allObjectives, setAllObjectives] = useState<any[]>([]);
-  const [filteredObjectives, setFilteredObjectives] = useState<any[]>([]);
+  const [agreements, setAgreements] = useState<any[]>([]);
 
-  // Invitaciones
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
   const [sendingAll, setSendingAll] = useState(false);
 
-  const initialForm: any = {
-    firstName: '', lastName: '', dni: '', fileNumber: '',
-    phone: '', email: '', category: 'Vigilador', status: 'active',
-    laborAgreement: 'SUVICO',
-    preferredClientId: '', preferredObjectiveId: ''
-  };
-  const [form, setForm] = useState<any>(initialForm);
+  const [form, setForm] = useState<any>({ ...initialLegajoForm });
 
-  useEffect(() => { loadData(); loadClientsAndObjectives(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); loadClientsAndObjectives(); loadAgreements(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const term = searchTerm.toLowerCase();
@@ -52,18 +57,10 @@ export default function EmployeesPage() {
       e.lastName.toLowerCase().includes(term) ||
       e.firstName.toLowerCase().includes(term) ||
       e.fileNumber.includes(term) ||
-      (e.email || '').toLowerCase().includes(term)
+      (e.email || '').toLowerCase().includes(term) ||
+      (e.dni || '').includes(term)
     ));
   }, [searchTerm, employees]);
-
-  useEffect(() => {
-    if (form.preferredClientId) {
-      const objs = allObjectives.filter(o => o.clientId === form.preferredClientId);
-      setFilteredObjectives(objs);
-    } else {
-      setFilteredObjectives([]);
-    }
-  }, [form.preferredClientId, allObjectives]);
 
   const loadData = async () => {
     try {
@@ -89,17 +86,30 @@ export default function EmployeesPage() {
           phone: raw.phone || raw.telefono || '',
           email: raw.email || '',
           category: raw.category || raw.cargo || 'Vigilador',
-          status: raw.status || raw.estado || 'active',
+          status: normalizeEmployeeStatus(raw.status || raw.estado),
           laborAgreement: raw.laborAgreement || raw.convenio || 'SUVICO',
           preferredClientId: raw.preferredClientId || '',
           preferredObjectiveId: raw.preferredObjectiveId || '',
+          genero: raw.genero || '',
           portalInvite: raw.portalInvite || null,
           empresaId: raw.empresaId || '',
-        } as Employee & { empresaId: string };
+        } as Employee & { empresaId: string; genero?: string };
       });
       setEmployees(filterRowsByEmpresa(data, empresaId, scopeEmpresa, migracionCompleta) as Employee[]);
     } catch (e) {
       console.error('Error cargando empleados:', e);
+    }
+  };
+
+  const loadAgreements = async () => {
+    try {
+      const data = await agreementService.getAll();
+      setAgreements(data.map(a => ({
+        ...a,
+        categories: Array.isArray(a.categories) ? a.categories : [],
+      })));
+    } catch (e) {
+      console.error('Error cargando convenios', e);
     }
   };
 
@@ -127,7 +137,6 @@ export default function EmployeesPage() {
     } catch (e) { console.error('Error cargando clientes/objetivos', e); }
   };
 
-  // ── ENVÍO DE INVITACIONES ────────────────────────────────────────────────────
   const sendInvites = async (empIds: string[]) => {
     const validIds = empIds.filter(id => {
       const emp = employees.find(e => e.id === id);
@@ -140,13 +149,11 @@ export default function EmployeesPage() {
     }
 
     try {
-      // 1. Crear usuarios Firebase Auth vía Cloud Function
       const functions = getFunctions();
       const createPortalAccess = httpsCallable(functions, 'createPortalAccess');
       const result: any = await createPortalAccess({ employeeIds: validIds });
       const results: any[] = result.data?.results || [];
 
-      // 2. Enviar email de reseteo de contraseña para cada uno exitoso
       let sent = 0, failed = 0;
       for (const r of results) {
         if (r.success && r.email) {
@@ -216,29 +223,40 @@ export default function EmployeesPage() {
     }
   };
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!form.lastName || !form.firstName || !form.dni) return addToast('Datos incompletos', 'error');
+    if (!form.lastName || !form.firstName || !form.dni) return addToast('Datos incompletos (nombre, apellido, DNI)', 'error');
+    const dataToSave = buildEmployeeSavePayload(form, empresaId);
+
     try {
       if (isEditing && form.id) {
-        await employeeService.update(form.id, form);
-        await auditService.log('EDICION_EMPLEADO', 'RRHH', { id: form.id, ...form });
+        if (form.dni && employees.some(e => e.id !== form.id && e.dni === form.dni))
+          return addToast('Ya existe un empleado con ese DNI', 'error');
+        if (form.fileNumber && employees.some(e => e.id !== form.id && e.fileNumber === form.fileNumber))
+          return addToast('Ya existe un empleado con ese número de legajo', 'error');
+        await updateDoc(doc(db, 'empleados', form.id), dataToSave);
+        await auditService.log('EDICION_EMPLEADO', 'RRHH', { id: form.id, ...dataToSave });
         addToast('Legajo actualizado', 'success');
       } else {
-        const id = await employeeService.add(stampEmpresaId({ ...form, createdAt: new Date().toISOString() }, empresaId) as any);
-        await auditService.log('ALTA_EMPLEADO', 'RRHH', { ...form, id });
+        if (form.dni && employees.some(e => e.dni === form.dni))
+          return addToast('Ya existe un empleado con ese DNI', 'error');
+        if (form.fileNumber && employees.some(e => e.fileNumber === form.fileNumber))
+          return addToast('Ya existe un empleado con ese número de legajo', 'error');
+        const id = await addDoc(collection(db, 'empleados'), stampEmpresaId({ ...dataToSave, createdAt: new Date().toISOString() }, empresaId));
+        await auditService.log('ALTA_EMPLEADO', 'RRHH', { ...dataToSave, id: id.id });
         addToast('Legajo creado', 'success');
       }
       loadData();
       setView('list');
-    } catch (e) { addToast('Error al guardar', 'error'); }
+    } catch (e) {
+      console.error(e);
+      addToast('Error al guardar', 'error');
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (confirm('¿Eliminar legajo?')) {
       const empToDelete = employees.find(e => e.id === id);
       await auditService.log('BAJA_EMPLEADO', 'RRHH', { ...empToDelete });
-      // Si tiene credenciales de portal, borrar usuario de Firebase Auth vía Cloud Function
       if (empToDelete?.uid) {
         try {
           const fn = httpsCallable(getFunctions(), 'manageEmployees');
@@ -247,26 +265,100 @@ export default function EmployeesPage() {
           console.warn('No se pudo eliminar credencial Auth:', e);
         }
       }
-      // Siempre eliminar el documento Firestore por ID de documento
       await employeeService.delete(id);
       loadData();
       addToast('Legajo eliminado', 'info');
     }
   };
 
-  const openNew = () => { setForm(initialForm); setIsEditing(false); setView('form'); };
-  const openEdit = (emp: any) => { setForm(emp); setIsEditing(true); setView('form'); };
+  const openNew = () => {
+    setForm({ ...initialLegajoForm });
+    setIsEditing(false);
+    setView('form');
+  };
 
-  // Contadores
+  const openEdit = async (emp: Employee) => {
+    if (!emp.id) return;
+    setLoadingEdit(true);
+    try {
+      const snap = await getDoc(doc(db, 'empleados', emp.id));
+      if (!snap.exists()) {
+        addToast('Legajo no encontrado', 'error');
+        return;
+      }
+      let mapped = mapFirestoreToLegajoForm(snap.id, snap.data() as Record<string, any>);
+      if (!mapped.preferredClientId && mapped.preferredObjectiveId) {
+        const obj = allObjectives.find(o => o.id === mapped.preferredObjectiveId);
+        if (obj?.clientId) mapped = { ...mapped, preferredClientId: obj.clientId };
+      }
+      setForm(mapped);
+      setIsEditing(true);
+      setView('form');
+    } catch (e) {
+      console.error(e);
+      addToast('Error cargando legajo', 'error');
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
   const withInvite = employees.filter(e => e.portalInvite?.sent).length;
-  const withEmail  = employees.filter(e => e.email).length;
-  const pending    = employees.filter(e => !e.portalInvite?.sent && e.email).length;
+  const withEmail = employees.filter(e => e.email).length;
+  const pending = employees.filter(e => !e.portalInvite?.sent && e.email).length;
+
+  const renderPortalBadge = (emp: Employee) => {
+    const hasSent = !!emp.portalInvite?.sent;
+    const hasEmail = !!emp.email;
+    if (hasSent) {
+      return (
+        <span className="flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
+          <CheckCircle2 size={10} /> Enviado
+        </span>
+      );
+    }
+    if (hasEmail) {
+      return (
+        <span className="flex items-center gap-1 text-[10px] font-black text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-full border border-amber-200 whitespace-nowrap">
+          <Clock size={10} /> Pendiente
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-center gap-1 text-[10px] font-black text-slate-400 bg-slate-50 dark:bg-slate-700 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-600 whitespace-nowrap">
+        <AlertCircle size={10} /> Sin email
+      </span>
+    );
+  };
+
+  const renderActions = (emp: Employee, isSending: boolean) => (
+    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+      {emp.email && (
+        <button
+          onClick={() => handleSendOne(emp)}
+          disabled={isSending}
+          className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50"
+          title={emp.portalInvite?.sent ? 'Reenviar acceso' : 'Enviar acceso'}
+        >
+          {isSending ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+        </button>
+      )}
+      <button
+        onClick={() => openEdit(emp)}
+        disabled={loadingEdit}
+        className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+      >
+        <Edit2 size={13} />
+      </button>
+      <button onClick={() => handleDelete(emp.id!)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors">
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
 
   return (
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in">
 
-        {/* HEADER */}
         <header className="flex justify-between items-end">
           <div>
             <h1 className="text-4xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">Personal</h1>
@@ -274,33 +366,49 @@ export default function EmployeesPage() {
           </div>
           {view === 'list' && (
             <button onClick={openNew} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black text-xs uppercase shadow-sm hover:scale-105 transition-all flex gap-2">
-              <Plus size={16}/> Nuevo Legajo
+              <Plus size={16} /> Nuevo Legajo
             </button>
           )}
         </header>
 
         {view === 'list' && (
           <>
-            {/* BARRA DE BÚSQUEDA */}
             <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 flex items-center gap-4 shadow-sm">
-              <Search className="text-slate-400 shrink-0"/>
+              <Search className="text-slate-400 shrink-0" />
               <input
-                placeholder="Buscar por nombre, apellido, legajo o email..."
+                placeholder="Buscar por nombre, apellido, legajo, DNI o email..."
                 className="flex-1 bg-transparent outline-none font-bold text-slate-700 dark:text-white uppercase"
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
-              <div className="text-xs font-black text-slate-300 uppercase px-4 border-l dark:border-slate-700 shrink-0">
+              <div className="flex items-center gap-1 border-l dark:border-slate-700 pl-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setListViewMode('cards')}
+                  title="Vista tarjetas"
+                  className={`p-2 rounded-lg transition-colors ${listViewMode === 'cards' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                >
+                  <LayoutGrid size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListViewMode('table')}
+                  title="Vista tabla"
+                  className={`p-2 rounded-lg transition-colors ${listViewMode === 'table' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                >
+                  <List size={16} />
+                </button>
+              </div>
+              <div className="text-xs font-black text-slate-300 uppercase px-2 border-l dark:border-slate-700 shrink-0">
                 {filteredEmployees.length} Pax
               </div>
             </div>
 
-            {/* PANEL DE ACCESO AL PORTAL */}
             <div className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 shadow-sm overflow-hidden">
               <div className="p-4 border-b dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg flex items-center justify-center">
-                    <ShieldCheck size={16} className="text-indigo-600 dark:text-indigo-400"/>
+                    <ShieldCheck size={16} className="text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div>
                     <p className="text-sm font-black text-slate-800 dark:text-white">Acceso Portal Empleados</p>
@@ -316,7 +424,7 @@ export default function EmployeesPage() {
                       disabled={sendingIds.size > 0}
                       className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-black uppercase transition-all"
                     >
-                      {sendingIds.size > 0 ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>}
+                      {sendingIds.size > 0 ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                       Enviar a {selected.size} seleccionado{selected.size > 1 ? 's' : ''}
                     </button>
                   )}
@@ -325,7 +433,7 @@ export default function EmployeesPage() {
                     disabled={sendingAll || pending === 0}
                     className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase transition-all"
                   >
-                    {sendingAll ? <Loader2 size={14} className="animate-spin"/> : <Mail size={14}/>}
+                    {sendingAll ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
                     Enviar a todos sin acceso ({pending})
                   </button>
                   <button
@@ -333,158 +441,143 @@ export default function EmployeesPage() {
                     className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-black uppercase transition-all"
                   >
                     {selected.size === filteredEmployees.length && filteredEmployees.length > 0
-                      ? <CheckSquare size={14}/> : <Square size={14}/>}
+                      ? <CheckSquare size={14} /> : <Square size={14} />}
                     {selected.size === filteredEmployees.length && filteredEmployees.length > 0 ? 'Deseleccionar' : 'Seleccionar todo'}
                   </button>
                 </div>
               </div>
 
-              {/* GRILLA DE EMPLEADOS */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-                {filteredEmployees.map(emp => {
-                  const hasSent = !!emp.portalInvite?.sent;
-                  const hasEmail = !!emp.email;
-                  const isSending = sendingIds.has(emp.id!);
-                  const isSelected = selected.has(emp.id!);
+              {listViewMode === 'cards' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+                  {filteredEmployees.map(emp => {
+                    const isSending = sendingIds.has(emp.id!);
+                    const isSelected = selected.has(emp.id!);
+                    const genero = (emp as any).genero;
 
-                  return (
-                    <div
-                      key={emp.id}
-                      onClick={() => emp.id && toggleSelect(emp.id)}
-                      className={`bg-white dark:bg-slate-800 p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-all cursor-pointer group relative overflow-hidden
-                        ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-200 dark:ring-indigo-800' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-200'}`}
-                    >
-                      {/* Checkbox */}
-                      <div className="absolute top-4 left-4">
-                        {isSelected
-                          ? <CheckSquare size={16} className="text-indigo-600"/>
-                          : <Square size={16} className="text-slate-300 group-hover:text-slate-400"/>}
-                      </div>
-
-                      {/* Estado activo/inactivo */}
-                      <div className={`absolute top-4 right-4 ${emp.status === 'active' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                        {emp.status === 'active' ? <UserCheck size={16}/> : <UserX size={16}/>}
-                      </div>
-
-                      {/* Info */}
-                      <div className="flex items-center gap-3 mb-3 mt-1 pl-4">
-                        <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center font-black text-slate-500 dark:text-slate-300 text-sm shrink-0">
-                          {emp.firstName.charAt(0)}{emp.lastName.charAt(0)}
+                    return (
+                      <div
+                        key={emp.id}
+                        onClick={() => emp.id && toggleSelect(emp.id)}
+                        className={`bg-white dark:bg-slate-800 p-5 rounded-xl border-2 shadow-sm hover:shadow-md transition-all cursor-pointer group relative overflow-hidden
+                          ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-200 dark:ring-indigo-800' : 'border-slate-100 dark:border-slate-700 hover:border-indigo-200'}`}
+                      >
+                        <div className="absolute top-4 left-4">
+                          {isSelected
+                            ? <CheckSquare size={16} className="text-indigo-600" />
+                            : <Square size={16} className="text-slate-300 group-hover:text-slate-400" />}
                         </div>
-                        <div className="min-w-0">
-                          <h3 className="font-black text-slate-800 dark:text-white uppercase leading-tight truncate">{emp.lastName}</h3>
-                          <p className="font-bold text-slate-500 text-xs uppercase truncate">{emp.firstName}</p>
-                          <span className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-1.5 py-0.5 rounded font-black uppercase mt-0.5 inline-block">{emp.category}</span>
+                        <div className={`absolute top-4 right-4 ${isEmployeeActive(emp.status) ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {isEmployeeActive(emp.status) ? <UserCheck size={16} /> : <UserX size={16} />}
+                        </div>
+                        <div className="flex items-center gap-3 mb-3 mt-1 pl-4">
+                          <div className="w-10 h-10 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center font-black text-slate-500 dark:text-slate-300 text-sm shrink-0">
+                            {emp.firstName.charAt(0)}{emp.lastName.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-black text-slate-800 dark:text-white uppercase leading-tight truncate">{emp.lastName}</h3>
+                            <p className="font-bold text-slate-500 text-xs uppercase truncate">{emp.firstName}</p>
+                            <span className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-1.5 py-0.5 rounded font-black uppercase mt-0.5 inline-block">{emp.category}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 border-t dark:border-slate-700 pt-3 mb-3">
+                          <div className="flex items-center gap-2 text-xs font-bold text-slate-400"><FileBadge size={12} /> Legajo: {emp.fileNumber || 'S/N'}</div>
+                          {emp.email
+                            ? <div className="flex items-center gap-2 text-xs font-bold text-slate-400 truncate"><Mail size={12} /> {emp.email}</div>
+                            : <div className="flex items-center gap-2 text-xs font-bold text-rose-400"><AlertCircle size={12} /> Sin email registrado</div>
+                          }
+                          <div className="flex items-center gap-2 text-xs font-bold text-slate-400"><MapPin size={12} /> {allObjectives.find(o => o.id === emp.preferredObjectiveId)?.name || 'Sin asignar'}</div>
+                          {genero && <div className="text-xs font-bold text-slate-400">Género: {genero === 'M' ? 'Masculino' : genero === 'F' ? 'Femenino' : genero}</div>}
+                        </div>
+                        <div className="flex items-center justify-between">
+                          {renderPortalBadge(emp)}
+                          {renderActions(emp, isSending)}
                         </div>
                       </div>
-
-                      <div className="space-y-1.5 border-t dark:border-slate-700 pt-3 mb-3">
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400"><FileBadge size={12}/> Legajo: {emp.fileNumber || 'S/N'}</div>
-                        {emp.email
-                          ? <div className="flex items-center gap-2 text-xs font-bold text-slate-400 truncate"><Mail size={12}/> {emp.email}</div>
-                          : <div className="flex items-center gap-2 text-xs font-bold text-rose-400"><AlertCircle size={12}/> Sin email registrado</div>
-                        }
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-400"><MapPin size={12}/> {allObjectives.find(o => o.id === emp.preferredObjectiveId)?.name || 'Sin asignar'}</div>
-                      </div>
-
-                      {/* Estado de invitación */}
-                      <div className="flex items-center justify-between">
-                        {hasSent ? (
-                          <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                            <CheckCircle2 size={11}/> Acceso enviado
-                          </span>
-                        ) : hasEmail ? (
-                          <span className="flex items-center gap-1.5 text-[10px] font-black text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-full border border-amber-200">
-                            <Clock size={11}/> Pendiente
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 bg-slate-50 dark:bg-slate-700 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-600">
-                            <AlertCircle size={11}/> Sin email
-                          </span>
-                        )}
-
-                        <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                          {hasEmail && (
-                            <button
-                              onClick={() => handleSendOne(emp)}
-                              disabled={isSending}
-                              className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors disabled:opacity-50"
-                              title={hasSent ? 'Reenviar acceso' : 'Enviar acceso'}
-                            >
-                              {isSending ? <Loader2 size={13} className="animate-spin"/> : <KeyRound size={13}/>}
-                            </button>
-                          )}
-                          <button onClick={() => openEdit(emp)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                            <Edit2 size={13}/>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-900 border-b dark:border-slate-700">
+                      <tr>
+                        <th className="p-3 w-10">
+                          <button type="button" onClick={toggleSelectAll} className="text-slate-400 hover:text-indigo-600">
+                            {selected.size === filteredEmployees.length && filteredEmployees.length > 0
+                              ? <CheckSquare size={16} className="text-indigo-600" />
+                              : <Square size={16} />}
                           </button>
-                          <button onClick={() => handleDelete(emp.id!)} className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors">
-                            <Trash2 size={13}/>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                        </th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Legajo</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Apellido</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Nombre</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">DNI</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Email</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Categoría</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Género</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Objetivo</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Estado</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400">Portal</th>
+                        <th className="p-3 text-[10px] font-black uppercase text-slate-400 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {filteredEmployees.map(emp => {
+                        const isSending = sendingIds.has(emp.id!);
+                        const isSelected = selected.has(emp.id!);
+                        const genero = (emp as any).genero;
+                        return (
+                          <tr
+                            key={emp.id}
+                            className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${isSelected ? 'bg-indigo-50/50 dark:bg-indigo-900/10' : ''}`}
+                          >
+                            <td className="p-3">
+                              <button type="button" onClick={() => emp.id && toggleSelect(emp.id)}>
+                                {isSelected ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} className="text-slate-300" />}
+                              </button>
+                            </td>
+                            <td className="p-3 font-mono text-xs font-bold text-slate-600 dark:text-slate-300">{emp.fileNumber}</td>
+                            <td className="p-3 font-black uppercase text-slate-800 dark:text-white">{emp.lastName}</td>
+                            <td className="p-3 font-bold uppercase text-slate-600 dark:text-slate-300">{emp.firstName}</td>
+                            <td className="p-3 font-mono text-xs text-slate-500">{emp.dni}</td>
+                            <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{emp.email || '—'}</td>
+                            <td className="p-3 text-xs font-bold uppercase text-slate-500">{emp.category}</td>
+                            <td className="p-3 text-xs font-mono text-slate-500">{genero === 'M' ? 'M' : genero === 'F' ? 'F' : '—'}</td>
+                            <td className="p-3 text-xs text-slate-500 max-w-[140px] truncate">{allObjectives.find(o => o.id === emp.preferredObjectiveId)?.name || '—'}</td>
+                            <td className="p-3">
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${isEmployeeActive(emp.status) ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30' : 'text-rose-700 bg-rose-50 dark:bg-rose-900/30'}`}>
+                                {isEmployeeActive(emp.status) ? 'Activo' : 'Inactivo'}
+                              </span>
+                            </td>
+                            <td className="p-3">{renderPortalBadge(emp)}</td>
+                            <td className="p-3 text-right">{renderActions(emp, isSending)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filteredEmployees.length === 0 && (
+                    <p className="p-8 text-center text-slate-400 text-sm font-bold">No hay empleados que coincidan con la búsqueda.</p>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}
 
-        {/* FORMULARIO */}
         {view === 'form' && (
-          <div className="bg-white dark:bg-slate-800 p-8 rounded-[3rem] border dark:border-slate-700 animate-in slide-in-from-right-4">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase">{isEditing ? 'Editar Legajo' : 'Alta de Personal'}</h2>
-              <button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs">Cancelar</button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Apellido</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })}/></div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">DNI</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.dni} onChange={e => setForm({ ...form, dni: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Legajo</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.fileNumber} onChange={e => setForm({ ...form, fileNumber: e.target.value })}/></div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Categoría</label>
-                <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-                  <option value="Vigilador">Vigilador</option>
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="Monitoreo">Monitoreo</option>
-                  <option value="Custodia">Custodia</option>
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Email</label><input type="email" className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}/></div>
-              <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Teléfono</label><input className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}/></div>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border dark:border-slate-700 mb-6">
-              <h3 className="text-sm font-black uppercase text-indigo-500 mb-4 flex items-center gap-2"><MapPin size={16}/> Dotación Fija (Objetivo Preferido)</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label>
-                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.preferredClientId || ''} onChange={e => setForm({ ...form, preferredClientId: e.target.value, preferredObjectiveId: '' })}>
-                    <option value="">- Sin Asignar -</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name || c.razonSocial}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label>
-                  <select className="w-full p-4 border dark:border-slate-600 dark:bg-slate-900 dark:text-white rounded-xl font-bold" value={form.preferredObjectiveId || ''} onChange={e => setForm({ ...form, preferredObjectiveId: e.target.value })} disabled={!form.preferredClientId}>
-                    <option value="">- Sin Asignar -</option>
-                    {filteredObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-6 border-t dark:border-slate-700">
-              <button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm hover:scale-105 transition-transform">
-                Guardar Legajo
-              </button>
-            </div>
-          </div>
+          <EmployeeLegajoForm
+            form={form}
+            setForm={setForm}
+            isEditing={isEditing}
+            onCancel={() => setView('list')}
+            onSave={handleSave}
+            agreements={agreements}
+            allObjectives={allObjectives}
+            clients={clients}
+            employees={employees}
+            addToast={addToast}
+          />
         )}
       </div>
     </DashboardLayout>
