@@ -95,7 +95,7 @@ const SHIFT_STYLES: any = {
     'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
     'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
     'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
-    'V':   'bg-teal-600 text-white border-teal-700 font-black shadow-sm',
+    'V':   'bg-emerald-700 text-white border-emerald-800 font-black shadow-sm',
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
