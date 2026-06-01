@@ -4066,6 +4066,8 @@ export default function PlanificacionPage() {
                                         let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
                                         let absence = absencesMap[key];
+                                        // AA (injustificada) solo es visible cuando el cronograma está publicado
+                                        if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
                                         const absAlreadyHandled = effectiveCode && ['V','L','PG','A','E','AA'].includes(effectiveCode) && !!absence;
                                         let hasConflict = (!absAlreadyHandled && ((s && absence && s.status !== 'ABSENT') || (s && s.hasNovedad)));
@@ -4089,7 +4091,7 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); if (absCode !== 'AA' || ((s || p) && !!publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) { content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; } }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
