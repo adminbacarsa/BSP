@@ -5,11 +5,78 @@
  * ya que Next.js con output:'export' no soporta API routes.
  */
 const http = require('http');
-const { execSync, exec } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const { execSync, execFile } = require('child_process');
 const path = require('path');
+const { pipeline } = require('stream/promises');
 
 const PORT = 3010;
+const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
 const FOLDER_ID = process.env.DRIVE_BACKUP_FOLDER_ID || '0AI2aip_4UuafUk9PVA';
+
+function setCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Empresa-Id, X-Import-Mode, X-File-Name');
+  res.setHeader('Content-Type', 'application/json');
+}
+
+async function importBackupFile(req, res) {
+  const empresaId = String(req.headers['x-empresa-id'] ?? 'bacarsa').trim() || 'bacarsa';
+  const mode = String(req.headers['x-import-mode'] ?? 'empresa').trim();
+  const fileName = decodeURIComponent(String(req.headers['x-file-name'] ?? 'backup.json').trim());
+  const tmpPath = path.join(os.tmpdir(), `cosp-backup-${Date.now()}.json`);
+
+  try {
+    await pipeline(req, fs.createWriteStream(tmpPath));
+    const stat = fs.statSync(tmpPath);
+    if (stat.size < 10) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: 'Archivo vacío o no recibido' }));
+      return;
+    }
+
+    const scriptPath = path.join(__dirname, 'seed-from-backup-file.js');
+    const args = [scriptPath, tmpPath];
+    if (mode === 'full') args.push('--full');
+    else args.push('--empresa', empresaId);
+
+    const output = await new Promise((resolve, reject) => {
+      execFile(
+        process.execPath,
+        args,
+        {
+          timeout: IMPORT_TIMEOUT_MS,
+          maxBuffer: 4 * 1024 * 1024,
+          env: {
+            ...process.env,
+            FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+            FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
+          },
+        },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(stderr || err.message || 'Error al importar'));
+          else resolve(`${stdout}\n${stderr}`.trim());
+        },
+      );
+    });
+
+    const writtenMatch = output.match(/([\d.,]+)\s+documentos importados/i);
+    const written = writtenMatch
+      ? parseInt(writtenMatch[1].replace(/[.,]/g, ''), 10)
+      : 0;
+
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, fileName, written, output }));
+  } catch (e) {
+    console.error('[emulator-bridge] import-backup-file', e.message);
+    res.writeHead(500);
+    res.end(JSON.stringify({ error: e.message.slice(0, 2000) }));
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch { /* omit */ }
+  }
+}
 
 function getToken() {
   return execSync('gcloud auth application-default print-access-token', { encoding: 'utf8' }).trim();
@@ -39,14 +106,16 @@ function listDriveBackups() {
 }
 
 const server = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json');
+  setCors(res);
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   const url = (req.url || '').split('?')[0];
+
+  if (req.method === 'POST' && url === '/import-backup-file') {
+    importBackupFile(req, res);
+    return;
+  }
 
   if (req.method === 'GET' && url === '/list-backups') {
     try {
@@ -68,7 +137,7 @@ const server = http.createServer((req, res) => {
         const { driveFileId } = JSON.parse(body);
         if (!driveFileId) { res.writeHead(400); res.end(JSON.stringify({ error: 'driveFileId requerido' })); return; }
         const scriptPath = path.join(__dirname, 'seed-from-drive.js');
-        exec(`node "${scriptPath}" "${driveFileId}"`, { timeout: 120000 }, (err, stdout, stderr) => {
+        execFile(process.execPath, [scriptPath, driveFileId], { timeout: 120000 }, (err, stdout, stderr) => {
           if (err) { res.writeHead(500); res.end(JSON.stringify({ error: stderr || err.message, output: stdout })); }
           else { res.end(JSON.stringify({ ok: true, output: stdout })); }
         });

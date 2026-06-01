@@ -32,6 +32,8 @@
     "dev:local": "bash scripts/start-local.sh",
     "dev:local:backup": "bash scripts/start-local.sh",
     "backup:import": "node scripts/import-backup.js",
+    "seed:backup": "node scripts/seed-from-backup-file.js",
+    "emulator-bridge": "node scripts/emulator-bridge.js",
     "emulators": "node scripts/run-emulators.js",
     "emulators:light": "node scripts/run-emulators.js --without-functions",
     "backup:restore": "node -e \"const fs=require('fs'),path=require('path'),p=path.join(__dirname,'backups');const prev=path.join(p,'previous'),lat=path.join(p,'latest');if(!fs.existsSync(prev)){console.error('No existe backups/previous');process.exit(1);}if(fs.existsSync(lat))fs.rmSync(lat,{recursive:true,force:true});fs.cpSync(prev,lat,{recursive:true});console.log('Restaurado backups/previous -> backups/latest');\"",

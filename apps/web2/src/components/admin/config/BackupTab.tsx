@@ -11,19 +11,6 @@ import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const STORAGE_KEY = 'emulator_loaded_backup';
 
-const EMPRESA_SCOPED_COLS = new Set([
-  'empleados', 'turnos', 'ausencias', 'objetivos', 'clientes', 'clients',
-  'novedades', 'audit_logs', 'planificacion_estados', 'servicios_sla',
-  'contratos_servicio', 'tipos_turno', 'user_notifications', 'system_backups',
-  'roles', 'feriados', 'planificaciones_historial', 'historial_operaciones',
-  'contracts', 'quotes', 'system_users',
-]);
-
-function docMatchesEmpresa(doc: any, empId: string): boolean {
-  const docEmpId = String(doc.empresaId ?? '').trim();
-  return docEmpId === empId || (empId === 'bacarsa' && docEmpId === '');
-}
-
 function emulatorBaseUrl(): string {
   return `http://${getEmulatorHost()}:8080`;
 }
@@ -41,41 +28,6 @@ async function assertEmulatorReachable(): Promise<void> {
   }
 }
 
-async function emulatorQueryAndDeleteByEmpresa(colName: string, empId: string): Promise<number> {
-  const url = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
-    body: JSON.stringify({
-      structuredQuery: {
-        from: [{ collectionId: colName }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: 'empresaId' },
-            op: 'EQUAL',
-            value: { stringValue: empId },
-          },
-        },
-        limit: 10000,
-      },
-    }),
-  });
-  if (!res.ok) return 0;
-  const rows: Array<{ document?: { name: string } }> = await res.json();
-  const names = rows.filter(r => r.document?.name).map(r => r.document!.name);
-  if (names.length === 0) return 0;
-  const batchUrl = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
-  for (let i = 0; i < names.length; i += 400) {
-    const chunk = names.slice(i, i + 400);
-    await fetch(batchUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
-      body: JSON.stringify({ writes: chunk.map(name => ({ delete: name })) }),
-    });
-  }
-  return names.length;
-}
-
 interface LoadedVersion {
   fileName: string;
   loadedAt: string;   // ISO string
@@ -85,6 +37,7 @@ interface LoadedVersion {
 }
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
+const BRIDGE_URL = 'http://127.0.0.1:3010';
 const PROJECT_ID  = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'comtroldata';
 const FUNCTIONS_LOGS_URL = `https://console.cloud.google.com/functions/list?project=${PROJECT_ID}`;
 
@@ -208,60 +161,6 @@ function formatRestoreError(e: unknown): string {
     return `${msg || 'Sin permiso'}${codeHint}. Verificá rol de panel y firestore.rules (restore_jobs).`;
   }
   return (msg || 'Error al restaurar') + codeHint;
-}
-
-// Deserializa { _seconds, _nanoseconds } → Firestore Timestamp recursivamente
-const deserialize = (obj: any): any => {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) return obj.map(deserialize);
-  if (typeof obj === 'object') {
-    if ('_seconds' in obj && '_nanoseconds' in obj) return new Timestamp(obj._seconds, obj._nanoseconds);
-    const out: any = {};
-    for (const [k, v] of Object.entries(obj)) out[k] = deserialize(v);
-    return out;
-  }
-  return obj;
-};
-
-// Convierte un valor JS al wire format de Firestore REST
-function toFsValue(v: unknown): Record<string, unknown> {
-  if (v === null || v === undefined) return { nullValue: null };
-  if (typeof v === 'boolean') return { booleanValue: v };
-  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  if (typeof v === 'string') return { stringValue: v };
-  if (v instanceof Timestamp) return { timestampValue: v.toDate().toISOString() };
-  if (v instanceof Date) return { timestampValue: v.toISOString() };
-  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFsValue) } };
-  if (typeof v === 'object') return { mapValue: { fields: toFsFields(v as Record<string, unknown>) } };
-  return { stringValue: String(v) };
-}
-
-function toFsFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, val] of Object.entries(obj)) out[k] = toFsValue(val);
-  return out;
-}
-
-// Escribe docs directamente al emulador usando Authorization: Bearer owner
-// (bypasea security rules — solo válido en emulador)
-async function emulatorBatchWrite(
-  writes: Array<{ name: string; fields: Record<string, unknown> }>,
-) {
-  const url = `${emulatorBaseUrl()}/v1/projects/${PROJECT_ID}/databases/(default)/documents:batchWrite`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer owner',
-    },
-    body: JSON.stringify({
-      writes: writes.map(w => ({ update: { name: w.name, fields: w.fields } })),
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`emulatorBatchWrite HTTP ${res.status}: ${body.slice(0, 200)}`);
-  }
 }
 
 function backupVisibleInTab(
@@ -401,136 +300,60 @@ export default function BackupTab() {
 
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
 
-  const countImportableDocs = (
-    backup: Record<string, unknown>,
-    isEmpresaMode: boolean,
-    targetEmpresaId: string,
-  ): number => {
-    const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, unknown[]][];
-    let total = 0;
-    for (const [colName, docs] of cols) {
-      if (!Array.isArray(docs) || docs.length === 0) continue;
-      if (!isEmpresaMode) {
-        total += docs.filter((d: any) => d?._id).length;
-        continue;
-      }
-      if (colName === 'empresas') {
-        total += docs.filter((d: any) => d?._id === targetEmpresaId).length;
-      } else if (EMPRESA_SCOPED_COLS.has(colName)) {
-        total += docs.filter((d: any) => docMatchesEmpresa(d, targetEmpresaId)).length;
-      }
-    }
-    return total;
-  };
-
-  // Carga un backup JSON local directo al emulador desde el browser
+  // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
     if (loadingLocal) return;
     setLastResult(null);
     setLoadingLocal(true);
-    setProgress({ done: 0, total: 0, phase: `Leyendo ${file.name}…` });
-    await new Promise<void>(r => requestAnimationFrame(() => r()));
     const isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
+    setProgress({ done: 0, total: 0, phase: `Subiendo ${file.name}…` });
+    await new Promise<void>(r => requestAnimationFrame(() => r()));
     try {
       if (isEmpresaMode && !empresaId) {
         throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
       }
       await assertEmulatorReachable();
 
-      setProgress({ done: 0, total: 0, phase: 'Parseando JSON…' });
-      await new Promise<void>(r => requestAnimationFrame(() => r()));
-      const text = await file.text();
-      const backup = JSON.parse(text);
-      validateBackupJsonForEmpresa(backup as Record<string, unknown>);
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+      setProgress({
+        done: 0,
+        total: 0,
+        phase: `Importando en servidor (${sizeMb} MB — puede tardar 2-4 min)…`,
+      });
 
-      const importable = countImportableDocs(backup, isEmpresaMode, empresaId);
-      if (importable === 0) {
-        const detected = detectDominantEmpresaInPayload(backup as Record<string, unknown>);
-        const hint = isEmpresaMode && detected.empresaId && detected.empresaId !== empresaId
-          ? ` El backup parece ser de «${detected.empresaId}» y tenés seleccionada «${empresaId}».`
-          : isEmpresaMode
-            ? ' Probá «Plataforma completa» (superadmin) o verificá el selector de empresa.'
-            : '';
-        throw new Error(`Ningún documento coincide con el alcance elegido.${hint}`);
+      const res = await fetch(`${BRIDGE_URL}/import-backup-file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Empresa-Id': empresaId || 'bacarsa',
+          'X-Import-Mode': isEmpresaMode ? 'empresa' : 'full',
+          'X-File-Name': encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+
+      let data: { ok?: boolean; error?: string; written?: number; output?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(
+          `No se pudo conectar al puente de importación (:3010). En otra terminal ejecutá: node scripts/emulator-bridge.js`,
+        );
+      }
+      if (!res.ok) {
+        throw new Error(data.error || `Error HTTP ${res.status}`);
       }
 
-      const cols = Object.entries(backup).filter(([k]) => !k.startsWith('_')) as [string, any[]][];
-
-      if (!isEmpresaMode) {
-        setProgress({ done: 0, total: importable, phase: 'Limpiando emulador (plataforma completa)…' });
-        await fetch(`${emulatorBaseUrl()}/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`, {
-          method: 'DELETE',
-        });
-      } else {
-        setProgress({ done: 0, total: importable, phase: `Limpiando datos de ${empresaId}…` });
-      }
-
-      let written = 0;
-      const totalDocs = importable;
-
-      for (const [colName, docs] of cols) {
-        if (!Array.isArray(docs) || docs.length === 0) continue;
-
-        let filteredDocs = docs;
-
-        if (isEmpresaMode) {
-          if (colName === 'empresas') {
-            filteredDocs = docs.filter((d: any) => d._id === empresaId);
-          } else if (EMPRESA_SCOPED_COLS.has(colName)) {
-            filteredDocs = docs.filter((d: any) => docMatchesEmpresa(d, empresaId));
-            if (filteredDocs.length > 0) {
-              setProgress({ done: written, total: totalDocs, phase: `Limpiando ${colName} (${empresaId})…` });
-              await emulatorQueryAndDeleteByEmpresa(colName, empresaId);
-            }
-          } else {
-            continue; // skip colecciones no empresa-scoped
-          }
-          if (filteredDocs.length === 0) continue;
-        }
-
-        for (let i = 0; i < filteredDocs.length; i += 400) {
-          const chunk = filteredDocs.slice(i, i + 400);
-          const writes = chunk.flatMap((d: any) => {
-            const { _id, ...data } = d;
-            if (!_id) return [];
-            return [{
-              name: `projects/${PROJECT_ID}/databases/(default)/documents/${colName}/${_id}`,
-              fields: toFsFields(deserialize(data)),
-            }];
-          });
-          if (writes.length > 0) await emulatorBatchWrite(writes);
-          written += chunk.length;
-          setProgress({ done: written, total: totalDocs, phase: `Cargando ${colName}…` });
-        }
-      }
-
-      // Re-insertar al usuario actual en system_users si el backup no lo incluía
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        const uid = currentUser.uid;
-        const backupSysUsers: any[] = backup.system_users ?? [];
-        const alreadyInBackup = Array.isArray(backupSysUsers) && backupSysUsers.some((u: any) => u._id === uid);
-        if (!alreadyInBackup) {
-          setProgress({ done: written, total: totalDocs, phase: 'Restaurando sesión admin…' });
-          const tokenResult = await currentUser.getIdTokenResult(true);
-          const role = String(tokenResult.claims.role ?? 'SUPERADMIN').trim() || 'SUPERADMIN';
-          const email = currentUser.email || '';
-          await emulatorBatchWrite([{
-            name: `projects/${PROJECT_ID}/databases/(default)/documents/system_users/${uid}`,
-            fields: toFsFields({
-              uid, email, firstName: 'Admin', lastName: 'Emulador', role,
-              empresaId: empresaId || 'bacarsa', status: 'ACTIVE', createdAt: new Date(),
-            }),
-          }]);
-          written += 1;
-        }
+      const written = Number(data.written ?? 0);
+      if (written === 0) {
+        throw new Error('Importación terminó sin documentos. Verificá empresa destino y el contenido del backup.');
       }
 
       const version: LoadedVersion = {
         fileName: file.name,
         loadedAt: new Date().toISOString(),
         totalDocs: written,
-        collections: cols.map(([k]) => k),
+        collections: [],
         sizeBytes: file.size,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(version));
@@ -756,7 +579,7 @@ export default function BackupTab() {
             <div className="flex-1">
               <h3 className="font-black text-sm text-amber-900">Actualizar datos del emulador</h3>
               <p className="text-xs text-amber-700 mt-0.5 mb-3">
-                Descargá el backup desde Drive y seleccionalo acá. Elegí el alcance:
+                Descargá el backup desde Drive y seleccionalo acá. Requiere <code className="bg-amber-100 px-1 rounded">node scripts/emulator-bridge.js</code> en otra terminal (puerto 3010). Importación ~2-4 min para backups grandes.
               </p>
               <div className="flex gap-2 mb-4">
                 <button
