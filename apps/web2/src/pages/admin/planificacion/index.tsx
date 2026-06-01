@@ -35,6 +35,11 @@ function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDo
     }
     return { pos, shift };
 }
+
+function isEmpExcludedFromPlanningDotacion(emp: { planificacionDotacion?: PlanificacionDotacionMap }, objectiveId: string | null | undefined): boolean {
+    if (!objectiveId || !emp?.planificacionDotacion) return false;
+    return isDeploymentSurplusCode(emp.planificacionDotacion[objectiveId]?.shiftCode);
+}
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
@@ -237,6 +242,30 @@ function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefi
     return true;
 }
 
+/** Turno visible en celda del crono para el objetivo activo (pending o publicado). */
+function resolveCellShiftAtObjective(
+    empId: string,
+    dateStr: string,
+    selectedObjective: string | undefined | null,
+    pendingChanges: Record<string, any>,
+    shiftsMap: Record<string, any>,
+): any | null {
+    if (!selectedObjective) return null;
+    const key = `${empId}_${dateStr}`;
+    const pending = pendingChanges[key];
+    const existing = shiftsMap[key];
+    if (pending?.isDeleted) return null;
+    const activeShift = pending && !pending.isDeleted ? pending : existing;
+    if (!activeShift) return null;
+    if (pending && !pending.isDeleted) {
+        const obj = activeShift.objectiveId;
+        if (obj != null && obj !== '' && String(obj) !== String(selectedObjective)) return null;
+        return activeShift;
+    }
+    if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return null;
+    return activeShift;
+}
+
 const getDateKey = (dateInput: any) => {
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
     const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -353,7 +382,7 @@ export default function PlanificacionPage() {
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
     const dotacionMigratedRef = useRef(false);
-    const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number } | null>(null);
+    const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -430,6 +459,8 @@ export default function PlanificacionPage() {
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
     const [autoForceSixTwo, setAutoForceSixTwo] = useState(true);
+    /** Tópico activo en el panel de ayuda del modal AUTO (hover sobre opciones). */
+    const [autoHelpTopic, setAutoHelpTopic] = useState<string>('default');
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
     /** null = Auto decide; true/false = forzar rotativo ON/OFF */
     const [autoRotateForce, setAutoRotateForce] = useState<boolean | null>(null);
@@ -667,6 +698,12 @@ export default function PlanificacionPage() {
         });
     }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients]);
 
+    /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
+    const planningDotacionEmployees = useMemo(
+        () => displayedEmployees.filter((e: any) => !isEmpExcludedFromPlanningDotacion(e, selectedObjective)),
+        [displayedEmployees, selectedObjective],
+    );
+
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
         const client = clients.find((c: any) => c.id === selectedClient);
@@ -734,17 +771,14 @@ export default function PlanificacionPage() {
         displayedEmployees.forEach((emp: any) => {
             let count = 0;
             daysInMonth.forEach(day => {
-                const key = `${emp.id}_${getDateKey(day)}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                const activeShift = pending && !pending.isDeleted ? pending : existing;
-                if (!activeShift || activeShift.isDeleted) return;
-                if (String(activeShift.code || '').toUpperCase() === 'RET') count++;
+                const dateStr = getDateKey(day);
+                const activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
+                if (activeShift && String(activeShift.code || '').toUpperCase() === 'RET') count++;
             });
             result[emp.id] = count;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
 
     // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
     const restViolationCells = useMemo(() => {
@@ -821,19 +855,39 @@ export default function PlanificacionPage() {
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective, slaCodeHoursHint]);
 
-    const retCount = useMemo(() => {
-        let count = 0;
+    /** Conteos del mes basados en turnos reales del objetivo (no tamaño de dotación asignada). */
+    const objectiveMonthShiftMetrics = useMemo(() => {
+        const withBillableHours = new Set<string>();
+        const withRetAtObjective = new Set<string>();
+        let totalRetDays = 0;
+        if (!selectedObjective) {
+            return { empCountWithTurnos: 0, empCountBillable: 0, totalRetDays: 0 };
+        }
         displayedEmployees.forEach((emp: any) => {
             daysInMonth.forEach(day => {
-                const key = `${emp.id}_${getDateKey(day)}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
-                if (activeShift && String(activeShift.code || '').toUpperCase() === 'RET') count++;
+                const dateStr = getDateKey(day);
+                const activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
+                if (!activeShift) return;
+                const code = String(activeShift.code || activeShift.shiftCode || '').toUpperCase();
+                if (code === 'RET') {
+                    totalRetDays++;
+                    withRetAtObjective.add(emp.id);
+                    return;
+                }
+                if (shiftCountsForEmployeeCronoHours(activeShift) && calcShiftHours(activeShift, slaCodeHoursHint) > 0) {
+                    withBillableHours.add(emp.id);
+                }
             });
         });
-        return count;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+        const withTurnos = new Set<string>([...withBillableHours, ...withRetAtObjective]);
+        return {
+            empCountWithTurnos: withTurnos.size,
+            empCountBillable: withBillableHours.size,
+            totalRetDays,
+        };
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
+
+    const retCount = useMemo(() => objectiveMonthShiftMetrics.totalRetDays, [objectiveMonthShiftMetrics.totalRetDays]);
 
     // Colchón disponible (horas): si hoy se ausenta alguien, ¿cuánto se podría cubrir
     // promoviendo RETs a turno facturable sin pasar 200h por empleado?
@@ -844,10 +898,8 @@ export default function PlanificacionPage() {
         displayedEmployees.forEach((emp: any) => {
             let empRetCount = 0;
             daysInMonth.forEach(day => {
-                const key = `${emp.id}_${getDateKey(day)}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                const activeShift = pending ? (pending.isDeleted ? null : pending) : existing;
+                const dateStr = getDateKey(day);
+                const activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
                 if (activeShift && String(activeShift.code || '').toUpperCase() === 'RET') empRetCount++;
             });
             if (empRetCount === 0) return;
@@ -856,7 +908,7 @@ export default function PlanificacionPage() {
             total += Math.min(empRetCount * 8, spareToCap);
         });
         return total;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empMonthlyHours]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empMonthlyHours, selectedObjective]);
 
     // Calcula las horas totales de descanso de un bloque de francos consecutivos.
     // Incluye: horas restantes tras el último turno trabajado + 24h × días de franco + horas hasta el próximo turno.
@@ -2005,6 +2057,93 @@ export default function PlanificacionPage() {
 
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
     const getEmpDefaultShift = (empId: string) => empDefaultShift[`${empId}___${selectedObjective}`] || null;
+
+    const computeEmpPosPickerLayout = (anchorRect: DOMRect) => {
+        const margin = 8;
+        const width = 260;
+        const vv = window.visualViewport;
+        const vTop = vv?.offsetTop ?? 0;
+        const vLeft = vv?.offsetLeft ?? 0;
+        const vh = vv?.height ?? window.innerHeight;
+        const vw = vv?.width ?? window.innerWidth;
+
+        const summaryBar = document.querySelector('[data-planning-summary-bar]') as HTMLElement | null;
+        const bottomReserve = summaryBar
+            ? Math.max(summaryBar.getBoundingClientRect().height + margin, 64)
+            : 72;
+        const usableBottom = vTop + vh - bottomReserve;
+
+        const headerH = 58;
+        const rowH = 76;
+        const footerBtnH = 40;
+        const idealH = headerH + positionStructure.length * rowH + footerBtnH;
+        const minH = 140;
+        const capH = Math.min(idealH, 420);
+
+        const spaceBelow = usableBottom - anchorRect.bottom - 4;
+        const spaceAbove = anchorRect.top - vTop - margin;
+        const anchorCenter = anchorRect.top + anchorRect.height / 2;
+        const lowerHalf = anchorCenter > vTop + (vh - bottomReserve) * 0.42;
+
+        const fitsBelow = spaceBelow >= minH;
+        const fitsAbove = spaceAbove >= minH;
+
+        let openDown: boolean;
+        if (lowerHalf && fitsAbove) openDown = false;
+        else if (!lowerHalf && fitsBelow) openDown = true;
+        else if (fitsAbove && !fitsBelow) openDown = false;
+        else if (fitsBelow && !fitsAbove) openDown = true;
+        else openDown = spaceBelow >= spaceAbove;
+
+        let maxHeight = Math.min(capH, Math.max(minH, openDown ? spaceBelow : spaceAbove));
+        let y = openDown ? anchorRect.bottom + 4 : anchorRect.top - maxHeight - 4;
+        y = Math.max(vTop + margin, Math.min(y, usableBottom - maxHeight));
+
+        // Si no entra anclado al botón, panel flotante centrado en el área útil
+        const anchoredClips = y + maxHeight > usableBottom + 1 || maxHeight < minH;
+        let floating = false;
+        if (anchoredClips) {
+            floating = true;
+            maxHeight = Math.min(capH, Math.max(minH, vh - bottomReserve - margin * 2));
+            y = vTop + margin + Math.max(0, (vh - bottomReserve - maxHeight) / 2);
+        }
+
+        let x = floating ? vLeft + (vw - width) / 2 : anchorRect.left;
+        if (x + width > vLeft + vw - margin) x = vLeft + vw - width - margin;
+        x = Math.max(vLeft + margin, x);
+
+        return { x, y, maxHeight, floating };
+    };
+
+    const openEmpPosPickerAt = (empId: string, anchorEl: HTMLElement) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const layout = computeEmpPosPickerLayout(anchorEl.getBoundingClientRect());
+                setEmpPosPicker({ empId, ...layout });
+            });
+        });
+    };
+
+    useEffect(() => {
+        if (!empPosPicker) return;
+        const reposition = () => {
+            const btn = document.querySelector(`[data-emp-pos-btn="${empPosPicker.empId}"]`) as HTMLElement | null;
+            if (!btn) return;
+            const layout = computeEmpPosPickerLayout(btn.getBoundingClientRect());
+            setEmpPosPicker((prev) => (prev ? { ...prev, ...layout } : prev));
+        };
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+        window.visualViewport?.addEventListener('resize', reposition);
+        window.visualViewport?.addEventListener('scroll', reposition);
+        return () => {
+            window.removeEventListener('scroll', reposition, true);
+            window.removeEventListener('resize', reposition);
+            window.visualViewport?.removeEventListener('resize', reposition);
+            window.visualViewport?.removeEventListener('scroll', reposition);
+        };
+    }, [empPosPicker?.empId, positionStructure.length]);
+
     const saveEmpPos = async (empId: string, posName: string | null, shiftCode?: string | null) => {
         if (!selectedObjective) return;
         const key = `${empId}___${selectedObjective}`;
@@ -2937,7 +3076,7 @@ export default function PlanificacionPage() {
     const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> => {
         if (!selectedObjective) return { ok: false, cycles: [] };
         if (!positionStructure.length) { toast.error('No hay puestos/SLA configurados para este objetivo'); return { ok: false, cycles: [] }; }
-        if (!displayedEmployees.length) { toast.error('No hay empleados en la dotación'); return { ok: false, cycles: [] }; }
+        if (!planningDotacionEmployees.length) { toast.error('No hay empleados activos en la dotación (REF/ESC no cuentan)'); return { ok: false, cycles: [] }; }
 
         setAutoV2Loading(true);
         setAutoV2Progress({ pct: 4, label: 'Iniciando análisis…' });
@@ -2949,11 +3088,11 @@ export default function PlanificacionPage() {
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
             await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
-            mergeAbsencesFromLocalGrid(absences, displayedEmployees.map((e: any) => e.id), monthStart, monthEnd);
+            mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
 
             // Acumular cola CCT del mes anterior (26 → fin) por empleado
             const empMonthlyInitial: Record<string,number> = {};
-            displayedEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
+            planningDotacionEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
             const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
             const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
             await bumpAutoV2Progress(32, 'Leyendo cola CCT (26 → fin mes anterior)…');
@@ -2982,7 +3121,7 @@ export default function PlanificacionPage() {
             await new Promise<void>((r) => setTimeout(r, 0));
             const brainInput = {
                 positions: positionStructure,
-                employees: displayedEmployees.map((e:any) => ({
+                employees: planningDotacionEmployees.map((e:any) => ({
                     id: e.id,
                     nombre: e.nombre || e.name,
                     lat: typeof e.lat === 'number' ? e.lat : null,
@@ -3027,7 +3166,7 @@ export default function PlanificacionPage() {
             const preflight = buildObjectiveCoveragePreflight({
                 positions: positionStructure,
                 days: preflightDays,
-                employees: displayedEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
+                employees: planningDotacionEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
                 absences,
                 slaVendidas,
                 cycles: brain.cycles,
@@ -3186,7 +3325,7 @@ export default function PlanificacionPage() {
             const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
             await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
-            mergeAbsencesFromLocalGrid(absences, displayedEmployees.map((e: any) => e.id), monthStart, monthEnd);
+            mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
 
             const preflightDays = daysInMonth.map(day => {
                 const dateStr = getDateKey(day);
@@ -3195,7 +3334,7 @@ export default function PlanificacionPage() {
             setAutoV2CoveragePreflight(buildObjectiveCoveragePreflight({
                 positions: positionStructure,
                 days: preflightDays,
-                employees: displayedEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
+                employees: planningDotacionEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
                 absences,
                 slaVendidas,
                 cycles: cyclesForGen,
@@ -3341,7 +3480,7 @@ export default function PlanificacionPage() {
 
             const genBrain = autoPlanningBrainRef.current ?? resolveAutoPlanningBrain({
                 positions: positionStructure,
-                employees: displayedEmployees.map((e:any) => ({
+                employees: planningDotacionEmployees.map((e:any) => ({
                     id: e.id,
                     nombre: e.nombre || e.name,
                     lat: typeof e.lat === 'number' ? e.lat : null,
@@ -3374,7 +3513,7 @@ export default function PlanificacionPage() {
 
             const baseGenCtx = {
                 positions: positionStructure,
-                employees: displayedEmployees.map((e:any) => ({
+                employees: planningDotacionEmployees.map((e:any) => ({
                     id: e.id,
                     nombre: e.nombre || e.name,
                     lat: typeof e.lat === 'number' ? e.lat : null,
@@ -3477,7 +3616,7 @@ export default function PlanificacionPage() {
             // ── Verificación de cobertura (slots, descansos, licencias, >200h) ──
             const verifyCtx = {
                 positions: positionStructure,
-                employees: displayedEmployees.map((e:any) => ({ id: e.id, nombre: e.nombre || e.name })),
+                employees: planningDotacionEmployees.map((e:any) => ({ id: e.id, nombre: e.nombre || e.name })),
                 daysInMonth,
                 empMonthlyInitial,
                 absences,
@@ -4081,6 +4220,11 @@ export default function PlanificacionPage() {
                 <tr className="h-6">
                     <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
+                        {selectedObjective && !isSnapshotView && (
+                            <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Con turnos en el mes / dotación activa (sin REF/ESC de reserva)">
+                                {objectiveMonthShiftMetrics.empCountWithTurnos}/{planningDotacionEmployees.length} c/ turno
+                            </span>
+                        )}
                         <div
                             className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-indigo-400/60 transition-colors"
                             title="Arrastrar para cambiar el ancho"
@@ -4206,13 +4350,21 @@ export default function PlanificacionPage() {
                                                         {positionStructure.length > 1 && !isServiceLocked && (
                                                             <button
                                                                 draggable={false}
-                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const estimatedH = Math.min(positionStructure.length * 36 + 48, 240); const flipUp = r.bottom + estimatedH > window.innerHeight - 8; setEmpPosPicker(empPosPicker?.empId === emp.id ? null : { empId: emp.id, x: r.left, y: flipUp ? r.top - estimatedH - 4 : r.bottom + 4 }); }}
-                                                                className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-colors whitespace-nowrap ${getEmpDefaultPos(emp.id) ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100'}`}
-                                                                title={`Puesto: ${getEmpDefaultPos(emp.id) || 'sin asignar'} · Turno: ${getEmpDefaultShift(emp.id) || 'auto'}`}
+                                                                data-emp-pos-btn={emp.id}
+                                                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (empPosPicker?.empId === emp.id) setEmpPosPicker(null); else openEmpPosPickerAt(emp.id, e.currentTarget as HTMLElement); }}
+                                                                className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-colors whitespace-nowrap ${
+                                                                    isDeploymentSurplusCode(getEmpDefaultShift(emp.id))
+                                                                        ? (getEmpDefaultShift(emp.id) === 'ESC' ? 'bg-sky-600 text-white' : 'bg-violet-600 text-white')
+                                                                        : getEmpDefaultPos(emp.id) ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400 opacity-0 group-hover:opacity-100'
+                                                                }`}
+                                                                title={`Puesto: ${getEmpDefaultPos(emp.id) || 'sin asignar'} · Rol: ${getEmpDefaultShift(emp.id) || 'auto'}${isEmpExcludedFromPlanningDotacion(emp, selectedObjective) ? ' (excluido de auto/dotación)' : ''}`}
                                                             >
-                                                                {getEmpDefaultShift(emp.id)
-                                                                    ? `${getEmpDefaultShift(emp.id)}`
-                                                                    : (getEmpDefaultPos(emp.id) || '···')}
+                                                                {(() => {
+                                                                    const sc = getEmpDefaultShift(emp.id);
+                                                                    if (sc === 'REF' || sc === 'ESC') return `${sc} · ${getEmpDefaultPos(emp.id) || '·'}`;
+                                                                    if (sc) return sc;
+                                                                    return getEmpDefaultPos(emp.id) || '···';
+                                                                })()}
                                                             </button>
                                                         )}
                                                         {!isSnapshotView && selectedObjective && !isServiceLocked && (
@@ -4460,37 +4612,54 @@ export default function PlanificacionPage() {
                     <div className="w-2 h-2 bg-slate-900 rotate-45 ml-2 -mt-1" />
                 </div>
             )}
-            {empPosPicker && (
+            {empPosPicker && typeof document !== 'undefined' && createPortal(
+                <>
                 <div
-                    className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"
-                    style={{ left: empPosPicker.x, top: empPosPicker.y, minWidth: 180 }}
+                    className="fixed inset-0 z-[9998] bg-black/20"
+                    aria-hidden
+                    onClick={() => setEmpPosPicker(null)}
+                />
+                <div
+                    className="fixed z-[9999] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+                    style={{
+                        left: empPosPicker.x,
+                        top: empPosPicker.y,
+                        width: 260,
+                        minWidth: 260,
+                        height: empPosPicker.maxHeight,
+                        maxHeight: empPosPicker.maxHeight,
+                    }}
                     onClick={e => e.stopPropagation()}
                 >
-                    <div className="px-3 py-2 text-[9px] font-black text-slate-400 uppercase border-b bg-slate-50 tracking-wider">Puesto + Turno</div>
-                    <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: 260 }}>
+                    <div className="px-3 py-2 text-[9px] font-black text-slate-400 uppercase border-b bg-slate-50 dark:bg-slate-900 tracking-wider shrink-0">
+                        Puesto + Turno
+                        {empPosPicker.floating && (
+                            <span className="ml-1 text-indigo-500 normal-case font-bold">· flotante</span>
+                        )}
+                        <p className="text-[8px] font-bold normal-case text-slate-400 mt-0.5 tracking-normal">REF/ESC excluyen del auto y dotación</p>
+                    </div>
+                    <div className="overflow-y-auto overscroll-contain custom-scrollbar flex-1 min-h-0">
                     {positionStructure.map(p => {
                         const codes = [...new Set((p.shifts || []).map((s:any) => String(s.code || '').toUpperCase()).filter(Boolean))];
                         const isSelPos = getEmpDefaultPos(empPosPicker.empId) === p.positionName;
                         const selShift = getEmpDefaultShift(empPosPicker.empId);
-                        // D12 y N12 se guardan y muestran como M/N (alias genérico)
                         const NORM: Record<string,string> = { D12: 'M', N12: 'N' };
                         const shiftColor: Record<string,string> = {
                             M: 'bg-sky-500 text-white', T: 'bg-amber-500 text-white',
                             N: 'bg-indigo-600 text-white',
                         };
+                        const surplusActive = (role: string) => isSelPos && selShift === role;
                         return (
-                            <div key={p.positionName} className={`border-b last:border-0 ${isSelPos ? 'bg-indigo-50' : ''}`}>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600">{p.positionName}</div>
+                            <div key={p.positionName} className={`border-b last:border-0 dark:border-slate-700 ${isSelPos ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600 dark:text-slate-200">{p.positionName}</div>
                                 <div className="flex flex-wrap gap-1 px-3 pb-2">
-                                    {/* Sin preferencia de turno — siempre disponible */}
                                     <button
                                         onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
-                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}
+                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
                                         title="Asignar al puesto sin preferencia de turno — el auto-scheduler elige"
                                     >
                                         AUTO
                                     </button>
-                                    {/* Botones por turno específico */}
                                     {codes.map((sc:string) => {
                                         const saveCode = NORM[sc] ?? sc;
                                         const displayLabel = NORM[sc] ?? sc;
@@ -4499,12 +4668,26 @@ export default function PlanificacionPage() {
                                         return (
                                             <button key={sc}
                                                 onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, saveCode)}
-                                                className={`flex items-center gap-0.5 px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[saveCode] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}>
+                                                className={`flex items-center gap-0.5 px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${active ? (shiftColor[saveCode] || 'bg-indigo-600 text-white') : 'bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-slate-700 dark:text-slate-200'}`}>
                                                 {displayLabel}
                                                 {is12h && <span className={`text-[8px] font-bold ml-0.5 ${active ? 'opacity-80' : 'text-slate-400'}`}>12h</span>}
                                             </button>
                                         );
                                     })}
+                                    <button
+                                        onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, 'REF')}
+                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${surplusActive('REF') ? 'bg-violet-600 text-white' : 'bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-900/30 dark:text-violet-200'}`}
+                                        title="Refuerzo: visible en grilla pero excluido del automatizar y del conteo de dotación"
+                                    >
+                                        REF
+                                    </button>
+                                    <button
+                                        onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, 'ESC')}
+                                        className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${surplusActive('ESC') ? 'bg-sky-600 text-white' : 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-900/30 dark:text-sky-200'}`}
+                                        title="Escuela: visible en grilla pero excluido del automatizar y del conteo de dotación"
+                                    >
+                                        ESC
+                                    </button>
                                 </div>
                             </div>
                         );
@@ -4512,11 +4695,13 @@ export default function PlanificacionPage() {
                     </div>
                     {getEmpDefaultPos(empPosPicker.empId) && (
                         <button onClick={() => saveEmpPos(empPosPicker.empId, null, null)}
-                            className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-400 hover:bg-slate-50 border-t transition-colors">
+                            className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 border-t dark:border-slate-700 transition-colors shrink-0">
                             Quitar prefijo
                         </button>
                     )}
                 </div>
+                </>,
+                document.body,
             )}
             <div className={`overflow-hidden transition-all duration-300 ease-in-out no-print ${selectedClient ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-40 opacity-100'}`}>
                 <PageHeader
@@ -5083,19 +5268,16 @@ export default function PlanificacionPage() {
                 {selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
-                    const empCount = displayedEmployees.filter((e: any) =>
-                        (sourceHours[e.id] || 0) > 0 || (empRetDays[e.id] || 0) > 0
-                    ).length;
-                    // Para el promedio excluir guardias que solo tienen días RET (0 hs facturables)
-                    const empCountBillable = displayedEmployees.filter((e: any) => (sourceHours[e.id] || 0) > 0).length;
+                    const empCount = objectiveMonthShiftMetrics.empCountWithTurnos;
+                    const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/francos/licencias.'
                         : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, francos ni licencias). Compará con Vendidas del SLA.';
                     return (
-                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                        <div className="text-center pr-3" title={hoursMode === 'cct' ? 'Empleados con horas en el ciclo CCT actual.' : 'Empleados con horas planificadas en el mes.'}>
+                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                        <div className="text-center pr-3" title="Guardias con al menos un turno (facturable o RET) en este objetivo durante el mes — no la dotación total asignada.">
                             <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Empl.</p>
                             <p className="text-sm font-black text-slate-700 dark:text-slate-200 leading-tight">{empCount}</p>
                         </div>
@@ -6494,7 +6676,7 @@ export default function PlanificacionPage() {
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
                 {showAutoV2Modal && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
-                        <div className="bg-white rounded-xl shadow-2xl w-[480px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white rounded-xl shadow-2xl w-[760px] max-w-[95vw] max-h-[92vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
                             {/* Header */}
                             <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
@@ -6511,22 +6693,7 @@ export default function PlanificacionPage() {
                             {/* Content */}
                             <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-4 space-y-3">
 
-                                {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && autoV2CoveragePreflight && (
-                                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1">
-                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Demanda SLA (objetivo)</p>
-                                        <p className="text-[11px] font-bold text-slate-800">
-                                            {autoV2CoveragePreflight.monthDemandHours}h estructura · {slaVendidas}h vendidas
-                                        </p>
-                                        <p className="text-[10px] text-slate-600">
-                                            Mes: {Object.entries(autoV2CoveragePreflight.monthBandDemand).map(([c, n]) => `${n}×${c}`).join(' · ')}
-                                        </p>
-                                        {autoV2CoveragePreflight.totalAbsenceDays > 0 && (
-                                            <p className="text-[10px] text-amber-700 font-bold">
-                                                Ausencias/licencias: {autoV2CoveragePreflight.totalAbsenceDays} días-persona bloqueados
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
+                                {/* preflight configure — se muestra en panel derecho del layout 2 paneles */}
 
                                 {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2CoveragePreflight && (
                                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -6540,165 +6707,283 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
-                                {/* Paso 1: configuración antes de generar */}
+                                {/* Paso 1: configuración — layout 2 paneles */}
                                 {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && (
-                                    <div className="space-y-3">
-                                        <p className="text-[11px] text-slate-600 font-bold leading-snug">
-                                            <strong>Auto</strong> arma 6+2 + rotativo. Vacaciones/licencias/enfermedad → <strong>Modo 12</strong> con plantilla del objetivo.
-                                            Contingencia (fechas) → <strong>RET</strong> sin sacar gente de franco.
-                                        </p>
-                                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5">
-                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-600">Reglas de cobertura</p>
-                                            {PLANNING_COVERAGE_RULES.map(rule => (
-                                                <div key={rule.id} className="text-[9px] font-bold text-slate-700 leading-snug">
-                                                    <span className="text-slate-900">{rule.title}:</span>{' '}
-                                                    {rule.summary}
-                                                    {rule.extraCost && (
-                                                        <span className="text-amber-700"> · costo extra si lo hacés manual en la grilla</span>
+                                    <div className="flex gap-5">
+
+                                        {/* ── PANEL IZQUIERDO: opciones ── */}
+                                        <div className="w-[248px] shrink-0 space-y-4">
+
+                                            {/* Cómputo de horas */}
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Cómputo de horas</p>
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('budget-cct')} onClick={() => setAutoV2BudgetMode('cct')}
+                                                        className={`py-3 px-3 rounded-xl text-left border-2 transition-colors ${autoV2BudgetMode === 'cct' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-amber-200'}`}>
+                                                        <div className={`text-[11px] font-black ${autoV2BudgetMode === 'cct' ? 'text-amber-800' : 'text-slate-600'}`}>CCT</div>
+                                                        <div className={`text-[9px] font-bold mt-0.5 ${autoV2BudgetMode === 'cct' ? 'text-amber-600' : 'text-slate-400'}`}>por tramos</div>
+                                                        {autoV2BudgetMode === 'cct' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5" />}
+                                                    </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('budget-calendar')} onClick={() => setAutoV2BudgetMode('calendar')}
+                                                        className={`py-3 px-3 rounded-xl text-left border-2 transition-colors ${autoV2BudgetMode === 'calendar' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-amber-200'}`}>
+                                                        <div className={`text-[11px] font-black ${autoV2BudgetMode === 'calendar' ? 'text-amber-800' : 'text-slate-600'}`}>Simple</div>
+                                                        <div className={`text-[9px] font-bold mt-0.5 ${autoV2BudgetMode === 'calendar' ? 'text-amber-600' : 'text-slate-400'}`}>200h netas</div>
+                                                        {autoV2BudgetMode === 'calendar' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5" />}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Ciclo de trabajo */}
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Ciclo de trabajo</p>
+                                                <div className="space-y-1.5">
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('scheme-fixed')} onClick={() => setAutoForceSixTwo(true)}
+                                                        className={`w-full text-left px-3 py-3 rounded-xl border-2 transition-colors ${autoForceSixTwo ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:border-indigo-200'}`}>
+                                                        <div className={`text-[11px] font-black ${autoForceSixTwo ? 'text-indigo-800' : 'text-slate-600'}`}>Esquema 6+2 · fijo</div>
+                                                        <div className={`text-[9px] font-bold mt-0.5 ${autoForceSixTwo ? 'text-indigo-500' : 'text-slate-400'}`}>6 días trabajo · 2 franco · recomendado</div>
+                                                    </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('scheme-auto')} onClick={() => setAutoForceSixTwo(false)}
+                                                        className={`w-full text-left px-3 py-3 rounded-xl border-2 transition-colors ${!autoForceSixTwo ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-amber-200'}`}>
+                                                        <div className={`text-[11px] font-black ${!autoForceSixTwo ? 'text-amber-800' : 'text-slate-600'}`}>Esquema automático</div>
+                                                        <div className={`text-[9px] font-bold mt-0.5 ${!autoForceSixTwo ? 'text-amber-600' : 'text-slate-400'}`}>Cerebro elige 6+2 / 6+1 / 4+2</div>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Opciones */}
+                                            <div>
+                                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Opciones</p>
+                                                <div className="space-y-1.5">
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('overwrite')} onClick={() => setAutoOverwrite(p => !p)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${autoOverwrite ? 'border-slate-400 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoOverwrite ? 'bg-slate-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoOverwrite ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${autoOverwrite ? 'text-slate-800' : 'text-slate-500'}`}>Sobreescribir celdas</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">reemplaza asignaciones existentes</div>
+                                                        </div>
+                                                    </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('rotate')} onClick={() => setAutoRotateForce(p => { const cur = p ?? autoPlanningBrainReport?.rotateShifts ?? true; return !cur; })}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-emerald-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'text-emerald-800' : 'text-slate-500'}`}>Turnos rotativos M→T→N</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">
+                                                                Auto {autoPlanningBrainReport?.rotateShifts ? 'ON' : 'OFF'}
+                                                                {autoRotateForce !== null ? (autoRotateForce ? ' · forzado ON' : ' · forzado OFF') : ' · tocá para forzar'}
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('sixone')} onClick={() => setUseSixPlusOne(p => !p)}
+                                                        disabled={!(planningDotacionEmployees.length % 6 === 0 && planningDotacionEmployees.length >= 6)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors disabled:opacity-40 ${useSixPlusOne ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-emerald-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${useSixPlusOne ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${useSixPlusOne ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${useSixPlusOne ? 'text-emerald-800' : 'text-slate-500'}`}>Ciclo 6+1 · banda fija</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">
+                                                                {planningDotacionEmployees.length % 6 === 0 && planningDotacionEmployees.length >= 6
+                                                                    ? `${planningDotacionEmployees.length / 6} grupo(s) de 6 · 85.7%`
+                                                                    : `múltiplo de 6 requerido (actual: ${planningDotacionEmployees.length})`}
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Contingencia */}
+                                            <div onMouseEnter={() => setAutoHelpTopic('contingency')}>
+                                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Contingencia — Modo 12</p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {daysInMonth.map(day => {
+                                                        const ds = getDateKey(day);
+                                                        const sel = autoContingenciaDias.has(ds);
+                                                        const isWe = day.getDay() === 0 || day.getDay() === 6;
+                                                        return (
+                                                            <button key={ds} type="button" title={ds}
+                                                                onClick={() => { setAutoContingenciaDias(prev => { const next = new Set(prev); if (next.has(ds)) next.delete(ds); else next.add(ds); return next; }); }}
+                                                                className={`min-w-[1.65rem] h-6 rounded text-[10px] font-black border transition-colors ${sel ? 'bg-violet-600 text-white border-violet-700' : isWe ? 'bg-rose-50 text-rose-600 border-rose-200 hover:border-violet-300' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}>
+                                                                {day.getDate()}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {autoContingenciaDias.size > 0 && <p className="text-[9px] font-bold text-violet-700 mt-1">{autoContingenciaDias.size} día(s) · D12+N12</p>}
+                                            </div>
+
+                                            {/* Avanzado */}
+                                            <div className="border-t border-slate-100 pt-3">
+                                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Avanzado</p>
+                                                <div className="space-y-1.5">
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('intensive')}
+                                                        onClick={() => (autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) && setAutoAjustarCrono(p => !p)}
+                                                        disabled={!(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors disabled:opacity-30 ${autoAjustarCrono ? 'border-violet-300 bg-violet-50' : 'border-slate-200 hover:border-violet-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoAjustarCrono ? 'bg-violet-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoAjustarCrono ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${autoAjustarCrono ? 'text-violet-800' : 'text-slate-500'}`}>Intensivo mes completo</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">4+2→6+1 · más RET</div>
+                                                        </div>
+                                                    </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('gemini')} onClick={() => setAutoV2RunGemini(p => !p)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${autoV2RunGemini ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 hover:border-indigo-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoV2RunGemini ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${autoV2RunGemini ? 'text-indigo-800' : 'text-slate-500'}`}>Ajuste fino IA (Gemini)</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">opcional · 30-60s extra</div>
+                                                        </div>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* ── PANEL DERECHO: explicación + diagnóstico ── */}
+                                        <div className="flex-1 flex flex-col gap-3 min-w-0">
+
+                                            {/* Card explicación dinámica */}
+                                            <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3.5 flex-1 min-h-[200px]">
+                                                {autoHelpTopic === 'default' && (
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-2">Cómo funciona el motor COSP</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Genera el cronograma del mes completo en base a la dotación y el SLA del objetivo.</p>
+                                                        <div className="space-y-1.5 text-[10px] font-bold text-slate-600">
+                                                            <div className="flex items-start gap-2"><span className="text-amber-600 shrink-0">Modo 8</span><span>M+T+N con franco rotativo. Para cada día: 3 trabajan, 1 descansa.</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-amber-600 shrink-0">Modo 12</span><span>D12+N12 automático cuando hay vacaciones/licencia/enfermedad en la dotación.</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-violet-600 shrink-0">Contingencia</span><span>D12+N12 manual en fechas específicas para liberar RETs.</span></div>
+                                                        </div>
+                                                        {autoV2CoveragePreflight && (
+                                                            <div className="mt-3 pt-2.5 border-t border-slate-200">
+                                                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Demanda del objetivo</p>
+                                                                <p className="text-[10px] font-bold text-slate-700">{Object.entries(autoV2CoveragePreflight.monthBandDemand).map(([c, n]) => `${n}×${c}`).join(' · ')} · <span className="text-amber-700">{slaVendidas}h vendidas</span></p>
+                                                                {autoV2CoveragePreflight.totalAbsenceDays > 0 && <p className="text-[10px] font-bold text-amber-700 mt-0.5">{autoV2CoveragePreflight.totalAbsenceDays} días con ausencias/licencias</p>}
+                                                            </div>
+                                                        )}
+                                                        <p className="mt-3 text-[9px] text-slate-400 font-bold">Pasá el cursor sobre una opción para ver su descripción.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'budget-cct' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-amber-800 mb-2">CCT por tramos</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Calcula las horas según el convenio 422/05, dividiendo el mes en dos tramos:</p>
+                                                        <div className="space-y-1 text-[10px] font-bold text-slate-600 mb-3"><div><strong>T1</strong> · días 1–24: horas normales hasta el tope del tramo.</div><div><strong>T2</strong> · días 25–fin: cola acumulada del mes.</div></div>
+                                                        <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-lg px-2.5 py-2">✓ Recomendado para la mayoría de objetivos con guardias bajo CCT 422/05.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'budget-calendar' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-amber-800 mb-2">Calendario simple</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Cuenta las horas de corrido sin dividir el mes en tramos. Límite único: <strong>200h netas</strong> por mes.</p>
+                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">Más flexible, pero puede no respetar exactamente el CCT. Usalo cuando el objetivo tiene acuerdo particular o no está bajo convenio.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'scheme-fixed' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-indigo-800 mb-2">Esquema 6+2 · fijo</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Todos los empleados trabajan <strong>6 días seguidos y descansan 2</strong>. Ciclo idéntico para toda la dotación.</p>
+                                                        <div className="text-[10px] font-mono font-bold text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 mb-3">LLLLLLFF · LLLLLLFF · LLLLLLFF…</div>
+                                                        <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-lg px-2.5 py-2">✓ Más fácil de supervisar y auditar. <strong>Recomendado</strong> para la mayoría de objetivos.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'scheme-auto' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-amber-800 mb-2">Esquema automático</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">El cerebro elige el ciclo más eficiente: puede usar <strong>6+2, 6+1 o 4+2</strong> para distintos empleados según la dotación.</p>
+                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">⚠ Puede mezclar ciclos — la grilla se vuelve más difícil de leer. Usalo solo para experimentar con dotaciones no estándar.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'overwrite' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-slate-800 mb-2">Sobreescribir celdas</p>
+                                                        <div className="space-y-2 text-[10px] font-bold">
+                                                            <div className="rounded-lg bg-slate-100 px-2.5 py-2 text-slate-700"><strong>OFF</strong> (recomendado) — solo rellena celdas vacías. Las asignaciones manuales que ya hiciste se preservan.</div>
+                                                            <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-amber-800"><strong>ON</strong> — el motor reemplaza todo, incluso lo que editaste a mano. Útil si querés empezar desde cero.</div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'rotate' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-emerald-800 mb-2">Turnos rotativos M→T→N</p>
+                                                        <div className="space-y-2 text-[10px] font-bold mb-2">
+                                                            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-emerald-800"><strong>ON</strong> — los empleados rotan de banda cada ciclo (péndulo M→T→N→T→M). Distribuye el desgaste nocturno.</div>
+                                                            <div className="rounded-lg bg-slate-100 px-2.5 py-2 text-slate-700"><strong>OFF</strong> (banda fija) — cada empleado mantiene su turno todo el mes. Más predecible para el guardia.</div>
+                                                        </div>
+                                                        <p className="text-[9px] text-slate-400 font-bold">El cerebro decide automáticamente. Podés forzarlo acá.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'sixone' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-emerald-800 mb-2">Ciclo 6+1 · banda fija</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 mb-2">Ciclo de <strong>7 días</strong>: 6 de trabajo + 1 franco. Eficiencia <strong>85.7%</strong> (vs 75% del 6+2).</p>
+                                                        <div className="text-[10px] font-mono font-bold text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 mb-2">LLLLLLF · LLLLLLF · LLLLLLF…</div>
+                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">Más horas facturables por mes, pero menos descanso acumulado. Requiere múltiplo de 6 guardias.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'contingency' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-violet-800 mb-2">Contingencia — Modo 12 manual</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Seleccioná fechas para activar <strong>D12+N12</strong> y liberar RETs ese día. Útil para eventos o picos de demanda.</p>
+                                                        <p className="text-[10px] font-bold text-slate-600 mb-2">El motor reorganiza quién trabaja — <strong>no convierte francos en turnos</strong>.</p>
+                                                        <p className="text-[10px] font-bold text-violet-700 bg-violet-50 rounded-lg px-2.5 py-2">Los días con V/L/E en la dotación ya activan Modo 12 automáticamente.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'intensive' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-violet-800 mb-2">Intensivo mes completo</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Combina ciclos cortos (4+2, 6+1) para maximizar días de trabajo y horas facturables. Genera más RETs disponibles.</p>
+                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">⚠ Requiere turnos rotativos ON. Solo para objetivos con alta demanda continua donde el 6+2 no alcanza.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'gemini' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-indigo-800 mb-2">Ajuste fino IA (Gemini)</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Después de generar, <strong>Gemini</strong> revisa y aplica micro-ajustes para mejorar la distribución de horas y cerrar huecos pequeños. No regenera desde cero.</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 bg-slate-100 rounded-lg px-2.5 py-2">Demora 30–60 segundos extra. Opcional.</p>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Diagnóstico (si el cerebro ya corrió) */}
+                                            {autoPlanningBrainReport?.diagnosis && (
+                                                <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 space-y-2">
+                                                    <p className="text-[9px] font-black uppercase tracking-wide text-indigo-500">Diagnóstico del esquema</p>
+                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                        <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Demanda</p>
+                                                            <p className="text-[10px] font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.demand.slotsPerDay} slots/día · {Math.round(autoPlanningBrainReport.diagnosis.demand.soldHours)}h vendidas</p>
+                                                        </div>
+                                                        <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Oferta</p>
+                                                            <p className="text-[10px] font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias · plantilla 6+2: {autoPlanningBrainReport.diagnosis.supply.plantillaRequired6x2}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`rounded-lg px-2.5 py-1.5 border text-[10px] font-bold ${autoPlanningBrainReport.diagnosis.balance === 'exact' ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : autoPlanningBrainReport.diagnosis.balance === 'surplus' ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-rose-100 border-rose-300 text-rose-900'}`}>
+                                                        <span className="text-[9px] uppercase opacity-70">Balance · </span>{autoPlanningBrainReport.diagnosis.balanceLabel}
+                                                        {autoPlanningBrainReport.strictSixTwo && <span className="block text-[9px] mt-0.5 text-emerald-700">6+2 estricto · bandas fijas + flotante</span>}
+                                                    </div>
+                                                    {autoPlanningBrainReport.recommendedAlternative && !autoAjustarCrono && (
+                                                        <button type="button" onClick={() => {
+                                                            const alt = autoPlanningBrainReport.recommendedAlternative!;
+                                                            const baseInput = autoPlanningBrainInputRef.current;
+                                                            if (!baseInput) return;
+                                                            const newBrain = resolveAutoPlanningBrain({ ...baseInput, cycleOverride: alt });
+                                                            autoPlanningBrainRef.current = newBrain;
+                                                            setAutoPlanningBrainReport(newBrain);
+                                                            autoSelectedCyclesRef.current = newBrain.cycles;
+                                                            setAutoCycles(newBrain.cycles);
+                                                        }} className="w-full text-left text-[10px] font-bold rounded-lg px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors">
+                                                            💡 <strong>{autoPlanningBrainReport.recommendedAlternative}</strong> también es viable — clic para aplicar
+                                                        </button>
                                                     )}
                                                 </div>
-                                            ))}
-                                        </div>
-                                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                            <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Modo 8 (normal)</p>
-                                            <p className="text-[11px] font-bold mt-0.5 text-amber-900">
-                                                M+T+N · el motor calcula servicio + franco + plantilla (ej. 12+4=16)
-                                            </p>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-1.5">
-                                            <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
-                                                className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
-                                                CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>cola + nuevo desde día 25</div>
-                                            </button>
-                                            <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
-                                                className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
-                                                Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas sin cola</div>
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black text-slate-700 flex-1">Sobreescribir celdas ya asignadas</span>
-                                            <button type="button" onClick={() => setAutoOverwrite(p => !p)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
-                                        <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border-2 transition-colors ${autoForceSixTwo ? 'border-indigo-200 bg-indigo-50' : 'border-amber-200 bg-amber-50'}`}>
-                                            <span className="text-[10px] font-black flex-1 leading-snug">
-                                                <span className={autoForceSixTwo ? 'text-indigo-800' : 'text-amber-800'}>
-                                                    {autoForceSixTwo ? 'Esquema fijo: 6+2' : 'Esquema automático'}
-                                                </span>
-                                                <span className={`block text-[9px] font-bold normal-case ${autoForceSixTwo ? 'text-indigo-600' : 'text-amber-700'}`}>
-                                                    {autoForceSixTwo ? 'Siempre 6 días trabajo + 2 franco (recomendado)' : 'Cerebro elige entre 6+2 / 6+1 / 4+2 según dotación'}
-                                                </span>
-                                            </span>
-                                            <button type="button" onClick={() => setAutoForceSixTwo(p => !p)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoForceSixTwo ? 'bg-indigo-500' : 'bg-amber-400'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoForceSixTwo ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Turnos rotativos (equilibrio M→T→N)
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">
-                                                    Auto {autoPlanningBrainReport?.rotateShifts ? 'ON' : 'OFF'}
-                                                    {autoRotateForce === null ? ' · tocá para forzar' : autoRotateForce ? ' · forzado ON' : ' · forzado OFF'}
-                                                </span>
-                                            </span>
-                                            <button type="button" onClick={() => setAutoRotateForce(p => {
-                                                const cur = p ?? autoPlanningBrainReport?.rotateShifts ?? true;
-                                                return !cur;
-                                            })}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
-
-                                        {/* Ciclo 6+1 */}
-                                        <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border transition-colors ${useSixPlusOne ? 'bg-emerald-50 border-emerald-200' : 'border-transparent'}`}>
-                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Ciclo 6+1 · banda fija · 85.7 %
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">
-                                                    {displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6
-                                                        ? `${displayedEmployees.length} guardias → ${displayedEmployees.length / 6} grupo${displayedEmployees.length / 6 > 1 ? 's' : ''} de 6 · ~${Math.round(displayedEmployees.length / 6 * 25.7)} días-guardia/mes`
-                                                        : `Requiere múltiplo de 6 guardias (6, 12, 18…) — actual: ${displayedEmployees.length}`}
-                                                </span>
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setUseSixPlusOne(p => !p)}
-                                                disabled={!(displayedEmployees.length % 6 === 0 && displayedEmployees.length >= 6)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 disabled:opacity-30 ${useSixPlusOne ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                                            >
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${useSixPlusOne ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
-
-                                        <div className="rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2 space-y-1.5">
-                                            <p className="text-[10px] font-black text-violet-900 uppercase tracking-wide">
-                                                Contingencia — Modo 12 manual
-                                            </p>
-                                            <p className="text-[9px] font-bold text-violet-800 leading-snug">
-                                                Elegí fechas para D12+N12 y liberar RET. Reorganiza quien ya trabaja ese día — no convierte F en turno (eso es franco trabajado / extra).
-                                            </p>
-                                            <div className="flex flex-wrap gap-1">
-                                                {daysInMonth.map(day => {
-                                                    const ds = getDateKey(day);
-                                                    const sel = autoContingenciaDias.has(ds);
-                                                    const isWe = day.getDay() === 0 || day.getDay() === 6;
-                                                    return (
-                                                        <button
-                                                            key={ds}
-                                                            type="button"
-                                                            title={ds}
-                                                            onClick={() => {
-                                                                setAutoContingenciaDias(prev => {
-                                                                const next = new Set(prev);
-                                                                if (next.has(ds)) next.delete(ds);
-                                                                else next.add(ds);
-                                                                return next;
-                                                            });
-                                                            }}
-                                                            className={`min-w-[1.65rem] h-6 rounded text-[10px] font-black border transition-colors ${
-                                                                sel
-                                                                    ? 'bg-violet-600 text-white border-violet-700'
-                                                                    : isWe
-                                                                        ? 'bg-rose-50 text-rose-600 border-rose-200 hover:border-violet-300'
-                                                                        : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'
-                                                            }`}
-                                                        >
-                                                            {day.getDate()}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            {autoContingenciaDias.size > 0 && (
-                                                <p className="text-[9px] font-bold text-violet-700">
-                                                    {autoContingenciaDias.size} día(s) Contingencia · Modo 12 (D12/N12)
-                                                </p>
                                             )}
-                                        </div>
-
-                                        <div className="border-t border-slate-200 pt-2 space-y-2 opacity-60">
-                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                                                Avanzado (opcional)
-                                            </p>
-                                        <div className={`flex items-center gap-2 ${!(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'opacity-60' : ''}`}>
-                                            <span className="text-[10px] font-black text-slate-700 flex-1 leading-snug">
-                                                Intensivo mes completo
-                                                <span className="block text-[9px] font-bold text-slate-500 normal-case">4+2→6+1 · más RET · requiere rotativo ON</span>
-                                            </span>
-                                            <button type="button" disabled={!(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts)} onClick={() => (autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) && setAutoAjustarCrono(p => !p)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoAjustarCrono ? 'bg-violet-500' : 'bg-slate-300'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoAjustarCrono ? 'translate-x-4' : ''}`}/>
-                                            </button>
-                                        </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini) <span className="text-slate-400">· opcional</span></span>
-                                            <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
-                                                className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
-                                                <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoV2RunGemini ? 'translate-x-4' : ''}`}/>
-                                            </button>
                                         </div>
                                     </div>
                                 )}
