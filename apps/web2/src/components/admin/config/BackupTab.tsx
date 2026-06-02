@@ -353,7 +353,6 @@ export default function BackupTab() {
       if (isEmpresaMode && !empresaId) {
         throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
       }
-      await assertEmulatorReachable();
       await assertBridgeReachable();
 
       const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
