@@ -56,6 +56,12 @@ function readStoredNearbyKm(): number {
     return DOTACION_NEARBY_KM_DEFAULT;
 }
 
+function formatKmLabel(km: number | null | undefined): string {
+    if (km == null || !Number.isFinite(km) || km >= 9999) return '';
+    if (km < 1) return `${Math.round(km * 1000)}m`;
+    return `${km.toFixed(1)}km`;
+}
+
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
     const R = 6371;
@@ -153,7 +159,6 @@ import {
     buildDeploymentShiftConfig,
     cellLabelForDeployment,
     deploymentFieldsForFirestore,
-    deploymentShiftHours,
     isDeploymentSurplusCode,
     shiftCountsForEmployeeCronoHours,
 } from '@/lib/planificacion/deploymentRoles';
@@ -195,8 +200,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'N12': 'Jornada Nocturna 12hs',
     'F': 'Franco Compensatorio',
     'RET': 'Guardia Retén',
-    'REF': 'Refuerzo (no cuenta cobertura SLA)',
-    'ESC': 'Escuela / formación en objetivo',
+    'REF': 'Refuerzo (no cuenta cobertura SLA ni horas planificadas)',
+    'ESC': 'Escuela / formación (no cuenta cobertura SLA ni horas planificadas)',
     'PU': 'Puesto Único / Especial',
     'A': 'ART',
     'V': 'Vacaciones',
@@ -237,7 +242,6 @@ const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number => {
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
-    if (isDeploymentSurplusCode(code)) return deploymentShiftHours(shift);
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
     const stored = Number(shift.hours);
     if (stored > 0) return stored;
@@ -621,6 +625,15 @@ export default function PlanificacionPage() {
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
+    const [vacancyReplacementSearch, setVacancyReplacementSearch] = useState('');
+    const [vacancyReplacementOpen, setVacancyReplacementOpen] = useState(false);
+
+    useEffect(() => {
+        if (showVacancyModal) {
+            setVacancyReplacementSearch('');
+            setVacancyReplacementOpen(false);
+        }
+    }, [showVacancyModal]);
     
     const [modifiers, setModifiers] = useState({ extend: false, early: false, plannedNovedad: '' });
 
@@ -1042,7 +1055,7 @@ export default function PlanificacionPage() {
     // Suma:
     //   - Cola del mes anterior (días 26..fin) → tomada de shiftsMap (no editable acá).
     //   - Días 1..25 del mes activo → toma pendingChanges si existe, si no shiftsMap.
-    // Filtra todos los códigos no facturables (RET, F, FF, FP, FT, V, L, etc.).
+    // Filtra códigos que no suman horas planificadas (RET, REF, ESC, F, FF, FP, FT, V, L, etc.).
     const empCctCurrentHours = useMemo(() => {
         const result: Record<string, number> = {};
         const yr = currentDate.getFullYear();
@@ -5656,8 +5669,8 @@ export default function PlanificacionPage() {
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
-                        ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/francos/licencias.'
-                        : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, francos ni licencias). Compará con Vendidas del SLA.';
+                        ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
+                        : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, REF, ESC, francos ni licencias). Compará con Vendidas del SLA.';
                     return (
                     <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                         <div className="text-center pr-3" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
@@ -6583,12 +6596,15 @@ export default function PlanificacionPage() {
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
                     const NON_AVAILABLE = new Set(['F','FF','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    const getEmpStatusOnDate = (empId: string): 'RETEN' | 'FREE' | 'WORKING' => {
+                    type VacancyDayRole = 'RETEN' | 'REF' | 'FREE' | 'WORKING';
+                    const getEmpDayRole = (empId: string): VacancyDayRole => {
                         const key = `${empId}_${vacancyData?.startDate}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                         if (!s || s.isDeleted) return 'FREE';
-                        if (s.code === 'RET') return 'RETEN';
-                        if (NON_AVAILABLE.has(s.code)) return 'FREE'; // franco/ausente: también disponible
+                        const code = String(s.code || '').toUpperCase();
+                        if (code === 'RET') return 'RETEN';
+                        if (code === 'REF') return 'REF';
+                        if (NON_AVAILABLE.has(code)) return 'FREE';
                         return 'WORKING';
                     };
                     // IDs del objetivo: preferredObjectiveId o alias SLA
@@ -6597,15 +6613,29 @@ export default function PlanificacionPage() {
                             .filter((e: any) => e.preferredObjectiveId === selectedObjective || slaIdToObjId[e.preferredObjectiveId] === selectedObjective)
                             .map((e: any) => e.id)
                     );
+                    const objLat = Number(selectedObjectiveData?.lat ?? 0);
+                    const objLng = Number(selectedObjectiveData?.lng ?? 0);
+                    const sortKm = (a: { km: number }, b: { km: number }) => a.km - b.km;
                     const candidatos = employees
                         .filter(e => e.id !== vacancyData?.employeeId)
                         .map(e => ({
                             ...e,
                             monthHours: getEmpMonthHours(e.id),
-                            dayStatus: getEmpStatusOnDate(e.id),
+                            dayRole: getEmpDayRole(e.id),
+                            km: employeeKmToObjective(e, objLat, objLng) ?? 9999,
                             isObjectiveGuard: objectiveEmpIds.has(e.id),
                             expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
-                        }))
+                        }));
+                    const q = vacancyReplacementSearch.toLowerCase().trim();
+                    const matchesSearch = (e: typeof candidatos[0]) => {
+                        if (!q) return true;
+                        return `${e.name || ''} ${e.lastName || ''} ${e.firstName || ''} ${e.legajo || ''}`.toLowerCase().includes(q);
+                    };
+                    const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
+                    const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
+                    const refCandidatos = candidatos.filter(e => e.dayRole === 'REF' && matchesSearch(e)).sort(sortKm);
+                    const objetivoCandidatos = candidatos
+                        .filter(e => e.isObjectiveGuard && e.dayRole === 'WORKING' && matchesSearch(e))
                         .sort((a, b) => {
                             const rank = (x: typeof a) => {
                                 if (x.expBadge.startsWith('★')) return 0;
@@ -6615,14 +6645,31 @@ export default function PlanificacionPage() {
                             };
                             const dr = rank(a) - rank(b);
                             if (dr !== 0) return dr;
-                            return a.monthHours - b.monthHours;
+                            return a.km - b.km;
                         });
-                    // Orden: 1° objetivo, 2° retenes externos, 3° sin turno externos, 4° con horas, 5° resto
-                    const objetivoCandidatos = candidatos.filter(e => e.isObjectiveGuard);
-                    const retenCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'RETEN');
-                    const sinTurnoCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'FREE');
-                    const retCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'WORKING' && e.monthHours < (e.maxHours||200) - 16);
-                    const restoCandidatos = candidatos.filter(e => !e.isObjectiveGuard && e.dayStatus === 'WORKING' && e.monthHours >= (e.maxHours||200) - 16);
+                    const retCandidatos = candidatos
+                        .filter(e => !e.isObjectiveGuard && e.dayRole === 'WORKING' && e.monthHours < (e.maxHours || 200) - 16 && matchesSearch(e))
+                        .sort(sortKm);
+                    const restoCandidatos = candidatos
+                        .filter(e => !e.isObjectiveGuard && e.dayRole === 'WORKING' && e.monthHours >= (e.maxHours || 200) - 16 && matchesSearch(e))
+                        .sort((a, b) => a.km - b.km || a.monthHours - b.monthHours);
+                    const selectedReplacementEmp = candidatos.find(e => e.id === selectedReplacement);
+                    const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string) => (
+                        <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => { setSelectedReplacement(e.id); setVacancyReplacementOpen(false); }}
+                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-indigo-50 rounded-lg ${selectedReplacement === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : ''}`}
+                        >
+                            <span className="font-bold truncate flex-1 min-w-0">{e.expBadge} {e.name}</span>
+                            {formatKmLabel(e.km) && (
+                                <span className="text-[10px] text-slate-400 font-mono shrink-0 flex items-center gap-0.5">
+                                    <MapPin size={10} />{formatKmLabel(e.km)}
+                                </span>
+                            )}
+                            <span className="text-[10px] text-slate-400 shrink-0">{suffix}</span>
+                        </button>
+                    );
                     return (
                     <div className="fixed inset-0 z-[70] flex items-end justify-end p-6 bg-black/25 backdrop-blur-[2px]">
                         <div className={`bg-white p-6 rounded-xl shadow-2xl w-[520px] border-l-4 ${colorMap[color].split(' ')[0]}`}>
@@ -6641,27 +6688,85 @@ export default function PlanificacionPage() {
                                 <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">
                                     {isInj ? 'Asignar cobertura (opcional)' : 'Seleccionar suplente'}
                                 </label>
-                                <select className="w-full p-3 rounded-lg border text-sm font-bold bg-white" value={selectedReplacement} onChange={e => setSelectedReplacement(e.target.value)}>
-                                    <option value="">Sin cobertura — dejar vacante</option>
-                                    {objetivoCandidatos.length > 0 && <optgroup label={`🏢 Guardias del objetivo (${objetivoCandidatos.length})`}>
-                                        {objetivoCandidatos.map(e => <option key={e.id} value={e.id}>{e.expBadge} {e.name} — {e.monthHours}h{e.dayStatus === 'RETEN' ? ' · Retén' : e.dayStatus === 'FREE' ? ' · Libre' : ''}</option>)}
-                                    </optgroup>}
-                                    {retenCandidatos.length > 0 && <optgroup label={`🔶 RETÉN externo — En disponibilidad (${retenCandidatos.length})`}>
-                                        {retenCandidatos.map(e => <option key={e.id} value={e.id}>★ {e.name} — Retén ({e.monthHours}h)</option>)}
-                                    </optgroup>}
-                                    {sinTurnoCandidatos.length > 0 && <optgroup label={`🟢 Sin turno hoy — disponibles (${sinTurnoCandidatos.length})`}>
-                                        {sinTurnoCandidatos.map(e => <option key={e.id} value={e.id}>{e.expBadge} {e.name} — Libre ({e.monthHours}h)</option>)}
-                                    </optgroup>}
-                                    {retCandidatos.length > 0 && <optgroup label={`Con horas disponibles (${retCandidatos.length})`}>
-                                        {retCandidatos.map(e => <option key={e.id} value={e.id}>{e.name} — {e.monthHours}h ({(e.maxHours||200) - e.monthHours}h libres)</option>)}
-                                    </optgroup>}
-                                    {restoCandidatos.length > 0 && <optgroup label={`Resto del personal (${restoCandidatos.length})`}>
-                                        {restoCandidatos.map(e => <option key={e.id} value={e.id}>{e.name} — {e.monthHours}h</option>)}
-                                    </optgroup>}
-                                </select>
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setVacancyReplacementOpen(v => !v)}
+                                        className="w-full p-3 rounded-lg border text-sm font-bold bg-white text-left flex items-center justify-between gap-2"
+                                    >
+                                        <span className={`truncate ${selectedReplacement ? 'text-slate-800' : 'text-slate-400'}`}>
+                                            {selectedReplacementEmp ? `${selectedReplacementEmp.expBadge} ${selectedReplacementEmp.name}` : 'Sin cobertura — dejar vacante'}
+                                        </span>
+                                        <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${vacancyReplacementOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+                                    {vacancyReplacementOpen && (
+                                        <div className="absolute left-0 right-0 top-full mt-1 z-[80] bg-white border rounded-xl shadow-xl overflow-hidden">
+                                            <div className="p-2 border-b">
+                                                <div className="relative">
+                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                    <input
+                                                        autoFocus
+                                                        className="w-full pl-9 pr-3 py-2 text-sm font-bold bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400"
+                                                        placeholder="Buscar por nombre o legajo..."
+                                                        value={vacancyReplacementSearch}
+                                                        onChange={e => setVacancyReplacementSearch(e.target.value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="max-h-52 overflow-y-auto custom-scrollbar p-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSelectedReplacement(''); setVacancyReplacementOpen(false); }}
+                                                    className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!selectedReplacement ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
+                                                >
+                                                    Sin cobertura — dejar vacante
+                                                </button>
+                                                {retenCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-amber-600">Retén — más cerca primero ({retenCandidatos.length})</div>
+                                                        {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`))}
+                                                    </>
+                                                )}
+                                                {sinTurnoCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
+                                                        {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`))}
+                                                    </>
+                                                )}
+                                                {refCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">REF — más cerca primero ({refCandidatos.length})</div>
+                                                        {refCandidatos.map(e => renderVacancyCandidate(e, `REF · ${e.monthHours}h`))}
+                                                    </>
+                                                )}
+                                                {objetivoCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-indigo-600">Guardias del objetivo ({objetivoCandidatos.length})</div>
+                                                        {objetivoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
+                                                    </>
+                                                )}
+                                                {retCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-500">Con horas disponibles ({retCandidatos.length})</div>
+                                                        {retCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h (${(e.maxHours || 200) - e.monthHours}h libres)`))}
+                                                    </>
+                                                )}
+                                                {restoCandidatos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400">Resto del personal ({restoCandidatos.length})</div>
+                                                        {restoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
+                                                    </>
+                                                )}
+                                                {retenCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && refCandidatos.length === 0 && objetivoCandidatos.length === 0 && retCandidatos.length === 0 && restoCandidatos.length === 0 && (
+                                                    <p className="px-3 py-4 text-xs text-slate-400 text-center">Sin resultados para &quot;{vacancyReplacementSearch}&quot;</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex gap-3">
-                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
+                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
                                 <button onClick={handleProcessVacancy} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg ${btnColor[color]}`}>
                                     {selectedReplacement ? 'Asignar reemplazo' : 'Marcar vacante'}
                                 </button>

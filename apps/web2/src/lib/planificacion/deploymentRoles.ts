@@ -1,6 +1,6 @@
 /**
  * RET (pool), REF (refuerzo desplegado) y ESC (escuela) — roles de despliegue en planificación.
- * REF y ESC no cuentan cobertura SLA; sí cuentan horas del empleado (misma banda).
+ * REF y ESC no cuentan cobertura SLA ni horas planificadas (cobertura extra / formación sin puesto real).
  */
 
 export type DeploymentRole = 'REGULAR' | 'POOL' | 'SURPLUS' | 'TRAINING';
@@ -56,7 +56,7 @@ export function deploymentShiftHours(shift: {
     return 0;
 }
 
-/** Horas que suman al cronograma/CCT del empleado (no las de cobertura del objetivo). */
+/** Turnos que suman horas planificadas del empleado (CCT / totales del cronograma). */
 export function shiftCountsForEmployeeCronoHours(shift: {
     code?: unknown;
     hours?: unknown;
@@ -65,7 +65,7 @@ export function shiftCountsForEmployeeCronoHours(shift: {
 } | null | undefined): boolean {
     if (!shift || shift.isDeleted) return false;
     const code = String(shift.code || '').toUpperCase();
-    if (isDeploymentSurplusCode(code)) return true;
+    if (isDeploymentSurplusCode(code)) return false;
     if (isDeploymentPoolCode(code)) return false;
     const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
     return !nonWork.has(code);
