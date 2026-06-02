@@ -37,6 +37,41 @@ function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDo
     return { pos, shift };
 }
 
+const DOTACION_NEARBY_KM_DEFAULT = 10;
+const DOTACION_NEARBY_KM_MIN = 5;
+const DOTACION_NEARBY_KM_MAX = 100;
+const NEARBY_KM_STORAGE_KEY = 'planif_nearby_km';
+
+function clampNearbyKm(v: number): number {
+    if (!Number.isFinite(v)) return DOTACION_NEARBY_KM_DEFAULT;
+    return Math.min(DOTACION_NEARBY_KM_MAX, Math.max(DOTACION_NEARBY_KM_MIN, Math.round(v)));
+}
+
+function readStoredNearbyKm(): number {
+    if (typeof window === 'undefined') return DOTACION_NEARBY_KM_DEFAULT;
+    try {
+        const stored = parseInt(localStorage.getItem(NEARBY_KM_STORAGE_KEY) || '', 10);
+        if (Number.isFinite(stored)) return clampNearbyKm(stored);
+    } catch { /* ignore */ }
+    return DOTACION_NEARBY_KM_DEFAULT;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function employeeKmToObjective(emp: { lat?: number; lng?: number; latitude?: number; longitude?: number }, objLat: number, objLng: number): number | null {
+    const empLat = Number(emp.lat ?? emp.latitude ?? 0);
+    const empLng = Number(emp.lng ?? emp.longitude ?? 0);
+    if (!empLat || !empLng || !objLat || !objLng) return null;
+    return haversineKm(empLat, empLng, objLat, objLng);
+}
+
 function isEmpExcludedFromPlanningDotacion(emp: { planificacionDotacion?: PlanificacionDotacionMap }, objectiveId: string | null | undefined): boolean {
     if (!objectiveId || !emp?.planificacionDotacion) return false;
     return isDeploymentSurplusCode(emp.planificacionDotacion[objectiveId]?.shiftCode);
@@ -250,6 +285,23 @@ function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefi
     return true;
 }
 
+const OTHER_OBJECTIVE_CELL_STYLE =
+    'bg-slate-700 text-slate-200 border-slate-600 ring-2 ring-slate-500 ring-offset-2 dark:ring-offset-slate-900 font-bold opacity-90';
+
+function isShiftAtOtherObjective(
+    s: any,
+    p: any,
+    selectedObjective: string | null | undefined,
+): boolean {
+    if (!selectedObjective) return false;
+    if (p?.isDeleted) return false;
+    const active = p && !p.isDeleted ? p : s;
+    if (!active) return false;
+    const obj = active.objectiveId;
+    if (obj == null || obj === '') return false;
+    return String(obj) !== String(selectedObjective);
+}
+
 /** Turno visible en celda del crono para el objetivo activo (pending o publicado). */
 function resolveCellShiftAtObjective(
     empId: string,
@@ -354,6 +406,8 @@ export default function PlanificacionPage() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
+    const [nearbyKmRadius, setNearbyKmRadius] = useState(DOTACION_NEARBY_KM_DEFAULT);
+    const [nearbyKmDraft, setNearbyKmDraft] = useState(String(DOTACION_NEARBY_KM_DEFAULT));
     const [isShowAllPending, startShowAllTransition] = useTransition();
     const [isFilterPending, startFilterTransition] = useTransition();
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
@@ -661,6 +715,70 @@ export default function PlanificacionPage() {
         return ids;
     }, [shiftsMap, selectedObjective]);
 
+    const selectedObjectiveData = useMemo(() => {
+        if (!selectedObjective || !selectedClient) return null;
+        const client = clients.find((c: any) => c.id === selectedClient);
+        if (!client) return null;
+        return client.objetivos?.find((o: any) => (o.id || o.name) === selectedObjective) || null;
+    }, [clients, selectedClient, selectedObjective]);
+
+    useEffect(() => {
+        const km = readStoredNearbyKm();
+        setNearbyKmRadius(km);
+        setNearbyKmDraft(String(km));
+    }, []);
+
+    const countEmployeesWithinKm = useCallback((km: number) => {
+        if (!selectedObjective || !selectedObjectiveData) return 0;
+        const objLat = Number(selectedObjectiveData.lat ?? 0);
+        const objLng = Number(selectedObjectiveData.lng ?? 0);
+        if (!objLat || !objLng) return 0;
+        let count = 0;
+        for (const e of employees) {
+            if (e.status === 'inactivo') continue;
+            const d = employeeKmToObjective(e, objLat, objLng);
+            if (d !== null && d <= km) count++;
+        }
+        return count;
+    }, [employees, selectedObjective, selectedObjectiveData]);
+
+    const clearNearbyCustomOrder = useCallback(() => {
+        if (!selectedObjective) return;
+        setCustomOrderMap(m => {
+            const nm = { ...m };
+            delete nm[selectedObjective];
+            try { localStorage.setItem('planif_emp_order', JSON.stringify(nm)); } catch { /* ignore */ }
+            return nm;
+        });
+    }, [selectedObjective]);
+
+    const applyNearbyKm = useCallback((raw: number, opts?: { silent?: boolean }) => {
+        const km = clampNearbyKm(raw);
+        setNearbyKmRadius(km);
+        setNearbyKmDraft(String(km));
+        try { localStorage.setItem(NEARBY_KM_STORAGE_KEY, String(km)); } catch { /* ignore */ }
+        startShowAllTransition(() => {
+            setForceShowAll(true);
+            clearNearbyCustomOrder();
+        });
+        if (opts?.silent) return;
+        const count = countEmployeesWithinKm(km);
+        if (count === 0) {
+            toast.warning(`Ningún empleado a ≤${km} km. Ampliá el radio y volvé a buscar.`);
+        }
+    }, [clearNearbyCustomOrder, countEmployeesWithinKm]);
+
+    const activateNearbyMode = useCallback(() => {
+        startShowAllTransition(() => {
+            setForceShowAll(true);
+            clearNearbyCustomOrder();
+        });
+        const count = countEmployeesWithinKm(nearbyKmRadius);
+        if (count === 0) {
+            toast.warning(`Ningún empleado a ≤${nearbyKmRadius} km. Ampliá el radio y volvé a buscar.`);
+        }
+    }, [clearNearbyCustomOrder, countEmployeesWithinKm, nearbyKmRadius]);
+
     const dotacionBaseEmployees = useMemo(() => {
         if (!selectedObjective && !forceShowAll) return [];
         let list = employees.filter(e => e.status !== 'inactivo');
@@ -670,9 +788,17 @@ export default function PlanificacionPage() {
                 slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
                 activeGuestIdsForObjective.has(e.id),
             );
+        } else if (selectedObjective && forceShowAll) {
+            const objLat = Number(selectedObjectiveData?.lat ?? 0);
+            const objLng = Number(selectedObjectiveData?.lng ?? 0);
+            if (!objLat || !objLng) return [];
+            list = list.filter(e => {
+                const km = employeeKmToObjective(e, objLat, objLng);
+                return km !== null && km <= nearbyKmRadius;
+            });
         }
         return list;
-    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective]);
+    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, selectedObjectiveData, nearbyKmRadius]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -709,6 +835,18 @@ export default function PlanificacionPage() {
         }
         if (bandFilter) {
             list = list.filter(e => employeeMonthStats[e.id]?.dominantBand === bandFilter);
+        }
+        if (forceShowAll && selectedObjective && selectedObjectiveData) {
+            const objLat = Number(selectedObjectiveData.lat ?? 0);
+            const objLng = Number(selectedObjectiveData.lng ?? 0);
+            if (objLat && objLng) {
+                return [...list].sort((a, b) => {
+                    const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
+                    const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
+                    if (da !== db) return da - db;
+                    return a.name.localeCompare(b.name);
+                });
+            }
         }
         const orderKey = selectedObjective || '__all__';
         const customOrder = customOrderMap[orderKey];
@@ -752,7 +890,7 @@ export default function PlanificacionPage() {
             }
             return a.name.localeCompare(b.name) * dir;
         });
-    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients]);
+    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, selectedObjectiveData]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
@@ -760,21 +898,23 @@ export default function PlanificacionPage() {
         [displayedEmployees, selectedObjective],
     );
 
-    const selectedObjectiveData = useMemo(() => {
-        if (!selectedObjective || !selectedClient) return null;
-        const client = clients.find((c: any) => c.id === selectedClient);
-        if (!client) return null;
-        return client.objetivos?.find((o: any) => (o.id || o.name) === selectedObjective) || null;
-    }, [clients, selectedClient, selectedObjective]);
-
-    const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-        const toRad = (deg: number) => (deg * Math.PI) / 180;
-        const R = 6371;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lng2 - lng1);
-        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    };
+    const addModalEmployeeCandidates = useMemo(() => {
+        const q = addSearchTerm.toLowerCase();
+        let list = employees.filter(e => e.status !== 'inactivo' && e.name.toLowerCase().includes(q));
+        if (!selectedObjective || !selectedObjectiveData) return list;
+        const objLat = Number(selectedObjectiveData.lat ?? 0);
+        const objLng = Number(selectedObjectiveData.lng ?? 0);
+        if (!objLat || !objLng) return list;
+        list = list.filter(e => {
+            const km = employeeKmToObjective(e, objLat, objLng);
+            return km !== null && km <= nearbyKmRadius;
+        });
+        return [...list].sort((a, b) => {
+            const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
+            const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
+            return da - db || a.name.localeCompare(b.name);
+        });
+    }, [employees, addSearchTerm, selectedObjective, selectedObjectiveData, nearbyKmRadius]);
 
     // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
     // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
@@ -1657,6 +1797,7 @@ export default function PlanificacionPage() {
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Presente</span></div>
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Ausente</span></div>
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-white border border-slate-300 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div></div><span className="text-[10px] font-bold text-slate-600">Conflicto</span></div>
+                            <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${OTHER_OBJECTIVE_CELL_STYLE}`}>M</div><span className="text-[10px] font-bold text-slate-600">Otro objetivo</span></div>
                         </div>
                     </div>
                 </div>
@@ -4450,17 +4591,17 @@ export default function PlanificacionPage() {
                             {!isSnapshotView && (
                                 <tr
                                     className={`group ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
-                                    onDragOver={(e) => handleRowDragOver(e, idx)}
-                                    onDrop={(e) => handleRowDrop(e, idx)}
-                                    onDragEnd={() => setDragOverVisual(null)}
+                                    onDragOver={forceShowAll ? undefined : (e) => handleRowDragOver(e, idx)}
+                                    onDrop={forceShowAll ? undefined : (e) => handleRowDrop(e, idx)}
+                                    onDragEnd={forceShowAll ? undefined : () => setDragOverVisual(null)}
                                 >
                                     <td
-                                        draggable
-                                        onDragStart={(e) => handleRowDragStart(e, idx)}
+                                        draggable={!forceShowAll}
+                                        onDragStart={forceShowAll ? undefined : (e) => handleRowDragStart(e, idx)}
                                         onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
-                                        title="Clic para seleccionar fila completa"
+                                        title={forceShowAll ? 'Modo cercanos: ordenado por distancia' : 'Clic para seleccionar fila completa'}
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
-                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
+                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${forceShowAll ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
                                             const empLat = Number(emp.lat ?? emp.latitude ?? 0);
@@ -4578,7 +4719,12 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
+                                        const activeShift = (p && !p.isDeleted) ? p : s;
+                                        const isOtherObjectiveShift = isShiftAtOtherObjective(s, p, selectedObjective);
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+                                        if (isOtherObjectiveShift && content != null) {
+                                            style = OTHER_OBJECTIVE_CELL_STYLE;
+                                        }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
@@ -4586,7 +4732,6 @@ export default function PlanificacionPage() {
                                         }
                                         const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || null;
                                         const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : null;
-                                        const activeShift = (p && !p.isDeleted) ? p : s;
                                         const cellRange = cellCode
                                             ? (SHIFT_RANGES[cellCode] || (
                                                 activeShift?.startTime && activeShift?.endTime
@@ -4598,7 +4743,7 @@ export default function PlanificacionPage() {
                                         const excludedOnDay = excludedPositionsByDate[cellDateStr];
                                         const isExclusionCol = !!excludedOnDay?.length;
                                         const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}` : (_exclHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}` : (_exclHint || _otherObjHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -5223,10 +5368,70 @@ export default function PlanificacionPage() {
                                         );
                                     })}
                                 </div>
-                                {customOrderMap[selectedObjective || '__all__'] && (
+                                {customOrderMap[selectedObjective || '__all__'] && !forceShowAll && (
                                     <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
                                 )}
-                                <button onClick={() => startShowAllTransition(() => setForceShowAll(!forceShowAll))} className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors ${forceShowAll ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500'}`}>{forceShowAll ? <Eye size={14}/> : <EyeOff size={14}/>} {forceShowAll ? 'Ver Todos' : 'Dotación'}</button>
+                                {forceShowAll ? (
+                                    <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl border bg-amber-100 text-amber-700 border-amber-200">
+                                        <button
+                                            type="button"
+                                            onClick={() => startShowAllTransition(() => setForceShowAll(false))}
+                                            className="p-1.5 rounded-lg hover:bg-amber-200/70 transition-colors"
+                                            title="Volver a dotación del objetivo"
+                                        >
+                                            <Eye size={14}/>
+                                        </button>
+                                        <span className="text-[10px] font-black uppercase">≤</span>
+                                        <input
+                                            type="number"
+                                            min={DOTACION_NEARBY_KM_MIN}
+                                            max={DOTACION_NEARBY_KM_MAX}
+                                            value={nearbyKmDraft}
+                                            onChange={e => setNearbyKmDraft(e.target.value)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') applyNearbyKm(parseInt(nearbyKmDraft, 10));
+                                            }}
+                                            className="w-11 text-center text-xs font-black bg-white/90 border border-amber-300 rounded-lg px-1 py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            title={`Radio en km (${DOTACION_NEARBY_KM_MIN}–${DOTACION_NEARBY_KM_MAX})`}
+                                        />
+                                        <span className="text-[10px] font-black uppercase">km</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => applyNearbyKm(parseInt(nearbyKmDraft, 10))}
+                                            className="p-1.5 rounded-lg hover:bg-amber-200/70 transition-colors"
+                                            title="Buscar con este radio"
+                                        >
+                                            <Search size={13}/>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => applyNearbyKm(nearbyKmRadius + 5)}
+                                            className="px-1.5 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-amber-200/70 transition-colors"
+                                            title={`Ampliar a ${clampNearbyKm(nearbyKmRadius + 5)} km`}
+                                        >
+                                            +5
+                                        </button>
+                                        {displayedEmployees.length > 0 && (
+                                            <span className="px-1.5 text-[9px] font-black text-amber-800/80" title="Empleados visibles">
+                                                {displayedEmployees.length}
+                                            </span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={activateNearbyMode}
+                                        title={`Buscar personal a ≤${nearbyKmRadius} km del objetivo`}
+                                        className="px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700"
+                                    >
+                                        <EyeOff size={14}/> Dotación
+                                    </button>
+                                )}
+                                {forceShowAll && displayedEmployees.length === 0 && (
+                                    <span className="text-[9px] font-bold text-amber-600 max-w-[140px] leading-tight">
+                                        Sin personal a ≤{nearbyKmRadius} km
+                                    </span>
+                                )}
                                 <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
                             </div>
                         </>
@@ -6257,7 +6462,7 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 )}
-                {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Seleccionar cambia el objetivo preferido del colaborador a <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span>.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{employees.filter(e => e.name.toLowerCase().includes(addSearchTerm.toLowerCase())).map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
+                {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Colaboradores a ≤{nearbyKmRadius} km de <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span> (más cerca primero). Al seleccionar se cambia su objetivo preferido.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{addModalEmployeeCandidates.map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';
                     const isVac = absType === 'Vacaciones';
