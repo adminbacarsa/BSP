@@ -160,15 +160,48 @@ function registerObjectiveAlias(
     aliases[key] = meta;
 }
 
-function resolveShiftObjectiveId(
-    shift: { objectiveId?: unknown; objectiveName?: unknown },
+/** Misma convención que Servicios: clientId + nombre cuando falta objectiveId. */
+function fallbackObjectiveKey(clientId: string, objectiveName: string): string {
+    return `${clientId}_${objectiveName}`;
+}
+
+function objectiveMatchCandidates(row: {
+    objectiveId?: unknown;
+    objectiveName?: unknown;
+    clientId?: unknown;
+}): string[] {
+    const cid = String(row.clientId ?? '').trim();
+    const oid = String(row.objectiveId ?? '').trim();
+    const name = String(row.objectiveName ?? '').trim();
+    const keys: string[] = [];
+    if (oid) keys.push(oid);
+    if (name) keys.push(name);
+    if (cid && name) keys.push(fallbackObjectiveKey(cid, name));
+    return keys;
+}
+
+function resolveCanonicalObjectiveId(
+    row: { objectiveId?: unknown; objectiveName?: unknown; clientId?: unknown },
     aliases: Record<string, ObjectiveMeta>,
 ): string | null {
-    for (const raw of [shift.objectiveId, shift.objectiveName]) {
-        const key = String(raw ?? '').trim();
-        if (key && aliases[key]) return aliases[key].canonicalId;
+    for (const key of objectiveMatchCandidates(row)) {
+        if (aliases[key]) return aliases[key].canonicalId;
     }
+    const oid = String(row.objectiveId ?? '').trim();
+    if (oid) return oid;
+    const cid = String(row.clientId ?? '').trim();
+    const name = String(row.objectiveName ?? '').trim();
+    if (cid && name) return fallbackObjectiveKey(cid, name);
     return null;
+}
+
+function registerObjectiveMetaAliases(
+    aliases: Record<string, ObjectiveMeta>,
+    meta: ObjectiveMeta,
+    extraKeys: string[] = [],
+) {
+    registerObjectiveAlias(aliases, meta, meta.canonicalId);
+    for (const key of extraKeys) registerObjectiveAlias(aliases, meta, key);
 }
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, startDate: Date, endDate: Date): boolean {
@@ -243,6 +276,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                             registerObjectiveAlias(aliases, meta, canonicalId);
                             if (obj.id) registerObjectiveAlias(aliases, meta, obj.id);
                             if (obj.name) registerObjectiveAlias(aliases, meta, obj.name);
+                            registerObjectiveAlias(aliases, meta, fallbackObjectiveKey(doc.id, displayName));
                         });
                     }
                 });
@@ -290,28 +324,47 @@ export const useReportes = (forcedClientId?: string | null) => {
             slaSnap.docs.forEach(d => {
                 const sla = d.data();
                 if (scopeEmpresa && !belongsToEmpresa(sla, empresaId, scopeEmpresa, migracionCompleta)) return;
-                if (!sla.objectiveId || !slaOverlapsRange(sla, startDate, endDate)) return;
+                if (!slaOverlapsRange(sla, startDate, endDate)) return;
 
-                const oid = String(sla.objectiveId).trim();
-                const cid = String(sla.clientId || '').trim();
+                const objName = String(sla.objectiveName ?? '').trim();
+                let cid = String(sla.clientId || '').trim();
+                if (!cid && sla.clientName) {
+                    const cn = String(sla.clientName).trim().toLowerCase();
+                    const found = Object.entries(clientMap).find(([, n]) => String(n).trim().toLowerCase() === cn);
+                    if (found) cid = found[0];
+                }
+                const matchKeys = objectiveMatchCandidates(sla);
+
+                let canonicalId: string | null = null;
+                for (const key of matchKeys) {
+                    if (aliasLookup[key]) {
+                        canonicalId = aliasLookup[key].canonicalId;
+                        break;
+                    }
+                }
+                if (!canonicalId) {
+                    canonicalId = resolveCanonicalObjectiveId(sla, aliasLookup);
+                }
+                if (!canonicalId) return;
+
+                const fromCatalog = aliasLookup[canonicalId];
+                if (!cid && fromCatalog?.clientId) cid = fromCatalog.clientId;
                 if (forcedClientId && cid && cid !== forcedClientId) return;
 
-                slaMap[oid] = Math.max(slaMap[oid] || 0, sla.totalMonthlyHours || 0);
-
-                const fromCatalog = aliasLookup[oid];
                 const meta: ObjectiveMeta = fromCatalog ?? {
-                    canonicalId: oid,
-                    name: String(sla.objectiveName || objMap[oid] || oid),
+                    canonicalId,
+                    name: objName || objMap[canonicalId] || canonicalId,
                     clientId: cid,
                     client: clientMap[cid] || String(sla.clientName || 'Sin Cliente'),
                 };
                 if (cid && !meta.clientId) meta.clientId = cid;
+                if (objName && meta.name === canonicalId) meta.name = objName;
                 if (cid && clientMap[cid]) meta.client = clientMap[cid];
+                else if (sla.clientName) meta.client = String(sla.clientName);
 
-                slaObjectiveMetas.set(oid, meta);
-                registerObjectiveAlias(aliasLookup, meta, oid);
-                registerObjectiveAlias(aliasLookup, meta, d.id);
-                if (sla.objectiveName) registerObjectiveAlias(aliasLookup, meta, String(sla.objectiveName));
+                slaObjectiveMetas.set(canonicalId, meta);
+                slaMap[canonicalId] = Math.max(slaMap[canonicalId] || 0, sla.totalMonthlyHours || 0);
+                registerObjectiveMetaAliases(aliasLookup, meta, [...matchKeys, d.id]);
             });
 
             // Consulta SIN indices complejos (filtrado en memoria si es necesario, o básico por fecha)
@@ -404,7 +457,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             rawShifts.forEach((s: any) => {
                 if (s.type === 'NOVEDAD' || !isObjectiveBillableCode(s.code)) return;
 
-                const objId = resolveShiftObjectiveId(s, aliasLookup);
+                const objId = resolveCanonicalObjectiveId(s, aliasLookup);
                 if (!objId) return;
 
                 if (!objGroups[objId]) objGroups[objId] = { shifts: [], clientId: s.clientId };
