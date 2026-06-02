@@ -97,8 +97,10 @@ function is24hs(pos: V2PositionDef): boolean {
 export function computeDailyServiceSlots(
     positions: V2PositionDef[],
     mode: '8' | '12',
-): { slotsPerDay: number; peakConcurrent: number; structuralMonthHours: number } {
+): { slotsPerDay: number; slots24hs: number; slotsCustom: number; peakConcurrent: number; structuralMonthHours: number } {
     let slotsPerDay = 0;
+    let slots24hs = 0;
+    let slotsCustom = 0;
     let peakConcurrent = 0;
     let structuralMonthHours = 0;
     const bandsPerPos = mode === '12' ? 2 : 3;
@@ -107,18 +109,22 @@ export function computeDailyServiceSlots(
     for (const pos of positions) {
         const qty = Math.max(1, Number(pos.qty) || 1);
         if (is24hs(pos)) {
-            slotsPerDay += qty * bandsPerPos;
+            const s = qty * bandsPerPos;
+            slotsPerDay += s;
+            slots24hs += s;
             peakConcurrent += qty;
-            structuralMonthHours += qty * bandsPerPos * 30 * shiftH;
+            structuralMonthHours += s * 30 * shiftH;
         } else {
             const bands = (pos.shifts || []).length || 1;
-            slotsPerDay += qty * bands;
-            peakConcurrent += qty * bands;
-            structuralMonthHours += qty * bands * 30 * shiftH;
+            const s = qty * bands;
+            slotsPerDay += s;
+            slotsCustom += s;
+            peakConcurrent += s;
+            structuralMonthHours += s * 30 * shiftH;
         }
     }
 
-    return { slotsPerDay, peakConcurrent, structuralMonthHours };
+    return { slotsPerDay, slots24hs, slotsCustom, peakConcurrent, structuralMonthHours };
 }
 
 export function computeDailyStaffingModel(
@@ -131,10 +137,8 @@ export function computeDailyStaffingModel(
     const modo8 = computeDailyServiceSlots(positions, '8');
     const modo12 = computeDailyServiceSlots(positions, '12');
     const servicioDiarioModo8 = modo8.slotsPerDay;
-    const plantillaTotal = Math.max(
-        Math.ceil(servicioDiarioModo8 * factor),
-        Math.ceil(modo8.peakConcurrent * factor),
-    );
+    // Factor solo aplica a puestos 24hs (rotativos); custom/L-V usan su propia dotación fija.
+    const plantillaTotal = Math.ceil(modo8.slots24hs * factor) + modo8.slotsCustom;
     const poolFrancos = Math.max(0, plantillaTotal - servicioDiarioModo8);
 
     return {
@@ -186,8 +190,9 @@ function resolveRotateShifts(
     if (cycleKey === '4+2') return false;
     if (peopleAvailable < 4) return false;
 
-    const slotsPerDay = computeDailyServiceSlots(positions, '8').slotsPerDay;
-    const plantilla6x2 = Math.ceil(slotsPerDay * ((6 + 2) / 6));
+    const slots8 = computeDailyServiceSlots(positions, '8');
+    // plantilla6x2 solo incluye puestos 24hs rotativoss (no custom/L-V sin factor).
+    const plantilla6x2 = Math.ceil(slots8.slots24hs * ((6 + 2) / 6)) + slots8.slotsCustom;
     const all24Qty1 = positions.filter(is24hs).every(p => Math.max(1, Number(p.qty) || 1) === 1);
 
     // 16 = 12 servicio + 4 franco: bandas fijas + flotante (no péndulo M→T→N).
