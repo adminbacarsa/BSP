@@ -30,7 +30,7 @@ import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import ExperienciaObjetivosPanel from '@/components/admin/employees/ExperienciaObjetivosPanel';
 import { countExperienciaObjetivos } from '@/lib/planificacion/experienciaObjetivos';
 import { normalizeArgPhone } from '@/lib/whatsapp';
-import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange, toCalendarDateStr, absenceNeedsMedicalVerification, absenceReplicatesToPlanning } from '@/lib/planificacion/absenceCodes';
 import { normalizeGeneroImport } from '@/lib/planificacion/genderPreference';
 
 import { 
@@ -40,9 +40,13 @@ import {
 
 // --- UTILIDADES ---
 
-const getArgentinaDate = (dateInput: any): string => {
+const getArgentinaDate = (dateInput: unknown): string => {
     if (!dateInput) return '';
-    const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
+    const cal = toCalendarDateStr(dateInput);
+    if (cal) return cal;
+    const rec = dateInput as { toDate?: () => Date };
+    const d = typeof rec.toDate === 'function' ? rec.toDate() : new Date(String(dateInput));
+    if (isNaN(d.getTime())) return '';
     const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
     const parts = new Intl.DateTimeFormat('es-AR', options).formatToParts(d);
     const day = parts.find(p => p.type === 'day')?.value;
@@ -283,6 +287,8 @@ export default function EmployeesPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState(0);
   const [authPinModal, setAuthPinModal] = useState<{ absenceId: string; absence: Absence } | null>(null);
+  const [verifyModal, setVerifyModal] = useState<{ absenceId: string; absence: Absence } | null>(null);
+  const [verifyLoading, setVerifyLoading] = useState(false);
   const [authPinValue, setAuthPinValue] = useState('');
   const [authPinError, setAuthPinError] = useState('');
   const [authPinLoading, setAuthPinLoading] = useState(false);
@@ -905,7 +911,53 @@ export default function EmployeesPage() {
   const handleSaveAgreement = async () => { if (!agreementForm.name) return; if (isEditingAgreement && agreementForm.id) { await agreementService.update(agreementForm.id, agreementForm); } else { await agreementService.add(agreementForm); } setAgreementForm(initialAgreement); setIsEditingAgreement(false); loadAgreements(); };
   const handleEditAgreement = (a: Agreement) => { setAgreementForm(a as ExtendedAgreement); setIsEditingAgreement(true); };
   const handleDeleteAgreement = async (id: string) => { if(confirm('?')) { await agreementService.delete(id); loadAgreements(); } };
-  const handleOpenAbsenceModal = (absence?: Absence) => { if (absence) { setAbsenceForm(absence); setIsEditingAbsence(true); } else { setAbsenceForm(initialAbsenceForm); setIsEditingAbsence(false); } setEmpSearch(''); setEmpDropOpen(false); setShowAbsenceModal(true); };
+  const handleOpenAbsenceModal = (absence?: Absence) => {
+    if (absence) {
+      const startDate = toCalendarDateStr(absence.startDate) || absence.startDate;
+      const endDate = toCalendarDateStr(absence.endDate) || absence.endDate;
+      let status = absence.status;
+      if (absenceNeedsMedicalVerification(absence) && status === 'Autorizada') {
+        status = 'En verificación';
+      }
+      setAbsenceForm({ ...absence, startDate, endDate, status });
+      setIsEditingAbsence(true);
+      setEmpSearch('');
+      setEmpDropOpen(false);
+    } else {
+      setAbsenceForm(initialAbsenceForm);
+      setIsEditingAbsence(false);
+      setEmpSearch('');
+      setEmpDropOpen(true);
+    }
+    setShowAbsenceModal(true);
+  };
+
+  const absenceEmployeeLabel = (empId: string, fallbackName?: string) => {
+    const emp = employees.find(e => e.id === empId);
+    if (emp) return `${emp.lastName}, ${emp.firstName}`;
+    return fallbackName || '';
+  };
+
+  const filteredAbsenceEmployees = useMemo(() => {
+    const q = empSearch.toLowerCase().trim();
+    return employees
+      .filter(e => e.status === 'activo' || e.status === 'active' || !e.status)
+      .filter(e => {
+        if (!q) return true;
+        const haystack = [
+          e.lastName,
+          e.firstName,
+          e.name,
+          e.fileNumber,
+          e.dni,
+          e.cuil,
+        ].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(q)
+          || `${e.lastName} ${e.firstName}`.toLowerCase().includes(q)
+          || `${e.firstName} ${e.lastName}`.toLowerCase().includes(q);
+      })
+      .sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''));
+  }, [employees, empSearch]);
 
   const absenceDateRangeError = useMemo(() => {
     const r = validateAbsenceDateRange(absenceForm.startDate, absenceForm.endDate);
@@ -949,21 +1001,23 @@ export default function EmployeesPage() {
       addToast(e instanceof Error ? e.message : 'Error al guardar la novedad', 'error');
       return;
     }
-    if (dataToSave.status === 'Autorizada' || dataToSave.status === 'Justificada') {
+    if (absenceReplicatesToPlanning(dataToSave)) {
       await replicarAusenciaEnPlanificador(savedId, { ...dataToSave, id: savedId });
-      await addDoc(collection(db, 'novedades'), stampEmpresaId({
-        source: 'AUSENCIA',
-        type: dataToSave.type,
-        status: 'pending',
-        employeeId: dataToSave.employeeId,
-        employeeName: dataToSave.employeeName,
-        startDate: dataToSave.startDate,
-        endDate: dataToSave.endDate,
-        ausenciaId: savedId,
-        description: `${dataToSave.type} de ${dataToSave.employeeName} — ${dataToSave.startDate} al ${dataToSave.endDate}`,
-        reportedBy: nombreReal,
-        createdAt: serverTimestamp(),
-      }, empresaId));
+      if (dataToSave.status === 'Autorizada' || dataToSave.status === 'Justificada') {
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          source: 'AUSENCIA',
+          type: dataToSave.type,
+          status: 'pending',
+          employeeId: dataToSave.employeeId,
+          employeeName: dataToSave.employeeName,
+          startDate: dataToSave.startDate,
+          endDate: dataToSave.endDate,
+          ausenciaId: savedId,
+          description: `${dataToSave.type} de ${dataToSave.employeeName} — ${dataToSave.startDate} al ${dataToSave.endDate}`,
+          reportedBy: nombreReal,
+          createdAt: serverTimestamp(),
+        }, empresaId));
+      }
     } else if (dataToSave.status === 'Rechazada') {
       await eliminarReplicasPlanificador(savedId);
     }
@@ -1006,6 +1060,32 @@ export default function EmployeesPage() {
       setBulkDeleteProgress(0);
     }
   };
+  const handleVerifyMedicalSubmit = async (outcome: 'Justificada' | 'Injustificada') => {
+    if (!verifyModal) return;
+    setVerifyLoading(true);
+    try {
+      const dataToUpdate: Absence = {
+        ...verifyModal.absence,
+        status: outcome,
+        type: outcome === 'Injustificada' ? 'Injustificada' : verifyModal.absence.type,
+        hasCertificate: outcome === 'Justificada' ? true : verifyModal.absence.hasCertificate,
+      };
+      await absenceService.update(verifyModal.absenceId, dataToUpdate, { empresaId, migracionCompleta });
+      await replicarAusenciaEnPlanificador(verifyModal.absenceId, dataToUpdate);
+      await registrarAuditoria(
+        'VERIFY_ABSENCE',
+        `${outcome === 'Justificada' ? 'Justificó' : 'Marcó injustificada'} ${verifyModal.absence.type} — ${verifyModal.absence.employeeName}`,
+      );
+      addToast(outcome === 'Justificada' ? 'Enfermedad justificada' : 'Ausencia marcada como injustificada', 'success');
+      setVerifyModal(null);
+      loadAbsences();
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Error al verificar', 'error');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
   const handleAuthorizePinSubmit = async () => {
     if (!authPinModal) return;
     if (authPinValue.length < 4) { setAuthPinError('PIN mínimo 4 dígitos'); return; }
@@ -1030,6 +1110,44 @@ export default function EmployeesPage() {
   };
 
   const getAbsenceEmployeeName = (a: Absence) => { if (a.employeeName) return a.employeeName; const emp = employees.find(e => e.id === a.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : 'Desconocido'; };
+  const absenceStatusBadgeClass = (status: string) => {
+    if (status === 'Autorizada') return 'bg-teal-100 text-teal-700';
+    if (status === 'Justificada') return 'bg-emerald-100 text-emerald-600';
+    if (status === 'Injustificada') return 'bg-rose-100 text-rose-600';
+    if (status === 'Rechazada') return 'bg-red-100 text-red-700';
+    if (status === 'En verificación') return 'bg-violet-100 text-violet-700';
+    return 'bg-amber-100 text-amber-600';
+  };
+  const renderAbsenceStatusCell = (a: Absence) => {
+    const needsVerify = absenceNeedsMedicalVerification(a) && (a.status === 'Pendiente' || a.status === 'En verificación');
+    if (needsVerify) {
+      return (
+        <button
+          type="button"
+          onClick={() => setVerifyModal({ absenceId: a.id!, absence: a })}
+          className="px-2 py-1 rounded text-[10px] font-black uppercase bg-violet-50 text-violet-700 border border-violet-300 hover:bg-violet-100 transition-colors flex items-center gap-1 mx-auto"
+        >
+          <FileCheck size={9}/> Verificar
+        </button>
+      );
+    }
+    if (a.status === 'Pendiente') {
+      return (
+        <button
+          type="button"
+          onClick={() => { setAuthPinModal({ absenceId: a.id!, absence: a }); setAuthPinValue(''); setAuthPinError(''); }}
+          className="px-2 py-1 rounded text-[10px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition-colors flex items-center gap-1 mx-auto"
+        >
+          <KeyRound size={9}/> Pendiente de Autorizar
+        </button>
+      );
+    }
+    return (
+      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${absenceStatusBadgeClass(a.status)}`}>
+        {a.status}
+      </span>
+    );
+  };
   const coberturaBadgeClass = (estado?: string) => {
     if (estado === 'GESTIONADA') return 'bg-teal-100 text-teal-700';
     if (estado === 'VACANTE') return 'bg-amber-100 text-amber-700';
@@ -2401,7 +2519,7 @@ export default function EmployeesPage() {
             {activeTab === 'correcciones' && (
                 <CorreccionesTab employees={employees} canAdjust={canAdjust} />
             )}
-            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}</div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr>{canAdjust && <th className="p-3 w-10"><input type="checkbox" style={{width:16,height:16,display:'block',cursor:'pointer',accentColor:'#e11d48'}} checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))} onChange={e => { const ids = filteredAbsences.map(a => a.id!); setSelectedAbsenceIds(e.target.checked ? new Set(ids) : new Set()); }}/></th>}<th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${selectedAbsenceIds.has(a.id!) ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>{canAdjust && <td className="p-3 w-10"><input type="checkbox" style={{width:16,height:16,display:'block',cursor:'pointer',accentColor:'#e11d48'}} checked={selectedAbsenceIds.has(a.id!)} onChange={e => { setSelectedAbsenceIds(prev => { const next = new Set(prev); e.target.checked ? next.add(a.id!) : next.delete(a.id!); return next; }); }}/></td>}<td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center">{a.status === 'Pendiente' ? <button onClick={() => { setAuthPinModal({ absenceId: a.id!, absence: a }); setAuthPinValue(''); setAuthPinError(''); }} className="px-2 py-1 rounded text-[10px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition-colors flex items-center gap-1 mx-auto"><KeyRound size={9}/> Pendiente de Autorizar</button> : <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${a.status === 'Autorizada' ? 'bg-teal-100 text-teal-700' : a.status === 'Justificada' ? 'bg-emerald-100 text-emerald-600' : a.status === 'Injustificada' ? 'bg-rose-100 text-rose-600' : a.status === 'Rechazada' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-600'}`}>{a.status}</span>}</td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <p className="text-[9px] text-slate-400 mt-1 font-bold">Gestionar en Planificación</p>}</td><td className="p-4 text-right flex justify-end gap-2">{a.status === 'Pendiente' && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
+            {activeTab === 'ausencias' && (<div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-hidden flex flex-col"><div className="flex flex-wrap items-center gap-2 mb-6"><div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-4 py-2 rounded-xl border dark:border-slate-700 flex-1 min-w-[180px] max-w-xs"><Search size={16} className="text-slate-400 shrink-0"/><input placeholder="Buscar empleado..." className="bg-transparent outline-none w-full text-sm font-bold text-slate-900 dark:text-white" value={absenceSearchTerm} onChange={e => setAbsenceSearchTerm(e.target.value)}/></div><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceTypeFilter} onChange={e => setAbsenceTypeFilter(e.target.value)}><option value="">Todos los tipos</option>{NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absenceStatusFilter} onChange={e => setAbsenceStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="Pendiente">Pendiente</option><option value="En verificación">En verificación</option><option value="Autorizada">Autorizada</option><option value="Justificada">Justificada</option><option value="Injustificada">Injustificada</option><option value="Rechazada">Rechazada</option></select><select className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs font-black uppercase text-slate-700 dark:text-white outline-none" value={absencePeriodFilter} onChange={e => setAbsencePeriodFilter(e.target.value)}><option value="">Todos los períodos</option>{absencePeriods.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>{(absenceTypeFilter || absenceStatusFilter || absencePeriodFilter) && <button onClick={() => { setAbsenceTypeFilter(''); setAbsenceStatusFilter(''); setAbsencePeriodFilter(''); }} className="px-3 py-2 rounded-xl text-xs font-black uppercase text-slate-400 hover:text-rose-500 border border-slate-200 dark:border-slate-600 hover:border-rose-300 transition-colors">✕ Limpiar</button>}</div><div className="flex-1 overflow-auto custom-scrollbar"><table className="w-full text-left"><thead className="bg-slate-50 dark:bg-slate-900 sticky top-0"><tr>{canAdjust && <th className="p-3 w-10"><input type="checkbox" style={{width:16,height:16,display:'block',cursor:'pointer',accentColor:'#e11d48'}} checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))} onChange={e => { const ids = filteredAbsences.map(a => a.id!); setSelectedAbsenceIds(e.target.checked ? new Set(ids) : new Set()); }}/></th>}<th className="p-4 text-[10px] font-black uppercase text-slate-400">Empleado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400">Periodo</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Certificado</th><th className="p-4 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th><th className="p-4 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 dark:divide-slate-700">{filteredAbsences.map(a => (<tr key={a.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 ${selectedAbsenceIds.has(a.id!) ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>{canAdjust && <td className="p-3 w-10"><input type="checkbox" style={{width:16,height:16,display:'block',cursor:'pointer',accentColor:'#e11d48'}} checked={selectedAbsenceIds.has(a.id!)} onChange={e => { setSelectedAbsenceIds(prev => { const next = new Set(prev); e.target.checked ? next.add(a.id!) : next.delete(a.id!); return next; }); }}/></td>}<td className="p-4 font-bold text-sm text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td><td className="p-4"><div className="flex flex-col"><span className="text-xs font-bold uppercase">{a.type}</span><span className="text-[10px] text-slate-500">{a.reason || '-'}</span></div></td><td className="p-4 text-xs font-mono text-slate-500">{getArgentinaDate(a.startDate)} - {getArgentinaDate(a.endDate)}</td><td className="p-4 text-center">{renderAbsenceStatusCell(a)}</td><td className="p-4 text-center">{a.hasCertificate ? <span className="text-emerald-500 flex justify-center"><FileCheck size={16}/></span> : <span className="text-slate-300">-</span>}</td><td className="p-4 text-center"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>{a.coberturaEstado || 'PENDIENTE'}</span>{(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && <p className="text-[9px] text-slate-400 mt-1 font-bold">Gestionar en Planificación</p>}</td><td className="p-4 text-right flex justify-end gap-2">{(a.status === 'Pendiente' || a.status === 'En verificación') && <button title="Rechazar" onClick={() => handleOpenAbsenceModal({...a, status: 'Rechazada'})} className="text-slate-400 hover:text-red-600 text-[10px] font-black uppercase px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>}<button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500"><Edit2 size={16}/></button><button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div></div>)}
         </div>
 
         {/* MODAL DE IMPORTACIÓN CSV (AMPLIADO) */}
@@ -2628,53 +2746,81 @@ export default function EmployeesPage() {
                         </div>
                         <button onClick={() => setShowAbsenceModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-400"><X size={20}/></button>
                     </div>
-                    <div className="space-y-4">
-                        <div className="relative">
+                    <div className="space-y-4" onClick={(e) => {
+                        const t = e.target as HTMLElement;
+                        if (!t.closest('[data-absence-emp-picker]')) setEmpDropOpen(false);
+                    }}>
+                        <div className="relative" data-absence-emp-picker>
                             <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Empleado</label>
-                            {absenceForm.employeeId ? (
-                                <div className="flex items-center gap-2 w-full p-3 bg-slate-50 dark:bg-slate-700 border border-rose-400 rounded-xl">
-                                    <div className="flex-1 font-black text-sm text-slate-900 dark:text-white truncate">
-                                        {(() => { const emp = employees.find(e => e.id === absenceForm.employeeId); return emp ? `${emp.lastName}, ${emp.firstName}` : (absenceForm.employeeName || absenceForm.employeeId); })()}
+                            <div className="relative">
+                                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-[1]"/>
+                                <input
+                                    autoFocus={!isEditingAbsence}
+                                    type="text"
+                                    placeholder="Buscar por apellido, nombre o legajo..."
+                                    value={empDropOpen || empSearch ? empSearch : (absenceForm.employeeId ? absenceEmployeeLabel(absenceForm.employeeId, absenceForm.employeeName) : '')}
+                                    onChange={e => {
+                                        setEmpSearch(e.target.value);
+                                        setEmpDropOpen(true);
+                                        if (absenceForm.employeeId) {
+                                            setAbsenceForm(f => ({ ...f, employeeId: '', employeeName: '' }));
+                                        }
+                                    }}
+                                    onFocus={() => {
+                                        setEmpDropOpen(true);
+                                        if (absenceForm.employeeId && !empSearch) {
+                                            setEmpSearch('');
+                                        }
+                                    }}
+                                    className="w-full pl-9 pr-10 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
+                                />
+                                {absenceForm.employeeId && !empDropOpen && !empSearch && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAbsenceForm(f => ({ ...f, employeeId: '', employeeName: '' }));
+                                            setEmpSearch('');
+                                            setEmpDropOpen(true);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500"
+                                        title="Cambiar empleado"
+                                    >
+                                        <X size={14}/>
+                                    </button>
+                                )}
+                                {empDropOpen && (
+                                    <div className="absolute z-[250] top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-lg max-h-52 overflow-y-auto custom-scrollbar">
+                                        {filteredAbsenceEmployees.map(e => (
+                                            <button
+                                                key={e.id}
+                                                type="button"
+                                                onMouseDown={() => {
+                                                    setAbsenceForm(f => ({
+                                                        ...f,
+                                                        employeeId: e.id,
+                                                        employeeName: `${e.firstName} ${e.lastName}`,
+                                                    }));
+                                                    setEmpSearch('');
+                                                    setEmpDropOpen(false);
+                                                }}
+                                                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors border-b border-slate-50 dark:border-slate-700 last:border-0 ${absenceForm.employeeId === e.id ? 'bg-rose-50 dark:bg-rose-900/20' : ''}`}
+                                            >
+                                                <span className="font-black text-slate-800 dark:text-slate-100">{e.lastName}, {e.firstName}</span>
+                                                {(e.fileNumber || e.dni) && (
+                                                    <span className="block text-[10px] text-slate-400 font-bold mt-0.5">
+                                                        {[e.fileNumber && `Leg. ${e.fileNumber}`, e.dni && `DNI ${e.dni}`].filter(Boolean).join(' · ')}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                        {filteredAbsenceEmployees.length === 0 && (
+                                            <p className="px-4 py-3 text-xs text-slate-400 italic">Sin resultados — probá apellido o legajo</p>
+                                        )}
                                     </div>
-                                    <button onClick={() => { setAbsenceForm(f => ({...f, employeeId: '', employeeName: ''})); setEmpSearch(''); setEmpDropOpen(true); }} className="text-slate-400 hover:text-rose-500 flex-shrink-0"><X size={14}/></button>
-                                </div>
-                            ) : (
-                                <div className="relative">
-                                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
-                                    <input
-                                        autoFocus={empDropOpen}
-                                        type="text"
-                                        placeholder="Buscar empleado..."
-                                        value={empSearch}
-                                        onChange={e => { setEmpSearch(e.target.value); setEmpDropOpen(true); }}
-                                        onFocus={() => setEmpDropOpen(true)}
-                                        className="w-full pl-9 pr-3 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
-                                    />
-                                    {empDropOpen && (
-                                        <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-sm max-h-48 overflow-y-auto custom-scrollbar">
-                                            {employees
-                                                .filter(e => e.status === 'activo' || e.status === 'active' || !e.status)
-                                                .filter(e => {
-                                                    const q = empSearch.toLowerCase();
-                                                    return !q || `${e.lastName} ${e.firstName}`.toLowerCase().includes(q) || `${e.firstName} ${e.lastName}`.toLowerCase().includes(q);
-                                                })
-                                                .sort((a,b) => (a.lastName||'').localeCompare(b.lastName||''))
-                                                .map(e => (
-                                                    <button
-                                                        key={e.id}
-                                                        onMouseDown={() => { setAbsenceForm(f => ({...f, employeeId: e.id, employeeName: `${e.firstName} ${e.lastName}`})); setEmpSearch(''); setEmpDropOpen(false); }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-rose-50 dark:hover:bg-rose-900/20 hover:text-rose-600 transition-colors"
-                                                    >
-                                                        {e.lastName}, {e.firstName}
-                                                    </button>
-                                                ))
-                                            }
-                                            {employees.filter(e => (e.status === 'activo' || e.status === 'active' || !e.status) && (!empSearch || `${e.lastName} ${e.firstName}`.toLowerCase().includes(empSearch.toLowerCase()))).length === 0 && (
-                                                <p className="px-4 py-3 text-xs text-slate-400 italic">Sin resultados</p>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+                                )}
+                            </div>
+                            {absenceForm.employeeId && !empDropOpen && (
+                                <p className="text-[10px] text-emerald-600 font-bold mt-1 ml-1">Empleado seleccionado</p>
                             )}
                         </div>
                         <div className="grid grid-cols-2 gap-4">
@@ -2682,7 +2828,19 @@ export default function EmployeesPage() {
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Tipo</label>
                                 <select
                                     value={absenceForm.type}
-                                    onChange={e => setAbsenceForm(f => ({...f, type: e.target.value}))}
+                                    onChange={e => {
+                                        const type = e.target.value;
+                                        setAbsenceForm(f => {
+                                            const medical = absenceNeedsMedicalVerification({ type });
+                                            let status = f.status;
+                                            if (medical && (status === 'Pendiente' || status === 'Autorizada')) {
+                                                status = 'En verificación';
+                                            } else if (!medical && status === 'En verificación') {
+                                                status = 'Pendiente';
+                                            }
+                                            return { ...f, type, status };
+                                        });
+                                    }}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 >
                                     {NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -2692,17 +2850,21 @@ export default function EmployeesPage() {
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Estado</label>
                                 <select
                                     value={absenceForm.status}
-                                    onChange={e => setAbsenceForm(f => ({...f, status: e.target.value}))}
+                                    onChange={e => setAbsenceForm(f => ({...f, status: e.target.value as Absence['status']}))}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 >
-                                    <option value="Pendiente">Pendiente</option>
-                                    <option value="Autorizada">Autorizada</option>
-                                    <option value="Justificada">Justificada</option>
-                                    <option value="Injustificada">Injustificada</option>
-                                    <option value="Rechazada">Rechazada</option>
+                                    {(absenceNeedsMedicalVerification(absenceForm)
+                                        ? ['En verificación', 'Justificada', 'Injustificada', 'Rechazada']
+                                        : ['Pendiente', 'Autorizada', 'Justificada', 'Injustificada', 'Rechazada']
+                                    ).map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>
                         </div>
+                        {absenceNeedsMedicalVerification(absenceForm) && absenceForm.status === 'En verificación' && (
+                            <p className="text-[10px] font-bold text-violet-600 -mt-2">
+                                Enfermedad/ART: impacta planificación de inmediato. Verificá el certificado para pasar a Justificada o Injustificada.
+                            </p>
+                        )}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Fecha inicio</label>
@@ -2832,6 +2994,42 @@ export default function EmployeesPage() {
                         <div className="bg-rose-600 h-3 rounded-full transition-all duration-300" style={{width:`${bulkDeleteProgress}%`}}/>
                     </div>
                     <p className="text-xs font-bold text-slate-500">{bulkDeleteProgress}% completado</p>
+                </div>
+            </div>
+        )}
+        {verifyModal && (
+            <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget && !verifyLoading) setVerifyModal(null); }}>
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-sm">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center"><FileCheck size={18} className="text-violet-600"/></div>
+                        <div>
+                            <h3 className="font-black text-base text-slate-900 dark:text-white uppercase">Verificar enfermedad</h3>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase">{verifyModal.absence.type} — {verifyModal.absence.employeeName}</p>
+                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">{getArgentinaDate(verifyModal.absence.startDate)} → {getArgentinaDate(verifyModal.absence.endDate)}</p>
+                        </div>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mb-5">
+                        La guardia ya figura ausente en planificación. Confirmá si el certificado justifica la ausencia o marcala como injustificada.
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <button
+                            type="button"
+                            onClick={() => handleVerifyMedicalSubmit('Justificada')}
+                            disabled={verifyLoading}
+                            className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs uppercase transition-colors flex items-center justify-center gap-2"
+                        >
+                            {verifyLoading ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle2 size={14}/>} Justificada (con certificado)
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleVerifyMedicalSubmit('Injustificada')}
+                            disabled={verifyLoading}
+                            className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-black text-xs uppercase transition-colors flex items-center justify-center gap-2"
+                        >
+                            {verifyLoading ? <Loader2 size={14} className="animate-spin"/> : <AlertTriangle size={14}/>} Injustificada
+                        </button>
+                        <button type="button" onClick={() => setVerifyModal(null)} disabled={verifyLoading} className="w-full py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-xs uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
+                    </div>
                 </div>
             </div>
         )}

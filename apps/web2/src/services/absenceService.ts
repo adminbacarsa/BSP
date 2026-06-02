@@ -2,7 +2,7 @@
 import { db } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { empresaScopedQuery, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
-import { validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { validateAbsenceDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 
 export interface Absence {
   id?: string;
@@ -11,7 +11,7 @@ export interface Absence {
   type: string;
   startDate: string;
   endDate: string;
-  status: 'Pendiente' | 'Autorizada' | 'Justificada' | 'Injustificada' | 'Rechazada';
+  status: 'Pendiente' | 'En verificación' | 'Autorizada' | 'Justificada' | 'Injustificada' | 'Rechazada';
   hasCertificate: boolean;
   reason: string;
   comments: string;
@@ -23,13 +23,7 @@ export interface Absence {
   coberturaEstado?: 'PENDIENTE' | 'GESTIONADA' | 'VACANTE';
 }
 
-const toDateStr = (val: any): string => {
-  if (!val) return '';
-  if (typeof val === 'string') return val;
-  if (val?.seconds) return new Date(val.seconds * 1000).toISOString().slice(0, 10);
-  if (val instanceof Date) return val.toISOString().slice(0, 10);
-  return '';
-};
+const toDateStr = (val: unknown): string => toCalendarDateStr(val) || '';
 
 export const absenceService = {
   getAll: async (opts?: { empresaId?: string; scopeEmpresa?: boolean }) => {

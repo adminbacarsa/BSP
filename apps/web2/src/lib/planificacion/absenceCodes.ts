@@ -55,6 +55,14 @@ export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA']);
 /** Códigos de licencias pagas (computan horas y bloquean planificación). */
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'A', 'E', 'PG']);
 
+/** Tipos RRHH que van a verificación médica (no autorización con PIN). */
+export const MEDICAL_VERIFICATION_ABSENCE_TYPES = new Set(['Enfermedad', 'ART']);
+
+export function absenceNeedsMedicalVerification(doc: { type?: unknown } | null | undefined): boolean {
+    const type = String(doc?.type ?? '').trim();
+    return MEDICAL_VERIFICATION_ABSENCE_TYPES.has(type);
+}
+
 /**
  * Infiere el código de ausencia desde un documento de la colección `ausencias`.
  * Prioridad:
@@ -95,9 +103,19 @@ export function isActiveAbsence(doc: any): boolean {
     const st = String(doc?.status || '').toLowerCase().trim();
     if (!st) return true; // legacy: sin status → la respetamos
     if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') return false;
-    // Pendiente de autorización → no mostrar en grilla/planificador hasta que sea autorizada
-    if (st === 'pendiente' || st === 'pending') return false;
+    if (st === 'en verificación' || st === 'en verificacion') return true;
+    // Pendiente: licencias/vacaciones esperan autorización; enfermedad/ART ya impactan planificación
+    if (st === 'pendiente' || st === 'pending') return absenceNeedsMedicalVerification(doc);
     return true;
+}
+
+export function absenceReplicatesToPlanning(doc: { status?: unknown; type?: unknown } | null | undefined): boolean {
+    const st = String(doc?.status ?? '').trim();
+    if (st === 'Rechazada') return false;
+    if (st === 'Autorizada' || st === 'Justificada' || st === 'Injustificada') return true;
+    if (st === 'En verificación') return true;
+    if (st === 'Pendiente' && absenceNeedsMedicalVerification(doc)) return true;
+    return false;
 }
 
 /** Normaliza startDate/endDate de Firestore a YYYY-MM-DD (calendario local). */
