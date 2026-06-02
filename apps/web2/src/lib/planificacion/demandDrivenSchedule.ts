@@ -142,6 +142,8 @@ function tryFillSlotFromFrancoRescue(
     inCurrent: boolean,
     options?: { ignorePendulum?: boolean; allowSlaClose?: boolean },
 ): boolean {
+    // En ciclo 6+2 puro no convertir francos en trabajo (rompe la forma 6+2).
+    if (params.ctx.noFlexSchemeEmployees === true) return false;
     const {
         assignments, runtime, ctx, shiftHoursH, passesAgreementRest,
         stats, limitedEmpIds, retDesignateSet, flexSchemeEmpIds,
@@ -232,6 +234,7 @@ export function fillDemandGapsWithFlexibleCycle(
 ): void {
     const { ctx, isCustomCoverPosition } = params;
     if (ctx.strictSixTwo === true) return;
+    if (ctx.noFlexSchemeEmployees === true) return;
     if (ctx.rotateShifts === false) return;
 
     const orderedDays = [...dayDemands].sort((a, b) => a.dateStr.localeCompare(b.dateStr));
@@ -1296,6 +1299,8 @@ function bruteForceFrancoToGap(
     code: string,
     inCurrent: boolean,
 ): boolean {
+    // En ciclo 6+2 puro no convertir francos en trabajo (rompe la forma 6+2).
+    if (params.ctx.noFlexSchemeEmployees === true) return false;
     const { assignments, ctx, shiftHoursH, passesAgreementRest, stats, runtime, limitedEmpIds } = params;
     const sh = shiftDefForCode(pos, dayLetter, code, ctx.autoCycles, shiftHoursH);
     const sHrs = shiftHoursH(sh);
