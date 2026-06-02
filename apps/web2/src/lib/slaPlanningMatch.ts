@@ -315,3 +315,29 @@ export function buildPlanningPositionStructure(
 
   return { structure, usedSlaFallback };
 }
+
+const PLANNING_FRANCO_OR_ABSENCE = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+
+/** Día sin servicio para el puesto (exclusión SLA global o por puesto). */
+export function isPlanningPositionExcludedOnDate(
+  pos: { excludedDates?: string[] } | null | undefined,
+  dateStr: string,
+): boolean {
+  if (!pos?.excludedDates?.length || !dateStr) return false;
+  return pos.excludedDates.includes(dateStr);
+}
+
+/** Turnos laborales que no deben asignarse en un día excluido (francos/licencias sí). */
+export function isPlanningWorkShiftCode(code: string | undefined | null): boolean {
+  const c = String(code || '').toUpperCase();
+  if (!c) return false;
+  return !PLANNING_FRANCO_OR_ABSENCE.has(c);
+}
+
+export function planningPositionExclusionLabel(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return dateStr;
+  const dt = new Date(y, m - 1, d);
+  const wd = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][dt.getDay()];
+  return `${wd} ${d}/${m}`;
+}

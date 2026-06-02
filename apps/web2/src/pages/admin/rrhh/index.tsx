@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { TabBar } from '@/components/ui';
+import { TabBar, SupervisorPinInput } from '@/components/ui';
 import { employeeService, Employee } from '@/services/employeeService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { holidayService, Holiday } from '@/services/holidayService';
@@ -2845,18 +2845,17 @@ export default function EmployeesPage() {
                             <p className="text-[10px] text-slate-500 font-bold uppercase">{authPinModal.absence.type} — {authPinModal.absence.employeeName}</p>
                         </div>
                     </div>
+                    <form autoComplete="off" onSubmit={(e) => { e.preventDefault(); handleAuthorizePinSubmit(); }} className="contents">
                     <label className="text-[10px] font-black uppercase text-slate-400 block mb-1 ml-1">PIN Supervisor</label>
-                    <input
-                        type="password"
-                        inputMode="numeric"
+                    <SupervisorPinInput
                         maxLength={6}
                         autoFocus
                         className="w-full px-4 py-3 border dark:border-slate-600 rounded-xl text-center text-2xl font-black tracking-widest bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-400 mb-1"
                         value={authPinValue}
                         onChange={e => { setAuthPinValue(e.target.value.replace(/\D/g, '')); setAuthPinError(''); }}
-                        onKeyDown={e => e.key === 'Enter' && handleAuthorizePinSubmit()}
                         placeholder="••••"
                     />
+                    </form>
                     {authPinError && <p className="text-[10px] font-bold text-rose-600 mb-3">{authPinError}</p>}
                     <div className="flex gap-3 mt-4">
                         <button onClick={() => { setAuthPinModal(null); setAuthPinValue(''); setAuthPinError(''); }} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-xs uppercase hover:bg-slate-50 transition-colors">Cancelar</button>

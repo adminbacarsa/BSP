@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { LayoutGrid, List, Search, Loader2 } from 'lucide-react';
 
+export { SupervisorPinInput } from './SupervisorPinInput';
+export type { SupervisorPinInputProps } from './SupervisorPinInput';
+
 // ─── SECTION TITLE ────────────────────────────────────────────────────────────
 export const SectionTitle = ({ label }: { label: string }) => (
   <div className="flex items-center gap-3 mb-4">

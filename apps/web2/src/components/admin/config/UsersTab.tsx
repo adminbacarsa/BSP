@@ -3,7 +3,7 @@ import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Buildi
 import { db, functions } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { toast } from 'sonner';
+import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
@@ -353,10 +353,9 @@ export default function UsersTab() {
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <div className="relative">
-                                        <input
-                                            type={formData.showPin ? 'text' : 'password'}
+                                        <SupervisorPinInput
+                                            masked={!formData.showPin}
                                             maxLength={4}
-                                            inputMode="numeric"
                                             placeholder="••••"
                                             value={formData.supervisorPin}
                                             onChange={e => setFormData({ ...formData, supervisorPin: e.target.value.replace(/\D/g, '').slice(0, 4) })}

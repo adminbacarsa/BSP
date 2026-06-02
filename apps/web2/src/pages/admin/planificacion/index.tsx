@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useTransition } from 'reac
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageHeader } from '@/components/ui';
+import { PageHeader, SupervisorPinInput } from '@/components/ui';
 import { useSetPageHeader } from '@/context/PageHeaderContext';
 import { 
     ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, Plus,
@@ -62,6 +62,9 @@ import {
     slaBelongsToPlanningClient,
     buildPlanningPositionStructure,
     DEFAULT_PLANNING_SHIFTS,
+    isPlanningPositionExcludedOnDate,
+    isPlanningWorkShiftCode,
+    planningPositionExclusionLabel,
 } from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -316,10 +319,14 @@ const posAsEngineDef = (pos: any) => ({
     shifts: pos?.shifts,
     activeDays: pos?.activeDays,
     coverageType: pos?.coverageType,
+    excludedDates: pos?.excludedDates,
 });
 
 const isPosActiveOnDay = (pos: any, dayLetter: string): boolean =>
     positionIsActiveOn(posAsEngineDef(pos), dayLetter);
+
+const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
+    isPlanningPositionExcludedOnDate(pos, dateStr);
 
 interface Coords { r: number; c: number; }
 
@@ -1070,6 +1077,18 @@ export default function PlanificacionPage() {
             return disabled;
         }
 
+        // Día excluido por SLA (Servicios → días excluidos): sin turnos laborales en este puesto
+        if (isPosExcludedOnDate(posConfig, dateStr)) {
+            uniqueSLAShifts.forEach((s: any) => {
+                const code = String(s.code || '').toUpperCase();
+                if (isPlanningWorkShiftCode(code)) disabled.add(code);
+            });
+            disabled.add('RET');
+            disabled.add('REF');
+            disabled.add('ESC');
+            return disabled;
+        }
+
         // Shift-level: bloquear cada turno que tenga days[] y no incluya el día actual
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
@@ -1241,12 +1260,13 @@ export default function PlanificacionPage() {
             }
         }
 
-        // Verificación de Días Activos
+        // Verificación de Días Activos y exclusiones SLA
         const dayLetter = getDayLetter(dateStr);
         const isDayActive = isPosActiveOnDay(posConfig, dayLetter);
+        const isDayExcluded = isPosExcludedOnDate(posConfig, dateStr);
         
         // Meta Final
-        const target = isDayActive ? (pax * dailyHoursTarget) : 0;
+        const target = isDayActive && !isDayExcluded ? (pax * dailyHoursTarget) : 0;
 
         let current = 0;
         const dominant = structure.reduce((prev: any, current: any) => (prev.qty > current.qty) ? prev : current, structure[0] || { qty: 1, positionName: 'General' });
@@ -1261,7 +1281,7 @@ export default function PlanificacionPage() {
                 }
             }
         });
-        return { current, target, pax, isActiveDay: isDayActive };
+        return { current, target, pax, isActiveDay: isDayActive && !isDayExcluded, isExcludedDay: isDayExcluded };
     };
 
     /**
@@ -1278,6 +1298,7 @@ export default function PlanificacionPage() {
         cycles?: string[],
     ): { closed: number; required: number; schemeLabel: string } => {
         if (!isPosActiveOnDay(pos, dayLetter)) return { closed: 0, required: 0, schemeLabel: '' };
+        if (isPosExcludedOnDate(pos, dateStr)) return { closed: 0, required: 0, schemeLabel: 'EXCL' };
 
         const dominant = (positionStructure || []).reduce(
             (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
@@ -1316,6 +1337,7 @@ export default function PlanificacionPage() {
             requiredUnits: units.required,
             schemeLabel: units.schemeLabel,
             isPositionClosed: units.required > 0 && units.closed >= units.required,
+            isExcludedDay: hoursStats.isExcludedDay,
         };
     }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective, autoCycles]);
 
@@ -2527,6 +2549,7 @@ export default function PlanificacionPage() {
         const newChanges = { ...pendingChanges }; 
         let count = 0; 
         let francosReplaced = 0; 
+        let skippedExcluded = 0;
         
         const fallbackPos = activePosition || (positionStructure[0]?.positionName) || 'General';
         const getEmpPos = (emp: any) => empDefaultPos[`${emp.id}___${selectedObjective}`] || fallbackPos;
@@ -2535,16 +2558,22 @@ export default function PlanificacionPage() {
         let markAsFT = false;
         if (francosReplaced > 0) { if(confirm(`⚠️ Estás sobrescribiendo ${francosReplaced} Francos.\n¿Deseas marcarlos como FT?`)) { markAsFT = true; } }
         const blockedEmps = new Set<string>();
-        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; const empPos = getEmpPos(emp); for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const dateStr = getDateKey(day); const key = `${emp.id}_${dateStr}`; const existing = shiftsMap[key]; if (isShiftConsolidated(existing)) continue; if (shiftConfig === null) { newChanges[key] = { isDeleted: true }; count++; } else { const assignPos = shiftConfig.positionName || empPos; const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos); if (blocked) { blockedEmps.add(emp.name); continue; } if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 })); let cellIsFT = false; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { cellIsFT = markAsFT; } newChanges[key] = { ...shiftConfig, isTemp: true, oldObjectiveId: existing?.objectiveId, isFrancoTrabajado: cellIsFT, positionName: assignPos }; count++; } } }
+        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; const empPos = getEmpPos(emp); for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const dateStr = getDateKey(day); const key = `${emp.id}_${dateStr}`; const existing = shiftsMap[key]; if (isShiftConsolidated(existing)) continue; if (shiftConfig === null) { newChanges[key] = { isDeleted: true }; count++; } else { const assignPos = shiftConfig.positionName || empPos; const posCfg = positionStructure.find((p: any) => p.positionName === assignPos); if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) { skippedExcluded++; continue; } const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code); if (blocked) { blockedEmps.add(emp.name); continue; } if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 })); let cellIsFT = false; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { cellIsFT = markAsFT; } newChanges[key] = { ...shiftConfig, isTemp: true, oldObjectiveId: existing?.objectiveId, isFrancoTrabajado: cellIsFT, positionName: assignPos }; count++; } } }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
+        if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): puesto excluido por SLA ese día`, { duration: 8000 });
         setPendingChanges(newChanges);
         toast.info(`${count} celdas`);
     };
 
-    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null): { blocked: boolean; warnings: string[] } => {
+    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null): { blocked: boolean; warnings: string[] } => {
         const warnings: string[] = [];
         const currentObjName = getObjectiveName(selectedObjective);
         const posForGenero = positionName || activePosition || selectedCell?.currentShift?.positionName || null;
+        const posCfg = positionStructure.find((p: any) => p.positionName === posForGenero);
+        if (posForGenero && isPosExcludedOnDate(posCfg, dateStr) && (shiftCode == null || isPlanningWorkShiftCode(shiftCode))) {
+            warnings.push(`🚫 Puesto "${posForGenero}" excluido por SLA (${planningPositionExclusionLabel(dateStr)}) — sin servicio ese día`);
+            return { blocked: true, warnings };
+        }
         const prefGenero = getPreferenciaGeneroFromPositionStructure(positionStructure, posForGenero);
         const generoCheck = checkGeneroPuesto(emp.genero, prefGenero);
         if (generoCheck.blocked && generoCheck.message) {
@@ -2586,7 +2615,7 @@ export default function PlanificacionPage() {
         const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
         if (emp && config && !config.isDeleted) {
             const assignPos = config.positionName || activePosition || 'General';
-            const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr, assignPos);
+            const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr, assignPos, config.code);
             if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 10000 }));
             if (blocked) return;
         }
@@ -2638,6 +2667,11 @@ export default function PlanificacionPage() {
         if (isDateLocked(selectedCell.dateStr)) { toast.error("Periodo cerrado."); return; } 
         if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: solo lectura."); return; }
         if (selectedCell.absence) { toast.warning("El empleado tiene una ausencia/vacaciones registrada: no se puede planificar encima."); return; }
+        const posCfg = positionStructure.find((p: any) => p.positionName === positionName);
+        if (isPosExcludedOnDate(posCfg, selectedCell.dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
+            toast.error(`Puesto "${positionName}" excluido por SLA (${planningPositionExclusionLabel(selectedCell.dateStr)}). Configurado en Servicios.`, { duration: 9000 });
+            return;
+        }
         const existingCode = String(selectedCell.currentShift?.code || selectedCell.currentShift?.type || '').toUpperCase();
         if (['V', 'L', 'A', 'E', 'AA'].includes(existingCode)) { toast.warning("Novedad RRHH (ausencia/vacaciones/licencia): no se puede planificar encima."); return; }
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
@@ -5869,37 +5903,63 @@ export default function PlanificacionPage() {
                                             <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Puesto / Función</label>
                                             <select 
                                                 className="w-full bg-slate-50 border p-2 rounded-lg text-xs font-bold"
-                                                // 🛑 V9.00 - COMPONENTE CONTROLADO
                                                 value={activePosition || ''} 
                                                 id="positionSelector"
                                                 disabled={isServiceLocked}
                                                 onChange={(e) => setActivePosition(e.target.value)}
                                             >
-                                                {positionStructure.map(p => (
-                                                    <option key={p.positionName} value={p.positionName}>
-                                                        {p.positionName} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
+                                                {positionStructure.map(p => {
+                                                    const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
+                                                    return (
+                                                    <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
+                                                        {p.positionName}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
                                                     </option>
-                                                ))}
+                                                    );
+                                                })}
                                             </select>
                                         </div>
                                         {(() => {
+                                            const currentPosName = activePosition || positionStructure[0]?.positionName || 'General';
+                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
+                                            const isExcludedToday = isPosExcludedOnDate(posCfg, selectedCell.dateStr);
+                                            if (!isExcludedToday) return null;
+                                            return (
+                                                <div className="mb-3 rounded-xl border-2 border-rose-300 bg-rose-50 px-3 py-2.5">
+                                                    <p className="text-[10px] font-black uppercase text-rose-800 flex items-center gap-1.5">
+                                                        <Ban size={12}/> Día excluido por SLA
+                                                    </p>
+                                                    <p className="text-[10px] font-bold text-rose-700 mt-1 leading-snug">
+                                                        El puesto <span className="font-black">{currentPosName}</span> no tiene servicio el {planningPositionExclusionLabel(selectedCell.dateStr)}.
+                                                        Definido en Servicios → Días excluidos. Solo podés asignar Franco (F).
+                                                    </p>
+                                                </div>
+                                            );
+                                        })()}
+                                        {(() => {
                                             const coverageData = modalCoverageStats || {
-                                                current: 0, target: 24, pax: 1, isActiveDay: true,
+                                                current: 0, target: 24, pax: 1, isActiveDay: true, isExcludedDay: false,
                                                 closedUnits: 0, requiredUnits: 1, schemeLabel: '', isPositionClosed: false,
                                             };
                                             const currentPosName = activePosition || 'General';
+                                            const isExcludedDay = coverageData.isExcludedDay;
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
                                             const coverageFull = coverageData.isActiveDay && coverageData.requiredUnits > 0 && isUnitsCovered;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
-                                            const displayTarget = coverageData.isActiveDay ? `${coverageData.target}h` : `Sin cobertura`;
+                                            const displayTarget = isExcludedDay
+                                                ? 'Excluido SLA'
+                                                : coverageData.isActiveDay ? `${coverageData.target}h` : `Sin cobertura`;
                                             const unitsLabel = coverageData.isActiveDay && coverageData.requiredUnits > 0
                                                 ? `${coverageData.closedUnits}/${coverageData.requiredUnits} puesto${coverageData.requiredUnits > 1 ? 's' : ''}`
                                                 : null;
-                                            const bgClass = coverageData.isActiveDay
+                                            const bgClass = isExcludedDay
+                                                ? 'bg-rose-100 text-rose-700'
+                                                : coverageData.isActiveDay
                                                 ? (isUnitsCovered ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600')
                                                 : 'bg-slate-100 text-slate-500';
-                                            const barColor = coverageData.isActiveDay
+                                            const barColor = isExcludedDay
+                                                ? 'bg-rose-300'
+                                                : coverageData.isActiveDay
                                                 ? (isHoursCovered ? 'bg-emerald-500' : 'bg-rose-500')
                                                 : 'bg-slate-300';
                                             return (
@@ -5927,19 +5987,22 @@ export default function PlanificacionPage() {
                                                             <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percentage}%` }} />
                                                         </div>
                                                     </div>
-                                                    <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                                                    <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked || isExcludedDay ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
                                                             const disabledByCoverage = coverageFull;
-                                                            const disabled = isServiceLocked || isBlocked || disabledByCoverage;
+                                                            const disabled = isServiceLocked || isBlocked || disabledByCoverage || isExcludedDay;
                                                             const timeRange = (s.startTime && s.endTime) ? `${s.startTime}–${s.endTime}` : null;
                                                             const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
+                                                            const blockTitle = isExcludedDay
+                                                                ? 'Puesto excluido por SLA este día'
+                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
                                                             return (
                                                                 <button
                                                                     key={s.code}
                                                                     onClick={() => !disabled && handleAssignShift(s, activePosition || 'General')}
                                                                     disabled={disabled}
-                                                                    title={disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined}
+                                                                    title={blockTitle}
                                                                     className={`p-2 rounded-lg border flex flex-col items-center justify-center gap-0.5 transition-transform relative ${disabled ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:scale-105'} ${SHIFT_STYLES[s.code]}`}
                                                                 >
                                                                     <span className="font-black text-sm">{s.code}</span>
@@ -5952,7 +6015,7 @@ export default function PlanificacionPage() {
                                                         <button
                                                             onClick={() => { setFrancoMode('NONE'); handleAssignShift({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, 'General'); }}
                                                             disabled={isServiceLocked}
-                                                            className="p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black"
+                                                            className={`p-2 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg flex flex-col items-center justify-center font-black ${isExcludedDay ? 'relative z-10 opacity-100 pointer-events-auto' : ''}`}
                                                             title="Asignar Franco (F)"
                                                         >
                                                             <span>F</span><span className="text-[8px]">Franco</span>
@@ -6243,20 +6306,18 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
 
-                            <div className="mb-6">
+                            <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="mb-6">
                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2 text-center">PIN de Supervisor</label>
-                                <input
+                                <SupervisorPinInput
                                     autoFocus
-                                    type="password"
                                     maxLength={4}
-                                    inputMode="numeric"
                                     placeholder="••••"
                                     value={authPin}
                                     onChange={e => { setAuthPin(e.target.value.replace(/\D/g,'').slice(0,4)); setAuthError(''); }}
                                     className="w-full text-center text-3xl font-black tracking-[0.6em] bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-indigo-500 outline-none dark:text-white rounded-xl px-4 py-4"
                                 />
                                 {authError && <p className="text-rose-600 text-xs font-bold text-center mt-2">{authError}</p>}
-                            </div>
+                            </form>
 
                             <div className="flex gap-3">
                                 <button
@@ -7394,9 +7455,9 @@ export default function PlanificacionPage() {
                                                     ))}
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <input type="password"
+                                                    <SupervisorPinInput
                                                         value={over200AuthPin}
-                                                        onChange={e => { setOver200AuthPin(e.target.value); setOver200AuthError(''); }}
+                                                        onChange={e => { setOver200AuthPin(e.target.value.replace(/\D/g, '').slice(0, 20)); setOver200AuthError(''); }}
                                                         placeholder="PIN supervisor (mín. 4 dígitos)"
                                                         maxLength={20}
                                                         className="flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400"/>
