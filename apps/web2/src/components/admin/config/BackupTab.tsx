@@ -16,8 +16,10 @@ function emulatorBaseUrl(): string {
 }
 
 async function assertEmulatorReachable(): Promise<void> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(`${emulatorBaseUrl()}/`, { method: 'GET' });
+    const res = await fetch(`${emulatorBaseUrl()}/`, { method: 'GET', signal: ctrl.signal });
     if (!res.ok && res.status !== 404) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -25,15 +27,21 @@ async function assertEmulatorReachable(): Promise<void> {
     throw new Error(
       'No se pudo conectar al emulador Firestore (:8080). Ejecutá npm run emulators y recargá la página.',
     );
+  } finally {
+    clearTimeout(tid);
   }
 }
 
 async function checkBridgeReachable(): Promise<boolean> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(`${BRIDGE_URL}/health`, { method: 'GET' });
+    const res = await fetch(`${BRIDGE_URL}/health`, { method: 'GET', signal: ctrl.signal });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(tid);
   }
 }
 
