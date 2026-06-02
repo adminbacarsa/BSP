@@ -140,13 +140,36 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     return positionGroups;
 }
 
-// Los cold-starts se asignan POR GRUPO para evitar colisiones de slot dentro del mismo grupo.
+/**
+ * Divide grupos multi-qty en subgrupos independientes de 4-5 (un subgrupo por slot concurrente).
+ * Puestos no-24hs se omiten — sus empleados no tienen opening slot.
+ */
+function buildSubgroupsFor24hs(
+    ctx: V2EngineContext,
+    positionGroups: Record<string, string[]>,
+): string[][] {
+    const result: string[][] = [];
+    for (const [posName, groupIds] of Object.entries(positionGroups)) {
+        const pos = ctx.positions.find(p => p.positionName === posName);
+        if (!pos || !is24hs(pos)) continue;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        const perSlot = Math.floor(groupIds.length / qty);
+        if (perSlot < 1) { result.push([...groupIds]); continue; }
+        for (let i = 0; i < qty; i++) {
+            const sub = groupIds.slice(i * perSlot, (i + 1) * perSlot);
+            if (sub.length > 0) result.push(sub);
+        }
+    }
+    return result;
+}
+
+// Los cold-starts se asignan POR SUBGRUPO para evitar colisiones de slot dentro del mismo grupo.
 // (Asignación global causaba que índice 0 e índice 4 del sort recibieran el mismo slot M
 //  si caían en el mismo grupo → dos guardias en M, nadie en F → 90 slots sin cubrir.)
-function resolveOpeningSlotByEmp(ctx: V2EngineContext, positionGroups: Record<string, string[]>): Record<string, number> {
+function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): Record<string, number> {
     const out: Record<string, number> = {};
 
-    for (const groupIds of Object.values(positionGroups)) {
+    for (const groupIds of subgroups) {
         const regularIds = groupIds.slice(0, 4);   // Primeros 4: M/T/N/F
         const floaterIds = groupIds.slice(4);       // 5to+: RET flotante
 
@@ -196,23 +219,26 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, positionGroups: Record<st
 }
 
 /**
- * true si cada puesto 24hs qty=1 opera los 7 días y tiene 4 ó 5 guardias.
- * 4 guardias → M+T+N+F (cobertura garantizada).
- * 5 guardias → ídem + 1 RET flotante (mismo ciclo, días de trabajo → RET).
- * Puestos con activeDays < 7 (L-V, fines de semana, etc.) usan V4.
+ * true si todos los puestos 24hs operan 7 días y cada slot concurrente tiene 4 ó 5 guardias.
+ * qty=1 → 4-5 guardias en total.
+ * qty=N → N×4 o N×5 guardias (N subgrupos independientes de 4-5).
+ * Puestos no-24hs (L-V, custom) se ignoran — no bloquean el floater.
  */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
     const groups = positionGroups ?? buildPositionGroups(ctx);
-    let counted = 0;
+    let counted24 = 0;
     for (const pos of ctx.positions) {
         if (!is24hs(pos)) continue;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) return false;
-        if (Math.max(1, Number(pos.qty) || 1) !== 1) return false;
+        const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
-        if (g.length !== 4 && g.length !== 5) return false;
-        counted += g.length;
+        if (g.length === 0) return false;
+        if (g.length % qty !== 0) return false;
+        const perSlot = g.length / qty;
+        if (perSlot !== 4 && perSlot !== 5) return false;
+        counted24 += g.length;
     }
-    return counted > 0 && counted === ctx.employees.length;
+    return counted24 > 0;
 }
 
 /**
@@ -224,7 +250,8 @@ function patchRetForAbsences(
     ctx: V2EngineContext,
     assignments: V2Assignment[],
     openingSlotByEmp: Record<string, number>,
-    positionGroups: Record<string, string[]>,
+    subgroups: string[][],
+    empToPosition: Record<string, string>,
     employeeMonthlyHours: Record<string, number>,
     employeeCycleHours: { current: Record<string, number>; next: Record<string, number> },
     cutoffDay: number,
@@ -232,7 +259,11 @@ function patchRetForAbsences(
     const aIdx = new Map<string, number>();
     assignments.forEach((a, i) => aIdx.set(`${a.empId}__${a.dateStr}`, i));
 
-    for (const [posName, groupIds] of Object.entries(positionGroups)) {
+    // Todos los flotantes (índice >=4 en su subgrupo) para candidatos cross-grupo
+    const allFloaterIds = subgroups.flatMap(sub => sub.slice(4));
+
+    for (const groupIds of subgroups) {
+        const posName = empToPosition[groupIds[0]] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
         const regularIds = groupIds.slice(0, 4);
@@ -257,12 +288,10 @@ function patchRetForAbsences(
                 });
                 if (alreadyCovered) continue;
 
-                // RET del mismo grupo primero, luego de otros grupos
+                // RET del mismo subgrupo primero, luego de otros subgrupos
                 const allRetCandidates = [
                     ...floaterIds.filter(id => !ctx.absences[id]?.has(dateStr)),
-                    ...Object.values(positionGroups)
-                        .flatMap(gIds => gIds.slice(4))
-                        .filter(id => !floaterIds.includes(id) && !ctx.absences[id]?.has(dateStr)),
+                    ...allFloaterIds.filter(id => !floaterIds.includes(id) && !ctx.absences[id]?.has(dateStr)),
                 ];
 
                 for (const retId of allRetCandidates) {
@@ -294,7 +323,18 @@ function patchRetForAbsences(
 
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
     const positionGroups = buildPositionGroups(ctx);
-    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, positionGroups);
+    // Subgrupos independientes por slot concurrente (qty>1 → N subgrupos de 4-5 c/u)
+    const subgroups = buildSubgroupsFor24hs(ctx, positionGroups);
+    // empToPosition: usado para L-V y patchRetForAbsences
+    const empToPosition: Record<string, string> = {};
+    for (const [posName, ids] of Object.entries(positionGroups)) {
+        ids.forEach(id => { empToPosition[id] = posName; });
+    }
+    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups);
+    // empSubgroup: cada guardia apunta a su subgrupo de 4-5 (para isRetFloater correcto)
+    const empSubgroup = new Map<string, string[]>();
+    subgroups.forEach(sub => sub.forEach(id => empSubgroup.set(id, sub)));
+
     const primaryShiftByEmp: Record<string, string | null> = {};
 
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31
@@ -311,17 +351,48 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
 
     for (const emp of ctx.employees) {
         const opening = openingSlotByEmp[emp.id];
-        if (opening === undefined) continue;
 
-        const posEntry = Object.entries(positionGroups).find(([, ids]) => ids.includes(emp.id));
-        const posName = posEntry?.[0] ?? '';
-        const posGroup = posEntry?.[1] ?? [];
+        if (opening === undefined) {
+            // Puesto L-V / custom: turno en días activos, Franco en días inactivos
+            const posName = empToPosition[emp.id] ?? '';
+            const pos = ctx.positions.find(p => p.positionName === posName);
+            if (!pos) continue;
+            primaryShiftByEmp[emp.id] = null;
+            ctx.daysInMonth.forEach(day => {
+                const dateStr = ctx.getDateKey(day);
+                if (ctx.absences[emp.id]?.has(dateStr)) return;
+                const dayLetter = ctx.getDayLetter(dateStr);
+                if (positionIsActiveOn(pos, dayLetter)) {
+                    const shiftCode = String(pos.shifts?.[0]?.code || 'M').toUpperCase();
+                    const meta = shiftMeta(pos, shiftCode);
+                    assignments.push({
+                        empId: emp.id,
+                        dateStr,
+                        positionName: posName,
+                        code: shiftCode,
+                        name: meta.name,
+                        hours: meta.hours,
+                        startTime: meta.startTime,
+                        ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                    });
+                    employeeMonthlyHours[emp.id] = (employeeMonthlyHours[emp.id] || 0) + meta.hours;
+                    const inCurrent = day.getDate() <= cutoffDay;
+                    if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
+                    else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
+                } else {
+                    assignments.push({ empId: emp.id, dateStr, positionName: '', code: 'F', name: 'Franco', hours: 0, startTime: '00:00', isFranco: true });
+                }
+            });
+            continue;
+        }
+
+        const posName = empToPosition[emp.id] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
 
-        // El 5to guardia en el grupo (índice ≥ 4) es RET flotante:
-        // misma rueda 24d pero sus bandas de trabajo (M/T/N) se emiten como RET.
-        const isRetFloater = posGroup.indexOf(emp.id) >= 4;
+        // isRetFloater: índice ≥ 4 dentro del subgrupo (no en el grupo completo del puesto)
+        const subGroup = empSubgroup.get(emp.id) ?? [];
+        const isRetFloater = subGroup.indexOf(emp.id) >= 4;
 
         ctx.daysInMonth.forEach((day, di) => {
             const dateStr = ctx.getDateKey(day);
@@ -362,7 +433,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     }
 
     patchRetForAbsences(
-        ctx, assignments, openingSlotByEmp, positionGroups,
+        ctx, assignments, openingSlotByEmp, subgroups, empToPosition,
         employeeMonthlyHours, employeeCycleHours, cutoffDay,
     );
 
