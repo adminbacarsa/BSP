@@ -3872,13 +3872,15 @@ export default function PlanificacionPage() {
 
             const baseGenCtx = {
                 positions: positionStructure,
-                employees: planningDotacionEmployees.map((e:any) => ({
-                    id: e.id,
-                    nombre: e.nombre || e.name,
-                    lat: typeof e.lat === 'number' ? e.lat : null,
-                    lng: typeof e.lng === 'number' ? e.lng : null,
-                    preferredObjectiveId: e.preferredObjectiveId,
-                })),
+                employees: planningDotacionEmployees
+                    .filter((e:any) => !selectedObjective || e.preferredObjectiveId === selectedObjective)
+                    .map((e:any) => ({
+                        id: e.id,
+                        nombre: e.nombre || e.name,
+                        lat: typeof e.lat === 'number' ? e.lat : null,
+                        lng: typeof e.lng === 'number' ? e.lng : null,
+                        preferredObjectiveId: e.preferredObjectiveId,
+                    })),
                 daysInMonth,
                 empMonthlyInitial,
                 absences,

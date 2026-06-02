@@ -136,7 +136,7 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 
     for (const emp of ctx.employees) {
         // Empleados cuyo objetivo base es diferente al actual (EXT/huéspedes) → idle.
-        if (ctx.objectiveId && emp.preferredObjectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
+        if (ctx.objectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
         const fixed = defaultPos[emp.id];
         if (!fixed || positionGroups[fixed] === undefined) continue;
         positionGroups[fixed].push(emp.id);
