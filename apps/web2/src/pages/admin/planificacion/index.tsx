@@ -13,7 +13,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2
+    PowerOff, LockKeyhole, Ghost, Maximize2, Minimize2, Copy, ClipboardPaste, Wand2
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -567,12 +567,28 @@ export default function PlanificacionPage() {
 
     const [showLegend, setShowLegend] = useState(false);
     const [selectedRef, setSelectedRef] = useState<string | null>(null);
+    const [cronoFullscreen, setCronoFullscreen] = useState(false);
 
     const setPageHeader = useSetPageHeader();
     useEffect(() => {
-        setPageHeader({ compactSidebar: !!selectedClient });
-        return () => setPageHeader({ compactSidebar: false });
-    }, [selectedClient]);
+        setPageHeader({ compactSidebar: !!selectedClient || cronoFullscreen, immersiveMode: cronoFullscreen });
+        return () => setPageHeader({ compactSidebar: false, immersiveMode: false });
+    }, [selectedClient, cronoFullscreen, setPageHeader]);
+
+    useEffect(() => {
+        if (!cronoFullscreen) return;
+        document.body.style.overflow = 'hidden';
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCronoFullscreen(false); };
+        window.addEventListener('keydown', onKey);
+        return () => {
+            document.body.style.overflow = '';
+            window.removeEventListener('keydown', onKey);
+        };
+    }, [cronoFullscreen]);
+
+    useEffect(() => {
+        if (cronoFullscreen && !selectedObjective) setCronoFullscreen(false);
+    }, [cronoFullscreen, selectedObjective]);
 
     // ============================================================================
     // 2. UTILIDADES Y HELPERS (NIVEL 1 - Definidos ANTES de usarse)
@@ -3647,7 +3663,8 @@ export default function PlanificacionPage() {
             let skipped = 0;
             for (const a of gen.assignments) {
                 const key = `${a.empId}_${a.dateStr}`;
-                if (isDateLocked(a.dateStr)) { skipped++; continue; }
+                // No se bloquean días pasados en auto-generación: el borrador planifica el mes completo.
+                // isDateLocked aplica solo a edición manual, no al motor automático.
                 if (!autoOverwrite && (pendingChanges[key] || shiftsMap[key])) { skipped++; continue; }
                 newChanges[key] = {
                     isTemp: true,
@@ -3756,7 +3773,6 @@ export default function PlanificacionPage() {
 
                 for (const a of fixResult.assignments) {
                     const key = `${a.empId}_${a.dateStr}`;
-                    if (isDateLocked(a.dateStr)) continue;
                     const existing = newChanges[key];
                     if (existing && !existing.isDeleted
                         && !NON_BILLABLE_FIX.has(String(existing.code || '').toUpperCase())
@@ -3843,7 +3859,7 @@ export default function PlanificacionPage() {
                         const empId = touchKey.slice(0, sep);
                         const dateStr = touchKey.slice(sep + 2);
                         const a = finalAssignments.find(x => x.empId === empId && x.dateStr === dateStr);
-                        if (!a || isDateLocked(dateStr)) continue;
+                        if (!a) continue;
                         finalChanges[`${empId}_${dateStr}`] = {
                             isTemp: true,
                             employeeId: empId,
@@ -3983,7 +3999,6 @@ export default function PlanificacionPage() {
             let written = 0;
             for (const a of result.assignments) {
                 const key = `${a.empId}_${a.dateStr}`;
-                if (isDateLocked(a.dateStr)) continue;
                 // No pisar un turno facturable autorizado (ej. overflow 200h) con un RET/F del fixer.
                 const existing = pendingChanges[key];
                 if (existing && !existing.isDeleted && !NON_BILLABLE.has(String(existing.code || '').toUpperCase())
@@ -4082,7 +4097,7 @@ export default function PlanificacionPage() {
                 const empId = touchKey.slice(0, sep);
                 const dateStr = touchKey.slice(sep + 2);
                 const a = reb.assignments.find(x => x.empId === empId && x.dateStr === dateStr);
-                if (!a || isDateLocked(dateStr)) continue;
+                if (!a) continue;
                 newChanges[`${empId}_${dateStr}`] = {
                     isTemp: true,
                     employeeId: empId,
@@ -4832,8 +4847,34 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'h-full overflow-hidden p-0 space-y-0' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
+                {cronoFullscreen && selectedObjective && (
+                    <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 bg-slate-900 text-white no-print border-b border-slate-700">
+                        <div className="flex items-center gap-2 min-w-0 text-xs font-black uppercase tracking-wide truncate">
+                            <CalendarCheck size={14} className="text-indigo-400 shrink-0"/>
+                            <span className="truncate">{clients.find(c => c.id === selectedClient)?.name || 'Cliente'}</span>
+                            <ChevronRight size={12} className="text-slate-500 shrink-0"/>
+                            <span className="truncate text-indigo-300">{selectedObjectiveData?.name || selectedObjective}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center bg-slate-800 rounded-lg p-0.5">
+                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-slate-700 rounded-md"><ChevronLeft size={14}/></button>
+                                <span className="px-2 font-black text-[10px] w-20 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span>
+                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-slate-700 rounded-md"><ChevronRight size={14}/></button>
+                            </div>
+                            <button
+                                onClick={() => setCronoFullscreen(false)}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                                title="Salir de pantalla completa (Esc)"
+                            >
+                                <Minimize2 size={16}/>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {!cronoFullscreen && (
                 <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 z-20 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
@@ -5208,6 +5249,14 @@ export default function PlanificacionPage() {
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
                                 <button
+                                    onClick={() => setCronoFullscreen(true)}
+                                    disabled={!selectedObjective}
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40"
+                                    title="Crono a pantalla completa"
+                                >
+                                    <Maximize2 size={18}/>
+                                </button>
+                                <button
                                     onClick={() => setShowAjustarCronoModal(true)}
                                     disabled={!selectedObjective}
                                     title="Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días"
@@ -5250,6 +5299,7 @@ export default function PlanificacionPage() {
                         </>
                     )}
                 </div>
+                )}
 
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
                 <div className={`flex-1 min-h-0 overflow-hidden relative custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
@@ -5488,7 +5538,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
 
-                <div className="hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className={`hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden ${cronoFullscreen ? '!hidden' : ''}`} style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
                         onClick={() => setShowActivityModal(true)}
