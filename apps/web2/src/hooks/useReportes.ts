@@ -53,23 +53,49 @@ const shiftHasRealCheckIn = (shift: any): boolean => {
 };
 
 /** Misma regla que operaciones: planificado sin publicar no entra a liquidación salvo fichada real u origen ops. */
-export function isShiftEligibleForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
-    if (shift?.draft === true) return false;
-    if (isOperationalOriginShift(shift)) return true;
-    if (shift?.type === 'NOVEDAD') return true;
+export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
+export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
     const start = shift?.startTime?.toDate?.();
-    const pubKey = start && shift?.objectiveId
-        ? planificacionPublishLookupKey(shift.objectiveId, start.getFullYear(), start.getMonth() + 1)
-        : '';
-    const isPublished = pubKey ? !!publishStatusMap[pubKey] : false;
+    if (!start || !shift?.objectiveId) return false;
+    const pubKey = planificacionPublishLookupKey(
+        shift.objectiveId,
+        start.getFullYear(),
+        start.getMonth() + 1,
+    );
+    return pubKey ? !!publishStatusMap[pubKey] : false;
+}
+
+export function isShiftEligibleForReports(
+    shift: any,
+    publishStatusMap: Record<string, boolean>,
+    publishFilter: ReportPublishFilter = 'published',
+): boolean {
+    if (shift?.draft === true) return false;
+    if (!shift?.startTime || !shift?.endTime) return false;
+
+    const isPublished = isShiftPublishedForReports(shift, publishStatusMap);
+    const isOps = isOperationalOriginShift(shift);
+    const isNovedad = shift?.type === 'NOVEDAD';
+
+    if (publishFilter === 'all') return true;
+
+    if (publishFilter === 'unpublished') {
+        if (isOps || isNovedad) return false;
+        if (!shift?.objectiveId) return false;
+        return !isPublished;
+    }
+
+    // published — liquidación oficial
+    if (isOps) return true;
+    if (isNovedad) return true;
 
     if (shiftHasRealCheckIn(shift)) return true;
 
     const st = String(shift?.status || '').toUpperCase();
     if (shift?.isAbsent || st === 'ABSENT') return isPublished;
 
-    if (!start || !shift?.objectiveId) return false;
+    if (!shift?.objectiveId) return false;
     return isPublished;
 }
 
@@ -446,6 +472,50 @@ function resolveClientIdFromName(clientName: string, clientMap: Record<string, s
     return partial?.[0] || '';
 }
 
+/** JSON compatible con payrollApi (integraciones externas). */
+export function buildPayrollExportPayload(
+    rows: any[],
+    opts: { start: string; end: string; empresaId?: string; publishFilter: ReportPublishFilter },
+) {
+    const bolsa = (r: any) => Math.max(0, (r.horasReales ?? r.total ?? 0) - (r.extra100 ?? 0));
+    return {
+        exportVersion: '1',
+        source: 'COSP_REPORTES_UI',
+        cctVersion: '422/05',
+        generatedAt: new Date().toISOString(),
+        dateRange: { start: opts.start, end: opts.end },
+        publishFilter: opts.publishFilter,
+        empresaId: opts.empresaId || null,
+        items: rows.map(row => {
+            const b = bolsa(row);
+            return {
+                employee: {
+                    id: row.id,
+                    fileNumber: row.legajo || null,
+                    fullName: row.name,
+                },
+                acumulado: {
+                    hsTeoricas: row.horasTeoricas ?? row.total ?? 0,
+                    hsReales: row.horasReales ?? 0,
+                    diurnas: row.diurnas ?? 0,
+                    nocturnas: row.nocturnas ?? 0,
+                    al50: row.extra50 ?? 0,
+                    al100FT: row.extra100 ?? 0,
+                    plusFeriado: row.plusFeriado ?? 0,
+                },
+                liquidacion200: {
+                    bolsa: b,
+                    hsSimples: Math.min(b, 200),
+                    al50: Math.max(0, b - 200),
+                    nota: 'FT y Feriados se pagan aparte.',
+                },
+                turnosCount: row.shifts ?? 0,
+                turnosConFichada: row.turnosConDatosReales ?? 0,
+            };
+        }),
+    };
+}
+
 export const useReportes = (forcedClientId?: string | null) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
@@ -466,6 +536,8 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
     
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
+    const [empMetaMap, setEmpMetaMap] = useState<Record<string, { name: string; legajo: string }>>({});
+    const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>('all');
     const [objMap, setObjMap] = useState<Record<string, string>>({});
     const [objectiveAliases, setObjectiveAliases] = useState<Record<string, ObjectiveMeta>>({});
     const [clientMap, setClientMap] = useState<Record<string, string>>({});
@@ -482,11 +554,18 @@ export const useReportes = (forcedClientId?: string | null) => {
                 ]);
                 
                 const emps: any = {};
+                const empsMeta: Record<string, { name: string; legajo: string }> = {};
                 s.forEach(d => {
                     const data = d.data();
-                    emps[d.id] = data.name || (data.firstName ? `${data.lastName}, ${data.firstName}` : 'Sin Nombre');
+                    const name = data.name || (data.firstName ? `${data.lastName}, ${data.firstName}` : 'Sin Nombre');
+                    emps[d.id] = name;
+                    empsMeta[d.id] = {
+                        name,
+                        legajo: String(data.fileNumber || data.legajo || '').trim(),
+                    };
                 });
                 setEmpMap(emps);
+                setEmpMetaMap(empsMeta);
                 
                 const objs: any = {};
                 const clis: any = {};
@@ -639,7 +718,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
                     if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
-                    return isShiftEligibleForReports(d, publishStatusMap);
+                    return isShiftEligibleForReports(d, publishStatusMap, publishFilter);
                 });
 
             const ausSnap = await getDocs(
@@ -679,6 +758,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 return {
                     ...s,
                     _dateKey: dk,
+                    _isPublished: isShiftPublishedForReports(s, publishStatusMap),
                     _absenceType: abs?.type || null,
                     _absenceStatus: abs?.status || null,
                     _absenceReason: abs?.reason || null,
@@ -709,6 +789,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     id: empId,
                     type: 'EMPLOYEE',
                     name: empMap[empId] || 'Desconocido',
+                    legajo: empMetaMap[empId]?.legajo || '',
                     shifts: shifts.filter((s:any) => isOperativeCode(s.code)).length,
                     total: stats.horasTeoricas,
                     horasTeoricas: stats.horasTeoricas,
@@ -868,6 +949,7 @@ export const useReportes = (forcedClientId?: string | null) => {
     return {
         loading,
         dateRange, setDateRange,
+        publishFilter, setPublishFilter,
         generateReports,
         loadAudit,
         employeeReport,
@@ -875,6 +957,7 @@ export const useReportes = (forcedClientId?: string | null) => {
         auditLogs,
         objMap,
         empMap,
+        empMetaMap,
         holidaysData,
         SHIFT_HOURS_LOOKUP,
         OPERATIVE_CODES

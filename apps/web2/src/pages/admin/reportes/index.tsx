@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
@@ -9,8 +9,9 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift, buildPayrollExportPayload, type ReportPublishFilter } from '@/hooks/useReportes';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 
 // --- ESTILOS DE IMPRESIÓN (MANTENIDOS) ---
 const PrintStyles = () => (
@@ -69,11 +70,15 @@ const DICTIONARY: Record<string, string> = {
 
 export default function ReportsPage() {
     const { assignedClientId } = useAuth();
+    const { empresaId } = useEmpresa();
     const {
-        loading, dateRange, setDateRange, generateReports, loadAudit,
+        loading, dateRange, setDateRange, publishFilter, setPublishFilter,
+        generateReports, loadAudit,
         employeeReport, objectiveReport, auditLogs,
         objMap, empMap, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
     } = useReportes(assignedClientId);
+
+    const [empSortBy, setEmpSortBy] = useState<'name' | 'legajo'>('name');
 
     const [activeTab, setActiveTab] = useState<'EMPLOYEE' | 'OBJECTIVE' | 'AUDIT' | 'SHIFTS' | 'PLANIFICADO'>('EMPLOYEE');
     const [selectedDetailEmployee, setSelectedDetailEmployee] = useState<string>('');
@@ -101,6 +106,42 @@ export default function ReportsPage() {
         const auth = getAuth();
         if (auth.currentUser) setCurrentUserName(auth.currentUser.displayName || auth.currentUser.email || "Usuario");
     }, []);
+
+    const sortedEmployeeReport = useMemo(() => {
+        const list = [...employeeReport];
+        if (empSortBy === 'legajo') {
+            list.sort((a, b) => {
+                const la = String(a.legajo || '').trim();
+                const lb = String(b.legajo || '').trim();
+                if (!la && !lb) return a.name.localeCompare(b.name);
+                if (!la) return 1;
+                if (!lb) return -1;
+                const na = /^\d+$/.test(la) && /^\d+$/.test(lb) ? Number(la) - Number(lb) : la.localeCompare(lb, 'es', { numeric: true });
+                if (na !== 0) return na;
+                return a.name.localeCompare(b.name);
+            });
+        } else {
+            list.sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return list;
+    }, [employeeReport, empSortBy]);
+
+    const downloadPayrollJson = () => {
+        if (!employeeReport.length) return;
+        const payload = buildPayrollExportPayload(sortedEmployeeReport, {
+            start: dateRange.start,
+            end: dateRange.end,
+            empresaId: empresaId || undefined,
+            publishFilter,
+        });
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `liquidacion_${dateRange.start}_${dateRange.end}.json`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+    };
 
     // Función de descarga CSV (Mantenida local porque usa interacción con DOM)
     const downloadCSV = async (data: any[], filename: string) => {
@@ -324,6 +365,7 @@ export default function ReportsPage() {
     };
 
     const renderEmployeeTable = () => {
+        const rows = sortedEmployeeReport;
         const grandTotal = employeeReport.reduce((acc, curr) => ({
             shifts: acc.shifts + curr.shifts,
             total: acc.total + curr.total,
@@ -338,10 +380,25 @@ export default function ReportsPage() {
 
         return (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50 no-print">
-                    <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
-                    <div className="flex gap-2">
-                        <button onClick={() => downloadCSV(employeeReport, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3 bg-slate-50 dark:bg-slate-700/50 no-print">
+                    <div>
+                        <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                            Filtro: {publishFilter === 'published' ? 'Solo cronos publicados' : publishFilter === 'unpublished' ? 'Solo borradores / no publicados' : 'Todos los turnos (publicados y borrador)'}
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <select
+                            value={empSortBy}
+                            onChange={e => setEmpSortBy(e.target.value as 'name' | 'legajo')}
+                            className="px-2 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
+                            title="Orden de la grilla"
+                        >
+                            <option value="name">Orden: Apellido</option>
+                            <option value="legajo">Orden: Legajo</option>
+                        </select>
+                        <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                        <button onClick={downloadPayrollJson} title="JSON para integración payrollApi" aria-label="Exportar JSON liquidación" className="p-2 bg-white border rounded hover:bg-indigo-50 text-indigo-600"><FileText size={16} aria-hidden="true"/></button>
                         <button onClick={() => window.print()} aria-label="Imprimir liquidación de horas" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
                 </div>
@@ -363,6 +420,7 @@ export default function ReportsPage() {
                     <table className="w-full text-sm text-left">
                         <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px]">
                             <tr>
+                                <th className="p-4">Legajo</th>
                                 <th className="p-4">Empleado</th>
                                 <th className="p-4 text-center">Turnos</th>
                                 <th className="p-4 text-center text-slate-400">Hs. Teóricas</th>
@@ -376,10 +434,11 @@ export default function ReportsPage() {
                             </tr>
                         </thead>
                         <tbody className="divide-y">
-                            {employeeReport.map(row => {
+                            {rows.map(row => {
                                 const horasReales = row.horasReales ?? row.total;
                                 return (
                                 <tr key={row.id} className="hover:bg-indigo-50/30 cursor-pointer group" onClick={() => { setDetailItem(row); setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterEmployee(''); setDetailFilterObjective(''); setDetailFilterStatus(''); }}>
+                                    <td className="p-4 font-mono text-xs text-slate-500">{row.legajo || '—'}</td>
                                     <td className="p-4 font-bold text-slate-700">
                                         {row.name}
                                         {(row.ftCount > 0 || row.ffCount > 0) && (
@@ -404,7 +463,7 @@ export default function ReportsPage() {
                         </tbody>
                         <tfoot className="bg-slate-900 text-white font-black text-xs uppercase print:bg-gray-200 print:text-black">
                             <tr>
-                                <td className="p-4 text-right">TOTAL GENERAL</td>
+                                <td colSpan={2} className="p-4 text-right">TOTAL GENERAL</td>
                                 <td className="p-4 text-center">{grandTotal.shifts}</td>
                                 <td className="p-4 text-center text-slate-400 print:text-black">{grandTotal.total.toFixed(1)}</td>
                                 <td className="p-4 text-center text-emerald-400 print:text-black">{grandTotal.horasReales.toFixed(1)}</td>
@@ -1118,7 +1177,11 @@ export default function ReportsPage() {
                             <select value={selectedDetailEmployee} onChange={e => setSelectedDetailEmployee(e.target.value)}
                                 className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
                                 <option value="">Todos los empleados</option>
-                                {employeeReport.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                                {sortedEmployeeReport.map(emp => (
+                                    <option key={emp.id} value={emp.id}>
+                                        {emp.legajo ? `[${emp.legajo}] ` : ''}{emp.name}
+                                    </option>
+                                ))}
                             </select>
                         </div>
                         <div className="min-w-[160px]">
@@ -1171,6 +1234,20 @@ export default function ReportsPage() {
                             </select>
                         </div>
                     )}
+
+                    <div className="flex-1 min-w-[200px]">
+                        <label htmlFor="rpt-publish-filter" className="text-[10px] font-bold text-slate-400 uppercase">Cronograma</label>
+                        <select
+                            id="rpt-publish-filter"
+                            value={publishFilter}
+                            onChange={e => setPublishFilter(e.target.value as ReportPublishFilter)}
+                            className="w-full p-2 border rounded-xl font-bold text-sm text-slate-700 bg-white"
+                        >
+                            <option value="all">Todos (publicados + borrador)</option>
+                            <option value="published">Solo publicados (liquidación oficial)</option>
+                            <option value="unpublished">Solo no publicados (revisión)</option>
+                        </select>
+                    </div>
 
                     <button onClick={() => activeTab === 'AUDIT' ? loadAudit() : generateReports()} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-black text-xs uppercase hover:bg-slate-800 transition-colors">
                         {loading ? 'Procesando...' : 'Generar Reporte'}
