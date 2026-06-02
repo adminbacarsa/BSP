@@ -25,6 +25,7 @@ function setCors(res) {
 async function importBackupFile(req, res) {
   const empresaId = String(req.headers['x-empresa-id'] ?? 'bacarsa').trim() || 'bacarsa';
   const mode = String(req.headers['x-import-mode'] ?? 'empresa').trim();
+  const devMode = req.headers['x-import-dev-mode'] === '1';
   const fileName = decodeURIComponent(String(req.headers['x-file-name'] ?? 'backup.json').trim());
   const tmpPath = path.join(os.tmpdir(), `cosp-backup-${Date.now()}.json`);
 
@@ -41,6 +42,7 @@ async function importBackupFile(req, res) {
     const args = [scriptPath, tmpPath];
     if (mode === 'full') args.push('--full');
     else args.push('--empresa', empresaId);
+    if (devMode) args.push('--dev');
 
     const output = await new Promise((resolve, reject) => {
       execFile(

@@ -30,14 +30,18 @@ const EMPRESA_SCOPED_COLS = new Set([
   'contracts', 'quotes', 'system_users', 'swap_requests',
 ]);
 
+// Colecciones pesadas que no se necesitan para desarrollo (~13k docs en prod)
+const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'system_backups', 'historial_operaciones']);
+
 const args = process.argv.slice(2);
 const fullMode = args.includes('--full');
+const devMode = args.includes('--dev');
 const empresaIdx = args.indexOf('--empresa');
 const empresaId = empresaIdx >= 0 ? String(args[empresaIdx + 1] || '').trim() : 'bacarsa';
 const fileArg = args.find(a => !a.startsWith('--') && a !== empresaId);
 
 if (!fileArg) {
-  console.error('Uso: node scripts/seed-from-backup-file.js <backup.json> [--empresa bacarsa] [--full]');
+  console.error('Uso: node scripts/seed-from-backup-file.js <backup.json> [--empresa bacarsa] [--full] [--dev]');
   process.exit(1);
 }
 
@@ -164,10 +168,14 @@ async function seedAuthFromSystemUsers(systemUsers) {
   return created;
 }
 
-async function seedFirestore(collections, empId, isFull) {
+async function seedFirestore(collections, empId, isFull, isDev) {
   let written = 0;
   for (const [col, docs] of Object.entries(collections)) {
     if (!Array.isArray(docs) || docs.length === 0) continue;
+    if (isDev && DEV_SKIP_COLS.has(col)) {
+      console.log(`  ${col.padEnd(28)} [--dev: omitida]`);
+      continue;
+    }
 
     let filtered = docs;
     if (!isFull) {
@@ -204,9 +212,11 @@ async function run() {
   const meta = data._meta || {};
   const { _meta, _auth_users, ...collections } = data;
   const isFull = fullMode;
+  const isDev = devMode;
   const scope = isFull ? 'plataforma completa' : `empresa ${empresaId}`;
+  const devNote = isDev ? ' [--dev: sin audit_logs/notifications]' : '';
 
-  console.log(`Backup: ${meta.exportedAt || '?'} — ${meta.totalDocs || '?'} docs — alcance import: ${scope}\n`);
+  console.log(`Backup: ${meta.exportedAt || '?'} — ${meta.totalDocs || '?'} docs — alcance import: ${scope}${devNote}\n`);
 
   if (isFull) {
     await clearEmulatorFull();
@@ -224,7 +234,7 @@ async function run() {
   }
 
   console.log('\nSembrando Firestore:');
-  const written = await seedFirestore(collections, empresaId, isFull);
+  const written = await seedFirestore(collections, empresaId, isFull, isDev);
 
   console.log(`\n✔ Listo — ${written.toLocaleString()} documentos importados (${scope})`);
   console.log('  Firestore UI: http://127.0.0.1:4000/firestore');

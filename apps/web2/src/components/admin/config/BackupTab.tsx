@@ -347,6 +347,7 @@ export default function BackupTab() {
   };
 
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
+  const [localDevMode, setLocalDevMode] = useState(true);
 
   // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
@@ -379,6 +380,7 @@ export default function BackupTab() {
             'Content-Type': 'application/json',
             'X-Empresa-Id': empresaId || 'bacarsa',
             'X-Import-Mode': isEmpresaMode ? 'empresa' : 'full',
+            'X-Import-Dev-Mode': localDevMode ? '1' : '0',
             'X-File-Name': encodeURIComponent(file.name),
           },
           body: file,
@@ -681,6 +683,20 @@ export default function BackupTab() {
                   </button>
                 )}
               </div>
+
+              {/* Modo dev: omite audit_logs y user_notifications (~13k docs) */}
+              <label className="flex items-center gap-2 cursor-pointer mb-3 select-none">
+                <input
+                  type="checkbox"
+                  checked={localDevMode}
+                  onChange={e => setLocalDevMode(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-amber-500"
+                />
+                <span className="text-xs font-bold text-amber-800">
+                  Modo dev — omitir audit_logs y notificaciones
+                  <span className="font-normal text-amber-600 ml-1">(~13k docs menos, emulador más liviano)</span>
+                </span>
+              </label>
 
               {progress || loadingLocal ? (
                 <div className="space-y-1.5">
