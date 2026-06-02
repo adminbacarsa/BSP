@@ -13,6 +13,7 @@ process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldPath } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
@@ -90,35 +91,38 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
   return deleted;
 }
 
+/** Limpia Firestore completo usando la REST API del emulador (instantáneo). */
 async function clearEmulatorFull() {
-  process.stdout.write('Limpiando Firestore completo... ');
-  const cols = await db.listCollections();
-  for (const col of cols) {
-    const docs = await col.listDocuments();
-    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-      const batch = db.batch();
-      docs.slice(i, i + BATCH_SIZE).forEach(r => batch.delete(r));
-      await batch.commit();
-    }
-  }
+  process.stdout.write('Limpiando Firestore completo (REST API)... ');
+  await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8080,
+      path: `/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`,
+      method: 'DELETE',
+    }, res => {
+      res.resume();
+      if (res.statusCode === 200 || res.statusCode === 204) resolve();
+      else reject(new Error(`REST emulator clear: HTTP ${res.statusCode}`));
+    });
+    req.on('error', reject);
+    req.end();
+  });
   console.log('OK');
 }
 
 async function clearEmpresa(empId) {
-  process.stdout.write(`Limpiando datos de ${empId}... `);
-  let deleted = 0;
-  for (const col of EMPRESA_SCOPED_COLS) {
-    try {
-      deleted += await deleteCollectionWhereEmpresa(col, empId);
-    } catch { /* colección inexistente */ }
-  }
+  process.stdout.write(`Limpiando datos de ${empId} (paralelo)... `);
+  // Todas las colecciones en paralelo — mucho más rápido que en serie.
+  const tasks = [...EMPRESA_SCOPED_COLS].map(col =>
+    deleteCollectionWhereEmpresa(col, empId).catch(() => 0),
+  );
+  const counts = await Promise.all(tasks);
+  let deleted = counts.reduce((a, b) => a + b, 0);
   try {
     const empRef = db.collection('empresas').doc(empId);
     const snap = await empRef.get();
-    if (snap.exists) {
-      await empRef.delete();
-      deleted += 1;
-    }
+    if (snap.exists) { await empRef.delete(); deleted += 1; }
   } catch { /* omit */ }
   console.log(`${deleted} docs borrados`);
 }

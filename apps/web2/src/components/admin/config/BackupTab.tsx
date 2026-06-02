@@ -370,7 +370,7 @@ export default function BackupTab() {
       });
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8 min
+      const timeoutId = setTimeout(() => controller.abort(), 13 * 60 * 1000); // 13 min
       let res: Response;
       try {
         res = await fetch(`${BRIDGE_URL}/import-backup-file`, {
@@ -387,7 +387,7 @@ export default function BackupTab() {
       } catch (fetchErr: any) {
         if (fetchErr?.name === 'AbortError') {
           throw new Error(
-            `Tiempo de espera agotado (8 min). Para archivos grandes usá la terminal:\n` +
+            `Tiempo de espera agotado (13 min). Para archivos grandes usá la terminal:\n` +
             `node scripts/seed-from-backup-file.js <ruta-backup.json> --empresa ${empresaId || 'bacarsa'}`,
           );
         }

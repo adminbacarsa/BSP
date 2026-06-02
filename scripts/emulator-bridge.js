@@ -12,7 +12,7 @@ const path = require('path');
 const { pipeline } = require('stream/promises');
 
 const PORT = 3010;
-const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
+const IMPORT_TIMEOUT_MS = 15 * 60 * 1000;
 const FOLDER_ID = process.env.DRIVE_BACKUP_FOLDER_ID || '0AI2aip_4UuafUk9PVA';
 
 function setCors(res) {
