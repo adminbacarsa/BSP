@@ -89,8 +89,11 @@ export function inferJune1CycleSlot(
     return null;
 }
 
-/** Offsets por defecto (día 1: M/T/N/F) si no hay trailing de mayo. */
+/** Offsets por defecto (día 1: M/T/N/F) si no hay trailing de mayo — regulares, stagger 6 slots. */
 const COLD_START_OPENINGS = [4, 10, 16, 22];
+
+/** Offsets cold-start para flotantes: inicio de bloque de trabajo → bloques 6+2 limpios desde día 1. */
+const FLOATER_COLD_START_OPENINGS = [0, 8, 16];
 
 function is24hs(pos: V2PositionDef): boolean {
     const cov = String(pos.coverageType || '').toLowerCase();
@@ -152,6 +155,7 @@ function buildSubgroupsFor24hs(
     for (const [posName, groupIds] of Object.entries(positionGroups)) {
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos || !is24hs(pos)) continue;
+        if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
         const perSlot = Math.floor(groupIds.length / qty);
         if (perSlot < 1) { result.push([...groupIds]); continue; }
@@ -222,8 +226,8 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             out[empId] = ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
         });
 
-        // Flotantes (índice ≥4): banda da igual, solo necesitan no coincidir en Franco con
-        // otro flotante del mismo subgrupo (para que no queden dos RET → F el mismo día)
+        // Flotantes (índice ≥4): sin trailing usan inicio de bloque de trabajo para que el
+        // primer bloque RET del mes sea siempre de 6 días completos.
         for (const empId of floaterIds) {
             const slot = inferJune1CycleSlot(
                 ctx.prevMonthLastShiftByEmp?.[empId],
@@ -231,7 +235,7 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 ctx.prevMonthTrailingRestDays?.[empId],
                 ctx.prevMonthLastWorkBandBeforeRest?.[empId],
             );
-            out[empId] = slot ?? COLD_START_OPENINGS[floaterIds.indexOf(empId) % 4];
+            out[empId] = slot ?? FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length];
         }
     }
 
@@ -249,10 +253,10 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
     let counted24 = 0;
     for (const pos of ctx.positions) {
         if (!is24hs(pos)) continue;
-        if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) return false;
+        if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
-        if (g.length === 0) return false;
+        if (g.length === 0) continue;
         if (g.length % qty !== 0) return false;
         const perSlot = g.length / qty;
         if (perSlot < 4) return false;
