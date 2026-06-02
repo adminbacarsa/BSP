@@ -457,6 +457,40 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         employeeMonthlyHours, employeeCycleHours, cutoffDay,
     );
 
+    // RET que patchRetForAbsences no convirtió (no había ausente que cubrir):
+    // mostrar la banda natural del ciclo → crono limpio sin RETs visibles en planning.
+    for (let i = 0; i < assignments.length; i++) {
+        const a = assignments[i];
+        if (a.code !== 'RET') continue;
+        const opening = openingSlotByEmp[a.empId];
+        if (opening === undefined) continue;
+        const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === a.dateStr);
+        if (di < 0) continue;
+        const naturalCode = CYCLE_24_MTN[(opening + di) % 24] as string;
+        if (!WORK_BANDS.has(naturalCode)) continue;
+        const posName = empToPosition[a.empId] ?? '';
+        const pos = ctx.positions.find(p => p.positionName === posName);
+        if (!pos) continue;
+        const meta = shiftMeta(pos, naturalCode);
+        assignments[i] = {
+            empId: a.empId,
+            dateStr: a.dateStr,
+            positionName: posName,
+            code: naturalCode,
+            name: meta.name,
+            hours: meta.hours,
+            startTime: meta.startTime,
+            ...(meta.endTime ? { endTime: meta.endTime } : {}),
+        };
+        employeeMonthlyHours[a.empId] = (employeeMonthlyHours[a.empId] || 0) + meta.hours;
+        const day = ctx.daysInMonth[di];
+        if (day) {
+            const inCurrent = day.getDate() <= cutoffDay;
+            if (inCurrent) employeeCycleHours.current[a.empId] = (employeeCycleHours.current[a.empId] || 0) + meta.hours;
+            else employeeCycleHours.next[a.empId] = (employeeCycleHours.next[a.empId] || 0) + meta.hours;
+        }
+    }
+
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);
     const slaDeficitRemaining = Math.max(0, Math.round((slaTarget - totalBillableHours) * 10) / 10);
