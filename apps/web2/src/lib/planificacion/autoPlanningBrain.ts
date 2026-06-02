@@ -41,8 +41,6 @@ export type { PlanningOperationalDiagnosis, PlanningBalanceKind } from './planni
 
 const CYCLE_MAP: Record<string, [number, number]> = {
     '4+2': [4, 2],
-    '5+1': [5, 1],
-    '6+1': [6, 1],
     '6+2': [6, 2],
 };
 

@@ -459,17 +459,16 @@ export interface V2EngineResult {
 }
 
 /** Devuelve [cL, cF] del ciclo "más representativo" elegido por el usuario.
- *  Prefiere el ciclo con más días de franco (6+2 > 6+1) para que si ambos
- *  están marcados, se respete el esquema de mayor descanso solicitado. */
+ *  Prefiere 6+2 (mayor descanso); 4+2 solo para ajustar/licencias. 6+1 y 5+1 eliminados. */
 export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL: number; cF: number } {
-    const ordered = ['6+2', '6+1', '5+1', '4+2'];
+    const ordered = ['6+2', '4+2'];
     for (const key of ordered) {
         if (autoCycles.includes(key)) {
             const [cL, cF] = CYCLE_MAP[key];
             return { key, cL, cF };
         }
     }
-    return { key: '6+1', cL: 6, cF: 1 };
+    return { key: '6+2', cL: 6, cF: 2 };
 }
 
 /**
@@ -549,50 +548,28 @@ function balanceGlobalCycleOffsets(
     }
 }
 
-/** Reserva flex por puesto: 6+1 (stagger 1) y opcional 5+1 (stagger 2) para cerrar SLA. */
+/** Reserva flex por puesto: solo 4+2 para ajustar/licencias. 6+1 y 5+1 eliminados. */
 function pickFlexSchemeEmployees(
     ctx: V2EngineContext,
     positionGroups: Record<string, string[]>,
     staggerByEmp: Record<string, number> | undefined,
 ): { sixOne: string[]; fiveOne: string[]; fourTwo: string[] } {
     const empty = { sixOne: [] as string[], fiveOne: [] as string[], fourTwo: [] as string[] };
+    if (!ctx.ajustarCrono) return empty;
     if (ctx.strictSixTwo === true || ctx.noFlexSchemeEmployees === true) return empty;
-    const sixOne: string[] = [];
-    const fiveOne: string[] = [];
+    if (!shouldUseDemandDrivenScheduling(ctx) || ctx.rotateShifts === false) return empty;
+
     const fourTwo: string[] = [];
-    if (!shouldUseDemandDrivenScheduling(ctx) || ctx.rotateShifts === false) {
-        return { sixOne, fiveOne, fourTwo };
-    }
     for (const pos of ctx.positions) {
         const cov = String(pos.coverageType || '').toLowerCase();
         if (cov !== '24hs' && cov !== '24' && cov !== '24h') continue;
         const group = positionGroups[pos.positionName] || [];
-        if (group.length === 0) continue;
-
-        if (ctx.ajustarCrono) {
-            group.forEach((empId, idxInGroup) => {
-                const stagger = staggerByEmp?.[empId] ?? idxInGroup;
-                const bucket = stagger % 3;
-                if (bucket === 0 && !fourTwo.includes(empId)) fourTwo.push(empId);
-                else if (bucket === 1 && !fiveOne.includes(empId)) fiveOne.push(empId);
-                else if (!sixOne.includes(empId)) sixOne.push(empId);
-            });
-            continue;
-        }
-
-        const byStagger = (target: number) =>
-            group.find(id => (staggerByEmp?.[id] ?? -1) === target)
-            ?? group.find(id => (staggerByEmp?.[id] ?? 0) === target);
-        const s1 = byStagger(1);
-        const s2 = byStagger(2);
-        if (s1 && !sixOne.includes(s1)) sixOne.push(s1);
-        if (s2 && !fiveOne.includes(s2) && s2 !== s1) fiveOne.push(s2);
+        group.forEach((empId, idxInGroup) => {
+            const stagger = staggerByEmp?.[empId] ?? idxInGroup;
+            if (stagger % 3 === 0 && !fourTwo.includes(empId)) fourTwo.push(empId);
+        });
     }
-    return {
-        sixOne: sixOne.slice(0, ctx.ajustarCrono ? sixOne.length : 4),
-        fiveOne: fiveOne.slice(0, ctx.ajustarCrono ? fiveOne.length : 2),
-        fourTwo: fourTwo.slice(0, ctx.ajustarCrono ? fourTwo.length : 0),
-    };
+    return { sixOne: [], fiveOne: [], fourTwo };
 }
 
 function isFrancoCode(code: string | undefined): boolean {
