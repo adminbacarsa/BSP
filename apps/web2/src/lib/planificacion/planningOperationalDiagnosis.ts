@@ -20,26 +20,34 @@ function is24hs(pos: V2PositionDef): boolean {
 
 function computeModo8Slots(positions: V2PositionDef[]): {
     slotsPerDay: number;
+    slots24hs: number;
+    slotsCustom: number;
     peakConcurrent: number;
     structuralMonthHours: number;
 } {
     let slotsPerDay = 0;
+    let slots24hs = 0;
+    let slotsCustom = 0;
     let peakConcurrent = 0;
     let structuralMonthHours = 0;
     for (const pos of positions) {
         const qty = Math.max(1, Number(pos.qty) || 1);
         if (is24hs(pos)) {
-            slotsPerDay += qty * 3;
+            const s = qty * 3;
+            slotsPerDay += s;
+            slots24hs += s;
             peakConcurrent += qty;
-            structuralMonthHours += qty * 3 * 30 * 8;
+            structuralMonthHours += s * 30 * 8;
         } else {
             const bands = (pos.shifts || []).length || 1;
-            slotsPerDay += qty * bands;
-            peakConcurrent += qty * bands;
-            structuralMonthHours += qty * bands * 30 * 8;
+            const s = qty * bands;
+            slotsPerDay += s;
+            slotsCustom += s;
+            peakConcurrent += s;
+            structuralMonthHours += s * 30 * 8;
         }
     }
-    return { slotsPerDay, peakConcurrent, structuralMonthHours };
+    return { slotsPerDay, slots24hs, slotsCustom, peakConcurrent, structuralMonthHours };
 }
 
 export interface PlanningOperationalDiagnosis {
@@ -104,7 +112,9 @@ export function buildPlanningOperationalDiagnosis(params: {
     const { positions, feasibility, staffing, peopleAvailable, soldHours, pickedCycle } = params;
     const m = feasibility.metrics;
     const modo8 = computeModo8Slots(positions);
-    const plantilla6x2 = plantillaForCycle(modo8.slotsPerDay, '6+2');
+    // Factor 6+2 solo aplica a puestos 24hs rotativoss; custom/L-V se cuentan directamente.
+    const [cycL6x2, cycF6x2] = CYCLE_MAP['6+2'];
+    const plantilla6x2 = Math.ceil(modo8.slots24hs * (cycL6x2 + cycF6x2) / cycL6x2) + modo8.slotsCustom;
     const servicio = staffing.servicioDiarioModo8;
     const poolFrancos = Math.max(0, plantilla6x2 - servicio);
 
