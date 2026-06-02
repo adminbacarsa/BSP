@@ -352,19 +352,37 @@ export default function BackupTab() {
       setProgress({
         done: 0,
         total: 0,
-        phase: `Importando en servidor (${sizeMb} MB — puede tardar 2-4 min)…`,
+        phase: `Importando en servidor (${sizeMb} MB — puede tardar varios minutos)…`,
       });
 
-      const res = await fetch(`${BRIDGE_URL}/import-backup-file`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Empresa-Id': empresaId || 'bacarsa',
-          'X-Import-Mode': isEmpresaMode ? 'empresa' : 'full',
-          'X-File-Name': encodeURIComponent(file.name),
-        },
-        body: file,
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8 * 60 * 1000); // 8 min
+      let res: Response;
+      try {
+        res = await fetch(`${BRIDGE_URL}/import-backup-file`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Empresa-Id': empresaId || 'bacarsa',
+            'X-Import-Mode': isEmpresaMode ? 'empresa' : 'full',
+            'X-File-Name': encodeURIComponent(file.name),
+          },
+          body: file,
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr?.name === 'AbortError') {
+          throw new Error(
+            `Tiempo de espera agotado (8 min). Para archivos grandes usá la terminal:\n` +
+            `node scripts/seed-from-backup-file.js <ruta-backup.json> --empresa ${empresaId || 'bacarsa'}`,
+          );
+        }
+        throw new Error(
+          `No se pudo conectar al puente de importación (:3010). En otra terminal ejecutá: node scripts/emulator-bridge.js`,
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       let data: { ok?: boolean; error?: string; written?: number; output?: string } = {};
       try {
