@@ -2611,7 +2611,7 @@ export default function PlanificacionPage() {
                         const start = new Date(tDate); start.setHours(sh, sm, 0);
                         const end = new Date(start);
 
-                        if(change.code === 'F' || change.code === 'FF') end.setHours(23,59,59);
+                        if(change.code === 'F' || change.code === 'FF' || change.code === 'V') end.setHours(23,59,59);
                         else end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
 
                         const safeSwapWith = change.swapWith || null;
@@ -2815,7 +2815,7 @@ export default function PlanificacionPage() {
                             const best = Object.values(freq).sort((a, b) => b.count - a.count)[0];
                             return best?.shift || null;
                         };
-                        let count = 0; let covered = 0; while (current <= end) { const dateStr = getDateKey(current); const titularKey = `${vacancyData.employeeId}_${dateStr}`; const existingShift = shiftsMap[titularKey]; const workShift = (existingShift && existingShift.code && !NON_WORK_CODES.has(existingShift.code)) ? existingShift : getTypicalShift(vacancyData.employeeId); newChanges[titularKey] = { code: absCode, name: vacancyData.type, isTemp: true, hours: 0, startTime: '00:00', comments: `${vacancyData.type} — gestionado desde planificador`, coveredBy: replacementEmp ? replacementEmp.name : null }; if (replacementEmp && workShift) { const suplenteKey = `${replacementEmp.id}_${dateStr}`; newChanges[suplenteKey] = { code: workShift.code, name: workShift.code, isTemp: true, objectiveId: workShift.objectiveId || selectedObjective, hours: workShift.hours || 8, startTime: workShift.startTime || '00:00', positionName: workShift.positionName || activePosition || 'General', comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})` }; covered++; } count++; current.setDate(current.getDate() + 1); } setPendingChanges(newChanges); setShowVacancyModal(false); setVacancyData(null); toast.success(replacementEmp ? `${absCode} en ${count} día(s) — ${covered} turno(s) asignados a ${replacementEmp.name}. Guardá los cambios.` : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`);
+                        let count = 0; let covered = 0; while (current <= end) { const dateStr = getDateKey(current); const titularKey = `${vacancyData.employeeId}_${dateStr}`; const existingShift = shiftsMap[titularKey]; const workShift = (existingShift && existingShift.code && !NON_WORK_CODES.has(existingShift.code)) ? existingShift : getTypicalShift(vacancyData.employeeId); const absHours = ['E','L','PG','A'].includes(absCode) ? 8 : 0; newChanges[titularKey] = { code: absCode, name: vacancyData.type, isTemp: true, hours: absHours, startTime: '00:00', comments: `${vacancyData.type} — gestionado desde planificador`, coveredBy: replacementEmp ? replacementEmp.name : null }; if (replacementEmp && workShift) { const suplenteKey = `${replacementEmp.id}_${dateStr}`; newChanges[suplenteKey] = { code: workShift.code, name: workShift.code, isTemp: true, objectiveId: workShift.objectiveId || selectedObjective, hours: workShift.hours || 8, startTime: workShift.startTime || '00:00', positionName: workShift.positionName || activePosition || 'General', comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})` }; covered++; } count++; current.setDate(current.getDate() + 1); } setPendingChanges(newChanges); setShowVacancyModal(false); setVacancyData(null); toast.success(replacementEmp ? `${absCode} en ${count} día(s) — ${covered} turno(s) asignados a ${replacementEmp.name}. Guardá los cambios.` : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`);
     };
     
     // 🛑 FIX: Inyección de Puesto en Bulk
@@ -6671,8 +6671,8 @@ export default function PlanificacionPage() {
                         </button>
                     );
                     return (
-                    <div className="fixed inset-0 z-[70] flex items-end justify-end p-6 bg-black/25 backdrop-blur-[2px]">
-                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-[520px] border-l-4 ${colorMap[color].split(' ')[0]}`}>
+                    <div className="fixed inset-0 z-[70] flex items-center justify-end p-6 bg-black/25 backdrop-blur-[2px]">
+                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-[520px] max-h-[min(92vh,720px)] overflow-y-auto border-l-4 ${colorMap[color].split(' ')[0]}`}>
                             <div className="flex items-start justify-between mb-4">
                                 <div>
                                     <h3 className="font-black text-lg text-slate-800">{title}</h3>
@@ -6700,8 +6700,8 @@ export default function PlanificacionPage() {
                                         <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${vacancyReplacementOpen ? 'rotate-180' : ''}`} />
                                     </button>
                                     {vacancyReplacementOpen && (
-                                        <div className="absolute left-0 right-0 top-full mt-1 z-[80] bg-white border rounded-xl shadow-xl overflow-hidden">
-                                            <div className="p-2 border-b">
+                                        <div className="absolute left-0 right-0 bottom-full mb-1 z-[80] bg-white border rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[min(50vh,320px)]">
+                                            <div className="p-2 border-b shrink-0">
                                                 <div className="relative">
                                                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                                     <input
@@ -6713,7 +6713,7 @@ export default function PlanificacionPage() {
                                                     />
                                                 </div>
                                             </div>
-                                            <div className="max-h-52 overflow-y-auto custom-scrollbar p-1">
+                                            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1">
                                                 <button
                                                     type="button"
                                                     onClick={() => { setSelectedReplacement(''); setVacancyReplacementOpen(false); }}

@@ -8,6 +8,12 @@ import { belongsToEmpresa, belongsToEmpresaView, empresaScopedQuery, filterRowsB
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retén: no computan horas de liquidación del empleado.
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET']);
+export const PAID_LEAVE_CODES = new Set(['V', 'L', 'PG', 'E', 'A']);
+/** Vacaciones: marca el día/período, no suma horas en reportes. */
+export const PERIOD_ONLY_CODES = new Set(['V']);
+/** Licencias/enfermedad justificadas: computan jornada estándar (8h). */
+export const PAID_DAY_LEAVE_CODES = new Set(['L', 'PG', 'E', 'A']);
+const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA', 'RET']);
 // REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
 const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
@@ -15,8 +21,48 @@ const isObjectiveBillableCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN': 9, 'FT': 0,
-    'F':0, 'V':0, 'L':0, 'PG':0, 'A':0, 'E':0, 'FF':0, 'RET': 0, 'REF': 8, 'ESC': 8,
+    'F':0, 'V':0, 'L':8, 'PG':8, 'A':8, 'E':8, 'FF':0, 'RET': 0, 'REF': 8, 'ESC': 8,
 };
+
+const PAID_DAY_DEFAULT_HOURS = 8;
+
+/** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
+export function resolveShiftDurationHours(
+    shift: {
+        code?: string;
+        hours?: number;
+        startTime?: { seconds?: number; _seconds?: number };
+        endTime?: { seconds?: number; _seconds?: number };
+        isAbsent?: boolean;
+        status?: string;
+    },
+    lookup: Record<string, number> = SHIFT_HOURS_LOOKUP,
+    opts?: { unjustifiedAbsent?: boolean; forObjectiveBilling?: boolean },
+): number {
+    const rawCode = (shift.code || '').trim().toUpperCase();
+    const isUnjustAbsent = opts?.unjustifiedAbsent ?? (
+        !PAID_LEAVE_CODES.has(rawCode) && (shift.isAbsent === true || (shift.status || '').toUpperCase() === 'ABSENT')
+    );
+
+    if (opts?.forObjectiveBilling && !isObjectiveBillableCode(rawCode)) return 0;
+    if (ZERO_HOUR_CODES.has(rawCode) || PERIOD_ONLY_CODES.has(rawCode) || isUnjustAbsent) return 0;
+
+    if (PAID_DAY_LEAVE_CODES.has(rawCode)) {
+        if (typeof shift.hours === 'number' && shift.hours > 0) return shift.hours;
+        const fromLookup = lookup[rawCode];
+        return fromLookup && fromLookup > 0 ? fromLookup : PAID_DAY_DEFAULT_HOURS;
+    }
+
+    const startSec = shift.startTime?.seconds ?? shift.startTime?._seconds ?? 0;
+    const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
+    if (!startSec || !endSec) return lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
+
+    let duration = Math.max(0, (endSec - startSec) / 3600);
+    if (duration === 0 || duration >= 23.5 || duration > 24 || isNaN(duration)) {
+        duration = lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
+    }
+    return duration;
+}
 
 // Helper seguro para fechas (Formato local Argentina)
 const getArgentinaDate = (dateInput: any): string => {

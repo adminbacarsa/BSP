@@ -341,13 +341,17 @@ export default function EmployeesPage() {
       const batch = writeBatch(db);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-        const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+        const isPeriodOnly = code === 'V';
+        const dayEnd = isPeriodOnly
+          ? new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+          : new Date(dayStart.getTime() + 8 * 3600000);
         const turnoRef = doc(collection(db, 'turnos'));
         batch.set(turnoRef, stampEmpresaId({
           employeeId: data.employeeId,
           employeeName: data.employeeName,
           startTime: Timestamp.fromDate(dayStart),
           endTime: Timestamp.fromDate(dayEnd),
+          hours: isPeriodOnly ? 0 : 8,
           type: 'NOVEDAD',
           code,
           status: 'Approved',

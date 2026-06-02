@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours } from '@/hooks/useReportes';
 import { useAuth } from '@/context/AuthContext';
 
 // --- ESTILOS DE IMPRESIÓN (MANTENIDOS) ---
@@ -505,12 +505,9 @@ export default function ReportsPage() {
                                 const dayName = dateObj.toLocaleDateString('es-AR', { weekday: 'long' });
                                 const rawCode = (s.code || '').trim().toUpperCase();
                                 // Francos e injustificada = 0 hs. Licencias/vacaciones/enfermedad/ART = sí computan.
-                                const TRUE_NON_WORK = new Set(['F','FF','FP','AA']);
                                 const PAID_LEAVE    = new Set(['V','L','PG','E','A']);
                                 const isUnjustAbsent = !PAID_LEAVE.has(rawCode) && (s.isAbsent || s.status === 'ABSENT');
-                                let duration = (TRUE_NON_WORK.has(rawCode) || rawCode === 'RET' || isUnjustAbsent) ? 0
-                                    : Math.max(0, ((s.endTime?.seconds||0) - (s.startTime?.seconds||0)) / 3600);
-                                if (!TRUE_NON_WORK.has(rawCode) && !isUnjustAbsent && (duration === 0 || duration > 24 || isNaN(duration))) duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
+                                const duration = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { unjustifiedAbsent: isUnjustAbsent });
                                 const isLicencia = ['L','PG'].includes(rawCode);
                                 const codeStyle = rawCode === 'PG' ? 'bg-blue-100 text-blue-700 border-blue-300'
                                     : rawCode === 'RET' ? 'bg-amber-100 text-amber-800 border-amber-300'
@@ -604,14 +601,9 @@ export default function ReportsPage() {
                 const isAbsent    = s.isAbsent    || shiftStatus === 'ABSENT';
 
                 const PAID_LEAVE_DETAIL = new Set(['V','L','PG','E','A']);
-                const TRUE_NON_WORK_DETAIL = new Set(['F','FF','FP','AA']);
-                // isNonWork ya incluye V/L/E/A/PG/AA/F/FF — lo reemplazamos con la lógica correcta
                 const isUnjustAbsentDetail = !PAID_LEAVE_DETAIL.has(rawCode) && isAbsent;
-                const zeroHours = TRUE_NON_WORK_DETAIL.has(rawCode) || rawCode === 'RET' || isUnjustAbsentDetail;
-                let duration = zeroHours ? 0 : Math.max(0, (end.getTime() - start.getTime()) / 3600000);
-                if (!zeroHours && (duration === 0 || duration > 24 || isNaN(duration))) {
-                    duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
-                }
+                const duration = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { unjustifiedAbsent: isUnjustAbsentDetail });
+                const zeroHours = duration === 0;
 
                 const isFT = s.isFrancoTrabajado || rawCode === 'FT';
                 const isFF = s.isFrancoCompensatorio || rawCode === 'FF';
@@ -888,11 +880,7 @@ export default function ReportsPage() {
             });
 
         const totalTeorico = filtered.reduce((acc, s) => {
-            const code = (s.code || '').trim().toUpperCase();
-            const dur = s.startTime?.seconds && s.endTime?.seconds
-                ? Math.max(0, Math.min(24, (s.endTime.seconds - s.startTime.seconds) / 3600))
-                : SHIFT_HOURS_LOOKUP[code] || 8;
-            return acc + (dur || 0);
+            return acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
         }, 0);
         const vacantCount = 0;
         const staffedCount = filtered.length;
@@ -972,11 +960,8 @@ export default function ReportsPage() {
                                 const startD = s.startTime?.seconds ? new Date(s.startTime.seconds * 1000) : null;
                                 const endD = s.endTime?.seconds ? new Date(s.endTime.seconds * 1000) : null;
                                 const code = (s.code || '').trim().toUpperCase();
-                                // Planificado = horas teóricas de lo planificado, sin importar asistencia ni código
-                                const isZero = false;
-                                const dur = (startD && endD)
-                                    ? Math.max(0, Math.min(24, (endD.getTime() - startD.getTime()) / 3600000))
-                                    : SHIFT_HOURS_LOOKUP[code] || 0;
+                                const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
+                                const isZero = dur === 0;
                                 const fmt = (d: Date) => d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
                                 const dayName = startD ? startD.toLocaleDateString('es-AR', {weekday:'short'}) : '-';
                                 const isVacant = !s.employeeName;
