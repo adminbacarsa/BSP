@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageHeader, SupervisorPinInput } from '@/components/ui';
+import { openCronoPopout } from '@/lib/planificacion/openCronoPopout';
 import { useSetPageHeader } from '@/context/PageHeaderContext';
 import { 
     ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Search, Plus,
@@ -13,7 +14,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Minimize2, Copy, ClipboardPaste, Wand2
+    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -399,6 +400,10 @@ export default function PlanificacionPage() {
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifPanelTop, setNotifPanelTop] = useState(0);
     const notifBtnRef = useRef<HTMLButtonElement>(null);
+    const diagnosticBtnRef = useRef<HTMLButtonElement>(null);
+    const coverageDiagnosticBtnRef = useRef<HTMLButtonElement>(null);
+    const [diagnosticPanelPos, setDiagnosticPanelPos] = useState<{ x: number; y: number } | null>(null);
+    const [coveragePanelPos, setCoveragePanelPos] = useState<{ x: number; y: number } | null>(null);
     const [hasUnread, setHasUnread] = useState(false);
     
     const [operatorName, setOperatorName] = useState('Cargando...');
@@ -567,28 +572,51 @@ export default function PlanificacionPage() {
 
     const [showLegend, setShowLegend] = useState(false);
     const [selectedRef, setSelectedRef] = useState<string | null>(null);
-    const [cronoFullscreen, setCronoFullscreen] = useState(false);
 
     const setPageHeader = useSetPageHeader();
     useEffect(() => {
-        setPageHeader({ compactSidebar: !!selectedClient || cronoFullscreen, immersiveMode: cronoFullscreen });
-        return () => setPageHeader({ compactSidebar: false, immersiveMode: false });
-    }, [selectedClient, cronoFullscreen, setPageHeader]);
+        setPageHeader({ compactSidebar: !!selectedClient });
+        return () => setPageHeader({ compactSidebar: false });
+    }, [selectedClient, setPageHeader]);
+
+    const floatingInitialObjective = useMemo(() => {
+        if (!selectedClient || !selectedObjective) return '';
+        const objs = (clients.find((c) => c.id === selectedClient)?.objetivos || []) as any[];
+        const other = objs.find((o) => (o.id || o.name) !== selectedObjective);
+        return other ? (other.id || other.name) : selectedObjective;
+    }, [clients, selectedClient, selectedObjective]);
+
+    const repositionDiagnosticPanel = useCallback(() => {
+        const rect = diagnosticBtnRef.current?.getBoundingClientRect();
+        if (rect) setDiagnosticPanelPos({ x: rect.left, y: rect.bottom + 4 });
+    }, []);
+
+    const repositionCoveragePanel = useCallback(() => {
+        const rect = coverageDiagnosticBtnRef.current?.getBoundingClientRect();
+        if (rect) setCoveragePanelPos({ x: rect.left, y: rect.bottom + 4 });
+    }, []);
 
     useEffect(() => {
-        if (!cronoFullscreen) return;
-        document.body.style.overflow = 'hidden';
-        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCronoFullscreen(false); };
-        window.addEventListener('keydown', onKey);
+        if (!showDiagnostic) return;
+        repositionDiagnosticPanel();
+        window.addEventListener('scroll', repositionDiagnosticPanel, true);
+        window.addEventListener('resize', repositionDiagnosticPanel);
         return () => {
-            document.body.style.overflow = '';
-            window.removeEventListener('keydown', onKey);
+            window.removeEventListener('scroll', repositionDiagnosticPanel, true);
+            window.removeEventListener('resize', repositionDiagnosticPanel);
         };
-    }, [cronoFullscreen]);
+    }, [showDiagnostic, repositionDiagnosticPanel]);
 
     useEffect(() => {
-        if (cronoFullscreen && !selectedObjective) setCronoFullscreen(false);
-    }, [cronoFullscreen, selectedObjective]);
+        if (!showCoverageDiagnostic) return;
+        repositionCoveragePanel();
+        window.addEventListener('scroll', repositionCoveragePanel, true);
+        window.addEventListener('resize', repositionCoveragePanel);
+        return () => {
+            window.removeEventListener('scroll', repositionCoveragePanel, true);
+            window.removeEventListener('resize', repositionCoveragePanel);
+        };
+    }, [showCoverageDiagnostic, repositionCoveragePanel]);
 
     // ============================================================================
     // 2. UTILIDADES Y HELPERS (NIVEL 1 - Definidos ANTES de usarse)
@@ -4315,9 +4343,9 @@ export default function PlanificacionPage() {
         const gridEmployees = employeesForRows ?? displayedEmployees;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
-            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
+            <thead className="sticky top-0 z-10 bg-slate-100 shadow-md">
                 <tr className="h-6">
-                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
                         {selectedObjective && !isSnapshotView && (
                             <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva)">
@@ -4602,9 +4630,9 @@ export default function PlanificacionPage() {
                     );
                 })}
             </tbody>
-            <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
+            <tfoot className="sticky bottom-0 z-10 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
                 <tr>
-                    <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <td className="sticky left-0 z-20 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
                             <button
                                 type="button"
@@ -4847,35 +4875,9 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'h-full overflow-hidden p-0 space-y-0' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                {cronoFullscreen && selectedObjective && (
-                    <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 bg-slate-900 text-white no-print border-b border-slate-700">
-                        <div className="flex items-center gap-2 min-w-0 text-xs font-black uppercase tracking-wide truncate">
-                            <CalendarCheck size={14} className="text-indigo-400 shrink-0"/>
-                            <span className="truncate">{clients.find(c => c.id === selectedClient)?.name || 'Cliente'}</span>
-                            <ChevronRight size={12} className="text-slate-500 shrink-0"/>
-                            <span className="truncate text-indigo-300">{selectedObjectiveData?.name || selectedObjective}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                            <div className="flex items-center bg-slate-800 rounded-lg p-0.5">
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-slate-700 rounded-md"><ChevronLeft size={14}/></button>
-                                <span className="px-2 font-black text-[10px] w-20 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span>
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-slate-700 rounded-md"><ChevronRight size={14}/></button>
-                            </div>
-                            <button
-                                onClick={() => setCronoFullscreen(false)}
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
-                                title="Salir de pantalla completa (Esc)"
-                            >
-                                <Minimize2 size={16}/>
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {!cronoFullscreen && (
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 z-20 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 relative z-40 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
                             <div className="flex items-center gap-4">
@@ -4961,7 +4963,15 @@ export default function PlanificacionPage() {
                             {selectedObjective && !isServiceLocked && (
                                 <div className="relative hidden md:block">
                                     <button
-                                        onClick={() => setShowDiagnostic(v => !v)}
+                                        ref={diagnosticBtnRef}
+                                        onClick={() => {
+                                            if (showDiagnostic) {
+                                                setShowDiagnostic(false);
+                                            } else {
+                                                repositionDiagnosticPanel();
+                                                setShowDiagnostic(true);
+                                            }
+                                        }}
                                         className="flex px-3 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-2 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
                                     >
                                         <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
@@ -4976,38 +4986,6 @@ export default function PlanificacionPage() {
                                         </div>
                                         <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
                                     </button>
-
-                                    {showDiagnostic && (
-                                        <>
-                                            <div className="fixed inset-0 z-40" onClick={() => setShowDiagnostic(false)}/>
-                                            <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[280px] p-3 animate-in zoom-in-95">
-                                                <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
-                                                <div className="space-y-1.5">
-                                                    {positionStructure.map((pos, i) => (
-                                                        <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-[10px] font-black text-slate-700 dark:text-slate-200">{pos.positionName}</p>
-                                                                <div className="flex flex-wrap gap-1 mt-0.5">
-                                                                    {(pos.shifts || []).map((sh: any, j: number) => (
-                                                                        <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
-                                                                            {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                            <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                {slaVendidas > 0 && (
-                                                    <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 flex justify-between items-center">
-                                                        <span className="text-[9px] font-black text-slate-400 uppercase">Hs. Vendidas / mes</span>
-                                                        <span className="text-base font-black text-teal-600">{slaVendidas}h</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </>
-                                    )}
                                 </div>
                             )}
 
@@ -5015,7 +4993,15 @@ export default function PlanificacionPage() {
                             {selectedObjective && !isServiceLocked && objectiveCoverageGapReport && (
                                 <div className="relative hidden md:block">
                                     <button
-                                        onClick={() => setShowCoverageDiagnostic(v => !v)}
+                                        ref={coverageDiagnosticBtnRef}
+                                        onClick={() => {
+                                            if (showCoverageDiagnostic) {
+                                                setShowCoverageDiagnostic(false);
+                                            } else {
+                                                repositionCoveragePanel();
+                                                setShowCoverageDiagnostic(true);
+                                            }
+                                        }}
                                         className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
                                             objectiveCoverageGapReport.worstDays.length === 0
                                                 ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300'
@@ -5033,67 +5019,6 @@ export default function PlanificacionPage() {
                                         </div>
                                         <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
                                     </button>
-
-                                    {showCoverageDiagnostic && (
-                                        <>
-                                            <div className="fixed inset-0 z-40" onClick={() => setShowCoverageDiagnostic(false)}/>
-                                            <div className="absolute top-full left-0 mt-1 z-50 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[320px] max-w-[420px] p-3 animate-in zoom-in-95">
-                                                <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
-                                                <div className="grid grid-cols-3 gap-2 mb-3">
-                                                    <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
-                                                        <div className="text-lg font-black text-emerald-700">{objectiveCoverageGapReport.daysFull}</div>
-                                                        <div className="text-[8px] font-bold text-emerald-600 uppercase">Días 100%</div>
-                                                    </div>
-                                                    <div className="bg-amber-50 rounded-lg p-2 text-center border border-amber-100">
-                                                        <div className="text-lg font-black text-amber-700">{objectiveCoverageGapReport.daysPartial}</div>
-                                                        <div className="text-[8px] font-bold text-amber-600 uppercase">Parcial</div>
-                                                    </div>
-                                                    <div className="bg-rose-50 rounded-lg p-2 text-center border border-rose-100">
-                                                        <div className="text-lg font-black text-rose-700">{objectiveCoverageGapReport.daysEmpty}</div>
-                                                        <div className="text-[8px] font-bold text-rose-600 uppercase">Sin cerrar</div>
-                                                    </div>
-                                                </div>
-                                                {Object.keys(objectiveCoverageGapReport.aggregateMissingPrimary).length > 0 && (
-                                                    <div className="mb-3">
-                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bandas faltantes en el mes (esquema M+T+N)</p>
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {Object.entries(objectiveCoverageGapReport.aggregateMissingPrimary)
-                                                                .sort((a, b) => b[1] - a[1])
-                                                                .map(([code, n]) => (
-                                                                    <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
-                                                                        {n}×{code}
-                                                                    </span>
-                                                                ))}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {objectiveCoverageGapReport.worstDays.length > 0 && (
-                                                    <div>
-                                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Peores días (click en pie para detalle)</p>
-                                                        <div className="space-y-1 max-h-[180px] overflow-y-auto">
-                                                            {objectiveCoverageGapReport.worstDays.slice(0, 8).map(wd => {
-                                                                const dayGaps = objectiveCoverageGapReport.byDay[wd.dateStr]?.positions || [];
-                                                                return (
-                                                                    <div key={wd.dateStr} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                                                                        <div className="flex justify-between text-[10px] font-black text-slate-700 dark:text-slate-200 mb-0.5">
-                                                                            <span>Día {wd.dateStr.slice(8)}</span>
-                                                                            <span className="text-rose-600">{wd.closed}/{wd.required}</span>
-                                                                        </div>
-                                                                        {dayGaps.slice(0, 3).map((g, i) => (
-                                                                            <p key={i} className="text-[9px] text-slate-500 leading-snug">{g.positionName}: {g.summary}</p>
-                                                                        ))}
-                                                                        {dayGaps.length > 3 && (
-                                                                            <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
-                                                                        )}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </>
-                                    )}
                                 </div>
                             )}
 
@@ -5249,10 +5174,18 @@ export default function PlanificacionPage() {
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
                                 <button
-                                    onClick={() => setCronoFullscreen(true)}
-                                    disabled={!selectedObjective}
+                                    onClick={() => {
+                                        if (!selectedClient) return;
+                                        openCronoPopout({
+                                            clientId: selectedClient,
+                                            objectiveId: floatingInitialObjective,
+                                            month: currentDate,
+                                            mainObjectiveId: selectedObjective,
+                                        });
+                                    }}
+                                    disabled={!selectedClient}
                                     className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40"
-                                    title="Crono a pantalla completa"
+                                    title="Abrir crono en ventana externa (monitor extra)"
                                 >
                                     <Maximize2 size={18}/>
                                 </button>
@@ -5299,10 +5232,9 @@ export default function PlanificacionPage() {
                         </>
                     )}
                 </div>
-                )}
 
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
-                <div className={`flex-1 min-h-0 overflow-hidden relative custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
+                <div className={`flex-1 min-h-0 overflow-hidden relative z-0 custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
                     {isProcessing && <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={40}/></div>}
                     
                     {!selectedObjective ? (
@@ -5402,7 +5334,7 @@ export default function PlanificacionPage() {
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[60] bg-slate-800 text-white p-2 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 items-center border border-slate-600 no-print">
+                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white p-2 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 items-center border border-slate-600 no-print">
                         {columnSelectMode ? (
                             <>
                                 <span className="text-[10px] font-bold px-2 text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -5538,7 +5470,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
 
-                <div className={`hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden ${cronoFullscreen ? '!hidden' : ''}`} style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
                         onClick={() => setShowActivityModal(true)}
@@ -7756,6 +7688,109 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 , document.body)}
+
+            {showDiagnostic && diagnosticPanelPos && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowDiagnostic(false)} />
+                    <div
+                        className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[280px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
+                        style={{ left: diagnosticPanelPos.x, top: diagnosticPanelPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
+                        <div className="space-y-1.5">
+                            {positionStructure.map((pos, i) => (
+                                <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200">{pos.positionName}</p>
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                            {(pos.shifts || []).map((sh: any, j: number) => (
+                                                <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
+                                                    {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
+                                </div>
+                            ))}
+                        </div>
+                        {slaVendidas > 0 && (
+                            <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 flex justify-between items-center">
+                                <span className="text-[9px] font-black text-slate-400 uppercase">Hs. Vendidas / mes</span>
+                                <span className="text-base font-black text-teal-600">{slaVendidas}h</span>
+                            </div>
+                        )}
+                    </div>
+                </>,
+                document.body,
+            )}
+
+            {showCoverageDiagnostic && coveragePanelPos && objectiveCoverageGapReport && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowCoverageDiagnostic(false)} />
+                    <div
+                        className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[320px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
+                        style={{ left: coveragePanelPos.x, top: coveragePanelPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
+                        <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
+                                <div className="text-lg font-black text-emerald-700">{objectiveCoverageGapReport.daysFull}</div>
+                                <div className="text-[8px] font-bold text-emerald-600 uppercase">Días 100%</div>
+                            </div>
+                            <div className="bg-amber-50 rounded-lg p-2 text-center border border-amber-100">
+                                <div className="text-lg font-black text-amber-700">{objectiveCoverageGapReport.daysPartial}</div>
+                                <div className="text-[8px] font-bold text-amber-600 uppercase">Parcial</div>
+                            </div>
+                            <div className="bg-rose-50 rounded-lg p-2 text-center border border-rose-100">
+                                <div className="text-lg font-black text-rose-700">{objectiveCoverageGapReport.daysEmpty}</div>
+                                <div className="text-[8px] font-bold text-rose-600 uppercase">Sin cerrar</div>
+                            </div>
+                        </div>
+                        {Object.keys(objectiveCoverageGapReport.aggregateMissingPrimary).length > 0 && (
+                            <div className="mb-3">
+                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bandas faltantes en el mes (esquema M+T+N)</p>
+                                <div className="flex flex-wrap gap-1">
+                                    {Object.entries(objectiveCoverageGapReport.aggregateMissingPrimary)
+                                        .sort((a, b) => b[1] - a[1])
+                                        .map(([code, n]) => (
+                                            <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
+                                                {n}×{code}
+                                            </span>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+                        {objectiveCoverageGapReport.worstDays.length > 0 && (
+                            <div>
+                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Peores días (click en pie para detalle)</p>
+                                <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                                    {objectiveCoverageGapReport.worstDays.slice(0, 8).map(wd => {
+                                        const dayGaps = objectiveCoverageGapReport.byDay[wd.dateStr]?.positions || [];
+                                        return (
+                                            <div key={wd.dateStr} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                                <div className="flex justify-between text-[10px] font-black text-slate-700 dark:text-slate-200 mb-0.5">
+                                                    <span>Día {wd.dateStr.slice(8)}</span>
+                                                    <span className="text-rose-600">{wd.closed}/{wd.required}</span>
+                                                </div>
+                                                {dayGaps.slice(0, 3).map((g, i) => (
+                                                    <p key={i} className="text-[9px] text-slate-500 leading-snug">{g.positionName}: {g.summary}</p>
+                                                ))}
+                                                {dayGaps.length > 3 && (
+                                                    <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>,
+                document.body,
+            )}
 
             {showAjustarCronoModal && (
                 <AjustarCronoOperativoModal

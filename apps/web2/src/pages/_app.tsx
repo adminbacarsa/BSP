@@ -24,7 +24,10 @@ const AssistantFloatingBubble = dynamic(
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
-  const showAssistant = !router.pathname.startsWith('/empleado') && !router.pathname.startsWith('/cliente') && !router.pathname.startsWith('/objetivo');
+  const showAssistant = !router.pathname.startsWith('/empleado')
+    && !router.pathname.startsWith('/cliente')
+    && !router.pathname.startsWith('/objetivo')
+    && !router.pathname.includes('crono-popout');
   useEffect(() => {
     initTheme();
     applyCompanyThemeFromStorage();
