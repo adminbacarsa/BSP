@@ -10,6 +10,7 @@ import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift, buildPayrollExportPayload, type ReportPublishFilter } from '@/hooks/useReportes';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 
@@ -127,8 +128,12 @@ export default function ReportsPage() {
     }, [employeeReport, empSortBy]);
 
     const downloadPayrollJson = () => {
-        if (!employeeReport.length) return;
-        const payload = buildPayrollExportPayload(sortedEmployeeReport, {
+        const rows = sortedEmployeeReport;
+        if (!rows.length) {
+            toast.error('Generá el reporte antes de exportar JSON.');
+            return;
+        }
+        const payload = buildPayrollExportPayload(rows, {
             start: dateRange.start,
             end: dateRange.end,
             empresaId: empresaId || undefined,
@@ -139,8 +144,13 @@ export default function ReportsPage() {
         const a = document.createElement('a');
         a.href = url;
         a.download = `liquidacion_${dateRange.start}_${dateRange.end}.json`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+        const vacDias = rows.reduce((n, r) => n + (r.novedadesRRHH?.vacacionesDias || 0), 0);
+        toast.success(`JSON exportado · ${rows.length} empleado(s)${vacDias ? ` · ${vacDias} días vacaciones` : ''}`);
     };
 
     // Función de descarga CSV (Mantenida local porque usa interacción con DOM)
@@ -398,7 +408,7 @@ export default function ReportsPage() {
                             <option value="legajo">Orden: Legajo</option>
                         </select>
                         <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
-                        <button onClick={downloadPayrollJson} title="JSON para integración payrollApi" aria-label="Exportar JSON liquidación" className="p-2 bg-white border rounded hover:bg-indigo-50 text-indigo-600"><FileText size={16} aria-hidden="true"/></button>
+                        <button type="button" onClick={downloadPayrollJson} title="Exportar JSON (integración payrollApi)" aria-label="Exportar JSON liquidación" className="px-2.5 py-2 bg-white border rounded hover:bg-indigo-50 text-indigo-600 flex items-center gap-1 text-[10px] font-black uppercase"><FileText size={14} aria-hidden="true"/> JSON</button>
                         <button onClick={() => window.print()} aria-label="Imprimir liquidación de horas" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
                 </div>
@@ -442,9 +452,17 @@ export default function ReportsPage() {
                                     <td className="p-4 font-bold text-slate-700">
                                         {row.name}
                                         {(row.ftCount > 0 || row.ffCount > 0) && (
-                                            <div className="flex gap-1 mt-1">
+                                            <div className="flex gap-1 mt-1 flex-wrap">
                                                 {row.ftCount > 0 && <span className="text-[9px] bg-violet-100 text-violet-700 px-1 rounded border border-violet-200">FT: {row.ftCount}</span>}
                                                 {row.ffCount > 0 && <span className="text-[9px] bg-cyan-100 text-cyan-700 px-1 rounded border border-cyan-200">FF: {row.ffCount}</span>}
+                                                {(row.novedadesRRHH?.vacacionesDias || 0) > 0 && (
+                                                    <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200">Vac: {row.novedadesRRHH.vacacionesDias}d</span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {!(row.ftCount > 0 || row.ffCount > 0) && (row.novedadesRRHH?.vacacionesDias || 0) > 0 && (
+                                            <div className="flex gap-1 mt-1 flex-wrap">
+                                                <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded border border-rose-200">Vac: {row.novedadesRRHH.vacacionesDias}d</span>
                                             </div>
                                         )}
                                     </td>
@@ -1261,7 +1279,7 @@ export default function ReportsPage() {
                             {
                                 label: 'Empleados',
                                 value: employeeReport.length,
-                                sub: `${employeeReport.reduce((a,c)=>a+c.shifts,0)} turnos`,
+                                sub: `${employeeReport.reduce((a,c)=>a+(c.shiftsTotal ?? c.shifts ?? 0),0)} turnos`,
                                 icon: '👤',
                                 color: 'from-indigo-500 to-indigo-600',
                             },

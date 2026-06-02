@@ -475,6 +475,36 @@ function resolveClientIdFromName(clientName: string, clientMap: Record<string, s
     return partial?.[0] || '';
 }
 
+export type RrhhNovedades = {
+    vacacionesDias: number;
+    enfermedadDias: number;
+    art: number;
+    licenciaEspecialDias: number;
+    permisoGremialDias: number;
+    injustificadaDias: number;
+};
+
+export function countNovedadesRRHHFromShifts(shifts: any[]): RrhhNovedades {
+    const rrhh: RrhhNovedades = {
+        vacacionesDias: 0,
+        enfermedadDias: 0,
+        art: 0,
+        licenciaEspecialDias: 0,
+        permisoGremialDias: 0,
+        injustificadaDias: 0,
+    };
+    for (const s of shifts) {
+        const code = String(s.code || '').trim().toUpperCase();
+        if (code === 'V') rrhh.vacacionesDias++;
+        else if (code === 'E') rrhh.enfermedadDias++;
+        else if (code === 'A') rrhh.art++;
+        else if (code === 'L') rrhh.licenciaEspecialDias++;
+        else if (code === 'PG') rrhh.permisoGremialDias++;
+        else if (code === 'AA') rrhh.injustificadaDias++;
+    }
+    return rrhh;
+}
+
 /** JSON compatible con payrollApi (integraciones externas). */
 export function buildPayrollExportPayload(
     rows: any[],
@@ -512,7 +542,8 @@ export function buildPayrollExportPayload(
                     al50: Math.max(0, b - 200),
                     nota: 'FT y Feriados se pagan aparte.',
                 },
-                turnosCount: row.shifts ?? 0,
+                novedadesRRHH: row.novedadesRRHH ?? countNovedadesRRHHFromShifts(row.rawShifts || []),
+                turnosCount: row.shiftsTotal ?? row.shifts ?? 0,
                 turnosConFichada: row.turnosConDatosReales ?? 0,
             };
         }),
@@ -787,13 +818,17 @@ export const useReportes = (forcedClientId?: string | null) => {
 
                 const ftCount = shifts.filter((s:any) => s.isFrancoTrabajado || s.code === 'FT').length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
+                const novedadesRRHH = countNovedadesRRHHFromShifts(shifts);
 
                 return {
                     id: empId,
                     type: 'EMPLOYEE',
                     name: empMap[empId] || 'Desconocido',
                     legajo: empMetaMap[empId]?.legajo || '',
-                    shifts: shifts.filter((s:any) => isOperativeCode(s.code)).length,
+                    shiftsTotal: shifts.length,
+                    shifts: shifts.length,
+                    shiftsOperativos: shifts.filter((s:any) => isOperativeCode(s.code)).length,
+                    novedadesRRHH,
                     total: stats.horasTeoricas,
                     horasTeoricas: stats.horasTeoricas,
                     horasReales: stats.horasReales,

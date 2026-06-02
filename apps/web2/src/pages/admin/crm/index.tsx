@@ -24,6 +24,7 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   shouldScopeQueriesToEmpresa,
   empresaCollectionQuery,
@@ -35,7 +36,9 @@ import {
   assertDocBelongsToEmpresa,
   queryAndDeleteForEmpresa,
   updateDocForEmpresa,
+  updateClientForEmpresa,
   TenantIsolationError,
+  isTenantIsolationError,
   canManageClientInTenant,
   isTenantWriteOwner,
   buildTenantBlockedMessage,
@@ -198,13 +201,17 @@ type ProformaBase = 'requested' | 'planned' | 'executed';
 export default function CRMPage() {
   const router = useRouter();
   const { empresaId, empresa } = useEmpresa();
+  const { isSuperAdmin, allEmpresas } = useAuth();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+  const tenantAccess = useMemo(
+    () => ({ isSuperAdmin, allEmpresas }),
+    [isSuperAdmin, allEmpresas],
+  );
 
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [activeTab, setActiveTab] = useState('INFO');
   const [currentUserName, setCurrentUserName] = useState('Cargando...');
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [rangeMode, setRangeMode] = useState<RangeMode>('month');
   const [rangeMonth, setRangeMonth] = useState(new Date().getMonth());
@@ -293,17 +300,20 @@ export default function CRMPage() {
     setSelectedClient(null);
     setView('list');
     setClients([]);
-    onAuthStateChanged(getAuth(), async (u) => {
-      setCurrentUserName(u?.displayName || u?.email || 'Operador');
-      if (u) {
-        const token = await u.getIdTokenResult();
-        const role = (token.claims.role as string || '').toLowerCase();
-        setIsSuperAdmin(role === 'superadmin');
-      }
-    });
     fetchClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empresaId, migracionCompleta]);
+  }, [empresaId]);
+
+  useEffect(() => {
+    fetchClients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [migracionCompleta]);
+
+  useEffect(() => {
+    onAuthStateChanged(getAuth(), (u) => {
+      setCurrentUserName(u?.displayName || u?.email || 'Operador');
+    });
+  }, []);
 
   const loadPortalUserForClient = async (clientId: string) => {
     try {
@@ -394,14 +404,20 @@ export default function CRMPage() {
   };
 
   const canDeleteClient = (c: { empresaId?: unknown; id?: string }) =>
-    canManageClientInTenant(c, empresaId, migracionCompleta);
+    canManageClientInTenant(c, empresaId, migracionCompleta, tenantAccess);
 
   const assertClientWritable = async (
     clientId: string,
     label?: string,
     action: 'guardar' | 'eliminar' = 'guardar',
   ) => {
-    const fresh = await assertClientWritableForEmpresa(clientId, empresaId, migracionCompleta, action);
+    const fresh = await assertClientWritableForEmpresa(
+      clientId,
+      empresaId,
+      migracionCompleta,
+      action,
+      tenantAccess,
+    );
     if (label && fresh.name && String(fresh.name) !== label) {
       console.warn('[CRM] nombre desactualizado al validar', { clientId, label, dbName: fresh.name });
     }
@@ -416,13 +432,13 @@ export default function CRMPage() {
       await loadClientFullData(c.id);
       loadPortalUserForClient(c.id);
     } catch (e: unknown) {
-      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'No se puede abrir este cliente'));
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'No se puede abrir este cliente'));
     }
   };
 
   const selectedClientWritable = useMemo(
-    () => (selectedClient ? canManageClientInTenant(selectedClient, empresaId, migracionCompleta) : false),
-    [selectedClient, empresaId, migracionCompleta],
+    () => (selectedClient ? canManageClientInTenant(selectedClient, empresaId, migracionCompleta, tenantAccess) : false),
+    [selectedClient, empresaId, migracionCompleta, tenantAccess],
   );
 
   useEffect(() => {
@@ -434,14 +450,19 @@ export default function CRMPage() {
         if (!cancelled) setSelectedClient(fresh);
       } catch (e: unknown) {
         if (cancelled) return;
-        toast.error(e instanceof TenantIsolationError ? e.message : 'Cliente no editable en esta empresa');
-        setView('list');
-        setSelectedClient(null);
+        const msg = isTenantIsolationError(e)
+          ? e.message
+          : (e instanceof Error ? e.message : 'Cliente no editable en esta empresa');
+        toast.error(msg);
+        if (isTenantIsolationError(e)) {
+          setView('list');
+          setSelectedClient(null);
+        }
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedClient?.id, empresaId, migracionCompleta]);
+  }, [view, selectedClient?.id, empresaId, migracionCompleta, isSuperAdmin, allEmpresas]);
 
   const clientDeleteToast = (
     name: string,
@@ -471,7 +492,7 @@ export default function CRMPage() {
       const data = dedupeClientsById(
         snap.docs
           .map((x) => ({ ...x.data(), id: x.id }))
-          .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta)),
+          .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta, tenantAccess)),
       );
       setClients(data);
     } catch (e) {
@@ -687,14 +708,13 @@ export default function CRMPage() {
     if (!selectedClient?.id) return;
     if (!infoForm?.name) return;
     try {
-      await assertClientWritable(selectedClient.id, selectedClient.name);
-      await updateDocForEmpresa('clients', selectedClient.id, infoForm, empresaId, migracionCompleta);
+      await updateClientForEmpresa(selectedClient.id, infoForm, empresaId, migracionCompleta, tenantAccess);
       setSelectedClient({ ...selectedClient, ...infoForm });
       setIsEditingInfo(false);
       toast.success('Actualizado');
     } catch (e: unknown) {
       console.error(e);
-      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al guardar'));
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al guardar'));
     }
   };
 
@@ -716,7 +736,7 @@ export default function CRMPage() {
       toast.success(`Etiquetas corregidas: ${r.servicios_sla} SLA, ${r.turnos} turnos`);
       await loadClientFullData(selectedClient.id);
     } catch (e: unknown) {
-      toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al corregir etiquetas'));
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al corregir etiquetas'));
     } finally {
       setRetaggingRelated(false);
     }
@@ -836,8 +856,7 @@ export default function CRMPage() {
     if (!noteText) return;
     const note = { date: new Date().toISOString(), note: noteText, user: currentUserName };
     try {
-      await assertClientWritable(selectedClient.id, selectedClient.name);
-      await updateDocForEmpresa('clients', selectedClient.id, { historial: arrayUnion(note) }, empresaId, migracionCompleta);
+      await updateClientForEmpresa(selectedClient.id, { historial: arrayUnion(note) }, empresaId, migracionCompleta, tenantAccess);
       setSelectedClient({ ...selectedClient, historial: [...(selectedClient.historial || []), note] });
       setHistoryNote('');
       toast.success('Nota guardada');
@@ -892,8 +911,7 @@ export default function CRMPage() {
     else objetivos.push({ id: String(Date.now()), ...payload });
 
     try {
-      await assertClientWritable(selectedClient.id, selectedClient.name);
-      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
+      await updateClientForEmpresa(selectedClient.id, { objetivos }, empresaId, migracionCompleta, tenantAccess);
       setSelectedClient({ ...selectedClient, objetivos });
       resetObjectiveForm();
       toast.success('Objetivo guardado');
@@ -922,7 +940,7 @@ export default function CRMPage() {
           toast.message(`${foreign.length} turno(s) de otra empresa siguen con ese objetivo (ID compartido).`);
         }
       }
-      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
+      await updateClientForEmpresa(selectedClient.id, { objetivos }, empresaId, migracionCompleta, tenantAccess);
       setSelectedClient({ ...selectedClient, objetivos });
       if (editingObjectiveIndex === idx) resetObjectiveForm();
       toast.success(`Objetivo eliminado${deletedShifts > 0 ? ` (${deletedShifts} turnos eliminados)` : ''}`);
@@ -952,7 +970,7 @@ export default function CRMPage() {
       const restoredId = found.data().objectiveId;
       const objetivos = [...(selectedClient.objetivos || [])];
       objetivos[idx] = { ...objetivos[idx], id: restoredId };
-      await updateDocForEmpresa('clients', selectedClient.id, { objetivos }, empresaId, migracionCompleta);
+      await updateClientForEmpresa(selectedClient.id, { objetivos }, empresaId, migracionCompleta, tenantAccess);
       setSelectedClient({ ...selectedClient, objetivos });
       toast.success(`ID restaurado: ${restoredId}`);
     } catch (e: any) {
@@ -1394,7 +1412,7 @@ export default function CRMPage() {
                           fetchClients();
                           close();
                         } catch (e: unknown) {
-                          toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
+                          toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"

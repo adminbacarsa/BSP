@@ -259,7 +259,9 @@ export function canManageClientInTenant(
   data: { empresaId?: unknown },
   empresaId: string,
   migracionCompleta: boolean,
+  access?: TenantAccessOpts,
 ): boolean {
+  if (canBypassTenantWriteCheck(access)) return true;
   return isTenantWriteOwner(data, empresaId, migracionCompleta);
 }
 
@@ -300,6 +302,20 @@ export class TenantIsolationError extends Error {
     super(message);
     this.name = 'TenantIsolationError';
   }
+}
+
+export type TenantAccessOpts = {
+  isSuperAdmin?: boolean;
+  allEmpresas?: boolean;
+};
+
+export function isTenantIsolationError(e: unknown): e is TenantIsolationError {
+  return e instanceof TenantIsolationError
+    || (e instanceof Error && e.name === 'TenantIsolationError');
+}
+
+export function canBypassTenantWriteCheck(opts?: TenantAccessOpts): boolean {
+  return opts?.isSuperAdmin === true || opts?.allEmpresas === true;
 }
 
 /** Asegura empresaId en altas/escrituras nuevas. */
@@ -519,6 +535,7 @@ export async function assertClientWritableForEmpresa(
   empresaId: string,
   migracionCompleta: boolean,
   action: 'guardar' | 'eliminar' = 'guardar',
+  access?: TenantAccessOpts,
 ): Promise<{ id: string; collection: ClientDocCollection; [key: string]: unknown }> {
   const resolved = await resolveClientDocument(clientId);
   if (!resolved) {
@@ -526,11 +543,29 @@ export async function assertClientWritableForEmpresa(
       `Cliente no encontrado (ID: ${clientId}). Refrescá el listado o verificá que el registro exista en Firestore.`,
     );
   }
-  if (!canManageClientInTenant(resolved.data, empresaId, migracionCompleta)) {
+  if (!canManageClientInTenant(resolved.data, empresaId, migracionCompleta, access)) {
     const docEmp = String(resolved.data.empresaId ?? '').trim() || 'sin empresa';
     throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, clientId));
   }
   return { id: resolved.id, collection: resolved.collection, ...resolved.data };
+}
+
+export async function updateClientForEmpresa(
+  clientId: string,
+  data: Record<string, unknown>,
+  empresaId: string,
+  migracionCompleta: boolean,
+  access?: TenantAccessOpts,
+): Promise<ClientDocCollection> {
+  const resolved = await assertClientWritableForEmpresa(
+    clientId,
+    empresaId,
+    migracionCompleta,
+    'guardar',
+    access,
+  );
+  await updateDocForEmpresa(resolved.collection, clientId, data, empresaId, migracionCompleta);
+  return resolved.collection;
 }
 
 export async function deleteClientForEmpresa(
