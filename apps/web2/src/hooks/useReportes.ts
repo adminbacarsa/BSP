@@ -192,6 +192,7 @@ function resolveCanonicalObjectiveId(
     const cid = String(row.clientId ?? '').trim();
     const name = String(row.objectiveName ?? '').trim();
     if (cid && name) return fallbackObjectiveKey(cid, name);
+    if (name) return name;
     return null;
 }
 
@@ -205,10 +206,25 @@ function registerObjectiveMetaAliases(
 }
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, startDate: Date, endDate: Date): boolean {
-    if (!sla.startDate || !sla.endDate) return false;
-    const slaStart = new Date(`${sla.startDate}T00:00:00`);
-    const slaEnd = new Date(`${sla.endDate}T23:59:59`);
-    return slaStart <= endDate && slaEnd >= startDate;
+    const sd = String(sla.startDate ?? '').trim().slice(0, 10);
+    const ed = String(sla.endDate ?? '').trim().slice(0, 10);
+    if (!sd || !ed) return false;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const rangeStart = `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-${pad(startDate.getDate())}`;
+    const rangeEnd = `${endDate.getFullYear()}-${pad(endDate.getMonth() + 1)}-${pad(endDate.getDate())}`;
+    return sd <= rangeEnd && ed >= rangeStart;
+}
+
+function resolveClientIdFromName(clientName: string, clientMap: Record<string, string>): string {
+    const cn = String(clientName || '').trim().toLowerCase();
+    if (!cn) return '';
+    const exact = Object.entries(clientMap).find(([, n]) => String(n).trim().toLowerCase() === cn);
+    if (exact) return exact[0];
+    const partial = Object.entries(clientMap).find(([, n]) => {
+        const nn = String(n).trim().toLowerCase();
+        return nn.includes(cn) || cn.includes(nn);
+    });
+    return partial?.[0] || '';
 }
 
 export const useReportes = (forcedClientId?: string | null) => {
@@ -328,11 +344,7 @@ export const useReportes = (forcedClientId?: string | null) => {
 
                 const objName = String(sla.objectiveName ?? '').trim();
                 let cid = String(sla.clientId || '').trim();
-                if (!cid && sla.clientName) {
-                    const cn = String(sla.clientName).trim().toLowerCase();
-                    const found = Object.entries(clientMap).find(([, n]) => String(n).trim().toLowerCase() === cn);
-                    if (found) cid = found[0];
-                }
+                if (!cid && sla.clientName) cid = resolveClientIdFromName(String(sla.clientName), clientMap);
                 const matchKeys = objectiveMatchCandidates(sla);
 
                 let canonicalId: string | null = null;
@@ -345,7 +357,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (!canonicalId) {
                     canonicalId = resolveCanonicalObjectiveId(sla, aliasLookup);
                 }
-                if (!canonicalId) return;
+                if (!canonicalId) canonicalId = d.id;
 
                 const fromCatalog = aliasLookup[canonicalId];
                 if (!cid && fromCatalog?.clientId) cid = fromCatalog.clientId;
@@ -361,6 +373,10 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (objName && meta.name === canonicalId) meta.name = objName;
                 if (cid && clientMap[cid]) meta.client = clientMap[cid];
                 else if (sla.clientName) meta.client = String(sla.clientName);
+                if (!meta.clientId && meta.client && meta.client !== 'Sin Cliente') {
+                    meta.clientId = resolveClientIdFromName(meta.client, clientMap)
+                        || `nm:${meta.client.toLowerCase().replace(/\s+/g, '_').slice(0, 48)}`;
+                }
 
                 slaObjectiveMetas.set(canonicalId, meta);
                 slaMap[canonicalId] = Math.max(slaMap[canonicalId] || 0, sla.totalMonthlyHours || 0);
@@ -484,8 +500,12 @@ export const useReportes = (forcedClientId?: string | null) => {
                     meta.clientId = String(objGroups[objId].clientId);
                     meta.client = clientMap[meta.clientId] || meta.client;
                 }
-                if (forcedClientId && meta.clientId && meta.clientId !== forcedClientId) return null;
-                if (!meta.clientId) return null;
+                if (!meta.clientId && meta.client && meta.client !== 'Sin Cliente') {
+                    meta.clientId = resolveClientIdFromName(meta.client, clientMap)
+                        || `nm:${meta.client.toLowerCase().replace(/\s+/g, '_').slice(0, 48)}`;
+                }
+                if (forcedClientId && meta.clientId && meta.clientId !== forcedClientId && !meta.clientId.startsWith('nm:')) return null;
+                if (!meta.client || meta.client === 'Sin Cliente') return null;
 
                 const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
                 const staffedShifts = data.shifts.filter((s: any) => !!empMap[s.employeeId]);
