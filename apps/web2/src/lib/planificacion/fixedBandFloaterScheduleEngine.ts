@@ -72,7 +72,14 @@ export function inferJune1CycleSlot(
                 ok++;
             }
             if (ok < need) continue;
-            if (!WORK_BANDS.has(CYCLE_24_MTN[june1])) continue;
+            // need=1 → mayo terminó en el 1er día del bloque franco; junio-1 es el 2do (aún F)
+            // need≥2 → bloque completo en mayo; junio-1 es el primer día de trabajo
+            if (need === 1) {
+                if (CYCLE_24_MTN[june1] !== 'F') continue;
+                if (!WORK_BANDS.has(CYCLE_24_MTN[(june1 + 1) % 24])) continue;
+            } else {
+                if (!WORK_BANDS.has(CYCLE_24_MTN[june1])) continue;
+            }
             const beforeBlock = (may31 - need + 24) % 24;
             const bandBefore = lastWorkBandBeforeRest?.toUpperCase();
             if (bandBefore && CYCLE_24_MTN[beforeBlock] !== bandBefore) continue;
@@ -123,20 +130,13 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     const positionGroups: Record<string, string[]> = {};
     ctx.positions.forEach(p => { positionGroups[p.positionName] = []; });
     const defaultPos = ctx.defaultPositionByEmp || {};
-    const empAssigned = new Set<string>();
 
     for (const emp of ctx.employees) {
         const fixed = defaultPos[emp.id];
         if (!fixed || positionGroups[fixed] === undefined) continue;
         positionGroups[fixed].push(emp.id);
-        empAssigned.add(emp.id);
     }
-
-    const unassigned = ctx.employees.filter(e => !empAssigned.has(e.id));
-    const posNames = ctx.positions.map(p => p.positionName);
-    unassigned.forEach((emp, i) => {
-        positionGroups[posNames[i % posNames.length]].push(emp.id);
-    });
+    // Empleados sin puesto explícito → idle; no se les genera ningún turno.
     return positionGroups;
 }
 
@@ -255,7 +255,7 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         if (g.length === 0) return false;
         if (g.length % qty !== 0) return false;
         const perSlot = g.length / qty;
-        if (perSlot !== 4 && perSlot !== 5) return false;
+        if (perSlot < 4) return false;
         counted24 += g.length;
     }
     return counted24 > 0;
