@@ -157,7 +157,7 @@ import {
     isDeploymentSurplusCode,
     shiftCountsForEmployeeCronoHours,
 } from '@/lib/planificacion/deploymentRoles';
-import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure } from '@/lib/planificacion/genderPreference';
+import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 
 // --- CONFIGURACIÓN VISUAL ---
@@ -1277,6 +1277,17 @@ export default function PlanificacionPage() {
         return pos ? pos.shifts : [];
     }, [positionStructure, activePosition]);
 
+    const genderRestrictedPositionsCount = useMemo(
+        () => positionStructure.filter((p: any) => getPreferenciaGeneroUi(p.preferenciaGenero)).length,
+        [positionStructure],
+    );
+
+    const renderPositionGeneroBadge = (pref: unknown, extraClass = '') => {
+        const ui = getPreferenciaGeneroUi(pref);
+        if (!ui) return null;
+        return <span className={`${ui.badgeClass} ${extraClass}`.trim()} title={ui.title}>{ui.label}</span>;
+    };
+
     // Turnos para la barra flotante de selección múltiple.
     // Combina todos los turnos de todas las posiciones del objetivo (sin duplicados).
     // Si ninguna posición tiene M/T/N/D12/N12, agrega los estándar como base mínima.
@@ -1830,6 +1841,8 @@ export default function PlanificacionPage() {
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Ausente</span></div>
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-white border border-slate-300 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div></div><span className="text-[10px] font-bold text-slate-600">Conflicto</span></div>
                             <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${OTHER_OBJECTIVE_CELL_STYLE}`}>M</div><span className="text-[10px] font-bold text-slate-600">Otro objetivo</span></div>
+                            <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-pink-700 bg-pink-100 border border-pink-200 px-1.5 py-0.5 rounded">♀ F</span><span className="text-[10px] font-bold text-slate-600">Puesto solo femenino</span></div>
+                            <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">♂ M</span><span className="text-[10px] font-bold text-slate-600">Puesto solo masculino</span></div>
                         </div>
                     </div>
                 </div>
@@ -4977,7 +4990,7 @@ export default function PlanificacionPage() {
                         {empPosPicker.floating && (
                             <span className="ml-1 text-indigo-500 normal-case font-bold">· flotante</span>
                         )}
-                        <p className="text-[8px] font-bold normal-case text-slate-400 mt-0.5 tracking-normal">REF/ESC excluyen del auto y dotación</p>
+                        <p className="text-[8px] font-bold normal-case text-slate-400 mt-0.5 tracking-normal">REF/ESC excluyen del auto y dotación · ♂/♀ = puesto con género definido</p>
                     </div>
                     <div className="overflow-y-auto overscroll-contain custom-scrollbar flex-1 min-h-0">
                     {positionStructure.map(p => {
@@ -4991,8 +5004,11 @@ export default function PlanificacionPage() {
                         };
                         const surplusActive = (role: string) => isSelPos && selShift === role;
                         return (
-                            <div key={p.positionName} className={`border-b last:border-0 dark:border-slate-700 ${isSelPos ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}>
-                                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600 dark:text-slate-200">{p.positionName}</div>
+                                <div key={p.positionName} className={`border-b last:border-0 dark:border-slate-700 ${isSelPos ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}>
+                                <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-600 dark:text-slate-200 flex items-center gap-1.5">
+                                    <span>{p.positionName}</span>
+                                    {renderPositionGeneroBadge(p.preferenciaGenero)}
+                                </div>
                                 <div className="flex flex-wrap gap-1 px-3 pb-2">
                                     <button
                                         onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
@@ -5158,6 +5174,14 @@ export default function PlanificacionPage() {
                                                 {positionStructure.length} Puestos
                                                 <span className="text-slate-300 dark:text-slate-600">|</span>
                                                 <span className="text-emerald-600 font-black">{positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)} Pax</span>
+                                                {genderRestrictedPositionsCount > 0 && (
+                                                    <>
+                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                        <span className="text-pink-600 font-black" title="Puestos con preferencia de género (M/F) definida en Servicios/SLA">
+                                                            {genderRestrictedPositionsCount} c/ género
+                                                        </span>
+                                                    </>
+                                                )}
                                                 {slaVendidas > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{slaVendidas}h vend.</span></>}
                                             </span>
                                         </div>
@@ -6226,7 +6250,12 @@ export default function PlanificacionPage() {
                                             </div>
                                         )}
                                         <div className="mb-2">
-                                            <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Puesto / Función</label>
+                                            <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block flex items-center gap-2">
+                                                Puesto / Función
+                                                {renderPositionGeneroBadge(
+                                                    positionStructure.find((p: any) => p.positionName === (activePosition || positionStructure[0]?.positionName))?.preferenciaGenero,
+                                                )}
+                                            </label>
                                             <select 
                                                 className="w-full bg-slate-50 border p-2 rounded-lg text-xs font-bold"
                                                 value={activePosition || ''} 
@@ -6238,12 +6267,33 @@ export default function PlanificacionPage() {
                                                     const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
                                                     return (
                                                     <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
-                                                        {p.positionName}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
+                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
                                                     </option>
                                                     );
                                                 })}
                                             </select>
                                         </div>
+                                        {(() => {
+                                            const currentPosName = activePosition || positionStructure[0]?.positionName || 'General';
+                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
+                                            const generoUi = getPreferenciaGeneroUi(posCfg?.preferenciaGenero);
+                                            if (!generoUi) return null;
+                                            const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
+                                            const generoCheck = emp ? checkGeneroPuesto(emp.genero, generoUi.pref) : { blocked: false };
+                                            return (
+                                                <div className={`mb-3 rounded-xl border-2 px-3 py-2.5 ${generoCheck.blocked ? 'border-rose-300 bg-rose-50' : generoUi.pref === 'F' ? 'border-pink-200 bg-pink-50' : 'border-blue-200 bg-blue-50'}`}>
+                                                    <p className={`text-[10px] font-black uppercase flex items-center gap-1.5 ${generoCheck.blocked ? 'text-rose-800' : generoUi.pref === 'F' ? 'text-pink-800' : 'text-blue-800'}`}>
+                                                        {renderPositionGeneroBadge(generoUi.pref)}
+                                                        Puesto {preferenciaGeneroLabel(generoUi.pref)}
+                                                    </p>
+                                                    <p className={`text-[10px] font-bold mt-1 leading-snug ${generoCheck.blocked ? 'text-rose-700' : generoUi.pref === 'F' ? 'text-pink-700' : 'text-blue-700'}`}>
+                                                        {generoCheck.blocked && generoCheck.message
+                                                            ? `${emp?.name || 'Empleado'}: ${generoCheck.message}`
+                                                            : `Solo se puede asignar personal ${generoUi.pref === 'F' ? 'femenino' : 'masculino'} a este puesto (definido en Servicios/SLA).`}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })()}
                                         {(() => {
                                             const currentPosName = activePosition || positionStructure[0]?.positionName || 'General';
                                             const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
@@ -6267,6 +6317,7 @@ export default function PlanificacionPage() {
                                                 closedUnits: 0, requiredUnits: 1, schemeLabel: '', isPositionClosed: false,
                                             };
                                             const currentPosName = activePosition || 'General';
+                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
                                             const isExcludedDay = coverageData.isExcludedDay;
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
@@ -6294,7 +6345,10 @@ export default function PlanificacionPage() {
                                                         <div className="flex items-center justify-between mb-1">
                                                             <div className="flex items-center gap-2">
                                                                 <Layers size={14} className="text-slate-400"/>
-                                                                <span className="text-[10px] font-bold text-slate-500 uppercase">Cobertura {currentPosName}</span>
+                                                                <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                                                                    Cobertura {currentPosName}
+                                                                    {renderPositionGeneroBadge(posCfg?.preferenciaGenero)}
+                                                                </span>
                                                             </div>
                                                             {unitsLabel && (
                                                                 <div className={`text-xs font-black px-2 py-0.5 rounded ${bgClass}`}>
@@ -6407,7 +6461,12 @@ export default function PlanificacionPage() {
                             <h3 className="font-black text-sm uppercase mb-1 text-slate-800 dark:text-white">
                                 {deployBandPicker === 'TRAINING' ? 'Escuela — elegir banda' : 'Refuerzo — elegir banda'}
                             </h3>
-                            <p className="text-[10px] text-slate-500 mb-4">Puesto: <span className="font-bold text-indigo-600">{activePosition}</span></p>
+                            <p className="text-[10px] text-slate-500 mb-4 flex items-center gap-2 flex-wrap">
+                                Puesto: <span className="font-bold text-indigo-600">{activePosition}</span>
+                                {renderPositionGeneroBadge(
+                                    positionStructure.find((p: any) => p.positionName === activePosition)?.preferenciaGenero,
+                                )}
+                            </p>
                             <div className="grid grid-cols-3 gap-2">
                                 {['M', 'T', 'N', 'D12', 'N12'].map(b => (
                                     <button key={b} onClick={() => confirmDeploymentBand(b)} className={`p-3 rounded-lg border font-black text-sm ${SHIFT_STYLES[b] || 'bg-slate-100'}`}>{b}</button>
@@ -7939,7 +7998,10 @@ export default function PlanificacionPage() {
                             {positionStructure.map((pos, i) => (
                                 <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200">{pos.positionName}</p>
+                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 flex-wrap">
+                                            <span>{pos.positionName}</span>
+                                            {renderPositionGeneroBadge(pos.preferenciaGenero)}
+                                        </p>
                                         <div className="flex flex-wrap gap-1 mt-0.5">
                                             {(pos.shifts || []).map((sh: any, j: number) => (
                                                 <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">

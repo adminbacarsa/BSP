@@ -29,6 +29,29 @@ export function preferenciaGeneroLabel(p: PreferenciaGeneroObjetivo | string | u
     return 'Indistinto';
 }
 
+export function getPreferenciaGeneroUi(pref: unknown): {
+    pref: PreferenciaGeneroPuesto;
+    label: string;
+    badgeClass: string;
+    title: string;
+} | null {
+    const p = normalizePreferenciaGenero(pref);
+    if (p === 'INDISTINTO') return null;
+    return {
+        pref: p,
+        label: p === 'M' ? '♂ M' : '♀ F',
+        badgeClass: p === 'M'
+            ? 'text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded shrink-0'
+            : 'text-[9px] font-black text-pink-700 bg-pink-100 border border-pink-200 px-1.5 py-0.5 rounded shrink-0',
+        title: preferenciaGeneroLabel(p),
+    };
+}
+
+export function preferenciaGeneroOptionSuffix(pref: unknown): string {
+    const ui = getPreferenciaGeneroUi(pref);
+    return ui ? ` · ${ui.label}` : '';
+}
+
 export function normalizePreferenciaGenero(raw: unknown): PreferenciaGeneroObjetivo {
     const v = String(raw || 'INDISTINTO').toUpperCase();
     if (v === 'M' || v === 'F') return v;
