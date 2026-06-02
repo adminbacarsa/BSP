@@ -341,3 +341,40 @@ export function planningPositionExclusionLabel(dateStr: string): string {
   const wd = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][dt.getDay()];
   return `${wd} ${d}/${m}`;
 }
+
+/** Mapa fecha YYYY-MM-DD → nombres de puestos excluidos ese día (SLA). */
+export function buildExcludedPositionsByDate(
+  positions: Array<{ positionName: string; excludedDates?: string[] }>,
+): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const pos of positions) {
+    for (const ds of pos.excludedDates || []) {
+      if (!map[ds]) map[ds] = [];
+      if (!map[ds].includes(pos.positionName)) map[ds].push(pos.positionName);
+    }
+  }
+  for (const ds of Object.keys(map)) map[ds].sort((a, b) => a.localeCompare(b));
+  return map;
+}
+
+export function abbrevPlanningPositionName(name: string, max = 6): string {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return '·';
+  const parts = trimmed.split(/\s+/);
+  if (parts.length > 1 && /^puesto$/i.test(parts[0])) {
+    const rest = parts.slice(1).join(' ');
+    return rest.length > max ? `${rest.slice(0, max - 1)}…` : rest;
+  }
+  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
+}
+
+export function excludedPositionsCellLabel(names: string[]): string {
+  if (!names.length) return '';
+  if (names.length === 1) return abbrevPlanningPositionName(names[0], 8);
+  return `${names.length} puestos`;
+}
+
+export function excludedPositionsTooltip(names: string[], dateStr: string): string {
+  if (!names.length) return '';
+  return `Sin servicio SLA (${planningPositionExclusionLabel(dateStr)}):\n${names.map((n) => `• ${n}`).join('\n')}`;
+}

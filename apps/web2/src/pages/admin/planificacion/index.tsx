@@ -899,6 +899,23 @@ export default function PlanificacionPage() {
 
     const retCount = useMemo(() => objectiveMonthShiftMetrics.totalRetDays, [objectiveMonthShiftMetrics.totalRetDays]);
 
+    /** Dotación estructural necesaria para 6+2, calculada desde positionStructure (sin correr el motor). */
+    const staffingReq6x2 = useMemo(() => {
+        if (!positionStructure.length) return null;
+        const FACTOR = 8 / 6;
+        const perPos = positionStructure.map((pos: any) => {
+            const qty = Math.max(1, Number(pos.qty) || 1);
+            const cov = String(pos.coverageType || '').toLowerCase();
+            const is24h = cov === '24hs' || cov === '24' || cov === '24h';
+            const bandsPerDay = is24h ? 3 : Math.max(1, (pos.shifts || []).length);
+            const slotsPerDay = qty * bandsPerDay;
+            const needed = is24h ? Math.ceil(slotsPerDay * FACTOR) : slotsPerDay;
+            return { positionName: pos.positionName, qty, is24h, bandsPerDay, needed };
+        });
+        const totalNeeded = perPos.reduce((s: number, p: any) => s + p.needed, 0);
+        return { perPos, totalNeeded };
+    }, [positionStructure]);
+
     // Colchón disponible (horas): si hoy se ausenta alguien, ¿cuánto se podría cubrir
     // promoviendo RETs a turno facturable sin pasar 200h por empleado?
     // Estimación: 8h por RET (turno típico), limitada por la capacidad restante de
@@ -4263,21 +4280,36 @@ export default function PlanificacionPage() {
         employeesForRows?: typeof displayedEmployees,
     ) => {
         const gridEmployees = employeesForRows ?? displayedEmployees;
-        const headerRowSpan = hasSlaExcludedDatesInMonth ? 3 : 2;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 <tr className="h-6">
-                    <th rowSpan={headerRowSpan} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
                         {selectedObjective && !isSnapshotView && (
                             <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva)">
                                 {planningDotacionEmployees.length} c/ turno
                             </span>
                         )}
+                        {selectedObjective && !isSnapshotView && staffingReq6x2 && (() => {
+                            const avail = planningDotacionEmployees.length;
+                            const needed = staffingReq6x2.totalNeeded;
+                            const ok = avail >= needed;
+                            const tooltip = staffingReq6x2.perPos
+                                .map((p: any) => `${p.positionName} (×${p.qty}${p.is24h ? ' 24hs' : ''}): ${p.needed} emp`)
+                                .join('\n') + `\nTotal 6+2: ${needed} · Dotación: ${avail}`;
+                            return (
+                                <span
+                                    className={`block text-[8px] font-bold mt-0.5 ${ok ? 'text-emerald-600' : 'text-rose-600'}`}
+                                    title={tooltip}
+                                >
+                                    {ok ? '✓' : '↑'} 6+2: {needed} nec · {avail} asig
+                                </span>
+                            );
+                        })()}
                         {hasSlaExcludedDatesInMonth && !isSnapshotView && (
-                            <span className="block text-[7px] font-bold text-rose-500 mt-1 leading-tight" title="Columnas con marca EX: hay puestos sin servicio ese día (Servicios → Días excluidos)">
-                                ⊘ = excl. SLA
+                            <span className="block text-[7px] font-bold text-rose-500 mt-1 leading-tight" title="En el número del día aparece el puesto excluido (Servicios → Días excluidos)">
+                                ⊘ = sin servicio SLA
                             </span>
                         )}
                         <div
@@ -4307,15 +4339,14 @@ export default function PlanificacionPage() {
                         const excludedNames = excludedPositionsByDate[dateStr];
                         const hasExclusion = !!excludedNames?.length;
                         return (
-                            <th key={`dw_${d.toISOString()}`} className={`min-w-[25px] border-b border-r p-1 text-center ${hasExclusion ? 'bg-rose-100/90 dark:bg-rose-950/40 border-t-2 border-t-rose-400' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'dark:border-slate-700'}`}
+                            <th key={`dw_${d.toISOString()}`} className={`min-w-[25px] border-b border-r p-1 text-center ${hasExclusion ? 'border-t-2 border-t-rose-400' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'dark:border-slate-700'}`}
                                 title={hasExclusion ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}>
-                                <span className={`text-[9px] font-black ${hasExclusion ? 'text-rose-700 dark:text-rose-300' : isWeekend ? 'text-rose-500 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{letter}</span>
-                                {hasExclusion && <span className="block text-[6px] font-black text-rose-600 leading-none mt-0.5">EX</span>}
+                                <span className={`text-[9px] font-black ${hasExclusion ? 'text-rose-600 dark:text-rose-400' : isWeekend ? 'text-rose-500 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{letter}</span>
                             </th>
                         );
                     })}
                 </tr>
-                <tr className="h-10">
+                <tr className={hasSlaExcludedDatesInMonth ? 'h-11' : 'h-10'}>
                     {daysInMonth.map((d, dayIndex) => {
                         const dateStr = getDateKey(d);
                         const isSource = columnSelectMode && columnSelectSource === dayIndex;
@@ -4331,14 +4362,14 @@ export default function PlanificacionPage() {
                                 onMouseEnter={() => !isSnapshotView && handleDayHeaderMouseEnter(dayIndex)}
                                 onMouseUp={handleDayHeaderMouseUpOrLeave}
                                 onMouseLeave={handleDayHeaderMouseUpOrLeave}
-                                className={`min-w-[25px] border-b border-r p-1 text-center select-none cursor-pointer transition-colors
-                                    ${isSource ? 'bg-indigo-600 text-white' : isInSel && columnSelectMode ? 'bg-indigo-100 dark:bg-indigo-900/40' : hasExclusion ? 'bg-rose-100/80 dark:bg-rose-950/35 ring-1 ring-inset ring-rose-300/60' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'hover:bg-slate-100 dark:hover:bg-slate-700 dark:border-slate-700'}`}
+                                className={`min-w-[25px] border-b-2 border-r p-0.5 text-center select-none cursor-pointer transition-colors
+                                    ${isSource ? 'bg-indigo-600 text-white' : isInSel && columnSelectMode ? 'bg-indigo-100 dark:bg-indigo-900/40' : hasExclusion ? 'bg-rose-100/90 dark:bg-rose-950/40 border-b-rose-300 dark:border-rose-800' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'hover:bg-slate-100 dark:hover:bg-slate-700 dark:border-slate-700 border-b-slate-200'}`}
                                 title={columnSelectMode ? (isSource ? 'Clic para cancelar copia' : 'Clic para extender destino') : exTitle || 'Clic para copiar este día'}
                             >
-                                <span className={`text-[10px] font-bold ${isSource ? 'text-white' : hasExclusion ? 'text-rose-800 dark:text-rose-200 font-black' : isWeekend ? 'text-rose-600 dark:text-rose-400 font-black' : 'dark:text-slate-300'}`}>{d.getDate()}</span>
+                                <span className={`text-[10px] font-bold leading-none ${isSource ? 'text-white' : hasExclusion ? 'text-rose-800 dark:text-rose-200 font-black' : isWeekend ? 'text-rose-600 dark:text-rose-400 font-black' : 'dark:text-slate-300'}`}>{d.getDate()}</span>
                                 {hasExclusion && !isSource && (
-                                    <div className="text-[6px] font-black text-rose-600 dark:text-rose-300 leading-none mt-0.5 truncate max-w-[22px] mx-auto" title={exTitle}>
-                                        ⊘
+                                    <div className="text-[6px] font-black text-rose-700 dark:text-rose-300 leading-tight mt-0.5 truncate max-w-[26px] mx-auto px-0.5" title={exTitle}>
+                                        ⊘ {excludedPositionsCellLabel(excludedNames)}
                                     </div>
                                 )}
                                 {isSource && <div className="text-[7px] font-black opacity-80 leading-none mt-0.5">ORIG</div>}
@@ -4346,27 +4377,6 @@ export default function PlanificacionPage() {
                         );
                     })}
                 </tr>
-                {hasSlaExcludedDatesInMonth && (
-                    <tr className="h-5 bg-rose-50/90 dark:bg-rose-950/30">
-                        {daysInMonth.map((d) => {
-                            const dateStr = getDateKey(d);
-                            const excludedNames = excludedPositionsByDate[dateStr] || [];
-                            return (
-                                <th
-                                    key={`ex_${d.toISOString()}`}
-                                    className={`min-w-[25px] border-b-2 border-rose-200 dark:border-rose-900 border-r p-0.5 text-center ${excludedNames.length ? 'bg-rose-100/90 dark:bg-rose-950/40' : ''}`}
-                                    title={excludedNames.length ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}
-                                >
-                                    {excludedNames.length > 0 && (
-                                        <span className="text-[6px] font-black text-rose-700 dark:text-rose-300 leading-tight block truncate px-0.5">
-                                            {excludedPositionsCellLabel(excludedNames)}
-                                        </span>
-                                    )}
-                                </th>
-                            );
-                        })}
-                    </tr>
-                )}
             </thead>
             <tbody>
                 {gridEmployees.map((emp, idx) => {
@@ -4560,32 +4570,6 @@ export default function PlanificacionPage() {
                 })}
             </tbody>
             <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
-                {hasSlaExcludedDatesInMonth && (
-                <tr className="bg-rose-50/95 dark:bg-rose-950/40 border-b border-rose-200">
-                    <td className="sticky left-0 z-40 bg-rose-50 dark:bg-rose-950/50 p-1.5 border-r border-rose-200 font-black text-[8px] uppercase text-rose-700 dark:text-rose-300 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]" style={{ width: nameColWidth, minWidth: nameColWidth }} title="Puestos sin servicio según SLA (Servicios → Días excluidos)">
-                        <span className="flex items-center gap-1"><Ban size={10}/> Excl. SLA</span>
-                    </td>
-                    {daysInMonth.map(day => {
-                        const dateStr = getDateKey(day);
-                        const excludedNames = excludedPositionsByDate[dateStr] || [];
-                        return (
-                            <td
-                                key={`exfoot_${dateStr}`}
-                                className={`text-center border-r border-rose-100 dark:border-rose-900/50 px-0.5 py-1 ${excludedNames.length ? 'bg-rose-100/90 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200' : 'text-slate-300'}`}
-                                title={excludedNames.length ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}
-                            >
-                                {excludedNames.length > 0 ? (
-                                    <span className="text-[7px] font-black leading-tight block truncate">
-                                        {excludedPositionsCellLabel(excludedNames)}
-                                    </span>
-                                ) : (
-                                    <span className="text-[8px] text-slate-300">·</span>
-                                )}
-                            </td>
-                        );
-                    })}
-                </tr>
-                )}
                 <tr>
                     <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
@@ -4832,7 +4816,7 @@ export default function PlanificacionPage() {
             </div>
             <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 z-40 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 z-20 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                          <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
                             <div className="flex items-center gap-4">

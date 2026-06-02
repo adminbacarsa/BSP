@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
@@ -79,6 +80,8 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   const [isOnline, setIsOnline] = useState(true);
   const [claimRole, setClaimRole] = useState('');
   const [showEmpresaDrop, setShowEmpresaDrop] = useState(false);
+  const [empresaDropPos, setEmpresaDropPos] = useState<{ x: number; y: number } | null>(null);
+  const empresaBtnRef = useRef<HTMLButtonElement>(null);
   const canSwitchEmpresa = isSuperAdmin || allEmpresas;
 
   useEffect(() => {
@@ -98,6 +101,33 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
       .catch(() => setClaimRole(''));
   }, [user]);
 
+  const repositionEmpresaDrop = useCallback(() => {
+    const rect = empresaBtnRef.current?.getBoundingClientRect();
+    if (rect) setEmpresaDropPos({ x: rect.left, y: rect.bottom + 4 });
+  }, []);
+
+  useEffect(() => {
+    if (!showEmpresaDrop) return;
+    repositionEmpresaDrop();
+    window.addEventListener('scroll', repositionEmpresaDrop, true);
+    window.addEventListener('resize', repositionEmpresaDrop);
+    return () => {
+      window.removeEventListener('scroll', repositionEmpresaDrop, true);
+      window.removeEventListener('resize', repositionEmpresaDrop);
+    };
+  }, [showEmpresaDrop, repositionEmpresaDrop]);
+
+  useEffect(() => {
+    if (!showEmpresaDrop) return;
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (empresaBtnRef.current?.contains(t)) return;
+      setShowEmpresaDrop(false);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [showEmpresaDrop]);
+
   const title = pageHeader.title ?? getTitleByPath(router.pathname) ?? 'Panel';
   const operatorName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'Usuario';
   const roleLabel = isSuperAdmin ? 'SuperAdmin' : (authUserRole || claimRole || 'Operador');
@@ -105,7 +135,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
 
   return (
     <div
-      className="shadow-sm border-b sticky z-30"
+      className="shadow-sm border-b sticky z-50"
       style={{ backgroundColor: 'var(--topbar-bg)', borderColor: 'var(--topbar-border)', color: 'var(--topbar-text)', top: 0 }}
     >
       {isEmulator && (
@@ -145,7 +175,17 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
         {empresa && (
           <div className="relative shrink-0">
             <button
-              onClick={() => canSwitchEmpresa && setShowEmpresaDrop(d => !d)}
+              ref={empresaBtnRef}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!canSwitchEmpresa) return;
+                if (showEmpresaDrop) {
+                  setShowEmpresaDrop(false);
+                } else {
+                  repositionEmpresaDrop();
+                  setShowEmpresaDrop(true);
+                }
+              }}
               className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border transition-colors max-w-[100px] sm:max-w-[140px]"
               style={canSwitchEmpresa ? {
                 backgroundColor: 'var(--company-primary, #4f46e5)',
@@ -158,24 +198,31 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
               <span className="truncate">{empresa.name || empresa.id}</span>
               {canSwitchEmpresa && <ChevronDown size={10} className="shrink-0" />}
             </button>
-            {canSwitchEmpresa && showEmpresaDrop && (
-              <div className="absolute left-0 top-full mt-1 z-50 border rounded-xl shadow-xl min-w-[180px] max-h-64 overflow-y-auto"
-                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                {empresas.filter(e => e.active !== false).map(e => (
-                  <button
-                    key={e.id}
-                    onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}
-                    className="w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl last:rounded-b-xl border-b last:border-0"
-                    style={{
-                      backgroundColor: e.id === empresaId ? 'var(--company-primary, #6366f1)' : undefined,
-                      color: e.id === empresaId ? '#fff' : 'var(--txt)',
-                      borderColor: 'var(--border)',
-                    }}
-                  >
-                    {e.name || e.id}
-                  </button>
-                ))}
-              </div>
+            {canSwitchEmpresa && showEmpresaDrop && empresaDropPos && typeof document !== 'undefined' && createPortal(
+              <>
+                <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowEmpresaDrop(false)} />
+                <div
+                  className="fixed z-[9999] border rounded-xl shadow-xl min-w-[180px] max-h-64 overflow-y-auto"
+                  style={{ left: empresaDropPos.x, top: empresaDropPos.y, backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {empresas.filter(e => e.active !== false).map(e => (
+                    <button
+                      key={e.id}
+                      onClick={() => { switchEmpresa(e.id); setShowEmpresaDrop(false); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl last:rounded-b-xl border-b last:border-0"
+                      style={{
+                        backgroundColor: e.id === empresaId ? 'var(--company-primary, #6366f1)' : undefined,
+                        color: e.id === empresaId ? '#fff' : 'var(--txt)',
+                        borderColor: 'var(--border)',
+                      }}
+                    >
+                      {e.name || e.id}
+                    </button>
+                  ))}
+                </div>
+              </>,
+              document.body,
             )}
           </div>
         )}
@@ -456,7 +503,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className="absolute top-0 left-0 right-0 h-2 z-50 cursor-n-resize"
             onMouseEnter={() => setTopbarVisible(true)} />
           <div
-            className={`absolute top-0 left-0 right-0 z-40 transition-transform duration-200 ease-out shadow-2xl ${topbarVisible ? 'translate-y-0' : '-translate-y-full'}`}
+            className={`absolute top-0 left-0 right-0 z-[100] transition-transform duration-200 ease-out shadow-2xl ${topbarVisible ? 'translate-y-0' : '-translate-y-full'}`}
             onMouseLeave={() => setTopbarVisible(false)}
           >
             <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
