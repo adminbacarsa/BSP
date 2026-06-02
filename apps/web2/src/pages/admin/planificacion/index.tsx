@@ -806,6 +806,15 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, slaIdToObjId, activeGuestIdsForObjective]);
 
+    /** Dotación propia del objetivo (sin invitados ni cobertura de otro servicio). */
+    const isEmployeeNativeToObjective = useCallback((e: { preferredObjectiveId?: string }) => {
+        if (!selectedObjective || !e?.preferredObjectiveId) return false;
+        return (
+            e.preferredObjectiveId === selectedObjective ||
+            slaIdToObjId[e.preferredObjectiveId] === selectedObjective
+        );
+    }, [selectedObjective, slaIdToObjId]);
+
     const clearNearbyCustomOrder = useCallback(() => {
         if (!selectedObjective) return;
         setCustomOrderMap(m => {
@@ -1138,6 +1147,7 @@ export default function PlanificacionPage() {
             return { empCountWithTurnos: 0, empCountBillable: 0, totalRetDays: 0 };
         }
         displayedEmployees.forEach((emp: any) => {
+            if (!isEmployeeNativeToObjective(emp)) return;
             daysInMonth.forEach(day => {
                 const dateStr = getDateKey(day);
                 const activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
@@ -1159,7 +1169,7 @@ export default function PlanificacionPage() {
             empCountBillable: withBillableHours.size,
             totalRetDays,
         };
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, isEmployeeNativeToObjective]);
 
     const retCount = useMemo(() => objectiveMonthShiftMetrics.totalRetDays, [objectiveMonthShiftMetrics.totalRetDays]);
 
@@ -4487,12 +4497,13 @@ export default function PlanificacionPage() {
     );
 
     const avgHoursPerEmployee = useMemo(() => {
-        if (!monthPlannedHours) return 0;
         const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
         const empWithHours = new Set<string>();
+        let nativePlannedHours = 0;
         daysInMonth.forEach((day) => {
             const dateStr = getDateKey(day);
             displayedEmployees.forEach((emp: any) => {
+                if (!isEmployeeNativeToObjective(emp)) return;
                 const key = `${emp.id}_${dateStr}`;
                 const pending = pendingChanges[key];
                 const existing = shiftsMap[key];
@@ -4501,13 +4512,17 @@ export default function PlanificacionPage() {
                 const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
                 if (!shiftObjective || shiftObjective !== selectedObjective) return;
                 if (!isWorkingCode(activeShift.code)) return;
-                if (calcShiftHours(activeShift) > 0) empWithHours.add(emp.id);
+                const h = calcShiftHours(activeShift);
+                if (h > 0) {
+                    empWithHours.add(emp.id);
+                    nativePlannedHours += h;
+                }
             });
         });
         const count = empWithHours.size;
-        if (!count) return 0;
-        return Math.round(monthPlannedHours / count);
-    }, [monthPlannedHours, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
+        if (!count || !nativePlannedHours) return 0;
+        return Math.round(nativePlannedHours / count);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, isEmployeeNativeToObjective]);
 
     const monthPlannedHoursByPosition = useMemo(() => {
         const map: Record<string, number> = {};
@@ -5700,6 +5715,9 @@ export default function PlanificacionPage() {
                 {selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
+                    const nativeAssignedHours = displayedEmployees
+                        .filter((emp: any) => isEmployeeNativeToObjective(emp))
+                        .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
                     const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
@@ -5726,9 +5744,9 @@ export default function PlanificacionPage() {
                             )}
                         </div>
                         {empCountBillable > 0 && (
-                            <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado con horas facturables en el ciclo CCT (excluye guardias solo-RET).' : 'Promedio de horas por empleado con horas facturables en el mes (excluye guardias solo-RET).'}>
+                            <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado de dotación propia del objetivo en el ciclo CCT (excluye invitados/cobertura externa y guardias solo-RET).' : 'Promedio de horas por empleado de dotación propia del objetivo en el mes (excluye invitados/cobertura externa y guardias solo-RET).'}>
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Prom./Emp.</p>
-                                <p className="text-sm font-black text-slate-500 dark:text-slate-300 leading-tight">{Math.round(totalHrs / empCountBillable)}h</p>
+                                <p className="text-sm font-black text-slate-500 dark:text-slate-300 leading-tight">{Math.round(nativeAssignedHours / empCountBillable)}h</p>
                             </div>
                         )}
                         {retCount > 0 && (

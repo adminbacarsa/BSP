@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift } from '@/hooks/useReportes';
 import { useAuth } from '@/context/AuthContext';
 
 // --- ESTILOS DE IMPRESIÓN (MANTENIDOS) ---
@@ -72,7 +72,7 @@ export default function ReportsPage() {
     const {
         loading, dateRange, setDateRange, generateReports, loadAudit,
         employeeReport, objectiveReport, auditLogs,
-        objMap, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
+        objMap, empMap, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
     } = useReportes(assignedClientId);
 
     const [activeTab, setActiveTab] = useState<'EMPLOYEE' | 'OBJECTIVE' | 'AUDIT' | 'SHIFTS' | 'PLANIFICADO'>('EMPLOYEE');
@@ -261,9 +261,9 @@ export default function ReportsPage() {
                                                                         {[...(row.rawShifts || [])].sort((a: any, b: any) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0)).map((s: any) => {
                                                                             const start = s.startTime?.seconds ? new Date(s.startTime.seconds * 1000) : null;
                                                                             const end = s.endTime?.seconds ? new Date(s.endTime.seconds * 1000) : null;
-                                                                            const dur = start && end ? (end.getTime() - start.getTime()) / 3600000 : 0;
+                                                                            const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
                                                                             const night = start && end ? getNightDuration(start, end) : 0;
-                                                                            const isVacant = !s.employeeName;
+                                                                            const isVacant = isReportVacancyShift(s, empMap);
                                                                             const rStart = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
                                                                             const rEnd   = s.realEndTime?.seconds   ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null;
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;

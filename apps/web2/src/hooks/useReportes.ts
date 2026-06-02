@@ -114,6 +114,91 @@ function shiftCalendarDateKey(shift: any): string {
     return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
 
+const REPORT_VIRTUAL_VACANCY_ORIGINS = new Set(['SLA_VIRTUAL', 'INTERRUPTION']);
+
+export function isReportVacancyShift(shift: any, empMap: Record<string, string>): boolean {
+    const eid = String(shift?.employeeId || '').trim();
+    const empName = String(shift?.employeeName || '').trim().toUpperCase();
+    if (!eid || eid === 'VACANTE') return true;
+    if (empName === 'VACANTE' || empName.startsWith('VACANTE:')) return true;
+    if (shift?.isUnassigned === true) return true;
+    return !empMap[eid];
+}
+
+function objectiveReportSlotKey(shift: any): string {
+    const start = shift?.startTime?.toDate?.();
+    if (!start) return `id:${shift?.id || '?'}`;
+    const dk = getArgentinaDate(shift.startTime);
+    const pos = String(shift?.positionName || 'general').trim().toLowerCase();
+    const code = String(shift?.code || '-').trim().toUpperCase();
+    const startMin = start.getHours() * 60 + start.getMinutes();
+    return `${dk}|${pos}|${code}|${startMin}`;
+}
+
+function registerSlaSlotCapacity(
+    caps: Record<string, number>,
+    objectiveId: string,
+    sla: { positions?: unknown },
+) {
+    if (!objectiveId || !sla?.positions) return;
+    const positions = Array.isArray(sla.positions)
+        ? sla.positions
+        : Object.values(sla.positions as Record<string, unknown>);
+    for (const raw of positions) {
+        const pos = raw as { name?: string; positionName?: string; quantity?: number; qty?: number; allowedShiftTypes?: unknown[]; shifts?: unknown[] };
+        const posName = String(pos.name || pos.positionName || 'general').trim().toLowerCase();
+        const qty = Math.max(1, Number(pos.quantity ?? pos.qty) || 1);
+        const slots = pos.allowedShiftTypes ?? pos.shifts ?? [];
+        if (!Array.isArray(slots) || slots.length === 0) continue;
+        for (const slot of slots) {
+            const s = slot as { code?: string };
+            const code = String(s.code || '').trim().toUpperCase();
+            if (!code) continue;
+            const key = `${objectiveId}|${posName}|${code}`;
+            caps[key] = Math.max(caps[key] || 0, qty);
+        }
+    }
+}
+
+/** Quita placeholders virtuales y vacantes huérfanas cuando el slot ya está cubierto. */
+export function filterObjectiveReportShifts(
+    shifts: any[],
+    empMap: Record<string, string>,
+    slaSlotCapacity: Record<string, number>,
+    objectiveId: string,
+): any[] {
+    const withoutVirtual = shifts.filter(s =>
+        !REPORT_VIRTUAL_VACANCY_ORIGINS.has(String(s?.origin || '').trim().toUpperCase()),
+    );
+
+    const bySlot = new Map<string, { staffed: any[]; vacant: any[] }>();
+    for (const s of withoutVirtual) {
+        const key = objectiveReportSlotKey(s);
+        const bucket = bySlot.get(key) || { staffed: [], vacant: [] };
+        if (isReportVacancyShift(s, empMap)) bucket.vacant.push(s);
+        else bucket.staffed.push(s);
+        bySlot.set(key, bucket);
+    }
+
+    const keepIds = new Set<string>();
+    for (const [slotKey, bucket] of bySlot.entries()) {
+        for (const s of bucket.staffed) keepIds.add(s.id);
+
+        const parts = slotKey.split('|');
+        const pos = parts[1] || 'general';
+        const code = parts[2] || '-';
+        const capKey = `${objectiveId}|${pos}|${code}`;
+        const required = slaSlotCapacity[capKey] || 0;
+        const maxVacant = required > 0
+            ? Math.max(0, required - bucket.staffed.length)
+            : (bucket.staffed.length > 0 ? 0 : bucket.vacant.length);
+
+        bucket.vacant.slice(0, maxVacant).forEach(s => keepIds.add(s.id));
+    }
+
+    return withoutVirtual.filter(s => keepIds.has(s.id));
+}
+
 /** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
 export function resolveShiftDurationHours(
     shift: {
@@ -468,6 +553,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             // Cargar contratos de servicio para cruzar Hs. Vendidas por objetivo
             const slaSnap = await getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>);
             const slaMap: Record<string, number> = {};
+            const slaSlotCapacity: Record<string, number> = {};
             const slaObjectiveMetas = new Map<string, ObjectiveMeta>();
             const aliasLookup: Record<string, ObjectiveMeta> = { ...objectiveAliases };
 
@@ -514,6 +600,7 @@ export const useReportes = (forcedClientId?: string | null) => {
 
                 slaObjectiveMetas.set(canonicalId, meta);
                 slaMap[canonicalId] = Math.max(slaMap[canonicalId] || 0, sla.totalMonthlyHours || 0);
+                registerSlaSlotCapacity(slaSlotCapacity, canonicalId, sla);
                 registerObjectiveMetaAliases(aliasLookup, meta, [...matchKeys, d.id]);
             });
 
@@ -672,6 +759,15 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (s.clientId) objGroups[objId].clientId = s.clientId;
             });
 
+            for (const objId of Object.keys(objGroups)) {
+                objGroups[objId].shifts = filterObjectiveReportShifts(
+                    objGroups[objId].shifts,
+                    empMap,
+                    slaSlotCapacity,
+                    objId,
+                );
+            }
+
             const allObjectiveIds = new Set<string>([
                 ...slaObjectiveMetas.keys(),
                 ...Object.keys(objGroups),
@@ -699,13 +795,10 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (!meta.client || meta.client === 'Sin Cliente') return null;
 
                 const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
-                const staffedShifts = data.shifts.filter((s: any) => !!empMap[s.employeeId]);
-                const vacantRawShifts = data.shifts.filter((s: any) => !empMap[s.employeeId]);
-                const vacantHours = vacantRawShifts.reduce((acc: number, s: any) => {
-                    if (!s.startTime?.seconds || !s.endTime?.seconds) return acc;
-                    const dur = (s.endTime.seconds - s.startTime.seconds) / 3600;
-                    return acc + Math.max(0, Math.min(dur, 24));
-                }, 0);
+                const staffedShifts = data.shifts.filter((s: any) => !isReportVacancyShift(s, empMap));
+                const vacantRawShifts = data.shifts.filter((s: any) => isReportVacancyShift(s, empMap));
+                const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
+                    acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
                 const stats = calculateStatsExact(
                     staffedShifts.filter((s: any) => isObjectiveBillableCode(s.code)),
                     holidaysData,
@@ -781,6 +874,7 @@ export const useReportes = (forcedClientId?: string | null) => {
         objectiveReport,
         auditLogs,
         objMap,
+        empMap,
         holidaysData,
         SHIFT_HOURS_LOOKUP,
         OPERATIVE_CODES
