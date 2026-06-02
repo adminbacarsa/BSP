@@ -27,6 +27,9 @@ function mayUseFrancoWorkedRescue(ctx: V2EngineContext): boolean {
 }
 
 function mayConvertFrancoToWork(ctx: V2EngineContext): boolean {
+    // noFlexSchemeEmployees = true significa ciclo 6+2 puro: F nunca se convierte en turno,
+    // incluso si hay un gap estructural de horas. El gap queda como slot sin cubrir.
+    if (ctx.noFlexSchemeEmployees === true) return false;
     return ctx.strictSixTwo !== true;
 }
 
@@ -796,6 +799,9 @@ function tryClosePositionDayWith12hAlternate(
 ): boolean {
     const { ctx, assignments } = params;
     if (isModo12Day(dateStr, ctx)) return false;
+    // En ciclo 6+2 puro (noFlexSchemeEmployees) no subir a D12/N12 para cerrar gaps estructurales:
+    // el gap queda como slot sin cubrir; el usuario decide ajustar o agregar personal.
+    if (ctx.noFlexSchemeEmployees === true || ctx.strictSixTwo === true) return false;
     if (!pd.alternateBandSlots?.D12 || !pd.alternateBandSlots?.N12) return false;
     const qty = Math.max(1, Number(pos.qty) || 1);
     if (!positionDayMtnGap(assignments, dateStr, pd, qty)) return false;
