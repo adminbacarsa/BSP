@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES } from '@/hooks/useReportes';
 import { useAuth } from '@/context/AuthContext';
 
 // --- ESTILOS DE IMPRESIÓN (MANTENIDOS) ---
@@ -87,6 +87,7 @@ export default function ReportsPage() {
     const [detailFilterEmployee, setDetailFilterEmployee] = useState('');
     const [detailFilterObjective, setDetailFilterObjective] = useState('');
     const [detailFilterStatus, setDetailFilterStatus] = useState('');
+    const [leavePopoverId, setLeavePopoverId] = useState<string | null>(null);
     const [currentUserName, setCurrentUserName] = useState("Cargando...");
     const [expandedObjective, setExpandedObjective] = useState<string | null>(null);
     const [objFilterClient, setObjFilterClient] = useState<string>('');
@@ -553,23 +554,26 @@ export default function ReportsPage() {
 
         const NON_WORK_CODES_DETAIL = new Set(['F','FF','V','L','PG','A','E','AA','FP']);
 
+        const LEAVE_DETAIL_CODES = new Set(['V', 'L', 'PG', 'E', 'A', 'AA']);
+
         // — Opciones para dropdowns —
-        const allStatuses = [...new Set((detailItem.rawShifts || []).map((s:any) => s.status).filter(Boolean))].sort();
-        const allObjectivesDetail = [...new Set((detailItem.rawShifts || []).map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
-        const allEmployeesDetail = [...new Set((detailItem.rawShifts || []).map((s:any) => s.employeeName).filter(Boolean))].sort();
+        const baseShifts = dedupeShiftsByAbsencePriority(detailItem.rawShifts || []);
+        const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
+        const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
+        const allEmployeesDetail = [...new Set(baseShifts.map((s:any) => s.employeeName).filter(Boolean))].sort();
 
         // — Aplicar filtros a los turnos crudos —
         const now = new Date();
-        const filteredRawShifts = (detailItem.rawShifts || []).filter((s:any) => {
+        const filteredRawShifts = baseShifts.filter((s:any) => {
             const startSec = s.startTime?.seconds ?? s.startTime?._seconds ?? 0;
             const start = new Date(startSec * 1000);
 
-            // Excluir turnos futuros sin estado real: solo mostrar iniciados, completados o ausentes
-            const hasRealStatus = s.isCompleted || s.isPresent || s.isAbsent
+            const code = String(s.code || '').toUpperCase();
+            const hasRealStatus = s.isCompleted || s.isPresent
                 || s.checkInTime?.seconds || s.realStartTime?.seconds
                 || (s.status || '').toUpperCase() === 'COMPLETED'
                 || (s.status || '').toUpperCase() === 'PRESENT'
-                || (s.status || '').toLowerCase().includes('absent');
+                || LEAVE_DETAIL_CODES.has(code) || s.type === 'NOVEDAD';
             if (start > now && !hasRealStatus) return false;
 
             const hhmm = `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`;
@@ -644,6 +648,11 @@ export default function ReportsPage() {
                     isCompleted,
                     isPresent,
                     isAbsent,
+                    _absenceStatus: s._absenceStatus,
+                    _absenceReason: s._absenceReason,
+                    _absenceType: s._absenceType,
+                    _coveredBy: s._coveredBy,
+                    isLeaveDay: LEAVE_REPORT_CODES.has(rawCode) || rawCode === 'V',
                 };
             });
 
@@ -661,7 +670,7 @@ export default function ReportsPage() {
         const horasSimples = Math.min(horasParaBolsa, 200);
 
         return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => setDetailItem(null)}>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }}>
                 <div className="bg-white w-full max-w-[95vw] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                     <div className="p-6 bg-slate-50 border-b">
                         <div className="flex justify-between items-start mb-4">
@@ -671,7 +680,7 @@ export default function ReportsPage() {
                                     <Users size={24} className="text-indigo-600"/> {detailItem.name}
                                 </h2>
                             </div>
-                            <button onClick={() => setDetailItem(null)} className="p-2 bg-white rounded-full border hover:bg-slate-100"><X size={20}/></button>
+                            <button onClick={() => { setDetailItem(null); setLeavePopoverId(null); }} className="p-2 bg-white rounded-full border hover:bg-slate-100"><X size={20}/></button>
                         </div>
                         {/* Filtros */}
                         <div className="flex flex-wrap gap-2 items-center">
@@ -732,7 +741,8 @@ export default function ReportsPage() {
                             <tbody className="divide-y divide-slate-100">
                                 {rowsWithData.map((row:any) => {
                                     const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-                                    const isLicenciaRow = ['L','PG'].includes(row.code);
+                                    const isLicenciaRow = ['L','PG','E','A'].includes(row.code);
+                                    const isLeaveClickable = ['E','L','PG','A'].includes(row.code);
                                 const detailCodeStyle = row.code === 'PG' ? 'bg-blue-100 text-blue-700 border-blue-300'
                                     : row.code === 'RET' ? 'bg-amber-100 text-amber-800 border-amber-300'
                                     : row.isFT ? 'bg-violet-100 text-violet-700 border-violet-200'
@@ -742,16 +752,37 @@ export default function ReportsPage() {
                                 return (
                                     <tr key={row.id} className={`hover:bg-indigo-50/50 ${isLicenciaRow ? 'bg-blue-50/40 border-l-4 border-l-blue-300' : ''} ${row.hasOvertime ? 'bg-orange-50/30' : ''}`}>
                                         <td className="py-2 px-3 font-bold text-slate-700 whitespace-nowrap">{formatDate({seconds: row.date.getTime()/1000})}</td>
-                                        <td className="py-2 px-3 text-slate-500 font-mono whitespace-nowrap">{fmt(row.date)}{row.endDate ? `–${fmt(row.endDate)}` : ''}</td>
+                                        <td className="py-2 px-3 text-slate-500 font-mono whitespace-nowrap">
+                                            {row.isLeaveDay ? <span className="text-slate-300">—</span> : `${fmt(row.date)}${row.endDate ? `–${fmt(row.endDate)}` : ''}`}
+                                        </td>
                                         <td className="py-2 px-3 font-mono whitespace-nowrap">
                                             {row.rStart && row.rEnd
                                                 ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
                                                 : <span className="text-slate-300">—</span>}
                                         </td>
-                                        <td className="py-2 px-3 text-center">
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase border ${detailCodeStyle}`}>
-                                                {row.code}
-                                            </span>
+                                        <td className="py-2 px-3 text-center relative">
+                                            {isLeaveClickable ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); setLeavePopoverId(leavePopoverId === row.id ? null : row.id); }}
+                                                    className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase border cursor-pointer hover:ring-2 hover:ring-indigo-300 ${detailCodeStyle}`}
+                                                    title="Ver detalle de licencia"
+                                                >
+                                                    {row.code}
+                                                </button>
+                                            ) : (
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase border ${detailCodeStyle}`}>
+                                                    {row.code}
+                                                </span>
+                                            )}
+                                            {leavePopoverId === row.id && (
+                                                <div className="absolute z-20 left-1/2 -translate-x-1/2 top-full mt-1 w-60 bg-white border border-slate-200 rounded-lg shadow-xl p-3 text-left text-[10px] normal-case font-normal" onClick={e => e.stopPropagation()}>
+                                                    <p className="font-black text-slate-700 uppercase text-[9px] mb-2">Novedad RRHH</p>
+                                                    <p className="text-slate-600"><span className="font-bold text-slate-500">Tipo:</span> {row._absenceType || (row.code === 'E' ? 'Enfermedad' : row.code === 'L' ? 'Licencia' : row.code === 'PG' ? 'Permiso gremial' : 'Ausencia')}</p>
+                                                    {row._absenceReason && <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Motivo:</span> {row._absenceReason}</p>}
+                                                    <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubierto por:</span> {row._coveredBy || 'Sin cobertura registrada'}</p>
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="py-2 px-3 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
                                         <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.rDur != null ? 'text-indigo-600' : 'text-slate-300'}`}>
@@ -766,15 +797,23 @@ export default function ReportsPage() {
                                         <td className="py-2 px-3 text-center whitespace-nowrap">
                                             {row.swapWith && <span className="text-[9px] bg-amber-50 text-amber-600 px-1 rounded border border-amber-100 mr-1">🔁 {row.swapWith}</span>}
                                             {(() => {
-                                                const NON_WORK_LABELS: Record<string,string> = { F:'Franco', FF:'Franco Comp.', V:'Vacaciones', L:'Licencia', PG:'Perm. Gremial', A:'Aus. Just.', E:'Enfermedad', AA:'Aus. Injust.', FP:'Franco Esp.', RET:'Retén' };
-                                                const labelStyle = ['L','PG'].includes(row.code) ? 'text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black border border-blue-200' : row.code === 'RET' ? 'text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black border border-amber-300' : 'text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold';
+                                                if (row.code === 'V') return <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold border border-emerald-200">Vacaciones</span>;
+                                                if (['E','L','PG','A','AA'].includes(row.code)) {
+                                                    const label = row.code === 'AA' ? 'Injustificada' : mapAbsenceStatusLabel(row._absenceStatus);
+                                                    const cls = label === 'Justificada' ? 'bg-emerald-100 text-emerald-700'
+                                                        : label === 'Injustificada' ? 'bg-rose-100 text-rose-700'
+                                                        : 'bg-violet-100 text-violet-700';
+                                                    return <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${cls}`}>{label}</span>;
+                                                }
+                                                const NON_WORK_LABELS: Record<string,string> = { F:'Franco', FF:'Franco Comp.', FP:'Franco Esp.', RET:'Retén' };
+                                                const labelStyle = row.code === 'RET' ? 'text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black border border-amber-300' : 'text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold';
                                                 if (NON_WORK_LABELS[row.code]) return <span className={labelStyle}>{NON_WORK_LABELS[row.code]}</span>;
                                                 if (row.hasOvertime) return <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">Extendido +{(row.rDur - row.total).toFixed(1)}h</span>;
                                                 if (row.isCompleted) return <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">Completado</span>;
                                                 if (row.isPresent) return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold animate-pulse">En servicio</span>;
                                                 if (row.rDur != null) return <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">Completado</span>;
                                                 if (row.isAbsent) return <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">Ausente</span>;
-                                                return <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">Ausente</span>;
+                                                return <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">Pendiente</span>;
                                             })()}
                                         </td>
                                     </tr>

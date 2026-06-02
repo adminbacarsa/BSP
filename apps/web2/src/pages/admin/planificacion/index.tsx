@@ -179,7 +179,7 @@ const SHIFT_STYLES: any = {
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
-    'RET': 'bg-white text-amber-800 border-amber-500 font-black',
+    'RET': 'bg-white text-slate-500 border border-slate-300 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
@@ -225,6 +225,30 @@ const SHIFT_RANGES: Record<string, string> = {
     'N12': '19:00 - 07:00',
     'PU': 'Horario Personalizado',
     'FT': 'Cobertura Extra (100%)'
+};
+
+const ABSENCE_STATUS_STYLES: Record<string, string> = {
+    'Justificada': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'Autorizada': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'En verificación': 'bg-violet-100 text-violet-700 border-violet-200',
+    'Pendiente': 'bg-amber-100 text-amber-800 border-amber-200',
+    'Injustificada': 'bg-rose-100 text-rose-700 border-rose-200',
+    'Rechazada': 'bg-rose-100 text-rose-700 border-rose-200',
+};
+
+const absenceStatusBadgeClass = (status: string) =>
+    ABSENCE_STATUS_STYLES[status] || 'bg-slate-100 text-slate-600 border-slate-200';
+
+const formatShiftScheduleLabel = (shift: any, bandCode: string): string => {
+    if (typeof shift?.startTime === 'string' && typeof shift?.endTime === 'string') {
+        return `${shift.startTime} - ${shift.endTime}`;
+    }
+    if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
+        const s = formatTime(shift.startTime);
+        const e = formatTime(shift.endTime);
+        if (s !== '--:--' && e !== '--:--' && s !== e) return `${s} - ${e}`;
+    }
+    return SHIFT_RANGES[bandCode] || '—';
 };
 
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
@@ -627,6 +651,7 @@ export default function PlanificacionPage() {
     const [selectedReplacement, setSelectedReplacement] = useState('');
     const [vacancyReplacementSearch, setVacancyReplacementSearch] = useState('');
     const [vacancyReplacementOpen, setVacancyReplacementOpen] = useState(false);
+    const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (showVacancyModal) {
@@ -634,6 +659,14 @@ export default function PlanificacionPage() {
             setVacancyReplacementOpen(false);
         }
     }, [showVacancyModal]);
+
+    useEffect(() => {
+        if (!vacancyReplacementOpen) return;
+        const t = window.setTimeout(() => {
+            vacancyReplacementPanelRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }, 50);
+        return () => window.clearTimeout(t);
+    }, [vacancyReplacementOpen]);
     
     const [modifiers, setModifiers] = useState({ extend: false, early: false, plannedNovedad: '' });
 
@@ -1853,6 +1886,7 @@ export default function PlanificacionPage() {
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Presente</span></div>
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Ausente</span></div>
                             <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-white border border-slate-300 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div></div><span className="text-[10px] font-bold text-slate-600">Conflicto</span></div>
+                            <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${SHIFT_STYLES['RET']}`}>RET</div><span className="text-[10px] font-bold text-slate-600">Retén (disponible)</span></div>
                             <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${OTHER_OBJECTIVE_CELL_STYLE}`}>M</div><span className="text-[10px] font-bold text-slate-600">Otro objetivo</span></div>
                             <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-pink-700 bg-pink-100 border border-pink-200 px-1.5 py-0.5 rounded">♀ F</span><span className="text-[10px] font-bold text-slate-600">Puesto solo femenino</span></div>
                             <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">♂ M</span><span className="text-[10px] font-bold text-slate-600">Puesto solo masculino</span></div>
@@ -4781,7 +4815,9 @@ export default function PlanificacionPage() {
                                         const isOtherObjectiveShift = isShiftAtOtherObjective(s, p, selectedObjective);
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
-                                            style = OTHER_OBJECTIVE_CELL_STYLE;
+                                            style = String(content).toUpperCase() === 'RET'
+                                                ? SHIFT_STYLES['RET']
+                                                : OTHER_OBJECTIVE_CELL_STYLE;
                                         }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
@@ -5888,7 +5924,7 @@ export default function PlanificacionPage() {
                 {/* 1. MODAL SELECTOR DE TURNOS */}
                 {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
-                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[500px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-[540px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
                                 const employeeName = employees.find(e => e.id === selectedCell.empId)?.name || 'Empleado';
                                 const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
@@ -5899,21 +5935,70 @@ export default function PlanificacionPage() {
                                 const isConsolidated = isShiftConsolidated(shift);
                                 const isRRHHCode = ['V', 'L', 'PG', 'A', 'E', 'AA'].includes(code);
                                 const isPastClosed = isDateLocked(selectedCell.dateStr);
-                                // Buscar quién cubrió este turno: primero en coveredBy, luego en comments de otros turnos del mismo día
-                                const coveringEmployee = shift?.coveredBy || (() => {
+                                const objectiveId = (shift?.objectiveId || selectedObjective || '').toString();
+                                const serviceName = shift?.objectiveName || (objectiveId ? getObjectiveName(objectiveId) : '-');
+                                const coveredPosition = (shift?.positionName || activePosition || 'General').toString();
+                                const NON_ABSENCE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'EN', 'FT', 'RET', 'REF', 'ESC', 'C']);
+                                const resolveCoverageForAbsence = () => {
                                     const empName = employees.find(e => e.id === selectedCell.empId)?.name || '';
                                     const dateStr = selectedCell.dateStr;
                                     const allSources = { ...shiftsMap, ...pendingChanges };
-                                    const found = Object.entries(allSources).find(([k, s]: [string, any]) =>
-                                        k.endsWith(`_${dateStr}`) && !k.startsWith(`${selectedCell.empId}_`) &&
-                                        s?.comments?.includes(`Cubriendo a ${empName}`)
-                                    );
-                                    if (!found) return null;
-                                    const covEmpId = found[0].replace(`_${dateStr}`, '');
-                                    const covEmp = employees.find((e: any) => e.id === covEmpId);
-                                    const covShift = (found[1] as any);
-                                    return covEmp ? `${covEmp.name} (${covShift.code || ''})` : null;
-                                })();
+                                    for (const [k, raw] of Object.entries(allSources)) {
+                                        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                        const s = raw as any;
+                                        if (s?.isDeleted) continue;
+                                        if (s?.comments?.includes(`Cubriendo a ${empName}`)) {
+                                            const covEmpId = k.replace(`_${dateStr}`, '');
+                                            const covEmp = employees.find((e: any) => e.id === covEmpId);
+                                            const covCode = String(s.code || '').toUpperCase();
+                                            return {
+                                                employeeName: covEmp?.name || '—',
+                                                code: covCode,
+                                                shift: s,
+                                                objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
+                                            };
+                                        }
+                                    }
+                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy;
+                                    if (coveredByRaw) {
+                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
+                                        return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
+                                    }
+                                    return null;
+                                };
+                                const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
+                                const resolveOriginalWorkShift = () => {
+                                    if (coverageInfo?.shift && coverageInfo.code && NON_ABSENCE_CODES.has(coverageInfo.code)) {
+                                        const h = Number(coverageInfo.shift.hours) || SHIFT_HOURS_LOOKUP[coverageInfo.code] || 8;
+                                        return {
+                                            code: coverageInfo.code,
+                                            label: LEGEND_DESCRIPTIONS[coverageInfo.code] || coverageInfo.code,
+                                            schedule: formatShiftScheduleLabel(coverageInfo.shift, coverageInfo.code),
+                                            hours: h,
+                                            service: coverageInfo.objectiveName || serviceName,
+                                            position: coverageInfo.shift.positionName || coveredPosition,
+                                        };
+                                    }
+                                    const pendingTitular = pending && !pending.isDeleted ? pending : null;
+                                    if (pendingTitular?.coveredBy && code && NON_ABSENCE_CODES.has(code)) {
+                                        const h = Number(pendingTitular.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
+                                        return {
+                                            code,
+                                            label: LEGEND_DESCRIPTIONS[code] || code,
+                                            schedule: formatShiftScheduleLabel(pendingTitular, code),
+                                            hours: h,
+                                            service: serviceName,
+                                            position: coveredPosition,
+                                        };
+                                    }
+                                    return null;
+                                };
+                                const originalWorkShift = (absence || isRRHHCode) ? resolveOriginalWorkShift() : null;
+                                const absenceTypeLabel = absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
+                                const absenceStatusLabel = absence?.status || (isRRHHCode ? 'Registrada' : '');
+                                const coveringEmployee = coverageInfo
+                                    ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
+                                    : (shift?.coveredBy || pending?.coveredBy || null);
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
                                 const isReadOnly = isConsolidated || !!absence || isRRHHCode || isPastClosed || isSwapPersisted;
@@ -5929,14 +6014,11 @@ export default function PlanificacionPage() {
                                 const rawStatus = (shift?.status || '').toString().toUpperCase();
                                 const STATUS_LABELS: Record<string, string> = { PRESENT: 'Presente', COMPLETED: 'Completado', ABSENT: 'Ausente', LATE: 'Tarde', INTERRUPTED: 'Interrumpido', PENDING: 'Pendiente' };
                                 const status = STATUS_LABELS[rawStatus] || rawStatus || '-';
-                                const objectiveId = (shift?.objectiveId || selectedObjective || '').toString();
-                                const serviceName = shift?.objectiveName || (objectiveId ? getObjectiveName(objectiveId) : '-');
                                 const storedHours = Number(shift?.hours);
                                 const calcHoursFromTs = (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string')
                                     ? Math.max(0, (formatTime(shift.endTime) !== '--:--' ? (shift.endTime.toDate ? shift.endTime.toDate().getTime() : new Date(shift.endTime.seconds * 1000).getTime()) - (shift.startTime.toDate ? shift.startTime.toDate().getTime() : new Date(shift.startTime.seconds * 1000).getTime()) : 0)) / 3600000
                                     : 0;
                                 const hours = storedHours || calcHoursFromTs || (code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0);
-                                const coveredPosition = (shift?.positionName || activePosition || 'General').toString();
                                 const showRealTimes = isConsolidated;
 
                                 if (isReadOnly) {
@@ -5973,6 +6055,127 @@ export default function PlanificacionPage() {
                                             </div>
 
                                             <div className="space-y-3">
+                                                {(absence || isRRHHCode) ? (
+                                                    <div className="rounded-xl border-2 border-amber-200 bg-white overflow-hidden shadow-sm">
+                                                        <div className="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
+                                                            <span className="text-[10px] font-black uppercase tracking-wide text-amber-900">Novedad RRHH</span>
+                                                            {absenceStatusLabel && (
+                                                                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border shrink-0 ${absenceStatusBadgeClass(absenceStatusLabel)}`}>
+                                                                    {absenceStatusLabel}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="p-4 space-y-4">
+                                                            <div>
+                                                                <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">1 · Turno que tenía</p>
+                                                                {originalWorkShift ? (
+                                                                    <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
+                                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                                            <span className="font-mono font-black text-sm text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{originalWorkShift.code}</span>
+                                                                            <span className="text-sm font-bold text-slate-800">{originalWorkShift.label}</span>
+                                                                            {originalWorkShift.hours > 0 && (
+                                                                                <span className="text-xs font-mono text-slate-500">{originalWorkShift.hours}h</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <p className="text-xs font-mono text-slate-600 mt-1.5">{originalWorkShift.schedule}</p>
+                                                                        <p className="text-xs text-slate-500 mt-1">
+                                                                            {originalWorkShift.service}
+                                                                            {originalWorkShift.position && originalWorkShift.position !== 'General' && (
+                                                                                <span className="text-slate-400"> · {originalWorkShift.position}</span>
+                                                                            )}
+                                                                        </p>
+                                                                    </div>
+                                                                ) : (
+                                                                    <p className="text-sm text-slate-400 italic">Sin turno de trabajo asignado ese día</p>
+                                                                )}
+                                                            </div>
+
+                                                            <div>
+                                                                <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">2 · Estado</p>
+                                                                <span className={`inline-flex text-xs font-black px-3 py-1.5 rounded-lg border ${absenceStatusBadgeClass(absenceStatusLabel)}`}>
+                                                                    {absenceStatusLabel || '—'}
+                                                                </span>
+                                                            </div>
+
+                                                            <div>
+                                                                <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">3 · Tipo de novedad</p>
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className="text-sm font-black text-slate-800">{absenceTypeLabel}</span>
+                                                                    {code && (
+                                                                        <span className="font-mono text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">{code}</span>
+                                                                    )}
+                                                                </div>
+                                                                {absence?.reason && (
+                                                                    <p className="text-xs text-amber-800/80 mt-1.5 font-medium">{absence.reason}</p>
+                                                                )}
+                                                            </div>
+
+                                                            <div>
+                                                                <p className="text-[10px] font-black uppercase text-slate-400 mb-1.5">4 · Cubierto por</p>
+                                                                {coverageInfo?.employeeName ? (
+                                                                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3">
+                                                                        <p className="text-sm font-black text-emerald-900">{coverageInfo.employeeName}</p>
+                                                                        {coverageInfo.code && (
+                                                                            <p className="text-xs text-emerald-700 mt-0.5">
+                                                                                Turno asignado: <span className="font-mono font-bold">{coverageInfo.code}</span>
+                                                                                {coverageInfo.shift && (
+                                                                                    <span className="text-emerald-600/80"> · {formatShiftScheduleLabel(coverageInfo.shift, coverageInfo.code)}</span>
+                                                                                )}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <p className="text-sm text-amber-700 font-bold">Sin cobertura asignada</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {pending ? (
+                                                            <div className="px-4 pb-4">
+                                                                <button onClick={handleDelete} className="w-full py-2 rounded-xl bg-white border border-amber-200 text-amber-900 font-black text-xs hover:bg-amber-100">
+                                                                    Quitar marca (borrador)
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
+                                                                Registrado en RRHH — no se edita desde Planificación
+                                                            </p>
+                                                        )}
+                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (
+                                                            <div className="px-4 pb-4">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName };
+                                                                        setSelectedCell(null);
+                                                                        setVacancyData(vd);
+                                                                        setSelectedReplacement('');
+                                                                        setShowVacancyModal(true);
+                                                                    }}
+                                                                    className="w-full py-2.5 rounded-xl bg-amber-600 text-white font-black text-xs hover:bg-amber-700"
+                                                                >
+                                                                    Re-procesar cobertura
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && !absence && (
+                                                            <div className="px-4 pb-4">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const newChanges = { ...pendingChanges };
+                                                                        newChanges[`${selectedCell.empId}_${selectedCell.dateStr}`] = { isDeleted: true };
+                                                                        setPendingChanges(newChanges);
+                                                                        setSelectedCell(null);
+                                                                        toast.info('Turno marcado para borrar — guardá los cambios.');
+                                                                    }}
+                                                                    className="w-full py-2.5 rounded-xl bg-slate-600 text-white font-black text-xs hover:bg-slate-700"
+                                                                >
+                                                                    Borrar turno asignado por error
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <>
                                                 <div className="p-3 rounded-xl border bg-slate-50">
                                                     <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Planificado (Planificador)</div>
                                                     <div className="grid grid-cols-2 gap-2 text-xs">
@@ -6002,6 +6205,22 @@ export default function PlanificacionPage() {
                                                         <div className="font-mono text-slate-800">{showRealTimes ? realEnd : '--:--'}</div>
                                                     </div>
                                                 </div>
+                                                    </>
+                                                )}
+
+                                                {isConsolidated && (absence || isRRHHCode) && (
+                                                    <div className="p-3 rounded-xl border bg-white">
+                                                        <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Fichada real</div>
+                                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                                            <div className="font-bold text-slate-600">Estado ops.</div>
+                                                            <div className="font-mono text-slate-800">{status || '-'}</div>
+                                                            <div className="font-bold text-slate-600">Ingreso</div>
+                                                            <div className="font-mono text-slate-800">{realStart}</div>
+                                                            <div className="font-bold text-slate-600">Egreso</div>
+                                                            <div className="font-mono text-slate-800">{realEnd}</div>
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 {hasSwap && (
                                                     <div className="p-3 rounded-xl border bg-cyan-50 border-cyan-200">
@@ -6013,59 +6232,6 @@ export default function PlanificacionPage() {
                                                         <div className="text-[10px] text-cyan-800 mt-1">
                                                             {shift?.isFrancoCompensatorio ? 'FxF (Franco Compensatorio / FF)' : (shift?.isSwap ? 'Swap' : '')}
                                                         </div>
-                                                    </div>
-                                                )}
-
-                                                {(absence || isRRHHCode) && (
-                                                    <div className="p-3 rounded-xl border bg-amber-50 border-amber-200">
-                                                        <div className="text-[10px] font-black uppercase text-amber-800 mb-2">RRHH</div>
-                                                        <div className="text-xs text-amber-900">
-                                                            <div><span className="font-bold">Tipo</span>: {absence?.type || shift?.name || code || '—'}</div>
-                                                            {absence?.status && <div className="mt-1"><span className="font-bold">Estado</span>: {absence.status}</div>}
-                                                            {coveringEmployee
-                                                                ? <div className="mt-2 pt-2 border-t border-amber-200 font-bold">Cubierto por: {coveringEmployee}</div>
-                                                                : (absence && !shift?.isTemp) ? null
-                                                                : <div className="mt-1 text-amber-700 text-[10px]">Sin cobertura asignada</div>
-                                                            }
-                                                            {(absence?.reason) && <div className="mt-1 text-amber-700 text-[10px]">{absence.reason}</div>}
-                                                        </div>
-                                                        {pending ? (
-                                                            <button onClick={handleDelete} className="mt-3 w-full py-2 rounded-xl bg-white border border-amber-200 text-amber-900 font-black text-xs hover:bg-amber-100">
-                                                                Quitar marca (borrador)
-                                                            </button>
-                                                        ) : (
-                                                            <div className="mt-3 text-[10px] font-bold text-amber-800">
-                                                                Esta novedad viene de RRHH (ausencias). No se edita desde Planificación.
-                                                            </div>
-                                                        )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName };
-                                                                    setSelectedCell(null);
-                                                                    setVacancyData(vd);
-                                                                    setSelectedReplacement('');
-                                                                    setShowVacancyModal(true);
-                                                                }}
-                                                                className="mt-2 w-full py-2 rounded-xl bg-amber-600 text-white font-black text-xs hover:bg-amber-700"
-                                                            >
-                                                                Re-procesar cobertura
-                                                            </button>
-                                                        )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && !absence && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    const newChanges = { ...pendingChanges };
-                                                                    newChanges[`${selectedCell.empId}_${selectedCell.dateStr}`] = { isDeleted: true };
-                                                                    setPendingChanges(newChanges);
-                                                                    setSelectedCell(null);
-                                                                    toast.info('Turno marcado para borrar — guardá los cambios.');
-                                                                }}
-                                                                className="mt-2 w-full py-2 rounded-xl bg-slate-600 text-white font-black text-xs hover:bg-slate-700"
-                                                            >
-                                                                Borrar turno asignado por error
-                                                            </button>
-                                                        )}
                                                     </div>
                                                 )}
 
@@ -6671,9 +6837,9 @@ export default function PlanificacionPage() {
                         </button>
                     );
                     return (
-                    <div className="fixed inset-0 z-[70] flex items-center justify-end p-6 bg-black/25 backdrop-blur-[2px]">
-                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-[520px] max-h-[min(92vh,720px)] overflow-y-auto border-l-4 ${colorMap[color].split(' ')[0]}`}>
-                            <div className="flex items-start justify-between mb-4">
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6 bg-black/25 backdrop-blur-[2px]">
+                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-full max-w-[520px] max-h-[min(92vh,720px)] flex flex-col border-l-4 ${colorMap[color].split(' ')[0]}`}>
+                            <div className="flex items-start justify-between mb-4 shrink-0">
                                 <div>
                                     <h3 className="font-black text-lg text-slate-800">{title}</h3>
                                     <p className="text-sm text-slate-500 mt-0.5">
@@ -6683,95 +6849,103 @@ export default function PlanificacionPage() {
                                 </div>
                                 <span className={`text-[10px] font-black px-2 py-1 rounded-full ${colorMap[color]}`}>{absType}</span>
                             </div>
-                            <p className="text-xs text-slate-400 mb-4">{hint}</p>
-                            <div className="bg-slate-50 p-4 rounded-xl border mb-5">
-                                <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">
+                            <p className="text-xs text-slate-400 mb-4 shrink-0">{hint}</p>
+                            <div className="bg-slate-50 p-4 rounded-xl border mb-5 min-h-0 flex-1 flex flex-col">
+                                <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block shrink-0">
                                     {isInj ? 'Asignar cobertura (opcional)' : 'Seleccionar suplente'}
                                 </label>
-                                <div className="relative">
+                                {!vacancyReplacementOpen ? (
                                     <button
                                         type="button"
-                                        onClick={() => setVacancyReplacementOpen(v => !v)}
-                                        className="w-full p-3 rounded-lg border text-sm font-bold bg-white text-left flex items-center justify-between gap-2"
+                                        onClick={() => setVacancyReplacementOpen(true)}
+                                        className="w-full p-3 rounded-lg border text-sm font-bold bg-white text-left flex items-center justify-between gap-2 shrink-0"
                                     >
                                         <span className={`truncate ${selectedReplacement ? 'text-slate-800' : 'text-slate-400'}`}>
                                             {selectedReplacementEmp ? `${selectedReplacementEmp.expBadge} ${selectedReplacementEmp.name}` : 'Sin cobertura — dejar vacante'}
                                         </span>
-                                        <ChevronDown size={16} className={`text-slate-400 shrink-0 transition-transform ${vacancyReplacementOpen ? 'rotate-180' : ''}`} />
+                                        <ChevronDown size={16} className="text-slate-400 shrink-0" />
                                     </button>
-                                    {vacancyReplacementOpen && (
-                                        <div className="absolute left-0 right-0 bottom-full mb-1 z-[80] bg-white border rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[min(50vh,320px)]">
-                                            <div className="p-2 border-b shrink-0">
-                                                <div className="relative">
-                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                    <input
-                                                        autoFocus
-                                                        className="w-full pl-9 pr-3 py-2 text-sm font-bold bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400"
-                                                        placeholder="Buscar por nombre o legajo..."
-                                                        value={vacancyReplacementSearch}
-                                                        onChange={e => setVacancyReplacementSearch(e.target.value)}
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => { setSelectedReplacement(''); setVacancyReplacementOpen(false); }}
-                                                    className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!selectedReplacement ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
-                                                >
-                                                    Sin cobertura — dejar vacante
-                                                </button>
-                                                {retenCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-amber-600">Retén — más cerca primero ({retenCandidatos.length})</div>
-                                                        {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`))}
-                                                    </>
-                                                )}
-                                                {sinTurnoCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
-                                                        {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`))}
-                                                    </>
-                                                )}
-                                                {refCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">REF — más cerca primero ({refCandidatos.length})</div>
-                                                        {refCandidatos.map(e => renderVacancyCandidate(e, `REF · ${e.monthHours}h`))}
-                                                    </>
-                                                )}
-                                                {objetivoCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-indigo-600">Guardias del objetivo ({objetivoCandidatos.length})</div>
-                                                        {objetivoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
-                                                    </>
-                                                )}
-                                                {retCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-500">Con horas disponibles ({retCandidatos.length})</div>
-                                                        {retCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h (${(e.maxHours || 200) - e.monthHours}h libres)`))}
-                                                    </>
-                                                )}
-                                                {restoCandidatos.length > 0 && (
-                                                    <>
-                                                        <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400">Resto del personal ({restoCandidatos.length})</div>
-                                                        {restoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
-                                                    </>
-                                                )}
-                                                {retenCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && refCandidatos.length === 0 && objetivoCandidatos.length === 0 && retCandidatos.length === 0 && restoCandidatos.length === 0 && (
-                                                    <p className="px-3 py-4 text-xs text-slate-400 text-center">Sin resultados para &quot;{vacancyReplacementSearch}&quot;</p>
-                                                )}
+                                ) : (
+                                    <div ref={vacancyReplacementPanelRef} className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col min-h-0 flex-1">
+                                        <div className="p-2 border-b shrink-0 bg-white sticky top-0 z-10">
+                                            <div className="relative">
+                                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                <input
+                                                    autoFocus
+                                                    className="w-full pl-9 pr-3 py-2.5 text-sm font-bold bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400"
+                                                    placeholder="Buscar por nombre o legajo..."
+                                                    value={vacancyReplacementSearch}
+                                                    onChange={e => setVacancyReplacementSearch(e.target.value)}
+                                                />
                                             </div>
                                         </div>
-                                    )}
-                                </div>
+                                        <div className="overflow-y-auto custom-scrollbar p-1 min-h-0 flex-1 max-h-[min(42vh,280px)]">
+                                            <button
+                                                type="button"
+                                                onClick={() => { setSelectedReplacement(''); setVacancyReplacementOpen(false); }}
+                                                className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!selectedReplacement ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
+                                            >
+                                                Sin cobertura — dejar vacante
+                                            </button>
+                                            {retenCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-amber-600">Retén — más cerca primero ({retenCandidatos.length})</div>
+                                                    {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`))}
+                                                </>
+                                            )}
+                                            {sinTurnoCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
+                                                    {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`))}
+                                                </>
+                                            )}
+                                            {refCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">REF — más cerca primero ({refCandidatos.length})</div>
+                                                    {refCandidatos.map(e => renderVacancyCandidate(e, `REF · ${e.monthHours}h`))}
+                                                </>
+                                            )}
+                                            {objetivoCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-indigo-600">Guardias del objetivo ({objetivoCandidatos.length})</div>
+                                                    {objetivoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
+                                                </>
+                                            )}
+                                            {retCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-500">Con horas disponibles ({retCandidatos.length})</div>
+                                                    {retCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h (${(e.maxHours || 200) - e.monthHours}h libres)`))}
+                                                </>
+                                            )}
+                                            {restoCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400">Resto del personal ({restoCandidatos.length})</div>
+                                                    {restoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
+                                                </>
+                                            )}
+                                            {retenCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && refCandidatos.length === 0 && objetivoCandidatos.length === 0 && retCandidatos.length === 0 && restoCandidatos.length === 0 && (
+                                                <p className="px-3 py-4 text-xs text-slate-400 text-center">Sin resultados para &quot;{vacancyReplacementSearch}&quot;</p>
+                                            )}
+                                        </div>
+                                        <div className="p-2 border-t shrink-0 bg-slate-50">
+                                            <button
+                                                type="button"
+                                                onClick={() => { setVacancyReplacementOpen(false); setVacancyReplacementSearch(''); }}
+                                                className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                                            >
+                                                Cerrar lista
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-3 shrink-0">
                                 <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
                                 <button onClick={handleProcessVacancy} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg ${btnColor[color]}`}>
                                     {selectedReplacement ? 'Asignar reemplazo' : 'Marcar vacante'}
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-400 text-center mt-3">Los cambios quedan pendientes — recordá guardar el cronograma.</p>
+                            <p className="text-[10px] text-slate-400 text-center mt-3 shrink-0">Los cambios quedan pendientes — recordá guardar el cronograma.</p>
                         </div>
                     </div>
                     );

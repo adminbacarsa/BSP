@@ -3,7 +3,16 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { belongsToEmpresa, belongsToEmpresaView, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import {
+    belongsToEmpresa,
+    belongsToEmpresaView,
+    empresaScopedQuery,
+    filterRowsByEmpresa,
+    parsePlanificacionEstadoDocId,
+    planificacionPublishLookupKey,
+    shouldScopeQueriesToEmpresa,
+} from '@/lib/multiempresa';
+import { iterateCalendarDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retén: no computan horas de liquidación del empleado.
@@ -25,6 +34,85 @@ const SHIFT_HOURS_LOOKUP: Record<string, number> = {
 };
 
 const PAID_DAY_DEFAULT_HOURS = 8;
+
+const isOperationalOriginShift = (shift: any): boolean => {
+    const o = String(shift?.origin || '').toUpperCase();
+    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
+    if (shift?.resolvedBy === 'OPERACIONES') return true;
+    if (shift?.isReten === true) return true;
+    return false;
+};
+
+const shiftHasRealCheckIn = (shift: any): boolean => {
+    const st = String(shift?.status || '').toUpperCase();
+    return !!(
+        shift?.isPresent || shift?.isCompleted
+        || shift?.checkInTime?.seconds || shift?.realStartTime?.seconds
+        || st === 'COMPLETED' || st === 'PRESENT'
+    );
+};
+
+/** Misma regla que operaciones: planificado sin publicar no entra a liquidación salvo fichada real u origen ops. */
+export function isShiftEligibleForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
+    if (shift?.draft === true) return false;
+    if (isOperationalOriginShift(shift)) return true;
+    if (shift?.type === 'NOVEDAD') return true;
+
+    const start = shift?.startTime?.toDate?.();
+    const pubKey = start && shift?.objectiveId
+        ? planificacionPublishLookupKey(shift.objectiveId, start.getFullYear(), start.getMonth() + 1)
+        : '';
+    const isPublished = pubKey ? !!publishStatusMap[pubKey] : false;
+
+    if (shiftHasRealCheckIn(shift)) return true;
+
+    const st = String(shift?.status || '').toUpperCase();
+    if (shift?.isAbsent || st === 'ABSENT') return isPublished;
+
+    if (!start || !shift?.objectiveId) return false;
+    return isPublished;
+}
+
+export const LEAVE_REPORT_CODES = new Set(['V', 'L', 'PG', 'E', 'A', 'AA']);
+
+export function mapAbsenceStatusLabel(status?: string | null): string {
+    const s = String(status || '').trim();
+    if (!s) return 'A verificar';
+    if (s === 'En verificación' || s === 'Pendiente') return 'A verificar';
+    if (s === 'Justificada' || s === 'Autorizada') return 'Justificada';
+    if (s === 'Injustificada' || s === 'Rechazada') return 'Injustificada';
+    return s;
+}
+
+/** Si hay licencia/ausencia RRHH en el día, ocultar turno M/T/N sin fichada duplicado. */
+export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
+    const byDate: Record<string, any[]> = {};
+    for (const s of shifts) {
+        const key = s._dateKey || shiftCalendarDateKey(s);
+        if (!key) { (byDate.__orphan ||= []).push(s); continue; }
+        (byDate[key] ||= []).push(s);
+    }
+    const out: any[] = byDate.__orphan ? [...byDate.__orphan] : [];
+    for (const [dateKey, dayShifts] of Object.entries(byDate)) {
+        if (dateKey === '__orphan') continue;
+        const hasLeave = dayShifts.some(s =>
+            LEAVE_REPORT_CODES.has(String(s.code || '').toUpperCase()) || s.type === 'NOVEDAD',
+        );
+        for (const s of dayShifts) {
+            const code = String(s.code || '').toUpperCase();
+            const isWork = !NON_WORK_CODES.has(code);
+            if (hasLeave && isWork && !shiftHasRealCheckIn(s)) continue;
+            out.push(s);
+        }
+    }
+    return out.sort((a, b) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0));
+}
+
+function shiftCalendarDateKey(shift: any): string {
+    const start = shift?.startTime?.toDate?.();
+    if (!start) return '';
+    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+}
 
 /** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
 export function resolveShiftDurationHours(
@@ -443,6 +531,19 @@ export const useReportes = (forcedClientId?: string | null) => {
                     where('startTime', '<=', Timestamp.fromDate(endDate)),
                   );
 
+            const planifSnap = await getDocs(
+                empresaScopedQuery('planificacion_estados', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+            );
+            const publishStatusMap: Record<string, boolean> = {};
+            planifSnap.docs.forEach(d => {
+                if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
+                const parsed = parsePlanificacionEstadoDocId(d.id);
+                if (parsed) {
+                    publishStatusMap[planificacionPublishLookupKey(parsed.objectiveId, parsed.year, parsed.month)] = true;
+                }
+                publishStatusMap[d.id] = true;
+            });
+
             const shiftsSnap = await getDocs(q);
             
             const rawShifts = shiftsSnap.docs
@@ -451,8 +552,52 @@ export const useReportes = (forcedClientId?: string | null) => {
                     if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
                     if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
-                    return true;
+                    return isShiftEligibleForReports(d, publishStatusMap);
                 });
+
+            const ausSnap = await getDocs(
+                empresaScopedQuery('ausencias', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+            );
+            const absenceById: Record<string, any> = {};
+            const absenceByEmpDate: Record<string, any> = {};
+            ausSnap.docs.forEach(d => {
+                const data = d.data();
+                if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+                const absDoc = { id: d.id, ...data };
+                absenceById[d.id] = absDoc;
+                const startStr = toCalendarDateStr(data.startDate);
+                const endStr = toCalendarDateStr(data.endDate || data.startDate);
+                if (!startStr || !endStr) return;
+                for (const dateStr of iterateCalendarDateRange(startStr, endStr)) {
+                    if (dateStr < dateRange.start || dateStr > dateRange.end) continue;
+                    absenceByEmpDate[`${data.employeeId}_${dateStr}`] = absDoc;
+                }
+            });
+
+            const coverageByEmpDate: Record<string, string> = {};
+            rawShifts.forEach((s: any) => {
+                const comments = String(s.comments || '');
+                const m = comments.match(/Cubriendo a (.+?) \(/);
+                if (!m) return;
+                const titularName = m[1].trim();
+                const titularId = Object.keys(empMap).find(id => empMap[id] === titularName);
+                if (!titularId) return;
+                const dk = shiftCalendarDateKey(s);
+                if (dk) coverageByEmpDate[`${titularId}_${dk}`] = s.employeeName || empMap[s.employeeId] || '—';
+            });
+
+            const enrichShift = (s: any) => {
+                const dk = shiftCalendarDateKey(s);
+                const abs = s.absenceId ? absenceById[s.absenceId] : (dk ? absenceByEmpDate[`${s.employeeId}_${dk}`] : null);
+                return {
+                    ...s,
+                    _dateKey: dk,
+                    _absenceType: abs?.type || null,
+                    _absenceStatus: abs?.status || null,
+                    _absenceReason: abs?.reason || null,
+                    _coveredBy: s.coveredBy || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null) || null,
+                };
+            };
 
             if (rawShifts.length === 0) {
                 toast.info("No se encontraron turnos válidos en este rango.");
@@ -463,11 +608,11 @@ export const useReportes = (forcedClientId?: string | null) => {
             rawShifts.forEach((s: any) => {
                 if (!s.employeeId || !empMap[s.employeeId]) return;
                 if(!empGroups[s.employeeId]) empGroups[s.employeeId] = [];
-                empGroups[s.employeeId].push(s);
+                empGroups[s.employeeId].push(enrichShift(s));
             });
 
             const empRows = Object.keys(empGroups).map(empId => {
-                const shifts = empGroups[empId];
+                const shifts = dedupeShiftsByAbsencePriority(empGroups[empId]);
                 const stats = calculateStatsExact(shifts, holidaysData);
 
                 const ftCount = shifts.filter((s:any) => s.isFrancoTrabajado || s.code === 'FT').length;
