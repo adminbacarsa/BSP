@@ -732,15 +732,33 @@ export default function PlanificacionPage() {
         if (!selectedObjective || !selectedObjectiveData) return 0;
         const objLat = Number(selectedObjectiveData.lat ?? 0);
         const objLng = Number(selectedObjectiveData.lng ?? 0);
-        if (!objLat || !objLng) return 0;
+        const hasCoords = !!(objLat && objLng);
         let count = 0;
         for (const e of employees) {
             if (e.status === 'inactivo') continue;
+            if (
+                e.preferredObjectiveId === selectedObjective ||
+                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
+                activeGuestIdsForObjective.has(e.id)
+            ) {
+                count++;
+                continue;
+            }
+            if (!hasCoords) continue;
             const d = employeeKmToObjective(e, objLat, objLng);
             if (d !== null && d <= km) count++;
         }
         return count;
-    }, [employees, selectedObjective, selectedObjectiveData]);
+    }, [employees, selectedObjective, selectedObjectiveData, slaIdToObjId, activeGuestIdsForObjective]);
+
+    const isEmployeeOnSelectedObjective = useCallback((e: { id: string; preferredObjectiveId?: string }) => {
+        if (!selectedObjective) return false;
+        return (
+            e.preferredObjectiveId === selectedObjective ||
+            slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
+            activeGuestIdsForObjective.has(e.id)
+        );
+    }, [selectedObjective, slaIdToObjId, activeGuestIdsForObjective]);
 
     const clearNearbyCustomOrder = useCallback(() => {
         if (!selectedObjective) return;
@@ -791,14 +809,16 @@ export default function PlanificacionPage() {
         } else if (selectedObjective && forceShowAll) {
             const objLat = Number(selectedObjectiveData?.lat ?? 0);
             const objLng = Number(selectedObjectiveData?.lng ?? 0);
-            if (!objLat || !objLng) return [];
+            const hasCoords = !!(objLat && objLng);
             list = list.filter(e => {
+                if (isEmployeeOnSelectedObjective(e)) return true;
+                if (!hasCoords) return false;
                 const km = employeeKmToObjective(e, objLat, objLng);
                 return km !== null && km <= nearbyKmRadius;
             });
         }
         return list;
-    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, selectedObjectiveData, nearbyKmRadius]);
+    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -839,14 +859,18 @@ export default function PlanificacionPage() {
         if (forceShowAll && selectedObjective && selectedObjectiveData) {
             const objLat = Number(selectedObjectiveData.lat ?? 0);
             const objLng = Number(selectedObjectiveData.lng ?? 0);
-            if (objLat && objLng) {
-                return [...list].sort((a, b) => {
+            const hasCoords = !!(objLat && objLng);
+            return [...list].sort((a, b) => {
+                const aAssigned = isEmployeeOnSelectedObjective(a);
+                const bAssigned = isEmployeeOnSelectedObjective(b);
+                if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
+                if (!aAssigned && hasCoords) {
                     const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
                     const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
                     if (da !== db) return da - db;
-                    return a.name.localeCompare(b.name);
-                });
-            }
+                }
+                return a.name.localeCompare(b.name);
+            });
         }
         const orderKey = selectedObjective || '__all__';
         const customOrder = customOrderMap[orderKey];
@@ -890,7 +914,7 @@ export default function PlanificacionPage() {
             }
             return a.name.localeCompare(b.name) * dir;
         });
-    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, selectedObjectiveData]);
+    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, selectedObjectiveData, isEmployeeOnSelectedObjective]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
@@ -904,17 +928,25 @@ export default function PlanificacionPage() {
         if (!selectedObjective || !selectedObjectiveData) return list;
         const objLat = Number(selectedObjectiveData.lat ?? 0);
         const objLng = Number(selectedObjectiveData.lng ?? 0);
-        if (!objLat || !objLng) return list;
+        const hasCoords = !!(objLat && objLng);
         list = list.filter(e => {
+            if (isEmployeeOnSelectedObjective(e)) return true;
+            if (!hasCoords) return false;
             const km = employeeKmToObjective(e, objLat, objLng);
             return km !== null && km <= nearbyKmRadius;
         });
         return [...list].sort((a, b) => {
-            const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
-            const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
-            return da - db || a.name.localeCompare(b.name);
+            const aAssigned = isEmployeeOnSelectedObjective(a);
+            const bAssigned = isEmployeeOnSelectedObjective(b);
+            if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
+            if (!aAssigned && hasCoords) {
+                const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
+                const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
+                if (da !== db) return da - db;
+            }
+            return a.name.localeCompare(b.name);
         });
-    }, [employees, addSearchTerm, selectedObjective, selectedObjectiveData, nearbyKmRadius]);
+    }, [employees, addSearchTerm, selectedObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective]);
 
     // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
     // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
