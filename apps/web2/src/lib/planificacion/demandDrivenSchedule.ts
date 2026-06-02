@@ -2417,14 +2417,17 @@ export function restoreRotativeCycleFrancos(
     ctx: V2EngineContext,
     expectedShiftForDay: (empId: string, dateStr: string, posName: string) => string | null,
     defaultPosByEmp: Record<string, string | null | undefined>,
+    cycleWorkDays?: Record<string, Set<string>>,
 ): void {
     if (ctx.rotateShifts === false) return;
     for (const a of assignments) {
         if (String(a.code || '').toUpperCase() !== 'RET') continue;
         if (isContingencyApretarDay(a.dateStr, ctx)) continue;
-        // RET en día Modo12 fue asignado intencionalmente (turno T absorbido por D12/N12):
-        // no convertir a F o se generan francos consecutivos que rompen el bloque 6+2 CCT.
+        // RET en día Modo12: asignado intencionalmente (turno T absorbido por D12/N12).
         if (isModo12Day(a.dateStr, ctx)) continue;
+        // RET en día laborable del ciclo: el guardia está disponible pero sin slot → mantener RET.
+        // Convertirlo a F rompería el bloque 6+2 y generaría francos dispersos o consecutivos.
+        if (cycleWorkDays?.[a.empId]?.has(a.dateStr)) continue;
         const posName = defaultPosByEmp[a.empId] || a.positionName || ctx.positions[0]?.positionName || '';
         const exp = expectedShiftForDay(a.empId, a.dateStr, posName);
         if (exp) continue;
