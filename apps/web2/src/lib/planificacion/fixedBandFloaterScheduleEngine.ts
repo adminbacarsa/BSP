@@ -163,17 +163,31 @@ function buildSubgroupsFor24hs(
     return result;
 }
 
-// Los cold-starts se asignan POR SUBGRUPO para evitar colisiones de slot dentro del mismo grupo.
-// (Asignación global causaba que índice 0 e índice 4 del sort recibieran el mismo slot M
-//  si caían en el mismo grupo → dos guardias en M, nadie en F → 90 slots sin cubrir.)
+// Cold-starts POR SUBGRUPO con deduplicación POR ZONA de banda.
+// El ciclo tiene 3 zonas de trabajo (M=0-5, T=8-13, N=16-21) y 3 de franco (F=6-7/14-15/22-23).
+// Si dos empleados del mismo subgrupo tienen offsets en la misma zona, coinciden en Franco
+// el mismo día → brecha de cobertura. Se mantiene solo uno por zona.
 function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): Record<string, number> {
     const out: Record<string, number> = {};
 
-    for (const groupIds of subgroups) {
-        const regularIds = groupIds.slice(0, 4);   // Primeros 4: M/T/N/F
-        const floaterIds = groupIds.slice(4);       // 5to+: RET flotante
+    // Zona de banda del slot (día 1 del mes = di=0)
+    const bandZone = (slot: number): 'M' | 'T' | 'N' | 'F' => {
+        const s = ((slot % 24) + 24) % 24;
+        if (s <= 5) return 'M';
+        if (s <= 7) return 'F';
+        if (s <= 13) return 'T';
+        if (s <= 15) return 'F';
+        if (s <= 21) return 'N';
+        return 'F';
+    };
+    // Slot preferido para llenar cada zona sin trailing
+    const ZONE_SLOT: Record<string, number> = { M: 4, T: 10, N: 16, F: 22 };
 
-        // Regulares: inferir desde trailing; cold-start dentro del grupo sin reusar slots ya tomados
+    for (const groupIds of subgroups) {
+        const regularIds = groupIds.slice(0, 4);
+        const floaterIds = groupIds.slice(4);
+
+        // Paso 1: inferir offsets desde trailing de mayo
         const withTrail: string[] = [];
         const withoutTrail: string[] = [];
         for (const empId of regularIds) {
@@ -186,24 +200,30 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             if (slot !== null) { out[empId] = slot; withTrail.push(empId); }
             else withoutTrail.push(empId);
         }
-        // Deduplicar slots inferidos: si 2 empleados del mismo grupo tienen el mismo slot
-        // (e.g., ambos terminaron mayo en banda M), mantener solo el primero y mover el resto
-        // a cold-start para evitar colisión de francos → brecha de cobertura.
-        const slotMap: Record<number, string[]> = {};
-        withTrail.forEach(id => { const s = out[id]; (slotMap[s] = slotMap[s] || []).push(id); });
-        for (const ids of Object.values(slotMap)) {
-            if (ids.length > 1) {
-                ids.slice(1).forEach(id => { delete out[id]; withoutTrail.push(id); });
+
+        // Paso 2: deduplicar por ZONA (no solo slot idéntico).
+        // Dos empleados en la misma zona del ciclo coinciden en Franco → cobertura rota.
+        const usedZones = new Map<string, true>();
+        for (const empId of [...withTrail]) {
+            const zone = bandZone(out[empId]);
+            if (!usedZones.has(zone)) {
+                usedZones.set(zone, true);
+            } else {
+                delete out[empId];
+                withoutTrail.push(empId);
             }
         }
-        const usedSlots = new Set(withTrail.filter(id => id in out).map(id => out[id]));
-        const available = COLD_START_OPENINGS.filter(s => !usedSlots.has(s));
+
+        // Paso 3: asignar a los sin-trailing el cold-start de la zona que falta
+        const missingZones = (['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z));
         withoutTrail.sort((a, b) => a.localeCompare(b));
         withoutTrail.forEach((empId, i) => {
-            out[empId] = available[i] ?? COLD_START_OPENINGS[i % 4];
+            const zone = missingZones[i] ?? ((['M', 'T', 'N', 'F'] as const)[i % 4]);
+            out[empId] = ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
         });
 
-        // Flotantes: banda da igual (se reemplaza por RET), cualquier slot sirve
+        // Flotantes (índice ≥4): banda da igual, solo necesitan no coincidir en Franco con
+        // otro flotante del mismo subgrupo (para que no queden dos RET → F el mismo día)
         for (const empId of floaterIds) {
             const slot = inferJune1CycleSlot(
                 ctx.prevMonthLastShiftByEmp?.[empId],
