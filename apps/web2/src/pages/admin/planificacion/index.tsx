@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useTransition } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -397,6 +397,8 @@ export default function PlanificacionPage() {
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
+    const [notifPanelTop, setNotifPanelTop] = useState(0);
+    const notifBtnRef = useRef<HTMLButtonElement>(null);
     const [hasUnread, setHasUnread] = useState(false);
     
     const [operatorName, setOperatorName] = useState('Cargando...');
@@ -2234,6 +2236,22 @@ export default function PlanificacionPage() {
     };
     const handleMarkAllRead = async () => { if (!confirm("¿Marcar todas como leídas?")) return; const batch = writeBatch(db); notifications.forEach(n => { if (n.id) { const ref = doc(db, 'novedades', n.id); batch.update(ref, { viewed: true, status: 'read' }); } }); await batch.commit(); setNotifications([]); setHasUnread(false); toast.success("Bandeja limpia"); };
     const handleDeleteAllNotifications = async () => { if (!confirm("¿Eliminar permanentemente todas las notificaciones? Esta acción no se puede deshacer.")) return; const batch = writeBatch(db); notifications.forEach(n => { if (n.id) batch.delete(doc(db, 'novedades', n.id)); }); await batch.commit(); setNotifications([]); setHasUnread(false); toast.success("Notificaciones eliminadas"); };
+
+    const repositionNotifPanel = useCallback(() => {
+        const rect = notifBtnRef.current?.getBoundingClientRect();
+        if (rect) setNotifPanelTop(rect.bottom + 8);
+    }, []);
+
+    useEffect(() => {
+        if (!showNotifications) return;
+        repositionNotifPanel();
+        window.addEventListener('scroll', repositionNotifPanel, true);
+        window.addEventListener('resize', repositionNotifPanel);
+        return () => {
+            window.removeEventListener('scroll', repositionNotifPanel, true);
+            window.removeEventListener('resize', repositionNotifPanel);
+        };
+    }, [showNotifications, repositionNotifPanel]);
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), { action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${selectedObjective}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid }); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
     const handleDelete = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
@@ -5096,16 +5114,34 @@ export default function PlanificacionPage() {
                                 {showLegend && renderLegend()}
 
                                 <div className="relative">
-                                    <button onClick={() => {setShowNotifications(!showNotifications); setHasUnread(false)}} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative">
+                                    <button
+                                        ref={notifBtnRef}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (showNotifications) {
+                                                setShowNotifications(false);
+                                            } else {
+                                                repositionNotifPanel();
+                                                setShowNotifications(true);
+                                                setHasUnread(false);
+                                            }
+                                        }}
+                                        className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative"
+                                    >
                                         <Bell size={18}/>{hasUnread && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                     </button>
-                                    
-                                    {showNotifications && (
-                                        <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-xl shadow-2xl border overflow-hidden z-50 animate-in zoom-in-95">
+                                </div>
+                                {showNotifications && typeof document !== 'undefined' && createPortal(
+                                    <>
+                                        <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowNotifications(false)} />
+                                        <div
+                                            className="fixed z-[9999] w-96 max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-2xl border overflow-hidden animate-in zoom-in-95"
+                                            style={{ top: notifPanelTop, right: 16 }}
+                                            onClick={e => e.stopPropagation()}
+                                        >
                                             <div className="p-3 bg-slate-50 border-b flex justify-between items-center">
                                                 <h3 className="font-black text-xs uppercase text-slate-500">Alertas</h3>
                                                 <div className="flex items-center gap-2">
-                                                    {/* 🛑 BOTÓN DE BORRADO MASIVO */}
                                                     {notifications.length > 0 && (
                                                         <div className="flex items-center gap-1">
                                                             <button onClick={handleMarkAllRead} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded">
@@ -5137,8 +5173,9 @@ export default function PlanificacionPage() {
                                                 )) : <div className="p-6 text-center text-slate-400 text-xs">Sin novedades recientes.</div>}
                                             </div>
                                         </div>
-                                    )}
-                                </div>
+                                    </>,
+                                    document.body,
+                                )}
 
                                 <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className="px-3 font-black text-xs w-24 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
                                 <div className="flex items-center gap-0.5" title="Automatización del cronograma (motor COSP)">
