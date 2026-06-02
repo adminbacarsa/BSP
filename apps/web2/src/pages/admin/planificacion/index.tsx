@@ -65,6 +65,10 @@ import {
     isPlanningPositionExcludedOnDate,
     isPlanningWorkShiftCode,
     planningPositionExclusionLabel,
+    buildExcludedPositionsByDate,
+    abbrevPlanningPositionName,
+    excludedPositionsCellLabel,
+    excludedPositionsTooltip,
 } from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -4215,6 +4219,18 @@ export default function PlanificacionPage() {
         return map;
     }, [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective, activePosition, dominantPosition]);
 
+    const excludedPositionsByDate = useMemo(() => {
+        const raw = buildExcludedPositionsByDate(positionStructure);
+        const filtered: Record<string, string[]> = {};
+        for (const day of daysInMonth) {
+            const ds = getDateKey(day);
+            if (raw[ds]?.length) filtered[ds] = raw[ds];
+        }
+        return filtered;
+    }, [positionStructure, daysInMonth]);
+
+    const hasSlaExcludedDatesInMonth = Object.keys(excludedPositionsByDate).length > 0;
+
     const planningCompareDiff = useMemo(() => {
         if (!comparingSnapshot?.data || !selectedObjective) return null;
         const dateKeys = daysInMonth.map((d) => getDateKey(d));
@@ -4247,15 +4263,21 @@ export default function PlanificacionPage() {
         employeesForRows?: typeof displayedEmployees,
     ) => {
         const gridEmployees = employeesForRows ?? displayedEmployees;
+        const headerRowSpan = hasSlaExcludedDatesInMonth ? 3 : 2;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
             <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 <tr className="h-6">
-                    <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <th rowSpan={headerRowSpan} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
                         {selectedObjective && !isSnapshotView && (
-                            <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Con turnos en el mes / dotación activa (sin REF/ESC de reserva)">
-                                {objectiveMonthShiftMetrics.empCountWithTurnos}/{planningDotacionEmployees.length} c/ turno
+                            <span className="block text-[8px] font-bold text-slate-400 mt-0.5" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva)">
+                                {planningDotacionEmployees.length} c/ turno
+                            </span>
+                        )}
+                        {hasSlaExcludedDatesInMonth && !isSnapshotView && (
+                            <span className="block text-[7px] font-bold text-rose-500 mt-1 leading-tight" title="Columnas con marca EX: hay puestos sin servicio ese día (Servicios → Días excluidos)">
+                                ⊘ = excl. SLA
                             </span>
                         )}
                         <div
@@ -4282,18 +4304,26 @@ export default function PlanificacionPage() {
                         const dateStr = getDateKey(d);
                         const letter = getDayLetter(dateStr);
                         const isWeekend = [0, 6].includes(d.getDay());
+                        const excludedNames = excludedPositionsByDate[dateStr];
+                        const hasExclusion = !!excludedNames?.length;
                         return (
-                            <th key={`dw_${d.toISOString()}`} className={`min-w-[25px] border-b border-r p-1 text-center ${isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'dark:border-slate-700'}`}>
-                                <span className={`text-[9px] font-black ${isWeekend ? 'text-rose-500 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{letter}</span>
+                            <th key={`dw_${d.toISOString()}`} className={`min-w-[25px] border-b border-r p-1 text-center ${hasExclusion ? 'bg-rose-100/90 dark:bg-rose-950/40 border-t-2 border-t-rose-400' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'dark:border-slate-700'}`}
+                                title={hasExclusion ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}>
+                                <span className={`text-[9px] font-black ${hasExclusion ? 'text-rose-700 dark:text-rose-300' : isWeekend ? 'text-rose-500 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'}`}>{letter}</span>
+                                {hasExclusion && <span className="block text-[6px] font-black text-rose-600 leading-none mt-0.5">EX</span>}
                             </th>
                         );
                     })}
                 </tr>
                 <tr className="h-10">
                     {daysInMonth.map((d, dayIndex) => {
+                        const dateStr = getDateKey(d);
                         const isSource = columnSelectMode && columnSelectSource === dayIndex;
                         const isInSel = !isSnapshotView && selection.start != null && dayIndex >= Math.min(selection.start.c, selection.end?.c ?? selection.start.c) && dayIndex <= Math.max(selection.start.c, selection.end?.c ?? selection.start.c);
                         const isWeekend = [0,6].includes(d.getDay());
+                        const excludedNames = excludedPositionsByDate[dateStr];
+                        const hasExclusion = !!excludedNames?.length;
+                        const exTitle = hasExclusion ? excludedPositionsTooltip(excludedNames, dateStr) : undefined;
                         return (
                             <th
                                 key={d.toISOString()}
@@ -4302,15 +4332,41 @@ export default function PlanificacionPage() {
                                 onMouseUp={handleDayHeaderMouseUpOrLeave}
                                 onMouseLeave={handleDayHeaderMouseUpOrLeave}
                                 className={`min-w-[25px] border-b border-r p-1 text-center select-none cursor-pointer transition-colors
-                                    ${isSource ? 'bg-indigo-600 text-white' : isInSel && columnSelectMode ? 'bg-indigo-100 dark:bg-indigo-900/40' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'hover:bg-slate-100 dark:hover:bg-slate-700 dark:border-slate-700'}`}
-                                title={columnSelectMode ? (isSource ? 'Clic para cancelar copia' : 'Clic para extender destino') : 'Clic para copiar este día'}
+                                    ${isSource ? 'bg-indigo-600 text-white' : isInSel && columnSelectMode ? 'bg-indigo-100 dark:bg-indigo-900/40' : hasExclusion ? 'bg-rose-100/80 dark:bg-rose-950/35 ring-1 ring-inset ring-rose-300/60' : isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : 'hover:bg-slate-100 dark:hover:bg-slate-700 dark:border-slate-700'}`}
+                                title={columnSelectMode ? (isSource ? 'Clic para cancelar copia' : 'Clic para extender destino') : exTitle || 'Clic para copiar este día'}
                             >
-                                <span className={`text-[10px] font-bold ${isSource ? 'text-white' : isWeekend ? 'text-rose-600 dark:text-rose-400 font-black' : 'dark:text-slate-300'}`}>{d.getDate()}</span>
+                                <span className={`text-[10px] font-bold ${isSource ? 'text-white' : hasExclusion ? 'text-rose-800 dark:text-rose-200 font-black' : isWeekend ? 'text-rose-600 dark:text-rose-400 font-black' : 'dark:text-slate-300'}`}>{d.getDate()}</span>
+                                {hasExclusion && !isSource && (
+                                    <div className="text-[6px] font-black text-rose-600 dark:text-rose-300 leading-none mt-0.5 truncate max-w-[22px] mx-auto" title={exTitle}>
+                                        ⊘
+                                    </div>
+                                )}
                                 {isSource && <div className="text-[7px] font-black opacity-80 leading-none mt-0.5">ORIG</div>}
                             </th>
                         );
                     })}
                 </tr>
+                {hasSlaExcludedDatesInMonth && (
+                    <tr className="h-5 bg-rose-50/90 dark:bg-rose-950/30">
+                        {daysInMonth.map((d) => {
+                            const dateStr = getDateKey(d);
+                            const excludedNames = excludedPositionsByDate[dateStr] || [];
+                            return (
+                                <th
+                                    key={`ex_${d.toISOString()}`}
+                                    className={`min-w-[25px] border-b-2 border-rose-200 dark:border-rose-900 border-r p-0.5 text-center ${excludedNames.length ? 'bg-rose-100/90 dark:bg-rose-950/40' : ''}`}
+                                    title={excludedNames.length ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}
+                                >
+                                    {excludedNames.length > 0 && (
+                                        <span className="text-[6px] font-black text-rose-700 dark:text-rose-300 leading-tight block truncate px-0.5">
+                                            {excludedPositionsCellLabel(excludedNames)}
+                                        </span>
+                                    )}
+                                </th>
+                            );
+                        })}
+                    </tr>
+                )}
             </thead>
             <tbody>
                 {gridEmployees.map((emp, idx) => {
@@ -4467,7 +4523,11 @@ export default function PlanificacionPage() {
                                                     : null
                                               ))
                                             : null;
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; setShiftTooltip({ label: shiftLabel, pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
+                                        const cellDateStr = getDateKey(day);
+                                        const excludedOnDay = excludedPositionsByDate[cellDateStr];
+                                        const isExclusionCol = !!excludedOnDay?.length;
+                                        const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}` : (_exclHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -4500,6 +4560,32 @@ export default function PlanificacionPage() {
                 })}
             </tbody>
             <tfoot className="sticky bottom-0 z-30 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
+                {hasSlaExcludedDatesInMonth && (
+                <tr className="bg-rose-50/95 dark:bg-rose-950/40 border-b border-rose-200">
+                    <td className="sticky left-0 z-40 bg-rose-50 dark:bg-rose-950/50 p-1.5 border-r border-rose-200 font-black text-[8px] uppercase text-rose-700 dark:text-rose-300 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]" style={{ width: nameColWidth, minWidth: nameColWidth }} title="Puestos sin servicio según SLA (Servicios → Días excluidos)">
+                        <span className="flex items-center gap-1"><Ban size={10}/> Excl. SLA</span>
+                    </td>
+                    {daysInMonth.map(day => {
+                        const dateStr = getDateKey(day);
+                        const excludedNames = excludedPositionsByDate[dateStr] || [];
+                        return (
+                            <td
+                                key={`exfoot_${dateStr}`}
+                                className={`text-center border-r border-rose-100 dark:border-rose-900/50 px-0.5 py-1 ${excludedNames.length ? 'bg-rose-100/90 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200' : 'text-slate-300'}`}
+                                title={excludedNames.length ? excludedPositionsTooltip(excludedNames, dateStr) : undefined}
+                            >
+                                {excludedNames.length > 0 ? (
+                                    <span className="text-[7px] font-black leading-tight block truncate">
+                                        {excludedPositionsCellLabel(excludedNames)}
+                                    </span>
+                                ) : (
+                                    <span className="text-[8px] text-slate-300">·</span>
+                                )}
+                            </td>
+                        );
+                    })}
+                </tr>
+                )}
                 <tr>
                     <td className="sticky left-0 z-40 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
@@ -4585,7 +4671,7 @@ export default function PlanificacionPage() {
     return (
         <DashboardLayout>
             <Head><title>Planificador</title></Head>
-            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
+            <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <Toaster position="top-center" />
             {coverageTooltip && (
                 <div
@@ -5301,7 +5387,7 @@ export default function PlanificacionPage() {
                 {selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
-                    const empCount = objectiveMonthShiftMetrics.empCountWithTurnos;
+                    const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
@@ -5310,7 +5396,7 @@ export default function PlanificacionPage() {
                         : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, francos ni licencias). Compará con Vendidas del SLA.';
                     return (
                     <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                        <div className="text-center pr-3" title="Guardias con al menos un turno (facturable o RET) en este objetivo durante el mes — no la dotación total asignada.">
+                        <div className="text-center pr-3" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
                             <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Empl.</p>
                             <p className="text-sm font-black text-slate-700 dark:text-slate-200 leading-tight">{empCount}</p>
                         </div>
