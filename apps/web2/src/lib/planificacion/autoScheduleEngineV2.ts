@@ -1747,9 +1747,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
-    const { sixOne: flexSixOne, fiveOne: flexFiveOne, fourTwo: flexFourTwo } = pickFlexSchemeEmployees(
-        ctx, positionGroups, ctx.demandDrivenStaggerByEmp,
-    );
+    const {
+        sixOne: flexSixOneRaw,
+        fiveOne: flexFiveOneRaw,
+        fourTwo: flexFourTwoRaw,
+    } = pickFlexSchemeEmployees(ctx, positionGroups, ctx.demandDrivenStaggerByEmp);
+    // noFlexSchemeEmployees = ciclo 6+2 puro para todos: ningún empleado recibe ciclo alternativo.
+    const flexSixOne = ctx.noFlexSchemeEmployees ? [] : flexSixOneRaw;
+    const flexFiveOne = ctx.noFlexSchemeEmployees ? [] : flexFiveOneRaw;
+    const flexFourTwo = ctx.noFlexSchemeEmployees ? [] : flexFourTwoRaw;
     const fixedFlexSixOne = ctx.noFlexSchemeEmployees ? [] : (fixedBandPlan?.flexSixOne ?? []);
     const fixedFlexFiveOne = ctx.noFlexSchemeEmployees ? [] : (fixedBandPlan?.flexFiveOne ?? []);
     const flexSchemeEmpIds = [
