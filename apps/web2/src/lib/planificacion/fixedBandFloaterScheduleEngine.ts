@@ -135,11 +135,13 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     const defaultPos = ctx.defaultPositionByEmp || {};
 
     for (const emp of ctx.employees) {
+        // Empleados cuyo objetivo base es diferente al actual (EXT/huéspedes) → idle.
+        if (ctx.objectiveId && emp.preferredObjectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
         const fixed = defaultPos[emp.id];
         if (!fixed || positionGroups[fixed] === undefined) continue;
         positionGroups[fixed].push(emp.id);
     }
-    // Empleados sin puesto explícito → idle; no se les genera ningún turno.
+    // Empleados sin puesto explícito en este objetivo → idle; no se les genera ningún turno.
     return positionGroups;
 }
 
