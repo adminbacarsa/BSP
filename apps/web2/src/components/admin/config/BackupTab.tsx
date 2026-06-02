@@ -222,6 +222,7 @@ export default function BackupTab() {
   } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [loadingLocal, setLoadingLocal] = useState(false);
+  const [loadingLocalSecs, setLoadingLocalSecs] = useState(0);
   const [restoring, setRestoring] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
   const [loadedVersion, setLoadedVersion] = useState<LoadedVersion | null>(null);
@@ -251,6 +252,12 @@ export default function BackupTab() {
       window.clearInterval(id);
     };
   }, []);
+
+  useEffect(() => {
+    if (!loadingLocal) { setLoadingLocalSecs(0); return; }
+    const id = window.setInterval(() => setLoadingLocalSecs(s => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [loadingLocal]);
 
   // Suscripción Firestore (producción: remota / emulador: local localhost:8080)
   useEffect(() => {
@@ -688,7 +695,9 @@ export default function BackupTab() {
                   <p className="text-[10px] text-amber-600">
                     {(progress?.total ?? 0) > 0
                       ? `${Math.round(((progress?.done ?? 0) / (progress?.total ?? 1)) * 100)}% completado`
-                      : 'Archivos grandes pueden tardar unos segundos en parsearse…'}
+                      : loadingLocalSecs > 0
+                        ? `Procesando en servidor… ${loadingLocalSecs}s${loadingLocalSecs >= 30 ? ' (puede tardar 2-4 min, no cierres la página)' : ''}`
+                        : 'Preparando…'}
                   </p>
                 </div>
               ) : (
