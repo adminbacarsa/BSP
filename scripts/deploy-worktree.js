@@ -30,13 +30,13 @@ function ensureWorktree() {
 
   if (!fs.existsSync(DEPLOY_DIR)) {
     console.log(`\n▶ Creando worktree de deploy en ${DEPLOY_DIR} ...`);
-    git(`worktree add "${DEPLOY_DIR}" ${BRANCH}`);
+    git(`worktree add --detach "${DEPLOY_DIR}" ${BRANCH}`);
     return;
   }
 
   if (!hasDeploy) {
     console.log(`\n▶ Registrando worktree en ${DEPLOY_DIR} ...`);
-    git(`worktree add "${DEPLOY_DIR}" ${BRANCH}`);
+    git(`worktree add --detach "${DEPLOY_DIR}" ${BRANCH}`);
     return;
   }
 

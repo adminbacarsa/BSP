@@ -78,10 +78,9 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
-/** Preferencia auto: 6+2 por defecto; 5+1 nunca se elige automáticamente (solo se sugiere). */
-const AUTO_CYCLE_PREFERENCE = ['6+2', '6+1', '4+2'] as const;
-/** Ajustar crono: maximizar horas/guardia (4+2→5+1→6+1); evita 6+2 para liberar RET. */
-const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['4+2', '5+1', '6+1'] as const;
+/** Único ciclo permitido: 6+2. D12/N12 se activan por Modo12 (ajustar + V/L/E), no por ciclo. */
+const AUTO_CYCLE_PREFERENCE = ['6+2'] as const;
+const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['6+2'] as const;
 
 function scoreAutoCycleFeasibility(feas: V2FeasibilityReport, cycleKey: string, ajustarCrono?: boolean): number {
     if (!feas.ok) {
@@ -148,19 +147,12 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
     const firstViableAny = evaluated.find(e => e.ok);
     const pick = firstViableIntensive ?? firstViable8h ?? firstViableAny ?? [...evaluated].sort((a, b) => b.score - a.score)[0];
 
-    // 5+1 no se elige automáticamente pero se sugiere si es viable
-    let recommendedAlternative: string | undefined;
-    if (!ajustarCrono) {
-        const feas51 = checkFeasibility({ ...ctx, autoCycles: ['5+1'] });
-        if (feas51.ok) recommendedAlternative = '5+1';
-    }
-
     return {
         cycles: [pick.cycleKey],
         feasibility: pick.feas,
         pickedKey: pick.cycleKey,
         ajustarCrono,
-        recommendedAlternative,
+        recommendedAlternative: undefined,
         evaluated: evaluated.map(e => ({ cycleKey: e.cycleKey, ok: e.ok, score: Math.round(e.score) })),
     };
 }

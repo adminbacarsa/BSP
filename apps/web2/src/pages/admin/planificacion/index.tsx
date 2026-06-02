@@ -458,7 +458,6 @@ export default function PlanificacionPage() {
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
-    const [autoForceSixTwo, setAutoForceSixTwo] = useState(true);
     /** Tópico activo en el panel de ayuda del modal AUTO (hover sobre opciones). */
     const [autoHelpTopic, setAutoHelpTopic] = useState<string>('default');
     /** false = banda fija (M/T/N todo el mes). true = rotación por bloque 6+2/4+2 (MMMMMMFF→siguiente banda). */
@@ -3141,7 +3140,7 @@ export default function PlanificacionPage() {
                 contingencyDaysManual: [...autoContingenciaDias],
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: autoForceSixTwo ? '6+2' : undefined,
+                cycleOverride: '6+2',
             };
             autoPlanningBrainInputRef.current = brainInput;
             const brain = resolveAutoPlanningBrain(brainInput);
@@ -3500,7 +3499,7 @@ export default function PlanificacionPage() {
                 contingencyDaysManual: [...autoContingenciaDias],
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: autoForceSixTwo ? '6+2' : undefined,
+                cycleOverride: '6+2',
             });
             autoPlanningBrainRef.current = genBrain;
             setAutoPlanningBrainReport(genBrain);
@@ -3545,7 +3544,7 @@ export default function PlanificacionPage() {
                 prevMonthLastWorkBandBeforeRest,
                 globalRetPool,
                 strictSixTwo: genBrain.strictSixTwo,
-                noFlexSchemeEmployees: autoForceSixTwo,
+                noFlexSchemeEmployees: true,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
@@ -6736,17 +6735,9 @@ export default function PlanificacionPage() {
                                             {/* Ciclo de trabajo */}
                                             <div>
                                                 <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Ciclo de trabajo</p>
-                                                <div className="space-y-1.5">
-                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('scheme-fixed')} onClick={() => setAutoForceSixTwo(true)}
-                                                        className={`w-full text-left px-3 py-3 rounded-xl border-2 transition-colors ${autoForceSixTwo ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:border-indigo-200'}`}>
-                                                        <div className={`text-[11px] font-black ${autoForceSixTwo ? 'text-indigo-800' : 'text-slate-600'}`}>Esquema 6+2 · fijo</div>
-                                                        <div className={`text-[9px] font-bold mt-0.5 ${autoForceSixTwo ? 'text-indigo-500' : 'text-slate-400'}`}>6 días trabajo · 2 franco · recomendado</div>
-                                                    </button>
-                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('scheme-auto')} onClick={() => setAutoForceSixTwo(false)}
-                                                        className={`w-full text-left px-3 py-3 rounded-xl border-2 transition-colors ${!autoForceSixTwo ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-amber-200'}`}>
-                                                        <div className={`text-[11px] font-black ${!autoForceSixTwo ? 'text-amber-800' : 'text-slate-600'}`}>Esquema automático</div>
-                                                        <div className={`text-[9px] font-bold mt-0.5 ${!autoForceSixTwo ? 'text-amber-600' : 'text-slate-400'}`}>Cerebro elige 6+2 / 6+1 / 4+2</div>
-                                                    </button>
+                                                <div className="px-3 py-3 rounded-xl border-2 border-indigo-400 bg-indigo-50">
+                                                    <div className="text-[11px] font-black text-indigo-800">Esquema 6+2 · fijo</div>
+                                                    <div className="text-[9px] font-bold mt-0.5 text-indigo-500">6 días trabajo · 2 franco · D12/N12 solo por ajustar o licencias</div>
                                                 </div>
                                             </div>
 
