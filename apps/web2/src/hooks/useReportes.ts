@@ -6,13 +6,16 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { belongsToEmpresa, belongsToEmpresaView, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 // --- CONSTANTES Y HELPERS ---
-// Non-work codes: días libres / licencias. Cualquier otro código se considera operativo.
+// Francos/licencias/retén: no computan horas de liquidación del empleado.
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET']);
+// REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
+const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
+const isObjectiveBillableCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has((code || '').trim().toUpperCase());
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN': 9, 'FT': 0,
-    'F':0, 'V':0, 'L':0, 'PG':0, 'A':0, 'E':0, 'FF':0, 'RET': 0
+    'F':0, 'V':0, 'L':0, 'PG':0, 'A':0, 'E':0, 'FF':0, 'RET': 0, 'REF': 8, 'ESC': 8,
 };
 
 // Helper seguro para fechas (Formato local Argentina)
@@ -140,6 +143,41 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     };
 };
 
+type ObjectiveMeta = {
+    canonicalId: string;
+    name: string;
+    clientId: string;
+    client: string;
+};
+
+function registerObjectiveAlias(
+    aliases: Record<string, ObjectiveMeta>,
+    meta: ObjectiveMeta,
+    alias: string,
+) {
+    const key = String(alias || '').trim();
+    if (!key) return;
+    aliases[key] = meta;
+}
+
+function resolveShiftObjectiveId(
+    shift: { objectiveId?: unknown; objectiveName?: unknown },
+    aliases: Record<string, ObjectiveMeta>,
+): string | null {
+    for (const raw of [shift.objectiveId, shift.objectiveName]) {
+        const key = String(raw ?? '').trim();
+        if (key && aliases[key]) return aliases[key].canonicalId;
+    }
+    return null;
+}
+
+function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, startDate: Date, endDate: Date): boolean {
+    if (!sla.startDate || !sla.endDate) return false;
+    const slaStart = new Date(`${sla.startDate}T00:00:00`);
+    const slaEnd = new Date(`${sla.endDate}T23:59:59`);
+    return slaStart <= endDate && slaEnd >= startDate;
+}
+
 export const useReportes = (forcedClientId?: string | null) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
@@ -161,6 +199,7 @@ export const useReportes = (forcedClientId?: string | null) => {
     
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
     const [objMap, setObjMap] = useState<Record<string, string>>({});
+    const [objectiveAliases, setObjectiveAliases] = useState<Record<string, ObjectiveMeta>>({});
     const [clientMap, setClientMap] = useState<Record<string, string>>({});
     const [holidaysData, setHolidaysData] = useState<Record<string, boolean>>({});
 
@@ -183,17 +222,32 @@ export const useReportes = (forcedClientId?: string | null) => {
                 
                 const objs: any = {};
                 const clis: any = {};
+                const aliases: Record<string, ObjectiveMeta> = {};
                 c.forEach(doc => {
                     const data = doc.data();
-                    clis[doc.id] = data.name;
+                    const clientName = data.name || doc.id;
+                    clis[doc.id] = clientName;
                     if (data.objetivos) {
                         data.objetivos.forEach((obj: any) => {
-                            const oid = obj.id || obj.name;
-                            objs[oid] = obj.name; 
+                            const canonicalId = String(obj.id || obj.name || '').trim();
+                            if (!canonicalId) return;
+                            const displayName = String(obj.name || canonicalId);
+                            objs[canonicalId] = displayName;
+                            if (obj.name && obj.name !== canonicalId) objs[obj.name] = displayName;
+                            const meta: ObjectiveMeta = {
+                                canonicalId,
+                                name: displayName,
+                                clientId: doc.id,
+                                client: clientName,
+                            };
+                            registerObjectiveAlias(aliases, meta, canonicalId);
+                            if (obj.id) registerObjectiveAlias(aliases, meta, obj.id);
+                            if (obj.name) registerObjectiveAlias(aliases, meta, obj.name);
                         });
                     }
                 });
                 setObjMap(objs);
+                setObjectiveAliases(aliases);
                 setClientMap(clis);
 
                 const holidays: any = {};
@@ -230,16 +284,34 @@ export const useReportes = (forcedClientId?: string | null) => {
             // Cargar contratos de servicio para cruzar Hs. Vendidas por objetivo
             const slaSnap = await getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>);
             const slaMap: Record<string, number> = {};
+            const slaObjectiveMetas = new Map<string, ObjectiveMeta>();
+            const aliasLookup: Record<string, ObjectiveMeta> = { ...objectiveAliases };
+
             slaSnap.docs.forEach(d => {
                 const sla = d.data();
                 if (scopeEmpresa && !belongsToEmpresa(sla, empresaId, scopeEmpresa, migracionCompleta)) return;
-                if (!sla.objectiveId || !sla.startDate || !sla.endDate) return;
-                const slaStart = new Date(`${sla.startDate}T00:00:00`);
-                const slaEnd   = new Date(`${sla.endDate}T23:59:59`);
-                if (slaStart <= endDate && slaEnd >= startDate) {
-                    const prev = slaMap[sla.objectiveId] || 0;
-                    slaMap[sla.objectiveId] = Math.max(prev, sla.totalMonthlyHours || 0);
-                }
+                if (!sla.objectiveId || !slaOverlapsRange(sla, startDate, endDate)) return;
+
+                const oid = String(sla.objectiveId).trim();
+                const cid = String(sla.clientId || '').trim();
+                if (forcedClientId && cid && cid !== forcedClientId) return;
+
+                slaMap[oid] = Math.max(slaMap[oid] || 0, sla.totalMonthlyHours || 0);
+
+                const fromCatalog = aliasLookup[oid];
+                const meta: ObjectiveMeta = fromCatalog ?? {
+                    canonicalId: oid,
+                    name: String(sla.objectiveName || objMap[oid] || oid),
+                    clientId: cid,
+                    client: clientMap[cid] || String(sla.clientName || 'Sin Cliente'),
+                };
+                if (cid && !meta.clientId) meta.clientId = cid;
+                if (cid && clientMap[cid]) meta.client = clientMap[cid];
+
+                slaObjectiveMetas.set(oid, meta);
+                registerObjectiveAlias(aliasLookup, meta, oid);
+                registerObjectiveAlias(aliasLookup, meta, d.id);
+                if (sla.objectiveName) registerObjectiveAlias(aliasLookup, meta, String(sla.objectiveName));
             });
 
             // Consulta SIN indices complejos (filtrado en memoria si es necesario, o básico por fecha)
@@ -328,24 +400,41 @@ export const useReportes = (forcedClientId?: string | null) => {
             setEmployeeReport(finalEmpRows.sort((a,b) => b.total - a.total));
 
             // 4. Procesamiento por Objetivo
-            const objGroups: any = {};
+            const objGroups: Record<string, { shifts: any[]; clientId?: string }> = {};
             rawShifts.forEach((s: any) => {
-                if (s.type === 'NOVEDAD' || !isOperativeCode(s.code)) return;
-                
-                const key = s.objectiveId || 'SIN_OBJETIVO';
-                if(!objGroups[key]) objGroups[key] = { shifts: [], clientId: s.clientId };
-                objGroups[key].shifts.push(s);
+                if (s.type === 'NOVEDAD' || !isObjectiveBillableCode(s.code)) return;
+
+                const objId = resolveShiftObjectiveId(s, aliasLookup);
+                if (!objId) return;
+
+                if (!objGroups[objId]) objGroups[objId] = { shifts: [], clientId: s.clientId };
+                objGroups[objId].shifts.push(s);
+                if (s.clientId) objGroups[objId].clientId = s.clientId;
             });
 
-            const objRows = Object.keys(objGroups).filter(objId => {
-                // Excluir objetivos huérfanos (sin nombre en objMap o sin cliente válido)
-                if (objId === 'SIN_OBJETIVO') return false;
-                if (!objMap[objId]) return false;
-                const cid = objGroups[objId].clientId;
-                if (!cid || !clientMap[cid]) return false;
-                return true;
-            }).map(objId => {
-                const data = objGroups[objId];
+            const allObjectiveIds = new Set<string>([
+                ...slaObjectiveMetas.keys(),
+                ...Object.keys(objGroups),
+            ]);
+
+            const objRows = [...allObjectiveIds].map(objId => {
+                const meta = slaObjectiveMetas.get(objId)
+                    || aliasLookup[objId]
+                    || {
+                        canonicalId: objId,
+                        name: objMap[objId] || objId,
+                        clientId: String(objGroups[objId]?.clientId || ''),
+                        client: clientMap[String(objGroups[objId]?.clientId || '')] || 'Sin Cliente',
+                    };
+
+                if (!meta.clientId && objGroups[objId]?.clientId) {
+                    meta.clientId = String(objGroups[objId].clientId);
+                    meta.client = clientMap[meta.clientId] || meta.client;
+                }
+                if (forcedClientId && meta.clientId && meta.clientId !== forcedClientId) return null;
+                if (!meta.clientId) return null;
+
+                const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
                 const staffedShifts = data.shifts.filter((s: any) => !!empMap[s.employeeId]);
                 const vacantRawShifts = data.shifts.filter((s: any) => !empMap[s.employeeId]);
                 const vacantHours = vacantRawShifts.reduce((acc: number, s: any) => {
@@ -353,7 +442,10 @@ export const useReportes = (forcedClientId?: string | null) => {
                     const dur = (s.endTime.seconds - s.startTime.seconds) / 3600;
                     return acc + Math.max(0, Math.min(dur, 24));
                 }, 0);
-                const stats = calculateStatsExact(staffedShifts, holidaysData);
+                const stats = calculateStatsExact(
+                    staffedShifts.filter((s: any) => isObjectiveBillableCode(s.code)),
+                    holidaysData,
+                );
                 const annotatedShifts = data.shifts.map((s: any) => ({
                     ...s,
                     employeeName: empMap[s.employeeId] || null
@@ -361,9 +453,9 @@ export const useReportes = (forcedClientId?: string | null) => {
                 return {
                     id: objId,
                     type: 'OBJECTIVE',
-                    name: objMap[objId] || objId,
-                    clientId: data.clientId,
-                    client: clientMap[data.clientId] || 'Sin Cliente',
+                    name: meta.name,
+                    clientId: meta.clientId,
+                    client: meta.client || clientMap[meta.clientId] || 'Sin Cliente',
                     shifts: staffedShifts.length,
                     vacantShifts: vacantRawShifts.length,
                     vacantHours,
@@ -376,8 +468,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                     plusFeriado: stats.plusFeriado,
                     rawShifts: annotatedShifts
                 };
-            });
-            setObjectiveReport(objRows.sort((a,b) => a.client.localeCompare(b.client)));
+            }).filter((row): row is NonNullable<typeof row> => row !== null);
+            setObjectiveReport(objRows.sort((a, b) => a.client.localeCompare(b.client) || a.name.localeCompare(b.name)));
 
         } catch (error: any) {
             console.error("Error generando reporte:", error);
