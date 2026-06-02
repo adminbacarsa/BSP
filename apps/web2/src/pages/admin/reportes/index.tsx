@@ -1243,9 +1243,9 @@ export default function ReportsPage() {
                             onChange={e => setPublishFilter(e.target.value as ReportPublishFilter)}
                             className="w-full p-2 border rounded-xl font-bold text-sm text-slate-700 bg-white"
                         >
-                            <option value="all">Todos (publicados + borrador)</option>
+                            <option value="all">Todos (publicados + borrador draft)</option>
                             <option value="published">Solo publicados (liquidación oficial)</option>
-                            <option value="unpublished">Solo no publicados (revisión)</option>
+                            <option value="unpublished">Solo borrador / no publicados</option>
                         </select>
                     </div>
 

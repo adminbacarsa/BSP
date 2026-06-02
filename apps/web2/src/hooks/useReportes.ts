@@ -71,22 +71,25 @@ export function isShiftEligibleForReports(
     publishStatusMap: Record<string, boolean>,
     publishFilter: ReportPublishFilter = 'published',
 ): boolean {
-    if (shift?.draft === true) return false;
     if (!shift?.startTime || !shift?.endTime) return false;
 
+    const isDraft = shift?.draft === true;
     const isPublished = isShiftPublishedForReports(shift, publishStatusMap);
     const isOps = isOperationalOriginShift(shift);
     const isNovedad = shift?.type === 'NOVEDAD';
 
+    // Todos: incluye borradores (draft) = crono planificado aún no publicado
     if (publishFilter === 'all') return true;
 
     if (publishFilter === 'unpublished') {
         if (isOps || isNovedad) return false;
+        if (isDraft) return true;
         if (!shift?.objectiveId) return false;
         return !isPublished;
     }
 
-    // published — liquidación oficial
+    // published — liquidación oficial (sin borradores)
+    if (isDraft) return false;
     if (isOps) return true;
     if (isNovedad) return true;
 
@@ -826,6 +829,15 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             setEmployeeReport(finalEmpRows.sort((a,b) => b.total - a.total));
+
+            const empCount = finalEmpRows.length;
+            const shiftCount = rawShifts.length;
+            if (empCount > 0) {
+                const filterLbl = publishFilter === 'all' ? 'todos (incl. borrador)'
+                    : publishFilter === 'unpublished' ? 'solo borrador'
+                    : 'solo publicados';
+                toast.success(`${empCount} empleado(s) · ${shiftCount} turnos · ${filterLbl}`);
+            }
 
             // 4. Procesamiento por Objetivo
             const objGroups: Record<string, { shifts: any[]; clientId?: string }> = {};
