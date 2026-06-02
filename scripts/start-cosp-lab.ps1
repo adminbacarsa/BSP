@@ -116,8 +116,8 @@ if (-not (Test-Path (Join-Path $projectRoot 'node_modules'))) {
 Ensure-EnvFiles
 
 if ($Restart) {
-  Write-Step 'Reiniciando: liberando puertos 8080, 9099, 5001, 4000, 4400...' 'Yellow'
-  Stop-PortListeners @(8080, 9099, 5001, 4000, 4400)
+  Write-Step 'Reiniciando: liberando puertos 8080, 9099, 5001, 4000, 4400, 3010...' 'Yellow'
+  Stop-PortListeners @(8080, 9099, 5001, 4000, 4400, 3010)
 }
 
 $emulatorsUp = (Test-TcpPort 8080) -and (Test-TcpPort 9099)
@@ -149,6 +149,19 @@ if (-not $emulatorsUp) {
   Write-Step '  Emuladores listos.' 'Green'
 } else {
   Write-Step 'Emuladores ya activos — omitiendo arranque.' 'Green'
+}
+
+if (-not (Test-TcpPort 3010)) {
+  Write-Step 'Abriendo puente de backups (:3010)...' 'Yellow'
+  Start-Process cmd.exe -ArgumentList @('/k', "cd /d `"$projectRoot`" && title COSP Bridge :3010 && npm run emulator-bridge")
+  try {
+    Wait-TcpPort 3010 30 'Bridge '
+    Write-Step '  Puente backup listo.' 'Green'
+  } catch {
+    Write-Step 'AVISO: puente :3010 no respondió — para importar backups: npm run emulator-bridge' 'Yellow'
+  }
+} else {
+  Write-Step 'Puente backup (:3010) ya activo.' 'Green'
 }
 
 if (-not $NoSeed) {

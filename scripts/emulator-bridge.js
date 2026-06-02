@@ -112,6 +112,12 @@ const server = http.createServer((req, res) => {
 
   const url = (req.url || '').split('?')[0];
 
+  if (req.method === 'GET' && url === '/health') {
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, port: PORT }));
+    return;
+  }
+
   if (req.method === 'POST' && url === '/import-backup-file') {
     importBackupFile(req, res);
     return;

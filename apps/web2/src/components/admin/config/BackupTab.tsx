@@ -28,6 +28,23 @@ async function assertEmulatorReachable(): Promise<void> {
   }
 }
 
+async function checkBridgeReachable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BRIDGE_URL}/health`, { method: 'GET' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function assertBridgeReachable(): Promise<void> {
+  const ok = await checkBridgeReachable();
+  if (ok) return;
+  throw new Error(
+    'Puente de importación (:3010) no responde. Ejecutá npm run emulator-bridge en otra terminal, o reiniciá npm run emulators (inicia el puente automáticamente).',
+  );
+}
+
 interface LoadedVersion {
   fileName: string;
   loadedAt: string;   // ISO string
@@ -200,6 +217,7 @@ export default function BackupTab() {
   const [restoring, setRestoring] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; phase: string } | null>(null);
   const [loadedVersion, setLoadedVersion] = useState<LoadedVersion | null>(null);
+  const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Leer versión activa del emulador desde localStorage
@@ -209,6 +227,21 @@ export default function BackupTab() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setLoadedVersion(JSON.parse(raw));
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!IS_EMULATOR) return;
+    let cancelled = false;
+    const poll = async () => {
+      const ok = await checkBridgeReachable();
+      if (!cancelled) setBridgeOnline(ok);
+    };
+    poll();
+    const id = window.setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
 
   // Suscripción Firestore (producción: remota / emulador: local localhost:8080)
@@ -313,6 +346,7 @@ export default function BackupTab() {
         throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
       }
       await assertEmulatorReachable();
+      await assertBridgeReachable();
 
       const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
       setProgress({
@@ -578,9 +612,25 @@ export default function BackupTab() {
             </div>
             <div className="flex-1">
               <h3 className="font-black text-sm text-amber-900">Actualizar datos del emulador</h3>
-              <p className="text-xs text-amber-700 mt-0.5 mb-3">
-                Descargá el backup desde Drive y seleccionalo acá. Requiere <code className="bg-amber-100 px-1 rounded">node scripts/emulator-bridge.js</code> en otra terminal (puerto 3010). Importación ~2-4 min para backups grandes.
+              <p className="text-xs text-amber-700 mt-0.5 mb-2">
+                Descargá el backup desde Drive y seleccionalo acá. El puente en <code className="bg-amber-100 px-1 rounded">:3010</code> se inicia con <code className="bg-amber-100 px-1 rounded">npm run emulators</code>. Importación ~2-4 min para backups grandes.
               </p>
+              <div className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-lg mb-3 ${
+                bridgeOnline === null
+                  ? 'bg-amber-100 text-amber-700'
+                  : bridgeOnline
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-rose-100 text-rose-800'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  bridgeOnline === null ? 'bg-amber-400 animate-pulse' : bridgeOnline ? 'bg-emerald-500' : 'bg-rose-500'
+                }`} />
+                {bridgeOnline === null
+                  ? 'Verificando puente :3010…'
+                  : bridgeOnline
+                    ? 'Puente listo — podés importar'
+                    : 'Puente apagado — ejecutá npm run emulator-bridge'}
+              </div>
               <div className="flex gap-2 mb-4">
                 <button
                   type="button"
@@ -617,11 +667,15 @@ export default function BackupTab() {
                   </p>
                 </div>
               ) : (
-                <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-sm cursor-pointer transition-colors shadow">
+                <label className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow ${
+                  bridgeOnline === false
+                    ? 'bg-amber-300 text-amber-900 cursor-not-allowed opacity-80'
+                    : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
+                }`}>
                   <Upload size={15} />
                   Seleccionar backup .json
                   <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden"
-                    disabled={loadingLocal}
+                    disabled={loadingLocal || bridgeOnline === false}
                     onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadLocalFile(f); e.target.value = ''; }} />
                 </label>
               )}

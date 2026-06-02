@@ -1,7 +1,7 @@
 /**
  * Firebase Emulator Suite con JDK 21+. Import opcional si backups/latest tiene datos.
  */
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -206,6 +206,40 @@ if (hasImport) {
 }
 emulatorArgs.push('--export-on-exit=./backups/latest');
 
+let bridgeProc = null;
+function startEmulatorBridge() {
+  const bridgeScript = path.join(__dirname, 'emulator-bridge.js');
+  bridgeProc = spawn(process.execPath, [bridgeScript], {
+    env,
+    cwd: projectRoot,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  bridgeProc.stdout?.on('data', (d) => logErr(`[bridge] ${String(d).trim()}`));
+  bridgeProc.stderr?.on('data', (d) => logErr(`[bridge] ${String(d).trim()}`));
+  bridgeProc.on('exit', (code) => {
+    if (code && code !== 0) logErr(`[bridge] salió con código ${code}`);
+  });
+  logErr('[emulators] Puente backup :3010 (emulator-bridge.js)');
+}
+
+function stopEmulatorBridge() {
+  if (bridgeProc && !bridgeProc.killed) {
+    try {
+      bridgeProc.kill();
+    } catch {
+      /* omit */
+    }
+  }
+  bridgeProc = null;
+}
+
+startEmulatorBridge();
+process.on('SIGINT', () => {
+  stopEmulatorBridge();
+  process.exit(130);
+});
+process.on('SIGTERM', stopEmulatorBridge);
+
 const firebaseJs = path.join(projectRoot, 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
 let r;
 if (fs.existsSync(firebaseJs)) {
@@ -228,6 +262,8 @@ if (fs.existsSync(firebaseJs)) {
     shell: process.platform === 'win32',
   });
 }
+
+stopEmulatorBridge();
 
 // Al salir: si latest quedó vacío pero previous tiene datos → restaurar automáticamente
 if (!hasRealData(latestDir) && hasRealData(previousDir)) {
