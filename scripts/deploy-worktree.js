@@ -24,9 +24,17 @@ function git(cmd, cwd = LAB_ROOT) {
   return (r.stdout || '').trim();
 }
 
+function normalizeDeployPath(p) {
+  return path.resolve(p).replace(/\\/g, '/').toLowerCase();
+}
+
 function ensureWorktree() {
   const list = git('worktree list --porcelain');
-  const hasDeploy = list.split('\n').some((line) => line.startsWith('worktree ') && line.includes(DEPLOY_DIR));
+  const deployNorm = normalizeDeployPath(DEPLOY_DIR);
+  const hasDeploy = list.split('\n').some((line) => {
+    if (!line.startsWith('worktree ')) return false;
+    return normalizeDeployPath(line.slice('worktree '.length).trim()) === deployNorm;
+  });
 
   if (!fs.existsSync(DEPLOY_DIR)) {
     console.log(`\n▶ Creando worktree de deploy en ${DEPLOY_DIR} ...`);
