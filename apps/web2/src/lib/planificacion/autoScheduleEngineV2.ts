@@ -2941,20 +2941,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         enforceFixedBandFrancoRetCap(assignments, ctx, cycleWorkDays);
     }
 
-    // Saneamiento final 6+2: cualquier F en día laborable del ciclo → RET (previene F dispersos
-    // y F consecutivos recreados por los pases de gap-fill post-guard).
+    // Segundo pase del franco guard: captura F consecutivos generados en pases finales.
     if (ctx.rotateShifts !== false) {
-        for (const a of assignments) {
-            const code = String(a.code || '').toUpperCase();
-            if ((code !== 'F' && code !== 'FF') || (a.hours ?? 0) > 0) continue;
-            if (!cycleWorkDays[a.empId]?.has(a.dateStr)) continue;
-            a.code = 'RET';
-            a.name = 'Retén';
-            a.hours = 0;
-            a.isFranco = false;
-            a.isReten = true;
-        }
-        // Segundo pase del franco guard: captura F consecutivos generados en pases finales.
         enforceFrancoStreakRules({
             assignments,
             ctx,
