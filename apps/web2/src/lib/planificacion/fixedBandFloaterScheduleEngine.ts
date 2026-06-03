@@ -134,14 +134,35 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     ctx.positions.forEach(p => { positionGroups[p.positionName] = []; });
     const defaultPos = ctx.defaultPositionByEmp || {};
 
+    const unassigned: string[] = [];
     for (const emp of ctx.employees) {
-        // Empleados cuyo objetivo base es diferente al actual (EXT/huéspedes) → idle.
+        // EXT / huéspedes → idle siempre.
         if (ctx.objectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
         const fixed = defaultPos[emp.id];
-        if (!fixed || positionGroups[fixed] === undefined) continue;
-        positionGroups[fixed].push(emp.id);
+        if (fixed && positionGroups[fixed] !== undefined) {
+            positionGroups[fixed].push(emp.id);
+        } else {
+            unassigned.push(emp.id);
+        }
     }
-    // Empleados sin puesto explícito en este objetivo → idle; no se les genera ningún turno.
+
+    // Empleados sin puesto explícito → distribuir a puestos 24hs de 7 días.
+    // Asignación al puesto con menos empleados actuales para equilibrar carga.
+    // Si no hay puestos 24hs disponibles, quedan idle.
+    if (unassigned.length > 0) {
+        const targets = ctx.positions.filter(p =>
+            is24hs(p) && (!Array.isArray(p.activeDays) || p.activeDays.length >= 7),
+        );
+        if (targets.length > 0) {
+            for (const empId of unassigned) {
+                const leastFull = targets.reduce((best, p) =>
+                    positionGroups[p.positionName].length < positionGroups[best.positionName].length ? p : best,
+                );
+                positionGroups[leastFull.positionName].push(empId);
+            }
+        }
+    }
+
     return positionGroups;
 }
 
