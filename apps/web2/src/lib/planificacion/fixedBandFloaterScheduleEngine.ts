@@ -146,10 +146,10 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 }
 
 /**
- * Divide grupos multi-qty en subgrupos de exactamente 4 regulares + 0-1 flotante.
- * qty = puestos concurrentes por turno = cantidad de subgrupos independientes.
- * Los extras (empleados más allá de qty×4) se distribuyen como 1 flotante por subgrupo,
- * empezando por los primeros subgrupos. Nunca más de 1 flotante por subgrupo.
+ * Divide grupos en subgrupos de exactamente 4 empleados (un subgrupo por slot concurrente).
+ * qty = puestos concurrentes por turno = número de subgrupos de 4.
+ * Los empleados más allá de qty×4 quedan idle (sin opening slot, sin turnos).
+ * Si hay menos de qty×4, se crean tantos subgrupos completos de 4 como alcancen.
  * Puestos no-24hs se omiten — sus empleados no tienen opening slot.
  */
 function buildSubgroupsFor24hs(
@@ -162,17 +162,12 @@ function buildSubgroupsFor24hs(
         if (!pos || !is24hs(pos)) continue;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
-        if (groupIds.length < 4) continue; // ni para 1 subgrupo
-        // Extras = empleados más allá de qty×4 (máx qty, uno por subgrupo)
-        const extras = Math.max(0, groupIds.length - qty * 4);
-        let idx = 0;
-        for (let i = 0; i < qty; i++) {
-            if (idx >= groupIds.length) break;
-            const size = 4 + (i < extras ? 1 : 0); // primer `extras` subgrupos llevan 1 flotante
-            const sub = groupIds.slice(idx, idx + size);
-            if (sub.length >= 4) result.push(sub);
-            idx += size;
+        // Subgrupos completos posibles (mín 1, máx qty)
+        const subgroupCount = Math.min(qty, Math.floor(groupIds.length / 4));
+        for (let i = 0; i < subgroupCount; i++) {
+            result.push(groupIds.slice(i * 4, i * 4 + 4));
         }
+        // Los empleados más allá de subgroupCount×4 quedan idle.
     }
     return result;
 }
@@ -273,9 +268,9 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
 }
 
 /**
- * true si todos los puestos 24hs operan 7 días y cada slot concurrente tiene entre 4 y 5 guardias.
- * qty = puestos concurrentes por turno. Acepta extras de hasta qty (1 flotante por subgrupo).
- * Condiciones: mínimo por subgrupo ≥ 4, máximo por subgrupo ≤ 5 (qty×4 ≤ g.length ≤ qty×5).
+ * true si hay al menos un puesto 24hs con al menos 4 empleados asignados (1 subgrupo de rotación).
+ * Extras más allá de qty×4 son ignorados (quedan idle). Déficit parcial (< qty subgrupos llenos)
+ * se acepta — el motor genera lo que puede y el coverage check reporta las brechas.
  * Puestos no-24hs (L-V, custom) se ignoran — no bloquean el floater.
  */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
@@ -286,11 +281,9 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
-        if (g.length === 0) continue;
-        const minPerSlot = Math.floor(g.length / qty);
-        if (minPerSlot < 4) return false;         // no alcanza para 6+2
-        if (g.length > qty * 5) return false;      // necesitaría >5 por subgrupo
-        counted24 += g.length;
+        if (g.length < 4) continue; // no alcanza para ningún subgrupo; ignorar este puesto
+        const subgroupCount = Math.min(qty, Math.floor(g.length / 4));
+        counted24 += subgroupCount * 4;
     }
     return counted24 > 0;
 }
@@ -411,6 +404,8 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const posName = empToPosition[emp.id] ?? '';
             const pos = ctx.positions.find(p => p.positionName === posName);
             if (!pos) continue;
+            // Empleados 24hs sin opening = extras descartados por buildSubgroupsFor24hs → idle
+            if (is24hs(pos)) continue;
             primaryShiftByEmp[emp.id] = null;
             ctx.daysInMonth.forEach(day => {
                 const dateStr = ctx.getDateKey(day);
