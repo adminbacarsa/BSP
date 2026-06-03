@@ -28,7 +28,6 @@ import { useAuth } from '@/context/AuthContext';
 import {
   shouldScopeQueriesToEmpresa,
   empresaCollectionQuery,
-  filterRowsByEmpresa,
   belongsToEmpresaView,
   slaBelongsToEmpresa,
   deleteClientForEmpresa,
@@ -81,11 +80,15 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import ProformaPanel from '@/components/crm/ProformaPanel';
+import { formatMoney } from '@/lib/crm/proformaFormat';
+import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
+import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
+import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
+import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
+import { slaService } from '@/services/slaService';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-
-const formatMoney = (val: any) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(Number(val) || 0);
 
 // --- MOTOR DE CÁLCULO (CCT 422/05) ---
 const analyzeShiftComposition = (start: string, end: string) => {
@@ -286,7 +289,6 @@ export default function CRMPage() {
   const [portalError, setPortalError] = useState('');
 
   // --- PROFORMA ---
-  const [proformaOpen, setProformaOpen] = useState(false);
   const [proformaMonth, setProformaMonth] = useState(new Date().getMonth());
   const [proformaYear, setProformaYear] = useState(new Date().getFullYear());
   const [proformaStartDate, setProformaStartDate] = useState('');
@@ -296,6 +298,9 @@ export default function CRMPage() {
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
   const [proformaTotals, setProformaTotals] = useState({ planned: 0, executed: 0, loading: false });
   const [proformaBreakdown, setProformaBreakdown] = useState<any[]>([]);
+  const [proformaBundle, setProformaBundle] = useState<ProformaExportBundle | null>(null);
+  const [proformaExporting, setProformaExporting] = useState(false);
+  const [empMetaMap, setEmpMetaMap] = useState<Record<string, { legajo?: string; name?: string }>>({});
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -520,18 +525,11 @@ export default function CRMPage() {
     setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 });
     try {
       const [srv, cont, quo] = await Promise.all([
-        getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', id))),
+        slaService.getByClientId(id, { empresaId, scopeEmpresa }),
         getDocs(query(collection(db, 'contracts'), where('clientId', '==', id))),
         getDocs(query(collection(db, 'quotes'), where('clientId', '==', id))),
       ]);
-      setClientServices(
-        filterRowsByEmpresa(
-          srv.docs.map((x) => ({ id: x.id, ...x.data() })),
-          empresaId,
-          scopeEmpresa,
-          migracionCompleta,
-        ),
-      );
+      setClientServices(srv);
       setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
       setClientQuotes(quo.docs.map((x) => ({ id: x.id, ...x.data() })));
     } catch (e) {
@@ -1152,6 +1150,17 @@ export default function CRMPage() {
     try {
       const { start, end } = getProformaRange();
 
+      let servicesForProforma = clientServices;
+      if (!servicesForProforma.length) {
+        servicesForProforma = await slaService.getByClientId(selectedClient.id, { empresaId, scopeEmpresa });
+      }
+
+      const objectiveAliases = buildObjectiveAliasMap(
+        selectedClient.id,
+        selectedClient.objetivos || [],
+        servicesForProforma,
+      );
+
       const sTurnos = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', selectedClient.id)));
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
@@ -1177,7 +1186,8 @@ export default function CRMPage() {
         const realStart = toDateSafe(t.realStartTime);
         const realEnd = toDateSafe(t.realEndTime);
 
-        const objectiveName = (t.objectiveName || 'Objetivo sin nombre').toString().trim();
+        const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: selectedClient.id };
+        const objectiveName = resolveObjectiveDisplayName(rowCtx, objectiveAliases);
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
         if (plannedStart && plannedEnd && plannedStart >= start && plannedStart <= end) {
@@ -1215,28 +1225,117 @@ export default function CRMPage() {
         .sort((a: any, b: any) => b.totalHours - a.totalHours);
 
       setProformaBreakdown(breakdown);
+
+      const empSnap = await getDocs(
+        scopeEmpresa
+          ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+          : collection(db, 'empleados'),
+      );
+      const empMeta: Record<string, { legajo?: string; name?: string }> = {};
+      empSnap.docs.forEach((d) => {
+        const data = d.data() as any;
+        if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        empMeta[d.id] = {
+          legajo: data.fileNumber || data.legajo || '',
+          name: data.name || `${data.lastName || ''} ${data.firstName || ''}`.trim(),
+        };
+      });
+      setEmpMetaMap(empMeta);
+
+      const turnos = sTurnos.docs.map((d) => ({ id: d.id, ...d.data(), clientId: selectedClient.id })) as any[];
+      const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
+      const grids = buildProformaObjectiveGrids({
+        turnos,
+        empMeta,
+        clientId: selectedClient.id,
+        objectiveAliases,
+        slaInRange: servicesForProforma,
+        start,
+        end,
+        mode: proformaDetailMode,
+        useExecutedForAuto,
+      });
+      const summary = buildProformaSummary(grids);
+      setProformaBundle({
+        clientName: selectedClient.name || '',
+        legalName: selectedClient.legalName || '',
+        taxId: selectedClient.taxId || '',
+        address: selectedClient.address || '',
+        periodLabel: buildPeriodLabel(start, end),
+        startDate: proformaStartDate,
+        endDate: proformaEndDate,
+        issuedAt: new Date(),
+        empresaName: (empresa as any)?.name || 'COSP',
+        summary,
+        objectives: grids,
+      });
+
       setProformaTotals({ planned: Math.round(planned.total), executed: Math.round(executed.total), loading: false });
     } catch (e) {
       console.error(e);
       setProformaTotals((p) => ({ ...p, loading: false }));
+      setProformaBundle(null);
       toast.error('Error al calcular turnos');
     }
   };
 
+  const proformaActive = activeTab === 'PREFACTURA';
+
   useEffect(() => {
-    if (!proformaOpen) return;
+    if (!proformaActive) return;
     const start = new Date(proformaYear, proformaMonth, 1);
     const end = new Date(proformaYear, proformaMonth + 1, 0);
     setProformaStartDate(start.toISOString().split('T')[0]);
     setProformaEndDate(end.toISOString().split('T')[0]);
-    setProformaDetailMode('auto');
-  }, [proformaOpen, proformaMonth, proformaYear]);
+  }, [proformaActive, proformaMonth, proformaYear]);
 
   useEffect(() => {
-    if (!proformaOpen || !selectedClient?.id) return;
+    if (!proformaActive || !selectedClient?.id || loadingClientData) return;
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proformaOpen, selectedClient?.id, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+  }, [proformaActive, selectedClient?.id, loadingClientData, clientServices, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+
+  const handleExportProformaPdf = () => {
+    if (!proformaBundle) return;
+    setProformaExporting(true);
+    try {
+      exportProformaPdf({ ...proformaBundle, issuedAt: new Date() });
+      toast.success('PDF generado');
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al generar PDF');
+    } finally {
+      setProformaExporting(false);
+    }
+  };
+
+  const handleExportProformaCsv = () => {
+    if (!proformaBundle) return;
+    setProformaExporting(true);
+    try {
+      exportProformaCsv({ ...proformaBundle, issuedAt: new Date() });
+      toast.success('CSV descargado');
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al generar CSV');
+    } finally {
+      setProformaExporting(false);
+    }
+  };
+
+  const handleExportProformaExcel = () => {
+    if (!proformaBundle) return;
+    setProformaExporting(true);
+    try {
+      exportProformaExcel({ ...proformaBundle, issuedAt: new Date() });
+      toast.success('Excel descargado');
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al generar Excel');
+    } finally {
+      setProformaExporting(false);
+    }
+  };
 
   const baseHours = useMemo(() => {
     if (!selectedClient) return 0;
@@ -1486,7 +1585,7 @@ export default function CRMPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => { void openClientDetail(c); setActiveTab('COTIZACIONES'); setProformaOpen(true); close(); }}
+                    onClick={() => { void openClientDetail(c); setActiveTab('PREFACTURA'); close(); }}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-xs uppercase transition-colors border"
                     style={{ backgroundColor: 'var(--surf2, #fef3c7)', color: '#b45309', borderColor: '#fde68a' }}
                   >
@@ -1754,7 +1853,7 @@ export default function CRMPage() {
 
             <div className="flex-1 rounded-xl border shadow-sm overflow-hidden flex flex-col min-h-[600px]" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
               <div className="flex border-b">
-                {['INFO', 'CONTRATOS', 'SERVICIOS', 'SEDES', 'COTIZACIONES', 'HISTORIAL'].map((t) => (
+                {['INFO', 'CONTRATOS', 'SERVICIOS', 'SEDES', 'PREFACTURA', 'COTIZACIONES', 'HISTORIAL'].map((t) => (
                   <button
                     key={t}
                     onClick={() => setActiveTab(t)}
@@ -1972,8 +2071,8 @@ export default function CRMPage() {
                         >
                           <Plus size={13} /> Nuevo Contrato
                         </button>
-                        <button onClick={() => setProformaOpen(true)} className="bg-white border hover:bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-colors">
-                          <Receipt size={13} /> Proforma
+                        <button onClick={() => setActiveTab('PREFACTURA')} className="bg-white border hover:bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-colors">
+                          <Receipt size={13} /> Prefactura
                         </button>
                       </div>
                     </div>
@@ -2798,6 +2897,40 @@ export default function CRMPage() {
                   </div>
                 )}
 
+                {activeTab === 'PREFACTURA' && (
+                  <ProformaPanel
+                    client={selectedClient}
+                    empresaName={empresa?.name}
+                    proformaMonth={proformaMonth}
+                    proformaYear={proformaYear}
+                    proformaStartDate={proformaStartDate}
+                    proformaEndDate={proformaEndDate}
+                    proformaDetailMode={proformaDetailMode}
+                    proformaBase={proformaBase}
+                    proformaHourlyValue={proformaHourlyValue}
+                    proformaTotals={proformaTotals}
+                    proformaBreakdown={proformaBreakdown}
+                    proformaBundle={proformaBundle}
+                    baseHours={baseHours}
+                    totalEstimate={totalEstimate}
+                    monthsEs={MONTHS_ES}
+                    expandedKeys={expandedKeys}
+                    onMonthChange={setProformaMonth}
+                    onYearChange={setProformaYear}
+                    onStartDateChange={setProformaStartDate}
+                    onEndDateChange={setProformaEndDate}
+                    onDetailModeChange={setProformaDetailMode}
+                    onBaseChange={setProformaBase}
+                    onHourlyValueChange={setProformaHourlyValue}
+                    onRecalculate={calculateProformaTurnos}
+                    onToggleExpanded={toggleExpandedKey}
+                    onExportPdf={handleExportProformaPdf}
+                    onExportCsv={handleExportProformaCsv}
+                    onExportExcel={handleExportProformaExcel}
+                    exporting={proformaExporting}
+                  />
+                )}
+
                 {activeTab === 'COTIZACIONES' && (
                   loadingClientData ? (
                     <div className="py-16 text-center text-slate-400">
@@ -2895,142 +3028,6 @@ export default function CRMPage() {
             </div>
           </div>
 
-        {proformaOpen ? (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setProformaOpen(false)}>
-            <div className="bg-white rounded-xl p-8 w-full max-w-6xl shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-black text-slate-800 uppercase">Proforma</h3>
-                <button onClick={() => setProformaOpen(false)} className="p-2 rounded-xl hover:bg-slate-100">
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                <div className="p-4 bg-slate-50 rounded-xl border">
-                  <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Pre-factura</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm font-bold text-slate-600">
-                    <div>Cliente: <span className="text-slate-800">{selectedClient?.name || '-'}</span></div>
-                    <div>CUIT: <span className="text-slate-800">{selectedClient?.taxId || '-'}</span></div>
-                    <div>Razón Social: <span className="text-slate-800">{selectedClient?.legalName || '-'}</span></div>
-                    <div className="md:col-span-2">Dirección: <span className="text-slate-800">{selectedClient?.address || '-'}</span></div>
-                    <div>Contacto: <span className="text-slate-800">{selectedClient?.contactName || '-'}</span></div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaYear} onChange={(e) => setProformaYear(Number(e.target.value))}>
-                    {[proformaYear - 2, proformaYear - 1, proformaYear, proformaYear + 1].map((y) => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
-                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaMonth} onChange={(e) => setProformaMonth(Number(e.target.value))}>
-                    {MONTHS_ES.map((m, idx) => (
-                      <option key={m} value={idx}>{m}</option>
-                    ))}
-                  </select>
-                  <input type="date" className="w-full p-3 rounded-xl border font-bold" value={proformaStartDate} onChange={(e) => setProformaStartDate(e.target.value)} />
-                  <input type="date" className="w-full p-3 rounded-xl border font-bold" value={proformaEndDate} onChange={(e) => setProformaEndDate(e.target.value)} />
-                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaDetailMode} onChange={(e) => setProformaDetailMode(e.target.value as ProformaDetailMode)}>
-                    <option value="auto">Detalle Auto</option>
-                    <option value="planned">Detalle Planificado</option>
-                    <option value="executed">Detalle Ejecutado</option>
-                  </select>
-                  <select className="w-full p-3 rounded-xl border font-black uppercase text-[10px]" value={proformaBase} onChange={(e) => setProformaBase(e.target.value as ProformaBase)}>
-                    <option value="requested">Solicitado (SLA)</option>
-                    <option value="planned">Planificado</option>
-                    <option value="executed">Ejecutado</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input className="w-full p-3 rounded-xl border font-bold" placeholder="Valor hora (ARS)" value={proformaHourlyValue} onChange={(e) => setProformaHourlyValue(e.target.value)} />
-                  <div className="md:col-span-2 flex items-center gap-3">
-                    <button onClick={calculateProformaTurnos} className="bg-white border px-4 py-2 rounded-xl text-[10px] font-black uppercase flex gap-2">
-                      <Calculator size={14} /> Recalcular turnos
-                    </button>
-                    {proformaTotals.loading ? (
-                      <span className="text-xs font-bold text-slate-400 flex items-center gap-2">
-                        <Loader2 size={14} className="animate-spin" /> Calculando...
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="p-4 bg-slate-50 rounded-xl border">
-                    <p className="text-[10px] font-black text-slate-400 uppercase">Horas base</p>
-                    <p className="text-2xl font-black text-slate-800">{baseHours} hs</p>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border">
-                    <p className="text-[10px] font-black text-slate-400 uppercase">Valor hora</p>
-                    <p className="text-2xl font-black text-slate-800">{formatMoney(Number(proformaHourlyValue) || 0)}</p>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border">
-                    <p className="text-[10px] font-black text-slate-400 uppercase">Total estimado</p>
-                    <p className="text-2xl font-black text-slate-800">{formatMoney(totalEstimate)}</p>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-white rounded-xl border space-y-3">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-[10px] font-black uppercase text-slate-400">Detalle por objetivo y puesto</p>
-                    <span className="text-[10px] font-black uppercase text-slate-400">HS</span>
-                  </div>
-
-                  {proformaBreakdown.length === 0 ? <div className="text-sm font-bold text-slate-400">Sin turnos en el período seleccionado.</div> : null}
-
-                  <div className="space-y-2">
-                    {proformaBreakdown.map((o) => (
-                      <div key={o.objectiveName} className="border rounded-xl overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
-                          <div>
-                            <p className="text-sm font-black text-slate-800">{o.objectiveName}</p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">Objetivo</p>
-                          </div>
-                          <div className="text-sm font-black text-slate-700">{o.totalHours} hs</div>
-                        </div>
-                        <div className="space-y-2 p-3">
-                          {o.positions.map((p: any) => {
-                            const key = `${o.objectiveName}__${p.positionName}`;
-                            return (
-                              <div key={key} className="border rounded-xl overflow-hidden">
-                                <button onClick={() => toggleExpandedKey(key)} className="w-full flex items-center justify-between px-4 py-3 text-left">
-                                  <div>
-                                    <p className="text-sm font-black text-slate-800">{p.positionName}</p>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase">Puesto</p>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-sm font-black text-slate-700">
-                                    {p.totalHours} hs {expandedKeys[key] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                  </div>
-                                </button>
-                                {expandedKeys[key] ? (
-                                  <div className="px-4 pb-3 text-xs font-bold text-slate-500 space-y-1">
-                                    {p.byDay.map((d: any) => (
-                                      <div key={d.date} className="flex items-center justify-between">
-                                        <span>{d.date}</span>
-                                        <span>{d.hours} hs</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-2 flex justify-end">
-                    <button onClick={() => setProformaOpen(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase">
-                      Cerrar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
           </div>
         </PageShell>
       )}
