@@ -167,6 +167,49 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 
+const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA']);
+
+function resolveTitularCoverageName(
+    titularEmpId: string,
+    titularName: string,
+    dateStr: string,
+    shiftsMap: Record<string, any>,
+    pendingChanges: Record<string, any>,
+    empNameById: (id: string) => string | undefined,
+    coveredByFromCell?: string | null,
+): string | null {
+    if (coveredByFromCell) {
+        return String(coveredByFromCell).replace(/\s*\([^)]*\)\s*$/, '').trim() || null;
+    }
+    const allSources = { ...shiftsMap, ...pendingChanges };
+    for (const [k, raw] of Object.entries(allSources)) {
+        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${titularEmpId}_`)) continue;
+        const s = raw as any;
+        if (s?.isDeleted) continue;
+        if (String(s.comments || '').includes(`Cubriendo a ${titularName}`)) {
+            const covEmpId = k.replace(`_${dateStr}`, '');
+            const name = empNameById(covEmpId);
+            const covCode = String(s.code || '').toUpperCase();
+            if (name && covCode && !LEAVE_CELL_CODES.has(covCode)) return `${name} turno ${covCode}`;
+            return name || null;
+        }
+    }
+    return null;
+}
+
+function buildLeaveCellTooltipLabel(opts: {
+    absenceType?: string | null;
+    reason?: string | null;
+    coveredBy?: string | null;
+}): string {
+    const lines: string[] = [];
+    if (opts.absenceType) lines.push(`Tipo: ${opts.absenceType}`);
+    const reason = String(opts.reason || '').trim();
+    if (reason && !reason.includes('gestionado desde planificador')) lines.push(`Motivo: ${reason}`);
+    lines.push(`Cubierto por: ${opts.coveredBy || 'Sin cobertura registrada'}`);
+    return lines.join('\n');
+}
+
 // --- CONFIGURACIÓN VISUAL ---
 const SHIFT_STYLES: any = {
     'M':   'bg-white text-blue-700 border-blue-400 font-bold',
@@ -4911,7 +4954,11 @@ export default function PlanificacionPage() {
                                         const excludedOnDay = excludedPositionsByDate[cellDateStr];
                                         const isExclusionCol = !!excludedOnDay?.length;
                                         const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}` : (_exclHint || _otherObjHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}</div></td>;
+                                        const leaveCellCode = absence
+                                            ? String(absence.inferredCode || inferAbsenceCode(absence) || content || '').toUpperCase()
+                                            : String(cellCode || '').toUpperCase();
+                                        const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || pending?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}` : (_exclHint || _otherObjHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -5059,11 +5106,15 @@ export default function PlanificacionPage() {
                     className="fixed z-[9999] pointer-events-none"
                     style={{ left: shiftTooltip.x + 10, top: shiftTooltip.y - 64 }}
                 >
-                    <div className="bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm whitespace-nowrap flex flex-col gap-1">
+                    <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[240px] ${shiftTooltip.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>
                         {shiftTooltip.label && (
-                            <div className="flex items-center gap-1.5 text-white">
-                                <Clock size={9} className="text-indigo-300 shrink-0" />
-                                {shiftTooltip.label}
+                            <div className="flex items-start gap-1.5 text-white font-medium">
+                                {shiftTooltip.label.startsWith('Tipo:') ? (
+                                    <Stethoscope size={9} className="text-rose-300 shrink-0 mt-0.5" />
+                                ) : (
+                                    <Clock size={9} className="text-indigo-300 shrink-0 mt-0.5" />
+                                )}
+                                <span>{shiftTooltip.label}</span>
                             </div>
                         )}
                         {shiftTooltip.pos && (
@@ -6830,7 +6881,7 @@ export default function PlanificacionPage() {
                     const colorMap: any = { teal: 'border-l-teal-500 bg-teal-50 text-teal-700', rose: 'border-l-rose-500 bg-rose-50 text-rose-700', purple: 'border-l-purple-500 bg-purple-50 text-purple-700', blue: 'border-l-blue-500 bg-blue-50 text-blue-700', amber: 'border-l-amber-500 bg-amber-50 text-amber-700' };
                     const btnColor: any = { teal: 'bg-teal-600 hover:bg-teal-700 shadow-teal-200', rose: 'bg-rose-600 hover:bg-rose-700 shadow-rose-200', purple: 'bg-purple-600 hover:bg-purple-700 shadow-purple-200', blue: 'bg-blue-600 hover:bg-blue-700 shadow-blue-200', amber: 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' };
                     const title = isVac ? 'Vacaciones — Planificar Cobertura' : isEnf ? 'Ausencia Médica — Cobertura Temporal' : isPG ? 'PG Permiso Gremial — Planificar Cobertura' : isLic ? 'Licencia Especial — Planificar Cobertura' : 'Ausencia Injustificada — Gestionar';
-                    const hint = isVac ? 'Elegí qué días procesar y quién cubre cada uno. Al reprocesar se quita la cobertura anterior del suplente.' : isEnf ? 'Podés asignar cobertura por día o dejar vacante. Reprocesar elimina turnos previos del suplente.' : isPG ? 'Permiso Gremial pago — asigná cobertura por día o dejá vacante.' : isLic ? 'Asigná un reemplazo distinto por día si hace falta, o dejá vacante.' : 'Podés asignar cobertura por día o dejar el puesto vacante.';
+                    const hint = isVac ? 'Elegí qué días procesar y quién cubre cada uno. Solo se listan RET, ESC o guardias sin turno ese día (más cerca primero).' : isEnf ? 'Solo RET, ESC o sin turno ese día — no se muestra personal ya asignado a otro objetivo.' : isPG ? 'Asigná cobertura por día desde RET, ESC o libres.' : isLic ? 'Suplentes desde RET, ESC o sin turno; ordenados por cercanía al objetivo.' : 'Podés asignar cobertura por día o dejar vacante.';
                     const candidateDate = vacancyEditingDay || [...vacancyActiveDates].sort()[0] || vacancyData?.startDate;
                     const formatShortDay = (ymd: string) => {
                         const [, m, d] = ymd.split('-');
@@ -6865,24 +6916,18 @@ export default function PlanificacionPage() {
                         return h;
                     };
                     // Clasificar disponibilidad en la fecha de la ausencia
-                    const NON_AVAILABLE = new Set(['F','FF','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
-                    type VacancyDayRole = 'RETEN' | 'REF' | 'FREE' | 'WORKING';
+                    const NON_AVAILABLE = new Set(['F','FF','FP','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
+                    type VacancyDayRole = 'RETEN' | 'ESC' | 'FREE' | 'WORKING';
                     const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
                         const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                         if (!s || s.isDeleted) return 'FREE';
                         const code = String(s.code || '').toUpperCase();
                         if (code === 'RET') return 'RETEN';
-                        if (code === 'REF') return 'REF';
+                        if (code === 'ESC') return 'ESC';
                         if (NON_AVAILABLE.has(code)) return 'FREE';
                         return 'WORKING';
                     };
-                    // IDs del objetivo: preferredObjectiveId o alias SLA
-                    const objectiveEmpIds = new Set(
-                        employees
-                            .filter((e: any) => e.preferredObjectiveId === selectedObjective || slaIdToObjId[e.preferredObjectiveId] === selectedObjective)
-                            .map((e: any) => e.id)
-                    );
                     const objLat = Number(selectedObjectiveData?.lat ?? 0);
                     const objLng = Number(selectedObjectiveData?.lng ?? 0);
                     const sortKm = (a: { km: number }, b: { km: number }) => a.km - b.km;
@@ -6893,36 +6938,17 @@ export default function PlanificacionPage() {
                             monthHours: getEmpMonthHours(e.id),
                             dayRole: getEmpDayRole(e.id, candidateDate || vacancyData?.startDate || ''),
                             km: employeeKmToObjective(e, objLat, objLng) ?? 9999,
-                            isObjectiveGuard: objectiveEmpIds.has(e.id),
                             expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
-                        }));
+                        }))
+                        .filter(e => e.dayRole === 'RETEN' || e.dayRole === 'ESC' || e.dayRole === 'FREE');
                     const q = vacancyReplacementSearch.toLowerCase().trim();
                     const matchesSearch = (e: typeof candidatos[0]) => {
                         if (!q) return true;
                         return `${e.name || ''} ${e.lastName || ''} ${e.firstName || ''} ${e.legajo || ''}`.toLowerCase().includes(q);
                     };
                     const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
+                    const escCandidatos = candidatos.filter(e => e.dayRole === 'ESC' && matchesSearch(e)).sort(sortKm);
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
-                    const refCandidatos = candidatos.filter(e => e.dayRole === 'REF' && matchesSearch(e)).sort(sortKm);
-                    const objetivoCandidatos = candidatos
-                        .filter(e => e.isObjectiveGuard && e.dayRole === 'WORKING' && matchesSearch(e))
-                        .sort((a, b) => {
-                            const rank = (x: typeof a) => {
-                                if (x.expBadge.startsWith('★')) return 0;
-                                if (x.expBadge.startsWith('◆')) return 1;
-                                if (x.expBadge.startsWith('◇')) return 2;
-                                return 3;
-                            };
-                            const dr = rank(a) - rank(b);
-                            if (dr !== 0) return dr;
-                            return a.km - b.km;
-                        });
-                    const retCandidatos = candidatos
-                        .filter(e => !e.isObjectiveGuard && e.dayRole === 'WORKING' && e.monthHours < (e.maxHours || 200) - 16 && matchesSearch(e))
-                        .sort(sortKm);
-                    const restoCandidatos = candidatos
-                        .filter(e => !e.isObjectiveGuard && e.dayRole === 'WORKING' && e.monthHours >= (e.maxHours || 200) - 16 && matchesSearch(e))
-                        .sort((a, b) => a.km - b.km || a.monthHours - b.monthHours);
                     const selectedReplacementEmp = candidatos.find(e => e.id === (vacancyEditingDay ? resolveDayReplacementId(vacancyEditingDay) : selectedReplacement));
                     const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string) => (
                         <button
@@ -7058,38 +7084,22 @@ export default function PlanificacionPage() {
                                                     {retenCandidatos.map(e => renderVacancyCandidate(e, `Retén · ${e.monthHours}h`))}
                                                 </>
                                             )}
+                                            {escCandidatos.length > 0 && (
+                                                <>
+                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">ESC — más cerca primero ({escCandidatos.length})</div>
+                                                    {escCandidatos.map(e => renderVacancyCandidate(e, `ESC · ${e.monthHours}h`))}
+                                                </>
+                                            )}
                                             {sinTurnoCandidatos.length > 0 && (
                                                 <>
                                                     <div className="px-3 py-1.5 text-[10px] font-black uppercase text-emerald-600">Sin turno — más cerca primero ({sinTurnoCandidatos.length})</div>
                                                     {sinTurnoCandidatos.map(e => renderVacancyCandidate(e, `Libre · ${e.monthHours}h`))}
                                                 </>
                                             )}
-                                            {refCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-sky-600">REF — más cerca primero ({refCandidatos.length})</div>
-                                                    {refCandidatos.map(e => renderVacancyCandidate(e, `REF · ${e.monthHours}h`))}
-                                                </>
-                                            )}
-                                            {objetivoCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-indigo-600">Guardias del objetivo ({objetivoCandidatos.length})</div>
-                                                    {objetivoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
-                                                </>
-                                            )}
-                                            {retCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-500">Con horas disponibles ({retCandidatos.length})</div>
-                                                    {retCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h (${(e.maxHours || 200) - e.monthHours}h libres)`))}
-                                                </>
-                                            )}
-                                            {restoCandidatos.length > 0 && (
-                                                <>
-                                                    <div className="px-3 py-1.5 text-[10px] font-black uppercase text-slate-400">Resto del personal ({restoCandidatos.length})</div>
-                                                    {restoCandidatos.map(e => renderVacancyCandidate(e, `${e.monthHours}h`))}
-                                                </>
-                                            )}
-                                            {retenCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && refCandidatos.length === 0 && objetivoCandidatos.length === 0 && retCandidatos.length === 0 && restoCandidatos.length === 0 && (
-                                                <p className="px-3 py-4 text-xs text-slate-400 text-center">Sin resultados para &quot;{vacancyReplacementSearch}&quot;</p>
+                                            {retenCandidatos.length === 0 && escCandidatos.length === 0 && sinTurnoCandidatos.length === 0 && (
+                                                <p className="px-3 py-4 text-xs text-slate-400 text-center">
+                                                    {q ? `Sin resultados para "${vacancyReplacementSearch}"` : 'No hay RET, ESC ni guardias libres ese día cerca del objetivo.'}
+                                                </p>
                                             )}
                                         </div>
                                         <div className="p-2 border-t shrink-0 bg-slate-50">

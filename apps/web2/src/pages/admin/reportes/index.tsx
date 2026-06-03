@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -320,20 +320,30 @@ export default function ReportsPage() {
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;
                                                                             const hasOvertime = rDur != null && rDur > dur + 0.1;
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+                                                                            const isLeaveRow = isLeaveReportShift(s);
                                                                             return (
-                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : ''}>
+                                                                                <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : ''}>
                                                                                     <td className="py-1.5 pr-3 text-slate-600">{start ? start.toLocaleDateString('es-AR') : '-'}</td>
-                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>{s.employeeName || 'Vacante'}</td>
+                                                                                    <td className={`py-1.5 pr-3 font-bold ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>
+                                                                                        {s.employeeName || 'Vacante'}
+                                                                                        {s._coveringFor && (
+                                                                                            <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
+                                                                                                (Cubrió a {s._coveringFor})
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500">{s.code || '-'}</td>
                                                                                     <td className="py-1.5 pr-3 text-slate-500 text-[10px]">
-                                                                                        {start && end ? `${fmt(start)}–${fmt(end)}` : '-'}
+                                                                                        {isLeaveRow ? '—' : (start && end ? `${fmt(start)}–${fmt(end)}` : '-')}
                                                                                     </td>
                                                                                     <td className="py-1.5 pr-3 text-[10px]">
                                                                                         {rStart && rEnd
                                                                                             ? <span className={hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(rStart)}–{fmt(rEnd)}</span>
                                                                                             : <span className="text-slate-300">—</span>}
                                                                                     </td>
-                                                                                    <td className="py-1.5 pr-3 text-right text-slate-400 text-[10px]">{dur.toFixed(1)}</td>
+                                                                                    <td className="py-1.5 pr-3 text-right text-slate-400 text-[10px]">
+                                                                                        {isLeaveRow && s._objectiveBillable === false ? '—' : dur.toFixed(1)}
+                                                                                    </td>
                                                                                     <td className={`py-1.5 pr-3 text-right font-bold text-[10px] ${isVacant ? 'text-amber-500' : hasOvertime ? 'text-orange-600' : 'text-indigo-600'}`}>
                                                                                         {rDur != null ? rDur.toFixed(1) : dur.toFixed(1)}
                                                                                         {hasOvertime && <span className="text-[9px] ml-1 text-orange-400">+{(rDur!-dur).toFixed(1)}</span>}
@@ -596,11 +606,22 @@ export default function ReportsPage() {
                                     <tr key={s.id} className={`hover:bg-slate-50 ${isLicencia ? 'bg-blue-50/40 border-l-4 border-l-blue-300' : ''}`}>
                                         <td className="p-4 font-bold text-slate-700">{formatDate(s.startTime)}</td>
                                         <td className="p-4 capitalize text-slate-500 text-xs">{dayName}</td>
-                                        {showEmpCol && <td className="p-4 text-xs font-bold text-indigo-700">{s._empName}</td>}
+                                        {showEmpCol && (
+                                            <td className="p-4 text-xs font-bold text-indigo-700">
+                                                {s._empName}
+                                                {s._coveringFor && (
+                                                    <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
+                                                        (Cubrió a {s._coveringFor})
+                                                    </span>
+                                                )}
+                                            </td>
+                                        )}
                                         <td className="p-4 text-center">
                                             <span className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${codeStyle}`}>{s.code}</span>
                                         </td>
-                                        <td className="p-4 text-center font-mono text-xs text-slate-500">{formatTime(s.startTime)} - {formatTime(s.endTime)}</td>
+                                        <td className="p-4 text-center font-mono text-xs text-slate-500">
+                                            {isLeaveReportShift(s) ? '—' : `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`}
+                                        </td>
                                         <td className="p-4 text-xs font-bold text-slate-600 truncate max-w-[180px]">{s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '-'}</td>
                                         <td className="p-4 text-center font-bold text-indigo-600">{duration > 0 ? duration.toFixed(1) : '-'}</td>
                                         <td className="p-4 text-center">
@@ -733,7 +754,7 @@ export default function ReportsPage() {
                     _absenceType: s._absenceType,
                     _coveredBy: s._coveredBy,
                     _coveringFor: s._coveringFor,
-                    isLeaveDay: LEAVE_REPORT_CODES.has(rawCode) || rawCode === 'V' || s._objectiveBillable === false,
+                    isLeaveDay: isLeaveReportShift(s) || s._objectiveBillable === false,
                     objectiveBillable,
                 };
             });
@@ -864,7 +885,7 @@ export default function ReportsPage() {
                                                     {row._absenceReason && <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Motivo:</span> {row._absenceReason}</p>}
                                                     <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubierto por:</span> {row._coveredBy || 'Sin cobertura registrada'}</p>
                                                     {row._coveringFor && (
-                                                        <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubriendo a:</span> {row._coveringFor}</p>
+                                                        <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubrió a:</span> {row._coveringFor}</p>
                                                     )}
                                                 </div>
                                             )}
@@ -1095,6 +1116,11 @@ export default function ReportsPage() {
                                         <td className="p-4 text-xs text-slate-500 capitalize">{dayName}</td>
                                         <td className={`p-4 font-bold text-sm ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>
                                             {s.employeeName || 'VACANTE'}
+                                            {s._coveringFor && (
+                                                <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
+                                                    (Cubrió a {s._coveringFor})
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="p-4 text-xs text-slate-600 font-bold truncate max-w-[160px]">{s._objName || '-'}</td>
                                         <td className="p-4 text-xs text-slate-400 truncate max-w-[120px]">{s._clientName || '-'}</td>
@@ -1102,7 +1128,7 @@ export default function ReportsPage() {
                                             <span className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${isZero ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>{code || '-'}</span>
                                         </td>
                                         <td className="p-4 text-center font-mono text-xs text-slate-500">
-                                            {startD && endD ? `${fmt(startD)} – ${fmt(endD)}` : '-'}
+                                            {isLeaveReportShift(s) ? '—' : (startD && endD ? `${fmt(startD)} – ${fmt(endD)}` : '-')}
                                         </td>
                                         <td className={`p-4 text-center font-black ${isZero ? 'text-slate-300' : 'text-indigo-600'}`}>
                                             {isZero ? '—' : dur > 0 ? dur.toFixed(1) : '-'}

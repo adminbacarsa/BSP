@@ -118,32 +118,52 @@ export function isShiftEligibleForReports(
 
 export const LEAVE_REPORT_CODES = new Set(['V', 'L', 'PG', 'E', 'A', 'AA']);
 
-export function mapAbsenceStatusLabel(status?: string | null): string {
-    const s = String(status || '').trim();
-    if (!s) return 'A verificar';
-    if (s === 'En verificación' || s === 'Pendiente') return 'A verificar';
-    if (s === 'Justificada' || s === 'Autorizada') return 'Justificada';
-    if (s === 'Injustificada' || s === 'Rechazada') return 'Injustificada';
-    return s;
+export function isLeaveReportShift(shift: any): boolean {
+    const code = String(shift?.code || '').trim().toUpperCase();
+    if (LEAVE_REPORT_CODES.has(code)) return true;
+    if (shift?.type === 'NOVEDAD' && (LEAVE_REPORT_CODES.has(code) || PERIOD_ONLY_CODES.has(code))) return true;
+    if (shift?._absenceType && RRHH_ABSENCE_TYPES.has(String(shift._absenceType).trim())) return true;
+    return false;
+}
+
+function leaveReportShiftScore(s: any): number {
+    const code = String(s.code || '').toUpperCase();
+    let score = 0;
+    if (LEAVE_REPORT_CODES.has(code)) score += 50;
+    if (s.type !== 'NOVEDAD') score += 30;
+    if (s.coveredBy || s._coveredBy) score += 10;
+    if (s.absenceId) score += 5;
+    return score;
 }
 
 /** Si hay licencia/ausencia RRHH en el día, ocultar turno M/T/N sin fichada duplicado. */
 export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
-    const byDate: Record<string, any[]> = {};
+    const byEmpDate: Record<string, any[]> = {};
     for (const s of shifts) {
-        const key = s._dateKey || shiftCalendarDateKey(s);
-        if (!key) { (byDate.__orphan ||= []).push(s); continue; }
-        (byDate[key] ||= []).push(s);
+        const dk = s._dateKey || shiftCalendarDateKey(s);
+        const key = dk ? `${s.employeeId || ''}_${dk}` : `__orphan_${s.id || Math.random()}`;
+        (byEmpDate[key] ||= []).push(s);
     }
-    const out: any[] = byDate.__orphan ? [...byDate.__orphan] : [];
-    for (const [dateKey, dayShifts] of Object.entries(byDate)) {
-        if (dateKey === '__orphan') continue;
-        const hasLeave = dayShifts.some(s =>
-            LEAVE_REPORT_CODES.has(String(s.code || '').toUpperCase())
-            || s.type === 'NOVEDAD'
-            || (s._absenceType && RRHH_ABSENCE_TYPES.has(String(s._absenceType).trim())),
-        );
+    const out: any[] = [];
+    for (const [bucketKey, dayShifts] of Object.entries(byEmpDate)) {
+        if (bucketKey.startsWith('__orphan_')) {
+            out.push(...dayShifts);
+            continue;
+        }
+        const leaveRows = dayShifts.filter(isLeaveReportShift);
+        const hasLeave = leaveRows.length > 0;
+        if (leaveRows.length > 0) {
+            const sorted = [...leaveRows].sort((a, b) => leaveReportShiftScore(b) - leaveReportShiftScore(a));
+            const primary = { ...sorted[0] };
+            const coveredBy = sorted.map((r) => r.coveredBy || r._coveredBy).find(Boolean);
+            if (coveredBy && !primary.coveredBy) {
+                primary.coveredBy = coveredBy;
+                primary._coveredBy = primary._coveredBy || coveredBy;
+            }
+            out.push(primary);
+        }
         for (const s of dayShifts) {
+            if (isLeaveReportShift(s)) continue;
             const code = String(s.code || '').toUpperCase();
             const isWork = !NON_WORK_CODES.has(code);
             const onLeave = isEmployeeOnLeave({ shiftCode: code, absenceType: s._absenceType });
@@ -152,6 +172,15 @@ export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
         }
     }
     return out.sort((a, b) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0));
+}
+
+export function mapAbsenceStatusLabel(status?: string | null): string {
+    const s = String(status || '').trim();
+    if (!s) return 'A verificar';
+    if (s === 'En verificación' || s === 'Pendiente') return 'A verificar';
+    if (s === 'Justificada' || s === 'Autorizada') return 'Justificada';
+    if (s === 'Injustificada' || s === 'Rechazada') return 'Injustificada';
+    return s;
 }
 
 function shiftCalendarDateKey(shift: any): string {
@@ -803,7 +832,10 @@ export const useReportes = (forcedClientId?: string | null) => {
                     if (titularId) {
                         const covName = s.employeeName || empMap[s.employeeId] || '—';
                         coverageByEmpDate[`${titularId}_${dk}`] = covName;
-                        coveringForByEmpDate[`${s.employeeId}_${dk}`] = titularName;
+                        const coverCode = String(s.code || '').trim().toUpperCase();
+                        coveringForByEmpDate[`${s.employeeId}_${dk}`] = coverCode
+                            ? `${titularName} turno ${coverCode}`
+                            : titularName;
                     }
                 }
                 if (s.coveredBy && dk) {
@@ -974,14 +1006,22 @@ export const useReportes = (forcedClientId?: string | null) => {
                     staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
                     holidaysData,
                 );
-                const annotatedShifts = [
-                    ...data.shifts.map((s: any) => ({
-                        ...s,
-                        employeeName: empMap[s.employeeId] || null,
-                        _objectiveBillable: true,
-                    })),
-                    ...(objLeaveShifts[objId] || []),
-                ];
+                const annotatedShifts = (() => {
+                    const merged = [
+                        ...data.shifts.map((s: any) => ({
+                            ...s,
+                            employeeName: empMap[s.employeeId] || null,
+                            _objectiveBillable: true,
+                        })),
+                        ...(objLeaveShifts[objId] || []),
+                    ];
+                    const byEmp: Record<string, any[]> = {};
+                    merged.forEach((s) => {
+                        const eid = s.employeeId || '_';
+                        (byEmp[eid] ||= []).push(s);
+                    });
+                    return Object.values(byEmp).flatMap((g) => dedupeShiftsByAbsencePriority(g));
+                })();
                 return {
                     id: objId,
                     type: 'OBJECTIVE',
