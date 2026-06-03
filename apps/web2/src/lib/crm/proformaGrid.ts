@@ -274,10 +274,6 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
       grandTotal,
     };
   })
-  .filter((g) => g.employees.length > 0 || (opts.slaInRange || []).some((sla) => {
-    const id = resolveCanonicalObjectiveId({ ...sla, clientId: opts.clientId }, aliases);
-    return id === g.objectiveId;
-  }))
   .sort((a, b) => a.objectiveName.localeCompare(b.objectiveName, 'es'));
 }
 

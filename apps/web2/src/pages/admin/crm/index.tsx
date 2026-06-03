@@ -86,7 +86,6 @@ import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/o
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
-import { slaService } from '@/services/slaService';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -141,6 +140,28 @@ const getDateKeyInTimezone = (date: Date) => {
   const year = parts.find((p) => p.type === 'year')?.value;
   return `${year}-${month}-${day}`;
 };
+
+const monthRangeYmd = (year: number, month: number) => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return {
+    start: `${year}-${pad(month + 1)}-01`,
+    end: `${year}-${pad(month + 1)}-${pad(lastDay)}`,
+  };
+};
+
+/** Prefactura: incluye borradores (crono no publicado); excluye cancelados y novedades. */
+const isShiftEligibleForProforma = (t: any) => {
+  const status = String(t.status || '').toLowerCase();
+  if (status.includes('cancel') || status.includes('delet')) return false;
+  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+  return true;
+};
+
+async function loadClientSlaRows(clientId: string) {
+  const snap = await getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', clientId)));
+  return snap.docs.map((x) => ({ id: x.id, ...x.data() }));
+}
 
 const toDateSafe = (val: any) => {
   if (!val) return null;
@@ -525,7 +546,7 @@ export default function CRMPage() {
     setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 });
     try {
       const [srv, cont, quo] = await Promise.all([
-        slaService.getByClientId(id, { empresaId, scopeEmpresa }),
+        loadClientSlaRows(id),
         getDocs(query(collection(db, 'contracts'), where('clientId', '==', id))),
         getDocs(query(collection(db, 'quotes'), where('clientId', '==', id))),
       ]);
@@ -1152,13 +1173,21 @@ export default function CRMPage() {
 
       let servicesForProforma = clientServices;
       if (!servicesForProforma.length) {
-        servicesForProforma = await slaService.getByClientId(selectedClient.id, { empresaId, scopeEmpresa });
+        servicesForProforma = await loadClientSlaRows(selectedClient.id);
       }
+
+      const objetivoStubs = (selectedClient.objetivos || []).map((o: any) => ({
+        objectiveId: o.id,
+        objectiveName: o.name,
+        startDate: proformaStartDate,
+        endDate: proformaEndDate,
+      }));
+      const slaInRange = [...servicesForProforma, ...objetivoStubs];
 
       const objectiveAliases = buildObjectiveAliasMap(
         selectedClient.id,
         selectedClient.objetivos || [],
-        servicesForProforma,
+        slaInRange,
       );
 
       const sTurnos = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', selectedClient.id)));
@@ -1178,8 +1207,8 @@ export default function CRMPage() {
 
       sTurnos.forEach((d) => {
         const t = d.data() as any;
+        if (!isShiftEligibleForProforma(t)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
-        if (!isWorkingCode(code)) return;
 
         const plannedStart = toDateSafe(t.startTime);
         const plannedEnd = toDateSafe(t.endTime);
@@ -1191,19 +1220,23 @@ export default function CRMPage() {
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
         if (plannedStart && plannedEnd && plannedStart >= start && plannedStart <= end) {
-          let hrs = Number(t.hours) || getDurationHours(plannedStart, plannedEnd);
-          if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-          if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-          planned.total += hrs;
-          add(planned, objectiveName, positionName, getDateKeyInTimezone(plannedStart), hrs);
+          if (isWorkingCode(code)) {
+            let hrs = Number(t.hours) || getDurationHours(plannedStart, plannedEnd);
+            if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
+            if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
+            planned.total += hrs;
+            add(planned, objectiveName, positionName, getDateKeyInTimezone(plannedStart), hrs);
+          }
         }
 
         if (realStart && realEnd && realStart >= start && realStart <= end) {
-          let hrs = getDurationHours(realStart, realEnd);
-          if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-          if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-          executed.total += hrs;
-          add(executed, objectiveName, positionName, getDateKeyInTimezone(realStart), hrs);
+          if (isWorkingCode(code)) {
+            let hrs = getDurationHours(realStart, realEnd);
+            if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
+            if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
+            executed.total += hrs;
+            add(executed, objectiveName, positionName, getDateKeyInTimezone(realStart), hrs);
+          }
         }
       });
 
@@ -1242,14 +1275,16 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = sTurnos.docs.map((d) => ({ id: d.id, ...d.data(), clientId: selectedClient.id })) as any[];
+      const turnos = sTurnos.docs
+        .map((d) => ({ id: d.id, ...d.data(), clientId: selectedClient.id }))
+        .filter(isShiftEligibleForProforma) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const grids = buildProformaObjectiveGrids({
         turnos,
         empMeta,
         clientId: selectedClient.id,
         objectiveAliases,
-        slaInRange: servicesForProforma,
+        slaInRange,
         start,
         end,
         mode: proformaDetailMode,
@@ -1283,10 +1318,9 @@ export default function CRMPage() {
 
   useEffect(() => {
     if (!proformaActive) return;
-    const start = new Date(proformaYear, proformaMonth, 1);
-    const end = new Date(proformaYear, proformaMonth + 1, 0);
-    setProformaStartDate(start.toISOString().split('T')[0]);
-    setProformaEndDate(end.toISOString().split('T')[0]);
+    const { start, end } = monthRangeYmd(proformaYear, proformaMonth);
+    setProformaStartDate(start);
+    setProformaEndDate(end);
   }, [proformaActive, proformaMonth, proformaYear]);
 
   useEffect(() => {
