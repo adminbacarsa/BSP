@@ -10,6 +10,7 @@ const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'FT', 'RET', 'REF', 'ESC']);
 
 const DAY_ABBR = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+const PDF_DAY_LETTER = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
 export function formatHoursHm(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return '';
@@ -91,6 +92,17 @@ function shortDayHeader(ymd: string): string {
   return `${Number(d)}/${Number(m)}`;
 }
 
+export function pdfDayNumber(ymd: string): string {
+  const [, , d] = ymd.split('-');
+  return String(Number(d));
+}
+
+export function pdfDayLetter(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return PDF_DAY_LETTER[dt.getDay()] || '';
+}
+
 function emptyCell(date: string): ProformaDayCell {
   return { date, display: '', hours: 0, dayHours: 0, nightHours: 0 };
 }
@@ -116,6 +128,7 @@ function cellFromShift(date: string, code: string, start: Date, end: Date, hours
 export type ProformaTurnoInput = {
   employeeId?: string;
   employeeName?: string;
+  isUnassigned?: boolean;
   clientId?: string;
   objectiveId?: string;
   objectiveName?: string;
@@ -127,6 +140,24 @@ export type ProformaTurnoInput = {
   realEndTime?: any;
   hours?: number;
 };
+
+export function isProformaVacancyShift(shift: Pick<ProformaTurnoInput, 'employeeId' | 'employeeName' | 'isUnassigned'>): boolean {
+  if (shift.isUnassigned === true) return true;
+  const eid = String(shift.employeeId ?? '').trim();
+  const empName = String(shift.employeeName ?? '').trim().toUpperCase();
+  if (empName === 'VACANTE' || empName.startsWith('VACANTE:')) return true;
+  if (eid === 'VACANTE') return true;
+  if ((!eid || eid === 'unknown') && (empName === 'VACANTE' || empName === 'SIN NOMBRE')) return true;
+  return false;
+}
+
+export function isProformaVacancyEmployee(row: { employeeId: string; name: string }): boolean {
+  const name = String(row.name || '').trim().toUpperCase();
+  const eid = String(row.employeeId || '').trim();
+  if (name === 'VACANTE' || name.startsWith('VACANTE:')) return true;
+  if (eid === 'VACANTE') return true;
+  return false;
+}
 
 export type BuildProformaGridsOpts = {
   turnos: ProformaTurnoInput[];
@@ -165,6 +196,8 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   const aliases = opts.objectiveAliases || {};
 
   for (const t of opts.turnos) {
+    if (isProformaVacancyShift(t)) continue;
+
     const code = String(t.code || t.type || '').trim().toUpperCase();
     const plannedStart = toDateSafe(t.startTime);
     const plannedEnd = toDateSafe(t.endTime);
@@ -191,6 +224,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const meta = opts.empMeta[empId];
     const empName = meta?.name || String(t.employeeName || 'Sin nombre').trim();
     const legajo = meta?.legajo || '—';
+    if (isProformaVacancyEmployee({ employeeId: empId, name: empName })) continue;
 
     byObjective[objId].employees[empId] ||= {
       employeeId: empId,
@@ -244,6 +278,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
         });
         return { ...e, totalHours, totalDay, totalNight };
       })
+      .filter((e) => !isProformaVacancyEmployee(e))
       .filter((e) => e.totalHours > 0 || Object.values(e.days).some((c) => c.display === 'Frco'))
       .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 

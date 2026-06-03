@@ -84,7 +84,7 @@ import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
 import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
-import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
+import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 
@@ -1234,6 +1234,7 @@ export default function CRMPage() {
 
       turnosList.forEach((t) => {
         if (!isShiftEligibleForProforma(t)) return;
+        if (isProformaVacancyShift(t)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
         const plannedStart = toDateSafe(t.startTime);
@@ -1301,7 +1302,7 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = turnosList.filter(isShiftEligibleForProforma) as any[];
+      const turnos = turnosList.filter((t) => isShiftEligibleForProforma(t) && !isProformaVacancyShift(t)) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const grids = buildProformaObjectiveGrids({
         turnos,
@@ -1663,8 +1664,8 @@ export default function CRMPage() {
       )}
 
       {view === 'detail' && selectedClient && (
-        <PageShell>
-          <div className="max-w-7xl mx-auto space-y-6">
+        <PageShell className={activeTab === 'PREFACTURA' ? 'p-2 md:p-3' : ''}>
+          <div className={activeTab === 'PREFACTURA' ? 'w-full max-w-none space-y-4' : 'max-w-7xl mx-auto space-y-6'}>
             <PageHeader
               title="CRM Clientes"
               subtitle={selectedClient.name}
@@ -1701,8 +1702,8 @@ export default function CRMPage() {
                 )}
               </div>
             )}
-          <div className="flex flex-col lg:flex-row gap-8">
-            <div className="w-full lg:w-1/4 space-y-6">
+          <div className={`flex flex-col gap-8 ${activeTab === 'PREFACTURA' ? '' : 'lg:flex-row'}`}>
+            <div className={`w-full space-y-6 ${activeTab === 'PREFACTURA' ? 'hidden' : 'lg:w-1/4'}`}>
               <div className="rounded-xl border p-8 text-center shadow-sm sticky top-6" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="w-24 h-24 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 mx-auto mb-6 shadow-lg">
                   <Building2 size={40} />
@@ -1909,13 +1910,13 @@ export default function CRMPage() {
               </div>
             </div>
 
-            <div className="flex-1 rounded-xl border shadow-sm overflow-hidden flex flex-col min-h-[600px]" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-              <div className="flex border-b">
+            <div className={`rounded-xl border shadow-sm overflow-hidden flex flex-col min-h-[600px] ${activeTab === 'PREFACTURA' ? 'w-full' : 'flex-1'}`} style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+              <div className="flex border-b overflow-x-auto">
                 {['INFO', 'CONTRATOS', 'SERVICIOS', 'SEDES', 'PREFACTURA', 'COTIZACIONES', 'HISTORIAL'].map((t) => (
                   <button
                     key={t}
                     onClick={() => setActiveTab(t)}
-                    className={`px-8 py-6 text-[10px] font-black uppercase tracking-widest border-b-[4px] transition-all ${
+                    className={`${activeTab === 'PREFACTURA' ? 'px-4 py-3' : 'px-8 py-6'} shrink-0 text-[10px] font-black uppercase tracking-widest border-b-[4px] transition-all ${
                       activeTab === t ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-slate-400'
                     }`}
                   >
@@ -1924,7 +1925,7 @@ export default function CRMPage() {
                 ))}
               </div>
 
-              <div className="p-10 flex-1 space-y-6">
+              <div className={`flex-1 space-y-6 ${activeTab === 'PREFACTURA' ? 'p-2 md:p-3' : 'p-10'}`}>
                 {activeTab === 'INFO' && (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
