@@ -635,6 +635,20 @@ const KNOWN_ORPHAN_CLIENT_IDS: Record<string, string> = {
   FzAowOV93fHQcxZhHfjN: 'NS0UBtf6zkHsm2iRRo9W',
 };
 
+/** IDs de documento clients + huérfanos legacy que apuntan al mismo cliente. */
+export function getClientIdAliases(canonicalId: string): string[] {
+  const id = String(canonicalId ?? '').trim();
+  if (!id) return [];
+  const ids = new Set<string>([id]);
+  for (const [orphan, target] of Object.entries(KNOWN_ORPHAN_CLIENT_IDS)) {
+    if (target === id) ids.add(orphan);
+  }
+  for (const [orphan, target] of Object.entries(KNOWN_ORPHAN_CLIENT_IDS)) {
+    if (orphan === id) ids.add(target);
+  }
+  return [...ids];
+}
+
 async function loadClientDocById(clientId: string): Promise<ResolvedClientDocument | null> {
   for (const col of CLIENT_DOC_COLLECTIONS) {
     const snap = await getDoc(doc(db, col, clientId));

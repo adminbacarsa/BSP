@@ -83,6 +83,7 @@ import {
 import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
+import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
@@ -157,11 +158,6 @@ const isShiftEligibleForProforma = (t: any) => {
   if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
   return true;
 };
-
-async function loadClientSlaRows(clientId: string) {
-  const snap = await getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', clientId)));
-  return snap.docs.map((x) => ({ id: x.id, ...x.data() }));
-}
 
 const toDateSafe = (val: any) => {
   if (!val) return null;
@@ -466,7 +462,7 @@ export default function CRMPage() {
       const fresh = await assertClientWritable(c.id, c.name);
       setSelectedClient(fresh);
       setView('detail');
-      await loadClientFullData(fresh.id);
+      await loadClientFullData(fresh);
       loadPortalUserForClient(fresh.id);
     } catch (e: unknown) {
       toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'No se puede abrir este cliente'));
@@ -541,25 +537,46 @@ export default function CRMPage() {
     }
   };
 
-  const loadClientFullData = async (id: string) => {
+  const loadClientFullData = async (client: { id: string; name?: string; legalName?: string }) => {
     setLoadingClientData(true);
     setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 });
     try {
-      const [srv, cont, quo] = await Promise.all([
-        loadClientSlaRows(id),
-        getDocs(query(collection(db, 'contracts'), where('clientId', '==', id))),
-        getDocs(query(collection(db, 'quotes'), where('clientId', '==', id))),
+      const [srvResult, contResult, quoResult] = await Promise.allSettled([
+        loadClientSlaForClient(
+          { id: client.id, name: client.name, legalName: client.legalName, objetivos: (client as any).objetivos },
+          { empresaId, scopeEmpresa },
+        ),
+        getDocs(query(collection(db, 'contracts'), where('clientId', '==', client.id))),
+        getDocs(query(collection(db, 'quotes'), where('clientId', '==', client.id))),
       ]);
-      setClientServices(srv);
-      setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
-      setClientQuotes(quo.docs.map((x) => ({ id: x.id, ...x.data() })));
+
+      if (srvResult.status === 'fulfilled') {
+        setClientServices(srvResult.value);
+      } else {
+        console.error('Error cargando SLA:', srvResult.reason);
+        setClientServices([]);
+      }
+
+      if (contResult.status === 'fulfilled') {
+        setClientContracts(contResult.value.docs.map((x) => ({ id: x.id, ...x.data() })));
+      } else {
+        console.error('Error cargando contratos:', contResult.reason);
+        setClientContracts([]);
+      }
+
+      if (quoResult.status === 'fulfilled') {
+        setClientQuotes(quoResult.value.docs.map((x) => ({ id: x.id, ...x.data() })));
+      } else {
+        console.error('Error cargando cotizaciones:', quoResult.reason);
+        setClientQuotes([]);
+      }
     } catch (e) {
       console.error(e);
       toast.error('Error al cargar contratos, SLA o cotizaciones');
     } finally {
       setLoadingClientData(false);
     }
-    void countClientRelatedDocsOtherTenant(id, empresaId, migracionCompleta)
+    void countClientRelatedDocsOtherTenant(client.id, empresaId, migracionCompleta)
       .then(setForeignRelatedCounts)
       .catch(() => setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 }));
   };
@@ -766,7 +783,7 @@ export default function CRMPage() {
       await assertClientWritable(selectedClient.id, selectedClient.name);
       const r = await retagClientRelatedDocsToEmpresa(selectedClient.id, empresaId, migracionCompleta);
       toast.success(`Etiquetas corregidas: ${r.servicios_sla} SLA, ${r.turnos} turnos`);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
     } catch (e: unknown) {
       toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al corregir etiquetas'));
     } finally {
@@ -780,7 +797,7 @@ export default function CRMPage() {
       await assertClientWritable(selectedClient.id, selectedClient.name);
       await updateDocForEmpresa('servicios_sla', editingServiceId, tempService, empresaId, migracionCompleta);
       setEditingServiceId(null);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       toast.success('SLA Actualizado');
     } catch (e) {
       console.error(e);
@@ -832,7 +849,7 @@ export default function CRMPage() {
         clientObjetivos,
       );
       if (expandedServiceId === s.id) setExpandedServiceId(null);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       toast.success(`Servicio eliminado (${r.deletedTurnos} turno(s))`);
     } catch (e) {
       console.error(e);
@@ -860,7 +877,7 @@ export default function CRMPage() {
     else updated[idx] = payload;
     try {
       await updateDocForEmpresa('servicios_sla', serviceId, { positions: updated }, empresaId, migracionCompleta);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       setEditingPositionIdx(null);
       setAddingPositionToService(null);
       setPositionForm({ positionName: '', coverageType: '24hs', quantity: 1, allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO' });
@@ -878,7 +895,7 @@ export default function CRMPage() {
     const updated = positions.filter((_, i) => i !== idx);
     try {
       await updateDocForEmpresa('servicios_sla', serviceId, { positions: updated }, empresaId, migracionCompleta);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       toast.success('Puesto eliminado');
     } catch (e) {
       toast.error('Error al eliminar puesto');
@@ -905,7 +922,7 @@ export default function CRMPage() {
       setServiceVersionForm(EMPTY_SVC_FORM);
       setAddingDraftPos(false);
       setEditingDraftPosIdx(null);
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       toast.success(source ? 'Nueva versión creada' : 'Servicio creado');
     } catch (e) {
       console.error(e);
@@ -1132,7 +1149,7 @@ export default function CRMPage() {
     try {
       if (editingContractId) await updateDoc(doc(db, 'contracts', editingContractId), payload);
       else await addDoc(collection(db, 'contracts'), { ...payload, createdAt: serverTimestamp() });
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       resetContractForm();
       toast.success('Contrato guardado');
     } catch (e) {
@@ -1146,7 +1163,7 @@ export default function CRMPage() {
     if (!window.confirm('¿Eliminar este contrato?')) return;
     try {
       await deleteDoc(doc(db, 'contracts', id));
-      await loadClientFullData(selectedClient.id);
+      await loadClientFullData(selectedClient);
       if (editingContractId === id) resetContractForm();
       toast.success('Contrato eliminado');
     } catch (e) {
@@ -1170,17 +1187,27 @@ export default function CRMPage() {
     setProformaTotals((p) => ({ ...p, loading: true }));
     try {
       const { start, end } = getProformaRange();
+      const clientRef = {
+        id: selectedClient.id,
+        name: selectedClient.name,
+        legalName: selectedClient.legalName,
+        objetivos: selectedClient.objetivos || [],
+      };
 
-      let servicesForProforma = clientServices;
-      if (!servicesForProforma.length) {
-        servicesForProforma = await loadClientSlaRows(selectedClient.id);
+      const servicesForProforma = await loadClientSlaForClient(clientRef, { empresaId, scopeEmpresa });
+      if (servicesForProforma.length !== clientServices.length) {
+        setClientServices(servicesForProforma);
       }
+
+      const periodYmd = proformaStartDate && proformaEndDate
+        ? { start: proformaStartDate, end: proformaEndDate }
+        : monthRangeYmd(proformaYear, proformaMonth);
 
       const objetivoStubs = (selectedClient.objetivos || []).map((o: any) => ({
         objectiveId: o.id,
         objectiveName: o.name,
-        startDate: proformaStartDate,
-        endDate: proformaEndDate,
+        startDate: periodYmd.start,
+        endDate: periodYmd.end,
       }));
       const slaInRange = [...servicesForProforma, ...objetivoStubs];
 
@@ -1190,7 +1217,7 @@ export default function CRMPage() {
         slaInRange,
       );
 
-      const sTurnos = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', selectedClient.id)));
+      const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
 
@@ -1205,8 +1232,7 @@ export default function CRMPage() {
         target.byObjective[oKey].positions[pKey].byDay[dateKey] = (target.byObjective[oKey].positions[pKey].byDay[dateKey] || 0) + hours;
       };
 
-      sTurnos.forEach((d) => {
-        const t = d.data() as any;
+      turnosList.forEach((t) => {
         if (!isShiftEligibleForProforma(t)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
@@ -1275,9 +1301,7 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = sTurnos.docs
-        .map((d) => ({ id: d.id, ...d.data(), clientId: selectedClient.id }))
-        .filter(isShiftEligibleForProforma) as any[];
+      const turnos = turnosList.filter(isShiftEligibleForProforma) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const grids = buildProformaObjectiveGrids({
         turnos,
