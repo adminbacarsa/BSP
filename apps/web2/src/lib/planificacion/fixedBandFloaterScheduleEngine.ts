@@ -207,8 +207,7 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             else withoutTrail.push(empId);
         }
 
-        // Paso 2: deduplicar por ZONA (no solo slot idéntico).
-        // Dos empleados en la misma zona del ciclo coinciden en Franco → cobertura rota.
+        // Paso 2: deduplicar por ZONA — dos empleados en la misma zona comparten franco.
         const usedZones = new Map<string, true>();
         for (const empId of [...withTrail]) {
             const zone = bandZone(out[empId]);
@@ -220,12 +219,33 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 3: asignar a los sin-trailing el cold-start de la zona que falta
+        // Paso 2b: anclar todos los openings a un conjunto canónico exactamente 6 apart.
+        // La deduplicación por zona previene mismo-zona, pero dos empleados en zonas
+        // distintas pueden coincidir en franco si sus openings difieren en ≠6 (ej. 7 apart).
+        let anchor = COLD_START_OPENINGS[0];
+        for (const empId of withTrail) {
+            if (out[empId] !== undefined) { anchor = out[empId]; break; }
+        }
+        const canonicalForZone: Partial<Record<string, number>> = {};
+        for (let k = 0; k < 4; k++) {
+            const s = ((anchor + k * 6) % 24 + 24) % 24;
+            const z = bandZone(s);
+            if (!(z in canonicalForZone)) canonicalForZone[z] = s;
+        }
+        for (const empId of withTrail) {
+            if (out[empId] !== undefined) {
+                const zone = bandZone(out[empId]);
+                const c = canonicalForZone[zone];
+                if (c !== undefined) out[empId] = c;
+            }
+        }
+
+        // Paso 3: cold-start usa el conjunto canónico para mantener 6-apart garantizado
         const missingZones = (['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z));
         withoutTrail.sort((a, b) => a.localeCompare(b));
         withoutTrail.forEach((empId, i) => {
             const zone = missingZones[i] ?? ((['M', 'T', 'N', 'F'] as const)[i % 4]);
-            out[empId] = ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
+            out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
         });
 
         // Flotantes (índice ≥4): sin trailing usan inicio de bloque de trabajo para que el
