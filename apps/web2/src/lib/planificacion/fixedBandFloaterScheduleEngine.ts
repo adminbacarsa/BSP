@@ -146,7 +146,10 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 }
 
 /**
- * Divide grupos multi-qty en subgrupos independientes de 4-5 (un subgrupo por slot concurrente).
+ * Divide grupos multi-qty en subgrupos de exactamente 4 regulares + 0-1 flotante.
+ * qty = puestos concurrentes por turno = cantidad de subgrupos independientes.
+ * Los extras (empleados más allá de qty×4) se distribuyen como 1 flotante por subgrupo,
+ * empezando por los primeros subgrupos. Nunca más de 1 flotante por subgrupo.
  * Puestos no-24hs se omiten — sus empleados no tienen opening slot.
  */
 function buildSubgroupsFor24hs(
@@ -159,11 +162,16 @@ function buildSubgroupsFor24hs(
         if (!pos || !is24hs(pos)) continue;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
-        const perSlot = Math.floor(groupIds.length / qty);
-        if (perSlot < 1) { result.push([...groupIds]); continue; }
+        if (groupIds.length < 4) continue; // ni para 1 subgrupo
+        // Extras = empleados más allá de qty×4 (máx qty, uno por subgrupo)
+        const extras = Math.max(0, groupIds.length - qty * 4);
+        let idx = 0;
         for (let i = 0; i < qty; i++) {
-            const sub = groupIds.slice(i * perSlot, (i + 1) * perSlot);
-            if (sub.length > 0) result.push(sub);
+            if (idx >= groupIds.length) break;
+            const size = 4 + (i < extras ? 1 : 0); // primer `extras` subgrupos llevan 1 flotante
+            const sub = groupIds.slice(idx, idx + size);
+            if (sub.length >= 4) result.push(sub);
+            idx += size;
         }
     }
     return result;
@@ -265,9 +273,9 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
 }
 
 /**
- * true si todos los puestos 24hs operan 7 días y cada slot concurrente tiene 4 ó 5 guardias.
- * qty=1 → 4-5 guardias en total.
- * qty=N → N×4 o N×5 guardias (N subgrupos independientes de 4-5).
+ * true si todos los puestos 24hs operan 7 días y cada slot concurrente tiene entre 4 y 5 guardias.
+ * qty = puestos concurrentes por turno. Acepta extras de hasta qty (1 flotante por subgrupo).
+ * Condiciones: mínimo por subgrupo ≥ 4, máximo por subgrupo ≤ 5 (qty×4 ≤ g.length ≤ qty×5).
  * Puestos no-24hs (L-V, custom) se ignoran — no bloquean el floater.
  */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
@@ -279,9 +287,9 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
         if (g.length === 0) continue;
-        if (g.length % qty !== 0) return false;
-        const perSlot = g.length / qty;
-        if (perSlot < 4) return false;
+        const minPerSlot = Math.floor(g.length / qty);
+        if (minPerSlot < 4) return false;         // no alcanza para 6+2
+        if (g.length > qty * 5) return false;      // necesitaría >5 por subgrupo
         counted24 += g.length;
     }
     return counted24 > 0;
