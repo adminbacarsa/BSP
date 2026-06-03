@@ -146,10 +146,12 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 }
 
 /**
- * Divide grupos en subgrupos de exactamente 4 empleados (un subgrupo por slot concurrente).
+ * Divide grupos en subgrupos de 4 regulares + sobrantes como flotantes.
  * qty = puestos concurrentes por turno = número de subgrupos de 4.
- * Los empleados más allá de qty×4 quedan idle (sin opening slot, sin turnos).
- * Si hay menos de qty×4, se crean tantos subgrupos completos de 4 como alcancen.
+ * Los primeros qty×4 empleados (o menos si no alcanza) forman los subgrupos regulares.
+ * Los sobrantes (más allá de subgroupCount×4) se agregan como flotantes en round-robin:
+ * cada uno va a CYCLE_24_MTN trabajo-días como RET (cubre ausencias de regulares).
+ * Si hay menos de 4 empleados en el puesto, se omite (sin subgrupos).
  * Puestos no-24hs se omiten — sus empleados no tienen opening slot.
  */
 function buildSubgroupsFor24hs(
@@ -162,12 +164,17 @@ function buildSubgroupsFor24hs(
         if (!pos || !is24hs(pos)) continue;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
-        // Subgrupos completos posibles (mín 1, máx qty)
         const subgroupCount = Math.min(qty, Math.floor(groupIds.length / 4));
+        if (subgroupCount === 0) continue;
+        // Subgrupos de 4 regulares (índices 0-3)
+        const subs: string[][] = [];
         for (let i = 0; i < subgroupCount; i++) {
-            result.push(groupIds.slice(i * 4, i * 4 + 4));
+            subs.push(groupIds.slice(i * 4, i * 4 + 4));
         }
-        // Los empleados más allá de subgroupCount×4 quedan idle.
+        // Sobrantes → flotantes en round-robin (índice ≥4 dentro del subgrupo → RET en días laborales)
+        const floaters = groupIds.slice(subgroupCount * 4);
+        floaters.forEach((id, fi) => { subs[fi % subs.length].push(id); });
+        result.push(...subs);
     }
     return result;
 }
@@ -268,9 +275,8 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
 }
 
 /**
- * true si hay al menos un puesto 24hs con al menos 4 empleados asignados (1 subgrupo de rotación).
- * Extras más allá de qty×4 son ignorados (quedan idle). Déficit parcial (< qty subgrupos llenos)
- * se acepta — el motor genera lo que puede y el coverage check reporta las brechas.
+ * true si hay al menos un puesto 24hs con al menos 4 empleados (1 subgrupo de rotación).
+ * Sobrantes más allá de qty×4 se tratan como flotantes (RET); no bloquean el motor.
  * Puestos no-24hs (L-V, custom) se ignoran — no bloquean el floater.
  */
 export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Record<string, string[]>): boolean {
@@ -281,9 +287,9 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
-        if (g.length < 4) continue; // no alcanza para ningún subgrupo; ignorar este puesto
+        if (g.length < 4) continue; // sin 4 empleados no hay subgrupo; ignorar
         const subgroupCount = Math.min(qty, Math.floor(g.length / 4));
-        counted24 += subgroupCount * 4;
+        counted24 += g.length; // regulares + flotantes
     }
     return counted24 > 0;
 }
