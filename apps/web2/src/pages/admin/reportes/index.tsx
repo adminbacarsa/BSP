@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift, buildPayrollExportPayload, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -683,7 +683,10 @@ export default function ReportsPage() {
 
                 const PAID_LEAVE_DETAIL = new Set(['V','L','PG','E','A']);
                 const isUnjustAbsentDetail = !PAID_LEAVE_DETAIL.has(rawCode) && isAbsent;
-                const duration = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { unjustifiedAbsent: isUnjustAbsentDetail });
+                const objectiveBillable = s._objectiveBillable !== false && shouldBillShiftToObjective(s);
+                const duration = objectiveBillable
+                    ? resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { unjustifiedAbsent: isUnjustAbsentDetail })
+                    : 0;
                 const zeroHours = duration === 0;
 
                 const isFT = s.isFrancoTrabajado || rawCode === 'FT';
@@ -729,7 +732,9 @@ export default function ReportsPage() {
                     _absenceReason: s._absenceReason,
                     _absenceType: s._absenceType,
                     _coveredBy: s._coveredBy,
-                    isLeaveDay: LEAVE_REPORT_CODES.has(rawCode) || rawCode === 'V',
+                    _coveringFor: s._coveringFor,
+                    isLeaveDay: LEAVE_REPORT_CODES.has(rawCode) || rawCode === 'V' || s._objectiveBillable === false,
+                    objectiveBillable,
                 };
             });
 
@@ -858,6 +863,9 @@ export default function ReportsPage() {
                                                     <p className="text-slate-600"><span className="font-bold text-slate-500">Tipo:</span> {row._absenceType || (row.code === 'E' ? 'Enfermedad' : row.code === 'L' ? 'Licencia' : row.code === 'PG' ? 'Permiso gremial' : 'Ausencia')}</p>
                                                     {row._absenceReason && <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Motivo:</span> {row._absenceReason}</p>}
                                                     <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubierto por:</span> {row._coveredBy || 'Sin cobertura registrada'}</p>
+                                                    {row._coveringFor && (
+                                                        <p className="text-slate-600 mt-1"><span className="font-bold text-slate-500">Cubriendo a:</span> {row._coveringFor}</p>
+                                                    )}
                                                 </div>
                                             )}
                                         </td>

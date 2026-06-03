@@ -137,6 +137,8 @@ import {
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
 import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planificacion/leaveCoverage';
+import { listDateRangeInclusive, applyVacancyCoverageToChanges, VACANCY_NON_WORK_CODES } from '@/lib/planificacion/vacancyCoverage';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
@@ -649,14 +651,32 @@ export default function PlanificacionPage() {
     const [showVacancyModal, setShowVacancyModal] = useState(false);
     const [vacancyData, setVacancyData] = useState<any>(null);
     const [selectedReplacement, setSelectedReplacement] = useState('');
+    const [vacancyActiveDates, setVacancyActiveDates] = useState<Set<string>>(new Set());
+    const [vacancyDayReplacements, setVacancyDayReplacements] = useState<Record<string, string>>({});
+    const [vacancyEditingDay, setVacancyEditingDay] = useState<string | null>(null);
     const [vacancyReplacementSearch, setVacancyReplacementSearch] = useState('');
     const [vacancyReplacementOpen, setVacancyReplacementOpen] = useState(false);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        if (!vacancyData?.startDate) {
+            setVacancyActiveDates(new Set());
+            setVacancyDayReplacements({});
+            return;
+        }
+        const all = listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate);
+        const focus = vacancyData.focusDate as string | undefined;
+        setVacancyActiveDates(new Set(focus && all.includes(focus) ? [focus] : all));
+        setVacancyDayReplacements({});
+        setVacancyEditingDay(null);
+        setSelectedReplacement('');
+    }, [vacancyData]);
+
+    useEffect(() => {
         if (showVacancyModal) {
             setVacancyReplacementSearch('');
             setVacancyReplacementOpen(false);
+            setVacancyEditingDay(null);
         }
     }, [showVacancyModal]);
 
@@ -1579,6 +1599,8 @@ export default function PlanificacionPage() {
 
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
+            const absence = absencesMap[key];
+            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -1613,6 +1635,8 @@ export default function PlanificacionPage() {
         const codeCounts: Record<string, number> = {};
         employeesList.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
+            const absence = absencesMap[key];
+            if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
             if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
             const code = String(shift.code || '').toUpperCase();
@@ -2842,24 +2866,51 @@ export default function PlanificacionPage() {
         setShowRRHHModal(false);
         setSelectedCell(null);
     };
-    const handleProcessVacancy = () => { if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; } if (!vacancyData) return; const replacementEmp = selectedReplacement ? employees.find(e => e.id === selectedReplacement) : null; const newChanges = { ...pendingChanges }; const [sY, sM, sD] = (vacancyData.startDate || '').split('-').map(Number); const [eY, eM, eD] = (vacancyData.endDate || vacancyData.startDate || '').split('-').map(Number); if (!sY || !eY) { toast.error('Datos de ausencia incompletos'); return; } let current = new Date(sY, sM - 1, sD); const end = new Date(eY, eM - 1, eD); const ABSENCE_TYPE_CODES: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG', 'Injustificada': 'AA' }; const absCode = ABSENCE_TYPE_CODES[vacancyData.type] || 'AA'; const NON_WORK_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET']);
-                        // Turno típico de la titular (para cubrir cuando no hay shift previo asignado)
-                        const getTypicalShift = (empId: string) => {
-                            const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
-                            const days = new Date(yr, mo + 1, 0).getDate();
-                            const freq: Record<string, { count: number; shift: any }> = {};
-                            for (let d = 1; d <= days; d++) {
-                                const k = `${empId}_${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-                                const s = shiftsMap[k];
-                                if (s?.code && !NON_WORK_CODES.has(s.code)) {
-                                    if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
-                                    freq[s.code].count++;
-                                }
-                            }
-                            const best = Object.values(freq).sort((a, b) => b.count - a.count)[0];
-                            return best?.shift || null;
-                        };
-                        let count = 0; let covered = 0; while (current <= end) { const dateStr = getDateKey(current); const titularKey = `${vacancyData.employeeId}_${dateStr}`; const existingShift = shiftsMap[titularKey]; const workShift = (existingShift && existingShift.code && !NON_WORK_CODES.has(existingShift.code)) ? existingShift : getTypicalShift(vacancyData.employeeId); const absHours = ['E','L','PG','A'].includes(absCode) ? 8 : 0; newChanges[titularKey] = { code: absCode, name: vacancyData.type, isTemp: true, hours: absHours, startTime: '00:00', comments: `${vacancyData.type} — gestionado desde planificador`, coveredBy: replacementEmp ? replacementEmp.name : null }; if (replacementEmp && workShift) { const suplenteKey = `${replacementEmp.id}_${dateStr}`; newChanges[suplenteKey] = { code: workShift.code, name: workShift.code, isTemp: true, objectiveId: workShift.objectiveId || selectedObjective, hours: workShift.hours || 8, startTime: workShift.startTime || '00:00', positionName: workShift.positionName || activePosition || 'General', comments: `Cubriendo a ${vacancyData.employeeName} (${vacancyData.type})` }; covered++; } count++; current.setDate(current.getDate() + 1); } setPendingChanges(newChanges); setShowVacancyModal(false); setVacancyData(null); toast.success(replacementEmp ? `${absCode} en ${count} día(s) — ${covered} turno(s) asignados a ${replacementEmp.name}. Guardá los cambios.` : `${absCode} en ${count} día(s) — sin cobertura asignada. Guardá los cambios.`);
+    const handleProcessVacancy = () => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
+        if (!vacancyData?.startDate) return;
+        const activeDays = [...vacancyActiveDates].sort();
+        if (activeDays.length === 0) { toast.error('Seleccioná al menos un día a procesar'); return; }
+        const getTypicalShift = (empId: string) => {
+            const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
+            const days = new Date(yr, mo + 1, 0).getDate();
+            const freq: Record<string, { count: number; shift: any }> = {};
+            for (let d = 1; d <= days; d++) {
+                const k = `${empId}_${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const s = shiftsMap[k];
+                if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
+                    if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
+                    freq[s.code].count++;
+                }
+            }
+            return Object.values(freq).sort((a, b) => b.count - a.count)[0]?.shift || null;
+        };
+        const days = activeDays.map((dateStr) => {
+            const replId = vacancyDayReplacements[dateStr] ?? selectedReplacement ?? '';
+            const emp = replId ? employees.find((e: any) => e.id === replId) : null;
+            return { dateStr, replacementEmpId: emp?.id ?? null, replacementName: emp?.name ?? null };
+        });
+        const { changes, count, covered, cleared } = applyVacancyCoverageToChanges(pendingChanges, {
+            vacancyData,
+            days,
+            selectedObjective,
+            activePosition,
+            shiftsMap,
+            getTypicalShift,
+        });
+        const vd = vacancyData;
+        const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
+        setPendingChanges(changes);
+        setShowVacancyModal(false);
+        setVacancyData(null);
+        setVacancyActiveDates(new Set());
+        setVacancyDayReplacements({});
+        const clearedMsg = cleared > 0 ? ` Se removieron ${cleared} turno(s) de cobertura anterior.` : '';
+        if (covered > 0) {
+            toast.success(`${absCode} en ${count} día(s) — ${covered} con cobertura asignada.${clearedMsg} Guardá los cambios.`);
+        } else {
+            toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg} Guardá los cambios.`);
+        }
     };
     
     // 🛑 FIX: Inyección de Puesto en Bulk
@@ -3221,8 +3272,8 @@ export default function PlanificacionPage() {
                 if (isShiftConsolidated(effectiveShift)) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); return; }
                 const isLocked = isDateLocked(dateStr);
                 const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
-                if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA' }); setSelectedReplacement(''); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
-                else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA' }); setSelectedReplacement(''); setShowVacancyModal(true); }
+                if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
+                else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
                 else { if (!isLocked) { let initialModifiers = { extend: false, early: false, plannedNovedad: '' }; if (effectiveShift) { initialModifiers = { extend: effectiveShift.isExtended || false, early: effectiveShift.isEarlyStart || false, plannedNovedad: effectiveShift.plannedNovedad || '' }; } setModifiers(initialModifiers); setFrancoMode('NONE'); } setCellEditMode(false); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
             }
         } 
@@ -4801,8 +4852,14 @@ export default function PlanificacionPage() {
                                         let absence = absencesMap[key];
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
-                                        const absAlreadyHandled = effectiveCode && ['V','L','PG','A','E','AA'].includes(effectiveCode) && !!absence;
-                                        let hasConflict = (!absAlreadyHandled && ((s && absence && s.status !== 'ABSENT') || (s && s.hasNovedad)));
+                                        const coveredByCell = p?.coveredBy || s?.coveredBy;
+                                        let hasConflict = shouldShowLeaveConflictSiren({
+                                            shiftCode: effectiveCode,
+                                            absence,
+                                            coveredBy: coveredByCell,
+                                            hasNovedad: !!(s && s.hasNovedad),
+                                            shiftStatus: s?.status,
+                                        });
                                         let statusIndicator = null;
                                         const _planPublished = !!publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)];
                                         if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (_planPublished && (s.status === 'ABSENT' || s.isAbsent)) statusIndicator = 'bg-rose-500'; }
@@ -6021,7 +6078,8 @@ export default function PlanificacionPage() {
                                     : (shift?.coveredBy || pending?.coveredBy || null);
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
-                                const isReadOnly = isConsolidated || !!absence || isRRHHCode || isPastClosed || isSwapPersisted;
+                                const showRrhhPanel = !!(absence || isRRHHCode);
+                                const isReadOnly = isConsolidated || isSwapPersisted;
 
                                 const plannedStart =
                                     (typeof shift?.startTime === 'string') ? shift.startTime
@@ -6041,7 +6099,7 @@ export default function PlanificacionPage() {
                                 const hours = storedHours || calcHoursFromTs || (code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0);
                                 const showRealTimes = isConsolidated;
 
-                                if (isReadOnly) {
+                                if (isReadOnly || showRrhhPanel) {
                                     return (
                                         <>
                                             <div className="flex justify-between items-start mb-4">
@@ -6157,18 +6215,23 @@ export default function PlanificacionPage() {
                                                                 </button>
                                                             </div>
                                                         ) : (
-                                                            <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
-                                                                Registrado en RRHH — no se edita desde Planificación
-                                                            </p>
+                                                            coverageInfo?.employeeName ? (
+                                                                <p className="px-4 pb-3 text-[10px] font-bold text-emerald-700 text-center">
+                                                                    Licencia cubierta — en reportes/liquidación figura como novedad RRHH; las horas del puesto las computa {coverageInfo.employeeName}.
+                                                                </p>
+                                                            ) : (
+                                                                <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
+                                                                    Novedad RRHH — podés re-procesar cobertura abajo si el día no está consolidado.
+                                                                </p>
+                                                            )
                                                         )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && absence && (
+                                                        {isRRHHCode && !isConsolidated && !pending && absence && (
                                                             <div className="px-4 pb-4">
                                                                 <button
                                                                     onClick={() => {
-                                                                        const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName };
+                                                                        const vd = { ...absence, source: 'AUSENCIA', employeeId: selectedCell.empId, employeeName, focusDate: selectedCell.dateStr };
                                                                         setSelectedCell(null);
                                                                         setVacancyData(vd);
-                                                                        setSelectedReplacement('');
                                                                         setShowVacancyModal(true);
                                                                     }}
                                                                     className="w-full py-2.5 rounded-xl bg-amber-600 text-white font-black text-xs hover:bg-amber-700"
@@ -6177,7 +6240,7 @@ export default function PlanificacionPage() {
                                                                 </button>
                                                             </div>
                                                         )}
-                                                        {isRRHHCode && !isPastClosed && !isConsolidated && !pending && !absence && (
+                                                        {isRRHHCode && !isConsolidated && !pending && !absence && (
                                                             <div className="px-4 pb-4">
                                                                 <button
                                                                     onClick={() => {
@@ -6755,6 +6818,9 @@ export default function PlanificacionPage() {
                 {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Colaboradores a ≤{nearbyKmRadius} km de <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span> (más cerca primero). Al seleccionar se cambia su objetivo preferido.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{addModalEmployeeCandidates.map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';
+                    const absenceDateRange = vacancyData?.startDate
+                        ? listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate)
+                        : [];
                     const isVac = absType === 'Vacaciones';
                     const isEnf = absType === 'Enfermedad' || absType === 'ART';
                     const isPG = absType === 'PG Permiso Gremial';
@@ -6764,7 +6830,25 @@ export default function PlanificacionPage() {
                     const colorMap: any = { teal: 'border-l-teal-500 bg-teal-50 text-teal-700', rose: 'border-l-rose-500 bg-rose-50 text-rose-700', purple: 'border-l-purple-500 bg-purple-50 text-purple-700', blue: 'border-l-blue-500 bg-blue-50 text-blue-700', amber: 'border-l-amber-500 bg-amber-50 text-amber-700' };
                     const btnColor: any = { teal: 'bg-teal-600 hover:bg-teal-700 shadow-teal-200', rose: 'bg-rose-600 hover:bg-rose-700 shadow-rose-200', purple: 'bg-purple-600 hover:bg-purple-700 shadow-purple-200', blue: 'bg-blue-600 hover:bg-blue-700 shadow-blue-200', amber: 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' };
                     const title = isVac ? 'Vacaciones — Planificar Cobertura' : isEnf ? 'Ausencia Médica — Cobertura Temporal' : isPG ? 'PG Permiso Gremial — Planificar Cobertura' : isLic ? 'Licencia Especial — Planificar Cobertura' : 'Ausencia Injustificada — Gestionar';
-                    const hint = isVac ? 'Seleccioná quién cubrirá los turnos durante el período de vacaciones, o dejá el puesto vacante.' : isEnf ? 'Podés asignar cobertura temporal o dejar vacante según la dotación disponible.' : isPG ? 'Permiso Gremial pago — el turno se libera pero las horas computan. Asigná cobertura o dejá vacante.' : isLic ? 'Asigná un reemplazo para el período de licencia o dejá vacante.' : 'Podés asignar cobertura o dejar el puesto vacante para gestión desde Operaciones.';
+                    const hint = isVac ? 'Elegí qué días procesar y quién cubre cada uno. Al reprocesar se quita la cobertura anterior del suplente.' : isEnf ? 'Podés asignar cobertura por día o dejar vacante. Reprocesar elimina turnos previos del suplente.' : isPG ? 'Permiso Gremial pago — asigná cobertura por día o dejá vacante.' : isLic ? 'Asigná un reemplazo distinto por día si hace falta, o dejá vacante.' : 'Podés asignar cobertura por día o dejar el puesto vacante.';
+                    const candidateDate = vacancyEditingDay || [...vacancyActiveDates].sort()[0] || vacancyData?.startDate;
+                    const formatShortDay = (ymd: string) => {
+                        const [, m, d] = ymd.split('-');
+                        return `${d}/${m}`;
+                    };
+                    const toggleVacancyDate = (d: string) => {
+                        setVacancyActiveDates((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(d)) next.delete(d); else next.add(d);
+                            return next;
+                        });
+                    };
+                    const resolveDayReplacementId = (dateStr: string) => vacancyDayReplacements[dateStr] ?? selectedReplacement ?? '';
+                    const resolveDayReplacementName = (dateStr: string) => {
+                        const id = resolveDayReplacementId(dateStr);
+                        return id ? (employees.find((e: any) => e.id === id)?.name || '—') : 'Sin cobertura';
+                    };
+                    const willAssignAny = [...vacancyActiveDates].some((d) => !!resolveDayReplacementId(d));
                     // Calcular horas mensuales del mes en curso
                     const getEmpMonthHours = (empId: string): number => {
                         const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
@@ -6783,8 +6867,8 @@ export default function PlanificacionPage() {
                     // Clasificar disponibilidad en la fecha de la ausencia
                     const NON_AVAILABLE = new Set(['F','FF','FT','V','L','PG','A','E','AA','PAST','LOCKED']);
                     type VacancyDayRole = 'RETEN' | 'REF' | 'FREE' | 'WORKING';
-                    const getEmpDayRole = (empId: string): VacancyDayRole => {
-                        const key = `${empId}_${vacancyData?.startDate}`;
+                    const getEmpDayRole = (empId: string, dateStr: string): VacancyDayRole => {
+                        const key = `${empId}_${dateStr}`;
                         const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                         if (!s || s.isDeleted) return 'FREE';
                         const code = String(s.code || '').toUpperCase();
@@ -6807,7 +6891,7 @@ export default function PlanificacionPage() {
                         .map(e => ({
                             ...e,
                             monthHours: getEmpMonthHours(e.id),
-                            dayRole: getEmpDayRole(e.id),
+                            dayRole: getEmpDayRole(e.id, candidateDate || vacancyData?.startDate || ''),
                             km: employeeKmToObjective(e, objLat, objLng) ?? 9999,
                             isObjectiveGuard: objectiveEmpIds.has(e.id),
                             expBadge: experienciaBadgeForReplacement(e.id, selectedObjective || '', e.experienciaObjetivos, e.preferredObjectiveId),
@@ -6839,13 +6923,21 @@ export default function PlanificacionPage() {
                     const restoCandidatos = candidatos
                         .filter(e => !e.isObjectiveGuard && e.dayRole === 'WORKING' && e.monthHours >= (e.maxHours || 200) - 16 && matchesSearch(e))
                         .sort((a, b) => a.km - b.km || a.monthHours - b.monthHours);
-                    const selectedReplacementEmp = candidatos.find(e => e.id === selectedReplacement);
+                    const selectedReplacementEmp = candidatos.find(e => e.id === (vacancyEditingDay ? resolveDayReplacementId(vacancyEditingDay) : selectedReplacement));
                     const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string) => (
                         <button
                             key={e.id}
                             type="button"
-                            onClick={() => { setSelectedReplacement(e.id); setVacancyReplacementOpen(false); }}
-                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-indigo-50 rounded-lg ${selectedReplacement === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : ''}`}
+                            onClick={() => {
+                                if (vacancyEditingDay) {
+                                    setVacancyDayReplacements((prev) => ({ ...prev, [vacancyEditingDay]: e.id }));
+                                    setVacancyEditingDay(null);
+                                } else {
+                                    setSelectedReplacement(e.id);
+                                }
+                                setVacancyReplacementOpen(false);
+                            }}
+                            className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-indigo-50 rounded-lg ${(vacancyEditingDay ? resolveDayReplacementId(vacancyEditingDay) : selectedReplacement) === e.id ? 'bg-indigo-50 ring-1 ring-indigo-300' : ''}`}
                         >
                             <span className="font-bold truncate flex-1 min-w-0">{e.expBadge} {e.name}</span>
                             {formatKmLabel(e.km) && (
@@ -6858,7 +6950,7 @@ export default function PlanificacionPage() {
                     );
                     return (
                     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 sm:p-6 bg-black/25 backdrop-blur-[2px]">
-                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-full max-w-[520px] max-h-[min(92vh,720px)] flex flex-col border-l-4 ${colorMap[color].split(' ')[0]}`}>
+                        <div className={`bg-white p-6 rounded-xl shadow-2xl w-full max-w-[560px] max-h-[min(92vh,780px)] flex flex-col border-l-4 ${colorMap[color].split(' ')[0]}`}>
                             <div className="flex items-start justify-between mb-4 shrink-0">
                                 <div>
                                     <h3 className="font-black text-lg text-slate-800">{title}</h3>
@@ -6869,10 +6961,51 @@ export default function PlanificacionPage() {
                                 </div>
                                 <span className={`text-[10px] font-black px-2 py-1 rounded-full ${colorMap[color]}`}>{absType}</span>
                             </div>
-                            <p className="text-xs text-slate-400 mb-4 shrink-0">{hint}</p>
+                            <p className="text-xs text-slate-400 mb-3 shrink-0">{hint}</p>
+                            {absenceDateRange.length > 1 && (
+                                <div className="mb-3 shrink-0">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <label className="text-[10px] font-black uppercase text-slate-400">Días a procesar</label>
+                                        <div className="flex gap-2">
+                                            <button type="button" onClick={() => setVacancyActiveDates(new Set(absenceDateRange))} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
+                                            <button type="button" onClick={() => setVacancyActiveDates(new Set())} className="text-[10px] font-bold text-slate-400 hover:underline">Ninguno</button>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+                                        {absenceDateRange.map((d) => (
+                                            <button
+                                                key={d}
+                                                type="button"
+                                                onClick={() => toggleVacancyDate(d)}
+                                                className={`px-2 py-1 rounded-lg text-[11px] font-bold font-mono border transition-colors ${vacancyActiveDates.has(d) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}
+                                            >
+                                                {formatShortDay(d)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {vacancyActiveDates.size > 0 && (
+                                <div className="mb-4 shrink-0 max-h-32 overflow-y-auto custom-scrollbar border rounded-xl divide-y">
+                                    {[...vacancyActiveDates].sort().map((d) => (
+                                        <div key={d} className="flex items-center gap-2 px-3 py-2 text-xs">
+                                            <span className="font-mono font-bold text-slate-600 w-14 shrink-0">{formatShortDay(d)}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setVacancyEditingDay(d); setVacancyReplacementOpen(true); }}
+                                                className="flex-1 text-left truncate font-bold text-slate-700 hover:text-indigo-600"
+                                            >
+                                                {resolveDayReplacementName(d)}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                             <div className="bg-slate-50 p-4 rounded-xl border mb-5 min-h-0 flex-1 flex flex-col">
                                 <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block shrink-0">
-                                    {isInj ? 'Asignar cobertura (opcional)' : 'Seleccionar suplente'}
+                                    {vacancyEditingDay
+                                        ? `Suplente para ${formatShortDay(vacancyEditingDay)}`
+                                        : (isInj ? 'Suplente por defecto (opcional)' : 'Suplente por defecto para días seleccionados')}
                                 </label>
                                 {!vacancyReplacementOpen ? (
                                     <button
@@ -6902,8 +7035,20 @@ export default function PlanificacionPage() {
                                         <div className="overflow-y-auto custom-scrollbar p-1 min-h-0 flex-1 max-h-[min(42vh,280px)]">
                                             <button
                                                 type="button"
-                                                onClick={() => { setSelectedReplacement(''); setVacancyReplacementOpen(false); }}
-                                                className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!selectedReplacement ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
+                                                onClick={() => {
+                                                    if (vacancyEditingDay) {
+                                                        setVacancyDayReplacements((prev) => {
+                                                            const next = { ...prev };
+                                                            delete next[vacancyEditingDay];
+                                                            return next;
+                                                        });
+                                                        setVacancyEditingDay(null);
+                                                    } else {
+                                                        setSelectedReplacement('');
+                                                    }
+                                                    setVacancyReplacementOpen(false);
+                                                }}
+                                                className={`w-full px-3 py-2.5 text-left text-sm font-bold hover:bg-slate-50 rounded-lg ${!(vacancyEditingDay ? resolveDayReplacementId(vacancyEditingDay) : selectedReplacement) ? 'bg-slate-50 ring-1 ring-slate-300 text-slate-500' : 'text-slate-400'}`}
                                             >
                                                 Sin cobertura — dejar vacante
                                             </button>
@@ -6960,9 +7105,9 @@ export default function PlanificacionPage() {
                                 )}
                             </div>
                             <div className="flex gap-3 shrink-0">
-                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
-                                <button onClick={handleProcessVacancy} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg ${btnColor[color]}`}>
-                                    {selectedReplacement ? 'Asignar reemplazo' : 'Marcar vacante'}
+                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); setVacancyActiveDates(new Set()); setVacancyDayReplacements({}); setVacancyEditingDay(null); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
+                                <button onClick={handleProcessVacancy} disabled={vacancyActiveDates.size === 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg disabled:opacity-40 ${btnColor[color]}`}>
+                                    {willAssignAny ? 'Confirmar cobertura' : 'Marcar vacante'}
                                 </button>
                             </div>
                             <p className="text-[10px] text-slate-400 text-center mt-3 shrink-0">Los cambios quedan pendientes — recordá guardar el cronograma.</p>

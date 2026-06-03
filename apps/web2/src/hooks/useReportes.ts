@@ -13,6 +13,7 @@ import {
     shouldScopeQueriesToEmpresa,
 } from '@/lib/multiempresa';
 import { iterateCalendarDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
+import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES, resolveLeaveCode } from '@/lib/planificacion/leaveCoverage';
 
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retén: no computan horas de liquidación del empleado.
@@ -27,6 +28,19 @@ const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA', 'RET']);
 const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
 const isObjectiveBillableCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has((code || '').trim().toUpperCase());
+
+/** Titular con licencia RRHH: no suma horas al objetivo aunque el turno guarde M/T/N. */
+export function shouldBillShiftToObjective(shift: any): boolean {
+    const code = String(shift?.code || '').trim().toUpperCase();
+    if (!isObjectiveBillableCode(code)) return false;
+    if (isEmployeeOnLeave({ shiftCode: code, absenceType: shift?._absenceType, absence: shift?._absenceType ? { type: shift._absenceType } : null })) {
+        return false;
+    }
+    if (shift?._absenceType && RRHH_ABSENCE_TYPES.has(String(shift._absenceType).trim()) && !shiftHasRealCheckIn(shift)) {
+        return false;
+    }
+    return true;
+}
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN': 9, 'FT': 0,
@@ -125,12 +139,15 @@ export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
     for (const [dateKey, dayShifts] of Object.entries(byDate)) {
         if (dateKey === '__orphan') continue;
         const hasLeave = dayShifts.some(s =>
-            LEAVE_REPORT_CODES.has(String(s.code || '').toUpperCase()) || s.type === 'NOVEDAD',
+            LEAVE_REPORT_CODES.has(String(s.code || '').toUpperCase())
+            || s.type === 'NOVEDAD'
+            || (s._absenceType && RRHH_ABSENCE_TYPES.has(String(s._absenceType).trim())),
         );
         for (const s of dayShifts) {
             const code = String(s.code || '').toUpperCase();
             const isWork = !NON_WORK_CODES.has(code);
-            if (hasLeave && isWork && !shiftHasRealCheckIn(s)) continue;
+            const onLeave = isEmployeeOnLeave({ shiftCode: code, absenceType: s._absenceType });
+            if ((hasLeave || onLeave) && isWork && !shiftHasRealCheckIn(s)) continue;
             out.push(s);
         }
     }
@@ -775,15 +792,23 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             const coverageByEmpDate: Record<string, string> = {};
+            const coveringForByEmpDate: Record<string, string> = {};
             rawShifts.forEach((s: any) => {
+                const dk = shiftCalendarDateKey(s);
                 const comments = String(s.comments || '');
                 const m = comments.match(/Cubriendo a (.+?) \(/);
-                if (!m) return;
-                const titularName = m[1].trim();
-                const titularId = Object.keys(empMap).find(id => empMap[id] === titularName);
-                if (!titularId) return;
-                const dk = shiftCalendarDateKey(s);
-                if (dk) coverageByEmpDate[`${titularId}_${dk}`] = s.employeeName || empMap[s.employeeId] || '—';
+                if (m && dk) {
+                    const titularName = m[1].trim();
+                    const titularId = Object.keys(empMap).find(id => empMap[id] === titularName);
+                    if (titularId) {
+                        const covName = s.employeeName || empMap[s.employeeId] || '—';
+                        coverageByEmpDate[`${titularId}_${dk}`] = covName;
+                        coveringForByEmpDate[`${s.employeeId}_${dk}`] = titularName;
+                    }
+                }
+                if (s.coveredBy && dk) {
+                    coverageByEmpDate[`${s.employeeId}_${dk}`] = String(s.coveredBy).replace(/\s*\([^)]*\)\s*$/, '').trim();
+                }
             });
 
             const enrichShift = (s: any) => {
@@ -797,6 +822,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     _absenceStatus: abs?.status || null,
                     _absenceReason: abs?.reason || null,
                     _coveredBy: s.coveredBy || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null) || null,
+                    _coveringFor: dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] || null : null,
                 };
             };
 
@@ -877,14 +903,15 @@ export const useReportes = (forcedClientId?: string | null) => {
             // 4. Procesamiento por Objetivo
             const objGroups: Record<string, { shifts: any[]; clientId?: string }> = {};
             rawShifts.forEach((s: any) => {
-                if (s.type === 'NOVEDAD' || !isObjectiveBillableCode(s.code)) return;
+                const enriched = enrichShift(s);
+                if (enriched.type === 'NOVEDAD' || !shouldBillShiftToObjective(enriched)) return;
 
-                const objId = resolveCanonicalObjectiveId(s, aliasLookup);
+                const objId = resolveCanonicalObjectiveId(enriched, aliasLookup);
                 if (!objId) return;
 
-                if (!objGroups[objId]) objGroups[objId] = { shifts: [], clientId: s.clientId };
-                objGroups[objId].shifts.push(s);
-                if (s.clientId) objGroups[objId].clientId = s.clientId;
+                if (!objGroups[objId]) objGroups[objId] = { shifts: [], clientId: enriched.clientId };
+                objGroups[objId].shifts.push(enriched);
+                if (enriched.clientId) objGroups[objId].clientId = enriched.clientId;
             });
 
             for (const objId of Object.keys(objGroups)) {
@@ -895,6 +922,22 @@ export const useReportes = (forcedClientId?: string | null) => {
                     objId,
                 );
             }
+
+            const objLeaveShifts: Record<string, any[]> = {};
+            rawShifts.forEach((s: any) => {
+                const enriched = enrichShift(s);
+                if (shouldBillShiftToObjective(enriched)) return;
+                const objId = resolveCanonicalObjectiveId(enriched, aliasLookup);
+                if (!objId) return;
+                const leaveCode = resolveLeaveCode(enriched.code, enriched._absenceType);
+                if (!leaveCode && !isEmployeeOnLeave({ shiftCode: enriched.code, absenceType: enriched._absenceType })) return;
+                (objLeaveShifts[objId] ||= []).push({
+                    ...enriched,
+                    employeeName: empMap[enriched.employeeId] || null,
+                    code: leaveCode || enriched.code,
+                    _objectiveBillable: false,
+                });
+            });
 
             const allObjectiveIds = new Set<string>([
                 ...slaObjectiveMetas.keys(),
@@ -928,13 +971,17 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
                     acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
                 const stats = calculateStatsExact(
-                    staffedShifts.filter((s: any) => isObjectiveBillableCode(s.code)),
+                    staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
                     holidaysData,
                 );
-                const annotatedShifts = data.shifts.map((s: any) => ({
-                    ...s,
-                    employeeName: empMap[s.employeeId] || null
-                }));
+                const annotatedShifts = [
+                    ...data.shifts.map((s: any) => ({
+                        ...s,
+                        employeeName: empMap[s.employeeId] || null,
+                        _objectiveBillable: true,
+                    })),
+                    ...(objLeaveShifts[objId] || []),
+                ];
                 return {
                     id: objId,
                     type: 'OBJECTIVE',

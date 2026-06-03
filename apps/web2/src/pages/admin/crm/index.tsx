@@ -46,6 +46,8 @@ import {
   countClientRelatedDocsOtherTenant,
   dedupeClientsById,
   tenantEmpresaIdsMatch,
+  collectTurnoIdsForSlaDelete,
+  deleteSlaWithRelatedDataForEmpresa,
 } from '@/lib/multiempresa';
 import {
   AlertCircle,
@@ -315,6 +317,15 @@ export default function CRMPage() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!router.isReady || loadingClients) return;
+    const qid = String(router.query.clientId ?? '').trim();
+    if (!qid || view === 'detail') return;
+    void openClientDetail({ id: qid });
+    router.replace('/admin/crm', undefined, { shallow: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.clientId, loadingClients]);
+
   const loadPortalUserForClient = async (clientId: string) => {
     try {
       const snap = await getDocs(query(collection(db, 'client_users'), where('clientId', '==', clientId)));
@@ -429,8 +440,8 @@ export default function CRMPage() {
       const fresh = await assertClientWritable(c.id, c.name);
       setSelectedClient(fresh);
       setView('detail');
-      await loadClientFullData(c.id);
-      loadPortalUserForClient(c.id);
+      await loadClientFullData(fresh.id);
+      loadPortalUserForClient(fresh.id);
     } catch (e: unknown) {
       toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'No se puede abrir este cliente'));
     }
@@ -506,6 +517,7 @@ export default function CRMPage() {
 
   const loadClientFullData = async (id: string) => {
     setLoadingClientData(true);
+    setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 });
     try {
       const [srv, cont, quo] = await Promise.all([
         getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', id))),
@@ -522,14 +534,15 @@ export default function CRMPage() {
       );
       setClientContracts(cont.docs.map((x) => ({ id: x.id, ...x.data() })));
       setClientQuotes(quo.docs.map((x) => ({ id: x.id, ...x.data() })));
-      const foreign = await countClientRelatedDocsOtherTenant(id, empresaId, migracionCompleta);
-      setForeignRelatedCounts(foreign);
     } catch (e) {
       console.error(e);
-      toast.error('Error al cargar datos del cliente');
+      toast.error('Error al cargar contratos, SLA o cotizaciones');
     } finally {
       setLoadingClientData(false);
     }
+    void countClientRelatedDocsOtherTenant(id, empresaId, migracionCompleta)
+      .then(setForeignRelatedCounts)
+      .catch(() => setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 }));
   };
 
   const getRangeLabel = () => {
@@ -753,6 +766,58 @@ export default function CRMPage() {
     } catch (e) {
       console.error(e);
       toast.error('Error al actualizar SLA');
+    }
+  };
+
+  const handleDeleteService = async (s: {
+    id: string;
+    clientId?: string;
+    objectiveId?: string;
+    objectiveName?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => {
+    if (!selectedClient?.id || !s.id) return;
+    try {
+      await assertClientWritable(selectedClient.id, selectedClient.name);
+      const clientObjetivos = selectedClient.objetivos || [];
+      const shiftIds = await collectTurnoIdsForSlaDelete(
+        {
+          id: s.id,
+          clientId: s.clientId || selectedClient.id,
+          objectiveId: s.objectiveId,
+          objectiveName: s.objectiveName,
+          startDate: s.startDate,
+          endDate: s.endDate,
+        },
+        empresaId,
+        migracionCompleta,
+        clientObjetivos,
+      );
+      if (!confirm(
+        `¿Eliminar el servicio «${s.objectiveName || s.id}» (${s.startDate || '?'} → ${s.endDate || '?'})?\n\n`
+        + `Se borrarán ${shiftIds.length} turno(s) del período y el contrato SLA.\nEsta acción no se puede deshacer.`,
+      )) return;
+
+      const r = await deleteSlaWithRelatedDataForEmpresa(
+        {
+          id: s.id,
+          clientId: s.clientId || selectedClient.id,
+          objectiveId: s.objectiveId,
+          objectiveName: s.objectiveName,
+          startDate: s.startDate,
+          endDate: s.endDate,
+        },
+        empresaId,
+        migracionCompleta,
+        clientObjetivos,
+      );
+      if (expandedServiceId === s.id) setExpandedServiceId(null);
+      await loadClientFullData(selectedClient.id);
+      toast.success(`Servicio eliminado (${r.deletedTurnos} turno(s))`);
+    } catch (e) {
+      console.error(e);
+      toast.error(isTenantIsolationError(e) ? e.message : 'Error al eliminar servicio');
     }
   };
 
@@ -1703,12 +1768,6 @@ export default function CRMPage() {
               </div>
 
               <div className="p-10 flex-1 space-y-6">
-                {loadingClientData ? (
-                  <div className="p-6 bg-slate-50 rounded-xl border flex items-center gap-3 text-slate-500 font-bold">
-                    <Loader2 className="animate-spin" size={18} /> Cargando datos del cliente...
-                  </div>
-                ) : null}
-
                 {activeTab === 'INFO' && (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
@@ -1893,6 +1952,12 @@ export default function CRMPage() {
                 )}
 
                 {activeTab === 'CONTRATOS' && (
+                  loadingClientData ? (
+                    <div className="py-16 text-center text-slate-400">
+                      <Loader2 className="animate-spin mx-auto mb-2" size={24} />
+                      <p className="text-sm font-bold">Cargando contratos…</p>
+                    </div>
+                  ) : (
                   <div className="space-y-4">
                     {/* Header */}
                     <div className="flex flex-wrap justify-between items-center gap-2">
@@ -2042,9 +2107,18 @@ export default function CRMPage() {
                       </div>
                     )}
                   </div>
+                  )
                 )}
 
                 {activeTab === 'SERVICIOS' && (() => {
+                  if (loadingClientData) {
+                    return (
+                      <div className="py-16 text-center text-slate-400">
+                        <Loader2 className="animate-spin mx-auto mb-2" size={24} />
+                        <p className="text-sm font-bold">Cargando servicios (SLA)…</p>
+                      </div>
+                    );
+                  }
                   const sortedServices = [...clientServices].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
                   const COVERAGE_LABELS: Record<string, string> = { '24hs': '24 hs', '12hs_diurno': '12 hs Diurno', '12hs_nocturno': '12 hs Nocturno', 'custom': 'Personalizado' };
 
@@ -2268,6 +2342,13 @@ export default function CRMPage() {
                                       className="p-1.5 hover:bg-indigo-50 text-indigo-400 hover:text-indigo-600 rounded-lg transition-colors"
                                     >
                                       <Copy size={14} />
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); void handleDeleteService(s); }}
+                                      title="Eliminar servicio y turnos del período"
+                                      className="p-1.5 hover:bg-rose-50 text-rose-400 hover:text-rose-600 rounded-lg transition-colors"
+                                    >
+                                      <Trash2 size={14} />
                                     </button>
                                     {isExpanded ? <ChevronUp size={16} className="text-indigo-400" /> : <ChevronDown size={16} className="text-slate-300" />}
                                   </div>
@@ -2718,6 +2799,12 @@ export default function CRMPage() {
                 )}
 
                 {activeTab === 'COTIZACIONES' && (
+                  loadingClientData ? (
+                    <div className="py-16 text-center text-slate-400">
+                      <Loader2 className="animate-spin mx-auto mb-2" size={24} />
+                      <p className="text-sm font-bold">Cargando cotizaciones…</p>
+                    </div>
+                  ) : (
                   <div className="space-y-4">
                     <div className="flex flex-wrap justify-between items-center gap-2">
                       <div className="flex items-center gap-2">
@@ -2759,6 +2846,7 @@ export default function CRMPage() {
                       </div>
                     )}
                   </div>
+                  )
                 )}
 
                 {activeTab === 'HISTORIAL' && (

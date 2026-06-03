@@ -19,7 +19,7 @@ import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdviso
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
-  deleteDocsByIdsForEmpresa, deleteSlaForEmpresa, TenantIsolationError,
+  collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, TenantIsolationError,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 
@@ -735,33 +735,28 @@ export default function ServiciosSLAPage() {
     const srv = services.find(s => s.id === id);
     if (!srv) return;
 
-    // Contar turnos del objetivo dentro del rango de fechas del servicio
-    const [sy, sm, sd] = (srv.startDate || '').split('-').map(Number);
-    const [ey, em, ed] = (srv.endDate || '').split('-').map(Number);
-    const rangeStart = Timestamp.fromDate(new Date(sy, sm - 1, sd, 0, 0, 0));
-    const rangeEnd   = Timestamp.fromDate(new Date(ey, em - 1, ed, 23, 59, 59));
+    const client = clients.find(c => c.id === srv.clientId);
+    const clientObjetivos = client?.objectives || client?.objetivos || [];
 
-    const turnosSnap = await getDocs(query(
-      collection(db, 'turnos'),
-      where('objectiveId', '==', srv.objectiveId),
-      where('startTime', '>=', rangeStart),
-      where('startTime', '<=', rangeEnd)
-    ));
-    const shiftIds = turnosSnap.docs
-      .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-      .map(d => d.id);
-
-    // Buscar ausencias y novedades vinculadas (chunks de 30)
-    const ausIds: string[] = [];
-    const novIds: string[] = [];
-    for (let i = 0; i < shiftIds.length; i += 30) {
-      const chunk = shiftIds.slice(i, i + 30);
-      const [ausSnap, novSnap] = await Promise.all([
-        getDocs(query(collection(db, 'ausencias'), where('shiftId', 'in', chunk))),
-        getDocs(query(collection(db, 'novedades'), where('shiftId', 'in', chunk))),
-      ]);
-      ausSnap.docs.forEach(d => ausIds.push(d.id));
-      novSnap.docs.forEach(d => novIds.push(d.id));
+    let shiftIds: string[] = [];
+    try {
+      shiftIds = await collectTurnoIdsForSlaDelete(
+        {
+          id: srv.id || id,
+          clientId: srv.clientId,
+          objectiveId: srv.objectiveId,
+          objectiveName: srv.objectiveName,
+          startDate: srv.startDate,
+          endDate: srv.endDate,
+        },
+        empresaId,
+        migracionCompleta,
+        clientObjetivos,
+      );
+    } catch (e) {
+      console.error(e);
+      addToast('Error al buscar turnos del servicio', 'error');
+      return;
     }
 
     const msg = [
@@ -770,22 +765,28 @@ export default function ServiciosSLAPage() {
       '',
       'Se eliminarán los datos de ese período:',
       `• ${shiftIds.length} turno(s)`,
-      `• ${ausIds.length} ausencia(s)`,
-      `• ${novIds.length} novedad(es)`,
       '',
+      'También se borran ausencias y novedades vinculadas a esos turnos.',
       'Esta acción no se puede deshacer.',
     ].join('\n');
     if (!confirm(msg)) return;
 
     try {
-      await Promise.all([
-        deleteDocsByIdsForEmpresa('turnos', shiftIds, empresaId, migracionCompleta),
-        deleteDocsByIdsForEmpresa('ausencias', ausIds, empresaId, migracionCompleta),
-        deleteDocsByIdsForEmpresa('novedades', novIds, empresaId, migracionCompleta),
-      ]);
-      await deleteSlaForEmpresa(id, empresaId, migracionCompleta);
-      await registrarAuditoria('DELETE_CONTRACT', `Eliminó contrato: ${srv.clientName} - ${srv.objectiveName} (${shiftIds.length} turnos)`);
-      addToast(`Servicio eliminado con ${shiftIds.length} turno(s)`, 'success');
+      const r = await deleteSlaWithRelatedDataForEmpresa(
+        {
+          id: srv.id || id,
+          clientId: srv.clientId,
+          objectiveId: srv.objectiveId,
+          objectiveName: srv.objectiveName,
+          startDate: srv.startDate,
+          endDate: srv.endDate,
+        },
+        empresaId,
+        migracionCompleta,
+        clientObjetivos,
+      );
+      await registrarAuditoria('DELETE_CONTRACT', `Eliminó contrato: ${srv.clientName} - ${srv.objectiveName} (${r.deletedTurnos} turnos)`);
+      addToast(`Servicio eliminado con ${r.deletedTurnos} turno(s)`, 'success');
     } catch (e) {
       addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar servicio', 'error');
     }

@@ -5,9 +5,10 @@
  */
 import {
   collection, getDocs, writeBatch, doc, setDoc, getDoc, deleteDoc, updateDoc,
-  query, where, Query, CollectionReference, DocumentReference,
+  query, where, limit, Query, CollectionReference, DocumentReference, Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { objectiveMatchKeys } from './slaPlanningMatch';
 
 /** Colecciones que participan en el aislamiento por empresa */
 const COLECCIONES = [
@@ -434,6 +435,125 @@ export async function deleteSlaForEmpresa(
   await deleteDocForEmpresa('servicios_sla', slaId, empresaId, migracionCompleta);
 }
 
+export type SlaDeleteInput = {
+  id: string;
+  clientId?: string;
+  objectiveId?: string;
+  objectiveName?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+function turnoBelongsToSla(
+  turno: Record<string, unknown>,
+  sla: SlaDeleteInput,
+  clientObjetivos?: Array<{ id?: string; name?: string; objectiveId?: string }>,
+): boolean {
+  const keys = objectiveMatchKeys(
+    String(sla.objectiveId ?? sla.objectiveName ?? ''),
+    clientObjetivos,
+  );
+  const candidates = [turno.objectiveId, turno.objectiveName];
+  for (const c of candidates) {
+    const v = String(c ?? '').trim();
+    if (!v) continue;
+    if (keys.has(v)) return true;
+  }
+  const slaOid = String(sla.objectiveId ?? '').trim();
+  const slaName = String(sla.objectiveName ?? '').trim();
+  if (slaOid && candidates.some((c) => String(c ?? '').trim() === slaOid)) return true;
+  if (slaName && candidates.some((c) => String(c ?? '').trim() === slaName)) return true;
+  if (sla.id && String(turno.objectiveId ?? '').trim() === sla.id) return true;
+  return false;
+}
+
+/** Turnos del período del SLA (objectiveId + alias por nombre/clientId). */
+export async function collectTurnoIdsForSlaDelete(
+  sla: SlaDeleteInput,
+  empresaId: string,
+  migracionCompleta: boolean,
+  clientObjetivos?: Array<{ id?: string; name?: string; objectiveId?: string }>,
+): Promise<string[]> {
+  const startDate = String(sla.startDate ?? '').trim();
+  const endDate = String(sla.endDate ?? '').trim();
+  if (!startDate || !endDate) return [];
+
+  const [sy, sm, sd] = startDate.split('-').map(Number);
+  const [ey, em, ed] = endDate.split('-').map(Number);
+  if (!sy || !sm || !sd || !ey || !em || !ed) return [];
+
+  const rangeStart = Timestamp.fromDate(new Date(sy, sm - 1, sd, 0, 0, 0));
+  const rangeEnd = Timestamp.fromDate(new Date(ey, em - 1, ed, 23, 59, 59));
+  const ids = new Set<string>();
+
+  const consider = (docs: { id: string; data: () => Record<string, unknown> }[]) => {
+    for (const d of docs) {
+      if (!isTenantWriteOwner(d.data(), empresaId, migracionCompleta)) continue;
+      if (turnoBelongsToSla(d.data(), sla, clientObjetivos)) ids.add(d.id);
+    }
+  };
+
+  const oid = String(sla.objectiveId ?? '').trim();
+  if (oid) {
+    const snap = await getDocs(query(
+      collection(db, 'turnos'),
+      where('objectiveId', '==', oid),
+      where('startTime', '>=', rangeStart),
+      where('startTime', '<=', rangeEnd),
+    ));
+    consider(snap.docs);
+  }
+
+  const cid = String(sla.clientId ?? '').trim();
+  if (cid) {
+    const snap = await getDocs(query(
+      collection(db, 'turnos'),
+      where('clientId', '==', cid),
+      where('startTime', '>=', rangeStart),
+      where('startTime', '<=', rangeEnd),
+    ));
+    consider(snap.docs);
+  }
+
+  return [...ids];
+}
+
+async function collectLinkedDocIds(
+  colName: 'ausencias' | 'novedades',
+  shiftIds: string[],
+): Promise<string[]> {
+  const out: string[] = [];
+  for (let i = 0; i < shiftIds.length; i += 30) {
+    const chunk = shiftIds.slice(i, i + 30);
+    const snap = await getDocs(query(collection(db, colName), where('shiftId', 'in', chunk)));
+    snap.docs.forEach((d) => out.push(d.id));
+  }
+  return out;
+}
+
+/** Elimina SLA y turnos/ausencias/novedades del mismo objetivo en el rango de fechas. */
+export async function deleteSlaWithRelatedDataForEmpresa(
+  sla: SlaDeleteInput,
+  empresaId: string,
+  migracionCompleta: boolean,
+  clientObjetivos?: Array<{ id?: string; name?: string; objectiveId?: string }>,
+): Promise<{ deletedTurnos: number; deletedAusencias: number; deletedNovedades: number }> {
+  const shiftIds = await collectTurnoIdsForSlaDelete(sla, empresaId, migracionCompleta, clientObjetivos);
+  const [ausIds, novIds] = await Promise.all([
+    collectLinkedDocIds('ausencias', shiftIds),
+    collectLinkedDocIds('novedades', shiftIds),
+  ]);
+
+  const [deletedTurnos, deletedAusencias, deletedNovedades] = await Promise.all([
+    deleteDocsByIdsForEmpresa('turnos', shiftIds, empresaId, migracionCompleta),
+    deleteDocsByIdsForEmpresa('ausencias', ausIds, empresaId, migracionCompleta),
+    deleteDocsByIdsForEmpresa('novedades', novIds, empresaId, migracionCompleta),
+  ]);
+  await deleteSlaForEmpresa(sla.id, empresaId, migracionCompleta);
+
+  return { deletedTurnos, deletedAusencias, deletedNovedades };
+}
+
 async function deleteDocsInBatches(refs: { ref: DocumentReference }[]): Promise<number> {
   return deleteRefsInBatches(refs.map((r) => r.ref));
 }
@@ -507,6 +627,50 @@ export type ResolvedClientDocument = {
   data: Record<string, unknown>;
 };
 
+/** IDs de clients borrados en migración Bacarsa → doc actual en Firestore. */
+const KNOWN_ORPHAN_CLIENT_IDS: Record<string, string> = {
+  '99yqpqc4ppY9rVXymWhx': 'DB8UZxFC4DpqGSQ3o69w',
+  p9atJYpcu9oUspQMFta3: 'ujOVMbL9gK8YK6DsiLvs',
+  ZlxmWiRw5qGYtIST5uZh: '8rr2FePfgQ6xY2jH0gyk',
+  FzAowOV93fHQcxZhHfjN: 'NS0UBtf6zkHsm2iRRo9W',
+};
+
+async function loadClientDocById(clientId: string): Promise<ResolvedClientDocument | null> {
+  for (const col of CLIENT_DOC_COLLECTIONS) {
+    const snap = await getDoc(doc(db, col, clientId));
+    if (snap.exists()) {
+      return { collection: col, id: snap.id, data: snap.data() as Record<string, unknown> };
+    }
+  }
+  return null;
+}
+
+/** Si el doc clients/{id} fue borrado en migración pero turnos siguen con clientId antiguo. */
+async function resolveClientFromOrphanClientId(orphanId: string): Promise<ResolvedClientDocument | null> {
+  const knownTarget = KNOWN_ORPHAN_CLIENT_IDS[orphanId];
+  if (knownTarget) {
+    const known = await loadClientDocById(knownTarget);
+    if (known) return known;
+  }
+
+  const turnoSnap = await getDocs(
+    query(collection(db, 'turnos'), where('clientId', '==', orphanId), limit(1)),
+  );
+  if (turnoSnap.empty) return null;
+
+  const objectiveId = String(turnoSnap.docs[0].data()?.objectiveId ?? '').trim();
+  if (!objectiveId) return null;
+
+  const clientsSnap = await getDocs(collection(db, 'clients'));
+  for (const c of clientsSnap.docs) {
+    const objetivos = (c.data().objetivos || []) as Array<{ id?: string }>;
+    if (objetivos.some(o => String(o?.id ?? '') === objectiveId)) {
+      return { collection: 'clients', id: c.id, data: c.data() as Record<string, unknown> };
+    }
+  }
+  return null;
+}
+
 /** Busca el cliente en `clients` y, si no existe, en `clientes` (legacy NestJS). */
 export async function resolveClientDocument(clientId: string): Promise<ResolvedClientDocument | null> {
   const id = String(clientId ?? '').trim();
@@ -517,7 +681,7 @@ export async function resolveClientDocument(clientId: string): Promise<ResolvedC
       return { collection: col, id: snap.id, data: snap.data() as Record<string, unknown> };
     }
   }
-  return null;
+  return resolveClientFromOrphanClientId(id);
 }
 
 export function dedupeClientsById<T extends { id?: unknown }>(rows: T[]): T[] {
@@ -540,12 +704,13 @@ export async function assertClientWritableForEmpresa(
   const resolved = await resolveClientDocument(clientId);
   if (!resolved) {
     throw new Error(
-      `Cliente no encontrado (ID: ${clientId}). Refrescá el listado o verificá que el registro exista en Firestore.`,
+      `Cliente no encontrado (ID: ${clientId}). El registro pudo haberse eliminado en una migración. ` +
+      'Refrescá el listado (F5). Si persiste, avisá a soporte para re-vincular turnos huérfanos.',
     );
   }
   if (!canManageClientInTenant(resolved.data, empresaId, migracionCompleta, access)) {
     const docEmp = String(resolved.data.empresaId ?? '').trim() || 'sin empresa';
-    throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, clientId));
+    throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, resolved.id));
   }
   return { id: resolved.id, collection: resolved.collection, ...resolved.data };
 }
@@ -564,7 +729,7 @@ export async function updateClientForEmpresa(
     'guardar',
     access,
   );
-  await updateDocForEmpresa(resolved.collection, clientId, data, empresaId, migracionCompleta);
+  await updateDocForEmpresa(resolved.collection, resolved.id, data, empresaId, migracionCompleta);
   return resolved.collection;
 }
 

@@ -269,13 +269,21 @@ export function verifyScheduleCoverage(
         return s + (Number(a.hours) || SHIFT_HRS[c] || 0);
     }, 0);
 
-    // 4. Conflictos con licencias (asignación + ausencia el mismo día)
+    // 4. Conflictos con licencias (asignación + ausencia el mismo día, sin cobertura)
     const licenseConflicts: LicenseConflict[] = [];
     assignments.forEach((a) => {
         const c = String(a.code || '').toUpperCase();
         if (NON_BILLABLE.has(c) || ABSENCE_CODES.has(c)) return;
         const abs = ctx.absences[a.empId]?.get(a.dateStr);
         if (abs) {
+            const hasCoverage = assignments.some((o) => {
+                if (o.dateStr !== a.dateStr || o.empId === a.empId) return false;
+                const oc = String(o.code || '').toUpperCase();
+                if (NON_BILLABLE.has(oc) || ABSENCE_CODES.has(oc)) return false;
+                if (o.positionName && a.positionName && o.positionName !== a.positionName) return false;
+                return true;
+            });
+            if (hasCoverage) return;
             licenseConflicts.push({
                 empId: a.empId,
                 dateStr: a.dateStr,
