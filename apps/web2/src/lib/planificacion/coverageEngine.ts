@@ -16,10 +16,13 @@ const WORK_BANDS = new Set(['M', 'T', 'N']);
 
 export type CoverageGap = {
     absentEmpId: string;
+    absentName?: string;
     dateStr: string;
     band: string;
     coveredBy: string | null;
-    coverageType: 'ret' | 'sin_turno' | 'ft_required' | 'uncovered';
+    coveredByName?: string;
+    coverageType: 'ret' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural';
+    ftCandidates?: { empId: string; nombre: string; code: string }[];
 };
 
 export type AbsenceCoverageResult = {
@@ -28,6 +31,7 @@ export type AbsenceCoverageResult = {
     coveredCount: number;
     ftRequiredCount: number;
     uncoveredCount: number;
+    francoNaturalCount: number;
 };
 
 function is24hs(pos: V2PositionDef): boolean {
@@ -92,7 +96,11 @@ export function applyAbsenceCoverage(
             if (di < 0) continue;
 
             const neededBand = CYCLE_24_MTN[(opening + di) % 24] as string;
-            if (!WORK_BANDS.has(neededBand)) continue; // día franco del ausente → sin brecha
+            if (!WORK_BANDS.has(neededBand)) {
+                // Día franco natural del ciclo 6+2 — la ausencia solapa con un descanso (error en RRHH)
+                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'franco_natural' });
+                continue;
+            }
 
             // Contar trabajadores activos en esa banda ese día (excluyendo al ausente)
             let actualBandCount = 0;
@@ -137,8 +145,9 @@ export function applyAbsenceCoverage(
     const coveredCount = gaps.filter(g => g.coveredBy !== null).length;
     const ftRequiredCount = gaps.filter(g => g.coverageType === 'ft_required').length;
     const uncoveredCount = gaps.filter(g => g.coverageType === 'uncovered').length;
+    const francoNaturalCount = gaps.filter(g => g.coverageType === 'franco_natural').length;
 
-    return { assignments: result, gaps, coveredCount, ftRequiredCount, uncoveredCount };
+    return { assignments: result, gaps, coveredCount, ftRequiredCount, uncoveredCount, francoNaturalCount };
 }
 
 function findRetFree(

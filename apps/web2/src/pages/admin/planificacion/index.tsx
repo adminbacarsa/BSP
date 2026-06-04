@@ -675,6 +675,7 @@ export default function PlanificacionPage() {
     const [autoV2Fixing, setAutoV2Fixing] = useState(false);
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
+    const [autoCoverageGaps, setAutoCoverageGaps] = useState<import('@/lib/planificacion/coverageEngine').CoverageGap[]>([]);
     const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
     const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
     const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'sla_open'|'done'>('configure');
@@ -3691,6 +3692,7 @@ export default function PlanificacionPage() {
             setAutoRotateForce(null);
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
+            setAutoCoverageGaps([]);
         }
     }, [showAutoV2Modal]);
 
@@ -4052,22 +4054,53 @@ export default function PlanificacionPage() {
                 ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
             });
 
-            // Cobertura automática de ausencias pre-declaradas (V/L/E/A/PG)
+            // Análisis de cobertura de ausencias pre-declaradas (V/L/E/A/PG)
+            // Siempre se analiza cuando el pipeline floater está disponible (para detectar francos
+            // naturales incluidos en licencias y candidatos FT). La asignación solo modifica
+            // el schedule si autoCoverAbsences está activo.
             let finalGenAssignments = gen.assignments;
-            if (autoCoverAbsences && useFloaterPipeline && gen.stats.openingSlotByEmp) {
-                await bumpAutoV2Progress(50, 'Aplicando cobertura de ausencias…');
+            if (useFloaterPipeline && gen.stats.openingSlotByEmp) {
+                await bumpAutoV2Progress(50, 'Analizando cobertura de ausencias…');
                 const covResult = applyAbsenceCoverage(
                     gen.assignments,
                     baseGenCtx,
                     gen.stats.openingSlotByEmp,
                 );
-                finalGenAssignments = covResult.assignments;
-                if (covResult.gaps.length > 0) {
-                    const msgs: string[] = [];
-                    if (covResult.coveredCount > 0) msgs.push(`${covResult.coveredCount} turno(s) cubierto(s)`);
-                    if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren Franco Trabajado`);
-                    toast.info(`Cobertura automática: ${msgs.join(' · ')}`, { duration: 6000 });
+
+                // Enriquecer gaps con nombres de empleados y candidatos FT
+                const empNameMap: Record<string, string> = {};
+                planningDotacionEmployees.forEach((e: any) => { empNameMap[e.id] = e.nombre || e.name || e.id; });
+
+                // Para candidatos FT: quién tiene F (franco) en cada día del mismo objetivo
+                const francoByDate: Record<string, { empId: string; nombre: string; code: string }[]> = {};
+                for (const a of gen.assignments) {
+                    if (a.code === 'F' || a.code === 'FF' || a.code === 'RET') {
+                        if (!francoByDate[a.dateStr]) francoByDate[a.dateStr] = [];
+                        francoByDate[a.dateStr].push({ empId: a.empId, nombre: empNameMap[a.empId] || a.empId, code: a.code });
+                    }
                 }
+
+                const enrichedGaps = covResult.gaps.map(g => ({
+                    ...g,
+                    absentName: empNameMap[g.absentEmpId] || g.absentEmpId,
+                    coveredByName: g.coveredBy ? (empNameMap[g.coveredBy] || g.coveredBy) : undefined,
+                    ftCandidates: g.coverageType === 'ft_required' ? (francoByDate[g.dateStr] || []) : undefined,
+                }));
+
+                setAutoCoverageGaps(enrichedGaps);
+
+                if (autoCoverAbsences) {
+                    finalGenAssignments = covResult.assignments;
+                    if (covResult.gaps.length > 0) {
+                        const msgs: string[] = [];
+                        if (covResult.coveredCount > 0) msgs.push(`${covResult.coveredCount} cubierto(s) por RET`);
+                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren FT`);
+                        if (covResult.francoNaturalCount > 0) msgs.push(`${covResult.francoNaturalCount} día(s) en franco del ciclo`);
+                        toast.info(`Análisis ausencias: ${msgs.join(' · ')}`, { duration: 6000 });
+                    }
+                }
+            } else {
+                setAutoCoverageGaps([]);
             }
 
             await bumpAutoV2Progress(58, 'Verificando cobertura…');
@@ -8198,6 +8231,91 @@ export default function PlanificacionPage() {
                                         </div>
                                     </div>
                                 )}
+
+                                {/* Panel de cobertura de ausencias — visible si hay gaps (siempre se analiza con pipeline floater) */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoCoverageGaps.length > 0 && (() => {
+                                    const francoGaps = autoCoverageGaps.filter(g => g.coverageType === 'franco_natural');
+                                    const retGaps = autoCoverageGaps.filter(g => g.coverageType === 'ret');
+                                    const ftGaps = autoCoverageGaps.filter(g => g.coverageType === 'ft_required');
+                                    // Agrupar FT gaps por empleado ausente
+                                    const ftByEmp: Record<string, { nombre: string; days: typeof ftGaps }> = {};
+                                    for (const g of ftGaps) {
+                                        if (!ftByEmp[g.absentEmpId]) ftByEmp[g.absentEmpId] = { nombre: g.absentName || g.absentEmpId, days: [] };
+                                        ftByEmp[g.absentEmpId].days.push(g);
+                                    }
+                                    const francoByEmp: Record<string, { nombre: string; days: typeof francoGaps }> = {};
+                                    for (const g of francoGaps) {
+                                        if (!francoByEmp[g.absentEmpId]) francoByEmp[g.absentEmpId] = { nombre: g.absentName || g.absentEmpId, days: [] };
+                                        francoByEmp[g.absentEmpId].days.push(g);
+                                    }
+                                    return (
+                                        <div className="rounded-xl border-2 border-amber-200 bg-amber-50/80 px-3 py-2.5 space-y-2.5">
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Cobertura ausencias</p>
+                                                <div className="flex gap-1">
+                                                    {retGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">{retGaps.length} RET ✓</span>}
+                                                    {ftGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">{ftGaps.length} sin cubrir</span>}
+                                                    {francoGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">{francoGaps.length} error RRHH</span>}
+                                                </div>
+                                            </div>
+
+                                            {/* Franco natural — error de carga en RRHH */}
+                                            {francoGaps.length > 0 && (
+                                                <div className="rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-2">
+                                                    <p className="text-[9px] font-black text-orange-800 mb-1.5">⚠ Días de licencia que son franco del ciclo 6+2</p>
+                                                    <p className="text-[9px] font-bold text-orange-700 mb-1.5">Estos días no necesitan cobertura — la licencia está mal cargada en RRHH (no puede incluir francos).</p>
+                                                    {Object.values(francoByEmp).map(({ nombre, days }) => (
+                                                        <div key={days[0].absentEmpId} className="text-[9px] font-bold text-orange-900">
+                                                            {nombre}: días {days.map(d => d.dateStr.slice(8, 10)).join(', ')} — corregir en RRHH
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {/* FT required — días laborales sin RET disponible */}
+                                            {ftGaps.length > 0 && (
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[9px] font-black text-rose-800">Días laborales de ausencia sin RET disponible</p>
+                                                    {Object.values(ftByEmp).map(({ nombre, days }) => (
+                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5">
+                                                            <p className="text-[9px] font-black text-rose-800 mb-1">{nombre}</p>
+                                                            <div className="space-y-1">
+                                                                {days.map(gap => (
+                                                                    <div key={gap.dateStr} className="flex items-start justify-between gap-1">
+                                                                        <span className="text-[9px] font-bold text-rose-700">Día {gap.dateStr.slice(8, 10)} · banda {gap.band}</span>
+                                                                        <div className="text-right">
+                                                                            {gap.ftCandidates && gap.ftCandidates.length > 0 ? (
+                                                                                <div className="text-[9px] font-bold text-slate-600">
+                                                                                    FT: {gap.ftCandidates.slice(0, 2).map(c => c.nombre.split(' ')[0]).join(', ')}
+                                                                                    {gap.ftCandidates.length > 2 ? ` +${gap.ftCandidates.length - 2}` : ''}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-[9px] font-bold text-slate-400">sin candidatos</span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                            <p className="text-[8px] font-bold text-violet-700 mt-1">D12+N12 activo en compañeros · gestionar FT desde Operaciones</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {/* Cubiertos por RET */}
+                                            {retGaps.length > 0 && (
+                                                <div className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1.5">
+                                                    <p className="text-[9px] font-black text-teal-800 mb-1">✓ Cubiertos por RET</p>
+                                                    {retGaps.map(g => (
+                                                        <div key={`${g.absentEmpId}_${g.dateStr}`} className="text-[9px] font-bold text-teal-700">
+                                                            Día {g.dateStr.slice(8, 10)} · {g.absentName?.split(' ')[0]} → {g.coveredByName?.split(',')[0]} ({g.band})
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
 
                                 {autoV2FormReport && (autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (
                                     <div className={`rounded-xl border-2 px-3 py-2.5 space-y-2 ${
