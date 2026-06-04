@@ -3547,6 +3547,18 @@ export default function PlanificacionPage() {
             mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
             setAutoAbsencesMap(absences);
 
+            // Días V/L/E que el cerebro maneja automáticamente (modo12DaysAuto)
+            const autoModo12AbsDays = new Set<string>();
+            for (const map of Object.values(absences)) {
+                if (!map) continue;
+                map.forEach((code, ds) => { if (['V','L','E'].includes(String(code).toUpperCase())) autoModo12AbsDays.add(ds); });
+            }
+            // Limpiar contingencia manual que solapa con ausencias auto
+            setAutoContingenciaDias(prev => {
+                const next = new Set([...prev].filter(d => !autoModo12AbsDays.has(d)));
+                return next.size !== prev.size ? next : prev;
+            });
+
             // Acumular cola CCT del mes anterior (26 → fin) por empleado
             const empMonthlyInitial: Record<string,number> = {};
             planningDotacionEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
@@ -3595,7 +3607,7 @@ export default function PlanificacionPage() {
                 objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
                 getDayLetter,
                 getDateKey,
-                contingencyDaysManual: [...autoContingenciaDias],
+                contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
                 cycleOverride: '6+2',
@@ -3785,6 +3797,16 @@ export default function PlanificacionPage() {
             mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
             setAutoAbsencesMap(absences);
 
+            const autoModo12AbsDays = new Set<string>();
+            for (const map of Object.values(absences)) {
+                if (!map) continue;
+                map.forEach((code, ds) => { if (['V','L','E'].includes(String(code).toUpperCase())) autoModo12AbsDays.add(ds); });
+            }
+            setAutoContingenciaDias(prev => {
+                const next = new Set([...prev].filter(d => !autoModo12AbsDays.has(d)));
+                return next.size !== prev.size ? next : prev;
+            });
+
             const preflightDays = daysInMonth.map(day => {
                 const dateStr = getDateKey(day);
                 return { dateStr, dayLetter: getDayLetter(dateStr) };
@@ -3955,7 +3977,7 @@ export default function PlanificacionPage() {
                 objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
                 getDayLetter,
                 getDateKey,
-                contingencyDaysManual: [...autoContingenciaDias],
+                contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
                 rotateShiftsOverride: autoRotateForce ?? undefined,
                 ajustarCronoOverride: autoAjustarCrono,
                 cycleOverride: '6+2',
@@ -7750,7 +7772,6 @@ export default function PlanificacionPage() {
                                                             const codes = absMap
                                                                 ? [...new Set([...absMap.values()].filter(c => ['V','L','E','A','PG','AA'].includes(c)))]
                                                                 : [];
-                                                            const alreadyModo12 = absDates.length > 0 && absDates.every(d => autoContingenciaDias.has(d));
                                                             return (
                                                                 <div key={emp.empId} className="px-2.5 py-2 rounded-xl border-2 border-amber-200 bg-amber-50">
                                                                     <div className="flex items-start justify-between gap-1.5">
@@ -7760,16 +7781,9 @@ export default function PlanificacionPage() {
                                                                                 {emp.blockedCount} día(s){codes.length > 0 && ` · ${codes.join('/')}`}
                                                                             </div>
                                                                         </div>
-                                                                        <button type="button"
-                                                                            onClick={() => setAutoContingenciaDias(prev => {
-                                                                                const next = new Set(prev);
-                                                                                absDates.forEach(d => next.add(d));
-                                                                                return next;
-                                                                            })}
-                                                                            disabled={alreadyModo12}
-                                                                            className={`shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${alreadyModo12 ? 'border-violet-300 bg-violet-50 text-violet-600 cursor-default' : 'border-amber-400 bg-white text-amber-700 hover:bg-amber-100 active:scale-95'}`}>
-                                                                            {alreadyModo12 ? '✓ D12' : '→ D12'}
-                                                                        </button>
+                                                                        <span className="shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border border-violet-200 bg-violet-50 text-violet-600">
+                                                                            D12 auto
+                                                                        </span>
                                                                     </div>
                                                                 </div>
                                                             );
@@ -7931,10 +7945,10 @@ export default function PlanificacionPage() {
                                                         <p className="text-[12px] font-black text-amber-800 mb-2">Ausencias en el mes</p>
                                                         <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Empleados con V/L/E/A/PG reducen la dotación disponible. Tenés dos herramientas para compensar:</p>
                                                         <div className="space-y-1.5 text-[10px] font-bold text-slate-600 mb-3">
-                                                            <div className="flex items-start gap-2"><span className="text-violet-600 font-black shrink-0">→ D12</span><span>Activa turnos de 12h (D12+N12) en los días del ausente. Un turno de 12h cubre las dos bandas y libera RETs para reponer dotación.</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-violet-600 font-black shrink-0">D12 auto</span><span>El cerebro activa D12+N12 automáticamente en días V/L/E. No necesitás agregarlo a contingencia manual.</span></div>
                                                             <div className="flex items-start gap-2"><span className="text-teal-600 font-black shrink-0">Cob. Auto</span><span>Asigna automáticamente el RET disponible del mismo objetivo a la banda del ausente (M→M, N→N, etc.).</span></div>
                                                         </div>
-                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">Usá <strong>→ D12</strong> + <strong>Cobertura auto</strong> juntos para el mejor resultado cuando la dotación es justa.</p>
+                                                        <p className="text-[10px] font-bold text-teal-700 bg-teal-50 rounded-lg px-2.5 py-2">Activá <strong>Cobertura de ausencias</strong> para que el RET libre cubra la banda automáticamente.</p>
                                                     </div>
                                                 )}
                                             </div>
@@ -8476,31 +8490,21 @@ export default function PlanificacionPage() {
                                                         <p className="text-[9px] font-black uppercase tracking-wide text-amber-700 mb-1">Ausencias en el mes</p>
                                                         {autoV2CoveragePreflight.employees.filter(e => e.blockedCount > 0).map(emp => {
                                                             const absMap = autoAbsencesMap[emp.empId];
-                                                            const absDates = [...emp.blockedDays].sort();
                                                             const codes = absMap
                                                                 ? [...new Set([...absMap.values()].filter(c => ['V','L','E','A','PG','AA'].includes(c)))]
                                                                 : [];
-                                                            const alreadyModo12 = absDates.length > 0 && absDates.every(d => autoContingenciaDias.has(d));
                                                             return (
                                                                 <div key={emp.empId} className="flex items-center justify-between gap-1.5">
                                                                     <div className="min-w-0">
                                                                         <span className="text-[10px] font-black text-amber-800 truncate block">{emp.nombre}</span>
                                                                         <span className="text-[9px] font-bold text-amber-600">{emp.blockedCount}d{codes.length > 0 ? ` · ${codes.join('/')}` : ''}</span>
                                                                     </div>
-                                                                    <button type="button"
-                                                                        onClick={() => setAutoContingenciaDias(prev => {
-                                                                            const next = new Set(prev);
-                                                                            absDates.forEach(d => next.add(d));
-                                                                            return next;
-                                                                        })}
-                                                                        disabled={alreadyModo12}
-                                                                        className={`shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${alreadyModo12 ? 'border-violet-300 bg-violet-50 text-violet-600 cursor-default' : 'border-amber-400 bg-white text-amber-700 hover:bg-amber-100 active:scale-95'}`}>
-                                                                        {alreadyModo12 ? '✓ D12' : '→ D12'}
-                                                                    </button>
+                                                                    <span className="shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border border-violet-200 bg-violet-50 text-violet-600">
+                                                                        D12 auto
+                                                                    </span>
                                                                 </div>
                                                             );
                                                         })}
-                                                        {autoContingenciaDias.size > 0 && <p className="text-[9px] font-bold text-violet-700 pt-0.5">{autoContingenciaDias.size} día(s) en Modo 12</p>}
                                                     </div>
                                                 )}
                                                 <button type="button"
