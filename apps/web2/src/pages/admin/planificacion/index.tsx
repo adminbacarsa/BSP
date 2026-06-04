@@ -629,6 +629,7 @@ export default function PlanificacionPage() {
     const [autoV2Report, setAutoV2Report] = useState<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const autoV2ReportRef = React.useRef<import('@/lib/planificacion/autoScheduleEngineV2').V2FeasibilityReport | null>(null);
     const [autoV2CoveragePreflight, setAutoV2CoveragePreflight] = useState<ObjectiveCoveragePreflight | null>(null);
+    const [autoAbsencesMap, setAutoAbsencesMap] = useState<Record<string, Map<string, string>>>({});
     const [autoV2BudgetMode, setAutoV2BudgetMode] = useState<'cct'|'calendar'>('cct');
     const [autoV2ShowEmpDetail, setAutoV2ShowEmpDetail] = useState(false);
     // Stats post-generación (capacidad CCT por empleado)
@@ -3544,6 +3545,7 @@ export default function PlanificacionPage() {
             await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
             mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
+            setAutoAbsencesMap(absences);
 
             // Acumular cola CCT del mes anterior (26 → fin) por empleado
             const empMonthlyInitial: Record<string,number> = {};
@@ -3781,6 +3783,7 @@ export default function PlanificacionPage() {
             await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
             const absences = await loadAbsencesForRange(monthStart, monthEnd);
             mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
+            setAutoAbsencesMap(absences);
 
             const preflightDays = daysInMonth.map(day => {
                 const dateStr = getDateKey(day);
@@ -7736,6 +7739,48 @@ export default function PlanificacionPage() {
                                                 {autoContingenciaDias.size > 0 && <p className="text-[9px] font-bold text-violet-700 mt-1">{autoContingenciaDias.size} día(s) · D12+N12</p>}
                                             </div>
 
+                                            {/* Ausencias detectadas */}
+                                            {autoV2CoveragePreflight && autoV2CoveragePreflight.employees.some(e => e.blockedCount > 0) && (
+                                                <div onMouseEnter={() => setAutoHelpTopic('absences')}>
+                                                    <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Ausencias en el mes</p>
+                                                    <div className="space-y-1.5">
+                                                        {autoV2CoveragePreflight.employees.filter(e => e.blockedCount > 0).map(emp => {
+                                                            const absMap = autoAbsencesMap[emp.empId];
+                                                            const absDates = [...emp.blockedDays].sort();
+                                                            const codes = absMap
+                                                                ? [...new Set([...absMap.values()].filter(c => ['V','L','E','A','PG','AA'].includes(c)))]
+                                                                : [];
+                                                            const alreadyModo12 = absDates.length > 0 && absDates.every(d => autoContingenciaDias.has(d));
+                                                            return (
+                                                                <div key={emp.empId} className="px-2.5 py-2 rounded-xl border-2 border-amber-200 bg-amber-50">
+                                                                    <div className="flex items-start justify-between gap-1.5">
+                                                                        <div className="min-w-0">
+                                                                            <div className="text-[10px] font-black text-amber-800 truncate">{emp.nombre}</div>
+                                                                            <div className="text-[9px] font-bold text-amber-600 mt-0.5">
+                                                                                {emp.blockedCount} día(s){codes.length > 0 && ` · ${codes.join('/')}`}
+                                                                            </div>
+                                                                        </div>
+                                                                        <button type="button"
+                                                                            onClick={() => setAutoContingenciaDias(prev => {
+                                                                                const next = new Set(prev);
+                                                                                absDates.forEach(d => next.add(d));
+                                                                                return next;
+                                                                            })}
+                                                                            disabled={alreadyModo12}
+                                                                            className={`shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${alreadyModo12 ? 'border-violet-300 bg-violet-50 text-violet-600 cursor-default' : 'border-amber-400 bg-white text-amber-700 hover:bg-amber-100 active:scale-95'}`}>
+                                                                            {alreadyModo12 ? '✓ D12' : '→ D12'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    {autoCoverAbsences && (
+                                                        <p className="text-[9px] font-bold text-teal-700 mt-1.5">Cobertura auto activa · RET → banda del ausente</p>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {/* Avanzado */}
                                             <div className="border-t border-slate-100 pt-3">
                                                 <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-2">Avanzado</p>
@@ -7879,6 +7924,17 @@ export default function PlanificacionPage() {
                                                         <p className="text-[12px] font-black text-indigo-800 mb-2">Ajuste fino IA (Gemini)</p>
                                                         <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Después de generar, <strong>Gemini</strong> revisa y aplica micro-ajustes para mejorar la distribución de horas y cerrar huecos pequeños. No regenera desde cero.</p>
                                                         <p className="text-[10px] font-bold text-slate-400 bg-slate-100 rounded-lg px-2.5 py-2">Demora 30–60 segundos extra. Opcional.</p>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'absences' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-amber-800 mb-2">Ausencias en el mes</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Empleados con V/L/E/A/PG reducen la dotación disponible. Tenés dos herramientas para compensar:</p>
+                                                        <div className="space-y-1.5 text-[10px] font-bold text-slate-600 mb-3">
+                                                            <div className="flex items-start gap-2"><span className="text-violet-600 font-black shrink-0">→ D12</span><span>Activa turnos de 12h (D12+N12) en los días del ausente. Un turno de 12h cubre las dos bandas y libera RETs para reponer dotación.</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-teal-600 font-black shrink-0">Cob. Auto</span><span>Asigna automáticamente el RET disponible del mismo objetivo a la banda del ausente (M→M, N→N, etc.).</span></div>
+                                                        </div>
+                                                        <p className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2">Usá <strong>→ D12</strong> + <strong>Cobertura auto</strong> juntos para el mejor resultado cuando la dotación es justa.</p>
                                                     </div>
                                                 )}
                                             </div>
