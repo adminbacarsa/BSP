@@ -181,22 +181,54 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 ## 6. Códigos de turno (CCT 422/05)
 
-| Código | Nombre | Horas | Computa horas |
-|--------|--------|-------|---------------|
-| `M` | Mañana | 8h | ✅ |
-| `T` | Tarde | 8h | ✅ |
-| `N` | Noche | 8h | ✅ |
-| `D12` | Diurno 12h | 12h | ✅ |
-| `N12` | Nocturno 12h | 12h | ✅ |
-| `F` | Franco | 0h | ❌ (es planificado, muestra estado FRANCO) |
-| `FF` | Franco feriado | 0h | ❌ |
-| `FP` | Franco permuta | 0h | ❌ |
-| `AA` | Ausencia injustificada | 0h | ❌ |
-| `V` | Vacaciones | — | ✅ (licencia paga) |
-| `L` | Licencia | — | ✅ (licencia paga) |
-| `E` | Enfermedad | — | ✅ (licencia paga) |
-| `PG` | Permiso gremial | — | ✅ (licencia paga) |
-| `A` | Autorizada | — | ✅ (licencia paga) |
+### Turnos de trabajo
+
+| Código | Nombre | Horas | Computa horas | Notas |
+|--------|--------|-------|---------------|-------|
+| `M` | Mañana | 8h | ✅ | Banda fija diurna |
+| `T` | Tarde | 8h | ✅ | Banda fija vespertina |
+| `N` | Noche | 8h | ✅ | Banda fija nocturna |
+| `D12` | Diurno 12h | 12h | ✅ | Extensión/rotativo diurno |
+| `N12` | Nocturno 12h | 12h | ✅ | Extensión/rotativo nocturno |
+| `RET` | Retención pasiva | 0h billables | — | Empleado en stand-by; disponible para cubrir. No genera horas facturables. Referencia interna: 8h stand-by. |
+| `ESC` | Escuela | 8h | ✅ | Sobreturno de capacitación: el vigilador va al puesto a aprender. Se usa como fuente de cobertura (prioridad 3). |
+| `REF` | Refuerzo | 8h | ✅ | Turno de refuerzo puntual, cobertura extra programada. |
+
+### Francos / Descansos
+
+| Código | Nombre | Horas | Costo extra | Notas |
+|--------|--------|-------|-------------|-------|
+| `F` | Franco | 0h | ❌ | Descanso planificado CCT 6+2 |
+| `FF` | Franco feriado | 0h | ❌ | Descanso en día feriado |
+| `FP` | Franco permuta | 0h | ❌ | Descanso por permuta de turno |
+| `FT` | Franco trabajado | 8h | ✅ extra | Empleado de franco que cubre ausencia. Genera costo adicional. Requiere validación del empleado. Última opción de cobertura. |
+
+### Ausencias / Licencias
+
+| Código | Nombre | Horas | Computa horas | Notas |
+|--------|--------|-------|---------------|-------|
+| `V` | Vacaciones | — | ✅ (paga) | Período vacacional planificado |
+| `L` | Licencia | — | ✅ (paga) | Licencia general (art. CCT) |
+| `E` | Enfermedad | — | ✅ (paga) | Baja médica con certificado |
+| `A` | Autorizada | — | ✅ (paga) | Ausencia autorizada / ART |
+| `PG` | Permiso gremial | — | ✅ (paga) | Actividad sindical |
+| `AA` | Ausencia injustificada | 0h | ❌ | Sin justificación ni certificado |
+
+### Prioridad de cobertura ante ausencia
+
+Cuando un empleado falta, el sistema busca reemplazante en este orden (menor a mayor costo):
+
+```
+1. Sin turno    — empleado disponible ese día (no tiene turno asignado)
+2. RET          — vigilador en retención pasiva (stand-by)
+3. ESC          — empleado en turno escuela (puede redirigirse al puesto)
+4. Ext. 12hs    — extender turno de 8hs → 12hs (D12/N12) de alguien ya en servicio
+                  ⚠ Requiere validación — no siempre acepta
+5. FT           — llamar a empleado de franco a trabajar
+                  ⚠ Requiere validación + genera costo extra (horas extras CCT)
+```
+
+Todos los candidatos deben ser del mismo objetivo. La banda a cubrir es la del empleado ausente (M cubre M, N cubre N, etc.).
 
 ---
 
