@@ -2463,10 +2463,15 @@ const functionsEmulator =
   process.env.FUNCTIONS_EMULATOR === 'true' ||
   Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
   Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+// Tras crear secrets en SM: DEPLOY_AFIP_WITH_SECRETS=true firebase deploy --only functions:lookupClientByCuit
+const bindAfipSecrets = !functionsEmulator && process.env.DEPLOY_AFIP_WITH_SECRETS === 'true';
+const lookupClientByCuitRuntime: { timeoutSeconds: number; memory: '256MB'; secrets?: string[] } = {
+  timeoutSeconds: 60,
+  memory: '256MB',
+};
+if (bindAfipSecrets) lookupClientByCuitRuntime.secrets = [...afipLookupSecrets];
 
 export const lookupClientByCuit = functionsEmulator
   ? functions.https.onCall(lookupClientByCuitHandler)
-  : functions
-      .runWith({ secrets: [...afipLookupSecrets], timeoutSeconds: 60, memory: '256MB' })
-      .https.onCall(lookupClientByCuitHandler);
+  : functions.runWith(lookupClientByCuitRuntime).https.onCall(lookupClientByCuitHandler);
 

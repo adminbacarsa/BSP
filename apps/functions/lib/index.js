@@ -2035,9 +2035,14 @@ const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY'];
 const functionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true' ||
     Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
     Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+const bindAfipSecrets = !functionsEmulator && process.env.DEPLOY_AFIP_WITH_SECRETS === 'true';
+const lookupClientByCuitRuntime = {
+    timeoutSeconds: 60,
+    memory: '256MB',
+};
+if (bindAfipSecrets)
+    lookupClientByCuitRuntime.secrets = [...afipLookupSecrets];
 exports.lookupClientByCuit = functionsEmulator
     ? functions.https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler)
-    : functions
-        .runWith({ secrets: [...afipLookupSecrets], timeoutSeconds: 60, memory: '256MB' })
-        .https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler);
+    : functions.runWith(lookupClientByCuitRuntime).https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler);
 //# sourceMappingURL=index.js.map
