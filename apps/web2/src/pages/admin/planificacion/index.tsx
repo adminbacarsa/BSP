@@ -7675,6 +7675,16 @@ export default function PlanificacionPage() {
                                                             <div className="text-[9px] font-bold text-slate-400">reemplaza asignaciones existentes</div>
                                                         </div>
                                                     </button>
+                                                    <button type="button" onMouseEnter={() => setAutoHelpTopic('coverage')} onClick={() => setAutoCoverAbsences(p => !p)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${autoCoverAbsences ? 'border-teal-300 bg-teal-50' : 'border-slate-200 hover:border-teal-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoCoverAbsences ? 'bg-teal-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoCoverAbsences ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${autoCoverAbsences ? 'text-teal-800' : 'text-slate-500'}`}>Cobertura de ausencias</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">asigna reemplazos por V/L/E/A/PG</div>
+                                                        </div>
+                                                    </button>
                                                     <button type="button" onMouseEnter={() => setAutoHelpTopic('rotate')} onClick={() => setAutoRotateForce(p => { const cur = p ?? autoPlanningBrainReport?.rotateShifts ?? true; return !cur; })}
                                                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:border-emerald-200'}`}>
                                                         <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${(autoRotateForce ?? autoPlanningBrainReport?.rotateShifts) ? 'bg-emerald-500' : 'bg-slate-200'}`}>
@@ -7752,16 +7762,6 @@ export default function PlanificacionPage() {
                                                             <div className="text-[9px] font-bold text-slate-400">opcional · 30-60s extra</div>
                                                         </div>
                                                     </button>
-                                                    <button type="button" onClick={() => setAutoCoverAbsences(p => !p)}
-                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${autoCoverAbsences ? 'border-teal-300 bg-teal-50' : 'border-slate-200 hover:border-teal-200'}`}>
-                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoCoverAbsences ? 'bg-teal-500' : 'bg-slate-200'}`}>
-                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoCoverAbsences ? 'translate-x-4' : ''}`} />
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <div className={`text-[11px] font-black ${autoCoverAbsences ? 'text-teal-800' : 'text-slate-500'}`}>Cobertura de ausencias</div>
-                                                            <div className="text-[9px] font-bold text-slate-400">asigna reemplazos por V/L/E/A/PG</div>
-                                                        </div>
-                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -7827,6 +7827,18 @@ export default function PlanificacionPage() {
                                                             <div className="rounded-lg bg-slate-100 px-2.5 py-2 text-slate-700"><strong>OFF</strong> (recomendado) — solo rellena celdas vacías. Las asignaciones manuales que ya hiciste se preservan.</div>
                                                             <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-amber-800"><strong>ON</strong> — el motor reemplaza todo, incluso lo que editaste a mano. Útil si querés empezar desde cero.</div>
                                                         </div>
+                                                    </div>
+                                                )}
+                                                {autoHelpTopic === 'coverage' && (
+                                                    <div>
+                                                        <p className="text-[12px] font-black text-teal-800 mb-2">Cobertura de ausencias</p>
+                                                        <p className="text-[11px] font-bold text-slate-700 leading-relaxed mb-2">Cuando está activo, tras generar el crono el motor asigna reemplazos para V, L, E, A y PG pre-declaradas.</p>
+                                                        <div className="space-y-1.5 text-[10px] font-bold text-slate-600 mb-3">
+                                                            <div className="flex items-start gap-2"><span className="text-teal-600 shrink-0 font-black">1.</span><span><strong>Sin turno</strong> — empleado libre ese día (F o sin asignación).</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-teal-600 shrink-0 font-black">2.</span><span><strong>RET</strong> — vigilador en stand-by, se convierte al turno que cubre.</span></div>
+                                                            <div className="flex items-start gap-2"><span className="text-amber-600 shrink-0 font-black">3.</span><span><strong>FT requerido</strong> — sin candidato: se avisa en toast. El operador lo resuelve manualmente.</span></div>
+                                                        </div>
+                                                        <p className="text-[10px] font-bold text-teal-700 bg-teal-50 rounded-lg px-2.5 py-2">Solo actúa en el motor 6+2 bandas fijas. ESC y ext.12hs se gestionan desde Operaciones.</p>
                                                     </div>
                                                 )}
                                                 {autoHelpTopic === 'rotate' && (
