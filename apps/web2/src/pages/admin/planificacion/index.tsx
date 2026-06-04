@@ -3653,7 +3653,9 @@ export default function PlanificacionPage() {
                 toast.warning('Esquema 4+2 (D12/N12): ningún ciclo M/T/N 8h cerró con la dotación actual.', { duration: 8000 });
             }
             brain.warnings.forEach(w => toast.message(w, { duration: 6000 }));
-            return { ok: brain.feasibility.ok, cycles: brain.cycles };
+            // Déficit de horas/dotación = advertencia, NO bloqueo. El motor puede generar igual.
+            // Bloqueo duro = no se encontraron ciclos (brain.cycles vacío).
+            return { ok: brain.cycles.length > 0, cycles: brain.cycles };
         } catch (e:any) {
             toast.error('Error al analizar viabilidad');
             console.error('[autoScheduleCOSP]', e);
@@ -3782,7 +3784,7 @@ export default function PlanificacionPage() {
      */
     const applyAutoScheduleV2 = async (cyclesOverride?: string[]) => {
         if (!selectedObjective) return;
-        if (!autoV2ReportRef.current?.ok) { toast.error('Calculá viabilidad primero (debe dar viable)'); return; }
+        if (!autoV2ReportRef.current) { toast.error('Calculá viabilidad primero'); return; }
         const cyclesForGen = cyclesOverride ?? autoSelectedCyclesRef.current ?? autoCycles;
         if (!cyclesForGen.length) { toast.error('No se detectó esquema de ciclo'); return; }
         setAutoV2Generating(true);
