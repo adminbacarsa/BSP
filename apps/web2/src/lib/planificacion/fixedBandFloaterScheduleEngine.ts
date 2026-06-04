@@ -572,6 +572,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             fixedBandSchemeByEmp: Object.fromEntries(
                 ctx.employees.map(e => [e.id, `6+2@${openingSlotByEmp[e.id] ?? '?'}`]),
             ),
+            openingSlotByEmp,
         },
     };
 }

@@ -1054,6 +1054,8 @@ export interface V2GenerateStats {
     flexSchemeEmpIds?: string[];
     /** Esquema asignado por guardia en bandas fijas (6+2 / 6+1 / 5+1). */
     fixedBandSchemeByEmp?: Record<string, string>;
+    /** Índice de apertura (0-23 en CYCLE_24_MTN) por empleado — solo motor fixedBandFloater. */
+    openingSlotByEmp?: Record<string, number>;
     /** F convertidos en turno para cerrar SLA (6+2→6+1 puntual). */
     flexCycleRescues?: number;
     /** Modo ajustar crono activo en esta generación. */

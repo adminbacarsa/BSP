@@ -142,6 +142,7 @@ import { listDateRangeInclusive, applyVacancyCoverageToChanges, VACANCY_NON_WORK
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
+import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
@@ -672,6 +673,7 @@ export default function PlanificacionPage() {
     } | null>(null);
     const [autoV2Fixing, setAutoV2Fixing] = useState(false);
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
+    const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
     const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
     const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
     const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'sla_open'|'done'>('configure');
@@ -4023,12 +4025,30 @@ export default function PlanificacionPage() {
                 ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
             });
 
+            // Cobertura automática de ausencias pre-declaradas (V/L/E/A/PG)
+            let finalGenAssignments = gen.assignments;
+            if (autoCoverAbsences && useFloaterPipeline && gen.stats.openingSlotByEmp) {
+                await bumpAutoV2Progress(50, 'Aplicando cobertura de ausencias…');
+                const covResult = applyAbsenceCoverage(
+                    gen.assignments,
+                    baseGenCtx,
+                    gen.stats.openingSlotByEmp,
+                );
+                finalGenAssignments = covResult.assignments;
+                if (covResult.gaps.length > 0) {
+                    const msgs: string[] = [];
+                    if (covResult.coveredCount > 0) msgs.push(`${covResult.coveredCount} turno(s) cubierto(s)`);
+                    if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren Franco Trabajado`);
+                    toast.info(`Cobertura automática: ${msgs.join(' · ')}`, { duration: 6000 });
+                }
+            }
+
             await bumpAutoV2Progress(58, 'Verificando cobertura…');
             // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.
             const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
             let written = 0;
             let skipped = 0;
-            for (const a of gen.assignments) {
+            for (const a of finalGenAssignments) {
                 const key = `${a.empId}_${a.dateStr}`;
                 // No se bloquean días pasados en auto-generación: el borrador planifica el mes completo.
                 // isDateLocked aplica solo a edición manual, no al motor automático.
@@ -7732,6 +7752,16 @@ export default function PlanificacionPage() {
                                                             <div className="text-[9px] font-bold text-slate-400">opcional · 30-60s extra</div>
                                                         </div>
                                                     </button>
+                                                    <button type="button" onClick={() => setAutoCoverAbsences(p => !p)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${autoCoverAbsences ? 'border-teal-300 bg-teal-50' : 'border-slate-200 hover:border-teal-200'}`}>
+                                                        <div className={`relative w-8 h-4 rounded-full shrink-0 transition-colors ${autoCoverAbsences ? 'bg-teal-500' : 'bg-slate-200'}`}>
+                                                            <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoCoverAbsences ? 'translate-x-4' : ''}`} />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className={`text-[11px] font-black ${autoCoverAbsences ? 'text-teal-800' : 'text-slate-500'}`}>Cobertura de ausencias</div>
+                                                            <div className="text-[9px] font-bold text-slate-400">asigna reemplazos por V/L/E/A/PG</div>
+                                                        </div>
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -8363,6 +8393,13 @@ export default function PlanificacionPage() {
                                                     <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
                                                         className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
                                                         <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoV2RunGemini ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Cobertura de ausencias (V/L/E/A/PG)</span>
+                                                    <button type="button" onClick={() => setAutoCoverAbsences(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoCoverAbsences ? 'bg-teal-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoCoverAbsences ? 'translate-x-4' : ''}`}/>
                                                     </button>
                                                 </div>
                                                 <button type="button"
