@@ -8470,6 +8470,39 @@ export default function PlanificacionPage() {
                                                         <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoCoverAbsences ? 'translate-x-4' : ''}`}/>
                                                     </button>
                                                 </div>
+                                                {/* Ausencias — mini wizard */}
+                                                {autoV2CoveragePreflight && autoV2CoveragePreflight.employees.some(e => e.blockedCount > 0) && (
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 space-y-1.5">
+                                                        <p className="text-[9px] font-black uppercase tracking-wide text-amber-700 mb-1">Ausencias en el mes</p>
+                                                        {autoV2CoveragePreflight.employees.filter(e => e.blockedCount > 0).map(emp => {
+                                                            const absMap = autoAbsencesMap[emp.empId];
+                                                            const absDates = [...emp.blockedDays].sort();
+                                                            const codes = absMap
+                                                                ? [...new Set([...absMap.values()].filter(c => ['V','L','E','A','PG','AA'].includes(c)))]
+                                                                : [];
+                                                            const alreadyModo12 = absDates.length > 0 && absDates.every(d => autoContingenciaDias.has(d));
+                                                            return (
+                                                                <div key={emp.empId} className="flex items-center justify-between gap-1.5">
+                                                                    <div className="min-w-0">
+                                                                        <span className="text-[10px] font-black text-amber-800 truncate block">{emp.nombre}</span>
+                                                                        <span className="text-[9px] font-bold text-amber-600">{emp.blockedCount}d{codes.length > 0 ? ` · ${codes.join('/')}` : ''}</span>
+                                                                    </div>
+                                                                    <button type="button"
+                                                                        onClick={() => setAutoContingenciaDias(prev => {
+                                                                            const next = new Set(prev);
+                                                                            absDates.forEach(d => next.add(d));
+                                                                            return next;
+                                                                        })}
+                                                                        disabled={alreadyModo12}
+                                                                        className={`shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${alreadyModo12 ? 'border-violet-300 bg-violet-50 text-violet-600 cursor-default' : 'border-amber-400 bg-white text-amber-700 hover:bg-amber-100 active:scale-95'}`}>
+                                                                        {alreadyModo12 ? '✓ D12' : '→ D12'}
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {autoContingenciaDias.size > 0 && <p className="text-[9px] font-bold text-violet-700 pt-0.5">{autoContingenciaDias.size} día(s) en Modo 12</p>}
+                                                    </div>
+                                                )}
                                                 <button type="button"
                                                     onClick={() => { setAutoWizardPersonalize(false); runFullGeneration(); }}
                                                     disabled={autoV2Loading || autoV2Generating}
