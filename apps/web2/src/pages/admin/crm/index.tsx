@@ -71,6 +71,7 @@ import {
   Plus,
   Printer,
   Receipt,
+  RefreshCw,
   Search,
   Send,
   ShieldCheck,
@@ -87,6 +88,7 @@ import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/cli
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
+import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -289,6 +291,7 @@ export default function CRMPage() {
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientForm, setNewClientForm] = useState({ name: '', legalName: '', taxId: '', ivaStatus: '', address: '', city: '', state: '', contactName: '', phone: '', email: '' });
   const [savingNewClient, setSavingNewClient] = useState(false);
+  const [afipLookupLoading, setAfipLookupLoading] = useState<'new' | 'edit' | null>(null);
 
   // --- HISTORIAL ---
   const [historyNote, setHistoryNote] = useState('');
@@ -731,6 +734,54 @@ export default function CRMPage() {
       toast.error('Error al calcular métricas');
     } finally {
       setCalculatingMetrics(false);
+    }
+  };
+
+  const mergeAfipIntoClientForm = <T extends typeof newClientForm>(form: T, afip: AfipClientLookupResult): T => ({
+    ...form,
+    taxId: afip.taxId,
+    legalName: afip.legalName,
+    name: String(form.name || '').trim() ? form.name : afip.name,
+    address: afip.address || form.address,
+    city: afip.city || form.city,
+    state: afip.state || form.state,
+    ivaStatus: afip.ivaStatus || form.ivaStatus,
+  });
+
+  const handleAfipLookup = async (target: 'new' | 'edit') => {
+    const taxId = target === 'new' ? newClientForm.taxId : String(infoForm.taxId || '');
+    const digits = taxId.replace(/\D/g, '');
+    if (digits.length !== 11) {
+      toast.error('Ingresá un CUIT de 11 dígitos antes de consultar AFIP');
+      return;
+    }
+    setAfipLookupLoading(target);
+    try {
+      const data = await lookupClientByCuitFromAfip(taxId);
+      if (target === 'new') {
+        setNewClientForm((f) => mergeAfipIntoClientForm(f, data));
+      } else {
+        setInfoForm((f: any) => mergeAfipIntoClientForm({
+          name: f.name ?? '',
+          legalName: f.legalName ?? '',
+          taxId: f.taxId ?? '',
+          ivaStatus: f.ivaStatus ?? '',
+          address: f.address ?? '',
+          city: f.city ?? '',
+          state: f.state ?? '',
+          contactName: f.contactName ?? '',
+          phone: f.phone ?? '',
+          email: f.email ?? '',
+        }, data));
+      }
+      toast.success(`Datos cargados desde AFIP: ${data.legalName}`);
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      if (err.code === 'functions/not-found') toast.error('CUIT no encontrado en el padrón AFIP');
+      else if (err.code === 'functions/failed-precondition') toast.error(err.message || 'AFIP no configurado en el servidor');
+      else toast.error(err.message || 'Error al consultar AFIP');
+    } finally {
+      setAfipLookupLoading(null);
     }
   };
 
@@ -1963,7 +2014,19 @@ export default function CRMPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">CUIT / Tax ID</label>
-                                <input className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="CUIT / Tax ID" value={infoForm.taxId || ''} onChange={(e) => setInfoForm({ ...infoForm, taxId: e.target.value })} />
+                                <div className="flex gap-2">
+                                  <input className="borderw-full flex-1 p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} placeholder="XX-XXXXXXXX-X" value={infoForm.taxId || ''} onChange={(e) => setInfoForm({ ...infoForm, taxId: e.target.value })} />
+                                  <button
+                                    type="button"
+                                    disabled={!selectedClientWritable || afipLookupLoading === 'edit'}
+                                    onClick={() => void handleAfipLookup('edit')}
+                                    className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
+                                    title="Consultar padrón AFIP"
+                                  >
+                                    {afipLookupLoading === 'edit' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                                    AFIP
+                                  </button>
+                                </div>
                               </div>
                               <div>
                                 <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Condición IVA</label>
@@ -3109,7 +3172,19 @@ export default function CRMPage() {
                 </div>
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">CUIT</label>
-                  <input className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="XX-XXXXXXXX-X" value={newClientForm.taxId} onChange={(e) => setNewClientForm({ ...newClientForm, taxId: e.target.value })} />
+                  <div className="flex gap-2">
+                    <input className="w-full flex-1 p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="XX-XXXXXXXX-X" value={newClientForm.taxId} onChange={(e) => setNewClientForm({ ...newClientForm, taxId: e.target.value })} />
+                    <button
+                      type="button"
+                      disabled={afipLookupLoading === 'new'}
+                      onClick={() => void handleAfipLookup('new')}
+                      className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
+                      title="Consultar padrón AFIP"
+                    >
+                      {afipLookupLoading === 'new' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      AFIP
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">

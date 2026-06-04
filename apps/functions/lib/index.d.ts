@@ -39,3 +39,4 @@ export declare const migrateEmpresaData: functions.HttpsFunction & functions.Run
 export declare const processEmpresaMigrateJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledBackup: functions.CloudFunction<unknown>;
+export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;

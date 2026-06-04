@@ -351,11 +351,10 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                       <div className="overflow-x-auto border-t w-full">
                         <table
                           className="w-full table-fixed text-[10px] border-collapse"
-                          style={{ minWidth: 88 + 220 + 76 + grid.dateColumns.length * 34 }}
+                          style={{ minWidth: 200 + 76 + grid.dateColumns.length * 34 }}
                         >
                           <colgroup>
-                            <col style={{ width: 88 }} />
-                            <col style={{ width: 220 }} />
+                            <col style={{ width: 200 }} />
                             {grid.dateColumns.map((d) => (
                               <col key={d} />
                             ))}
@@ -363,8 +362,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                           </colgroup>
                           <thead>
                             <tr className="bg-slate-50 border-b">
-                              <th className="sticky left-0 z-10 bg-slate-50 border-r px-2 py-1.5 text-left font-black text-slate-600 whitespace-nowrap">Legajo</th>
-                              <th className="sticky left-[88px] z-10 bg-slate-50 border-r px-2 py-1.5 text-left font-black text-slate-600">Apellido y nombre/s</th>
+                              <th className="sticky left-0 z-10 bg-slate-50 border-r px-2 py-1.5 text-left font-black text-slate-600">Apellido y nombre/s</th>
                               {grid.dateColumns.map((d) => (
                                 <th key={d} className="px-0.5 py-1 text-center font-black text-slate-500 border-r whitespace-nowrap">
                                   <div>{shortDayHeader(d)}</div>
@@ -377,15 +375,14 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                           <tbody>
                             {grid.employees.length === 0 ? (
                               <tr>
-                                <td colSpan={grid.dateColumns.length + 3} className="p-4 text-center text-slate-400 font-bold">
+                                <td colSpan={grid.dateColumns.length + 2} className="p-4 text-center text-slate-400 font-bold">
                                   Sin turnos en el período
                                 </td>
                               </tr>
                             ) : (
                               grid.employees.map((e) => (
                                 <tr key={e.employeeId} className="border-b hover:bg-slate-50/50">
-                                  <td className="sticky left-0 z-10 bg-white border-r px-2 py-1.5 font-mono font-bold whitespace-nowrap">{e.legajo}</td>
-                                  <td className="sticky left-[88px] z-10 bg-white border-r px-2 py-1.5 font-bold text-slate-700 truncate max-w-[220px]" title={e.name}>{e.name}</td>
+                                  <td className="sticky left-0 z-10 bg-white border-r px-2 py-1.5 font-bold text-slate-700 truncate max-w-[200px]" title={e.name}>{e.name}</td>
                                   {grid.dateColumns.map((d) => (
                                     <td key={d} className="px-0.5 py-1 text-center border-r font-mono text-slate-600 whitespace-nowrap">{e.days[d]?.display || ''}</td>
                                   ))}
@@ -398,7 +395,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                               const grand = idx === 0 ? grid.grandTotal.total : idx === 1 ? grid.grandTotal.day : grid.grandTotal.night;
                               return (
                                 <tr key={label} className="bg-slate-100 font-black border-t-2">
-                                  <td className="sticky left-0 z-10 bg-slate-100 border-r px-2 py-1.5" colSpan={2}>{label}</td>
+                                  <td className="sticky left-0 z-10 bg-slate-100 border-r px-2 py-1.5">{label}</td>
                                   {grid.dateColumns.map((d) => (
                                     <td key={d} className="px-0.5 py-1 text-center border-r font-mono whitespace-nowrap">
                                       {formatHoursColonTotal(grid.dailyTotals[d]?.[key] || 0)}

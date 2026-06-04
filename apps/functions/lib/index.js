@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -25,6 +25,7 @@ const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
 const assistantInteractionLog_1 = require("./assistant/assistantInteractionLog");
 const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
 const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
+const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -2030,4 +2031,13 @@ exports.scheduledBackup = functions
     }
     return null;
 });
+const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY'];
+const functionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true' ||
+    Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
+    Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+exports.lookupClientByCuit = functionsEmulator
+    ? functions.https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler)
+    : functions
+        .runWith({ secrets: [...afipLookupSecrets], timeoutSeconds: 60, memory: '256MB' })
+        .https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler);
 //# sourceMappingURL=index.js.map

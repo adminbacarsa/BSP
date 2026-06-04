@@ -44,6 +44,7 @@ import {
 } from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from './assistant/planificacionEstadoKeys';
+import { lookupClientByCuitHandler } from './afip/lookupClientByCuitHandler';
 
 // Inicialización de Firebase Admin
 if (!admin.apps.length) {
@@ -2455,4 +2456,17 @@ export const scheduledBackup = functions
     }
     return null;
   });
+
+// Consulta padrón AFIP (Constancia de Inscripción) — certificado en Secret Manager / .env emulador
+const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY'] as const;
+const functionsEmulator =
+  process.env.FUNCTIONS_EMULATOR === 'true' ||
+  Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
+  Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+
+export const lookupClientByCuit = functionsEmulator
+  ? functions.https.onCall(lookupClientByCuitHandler)
+  : functions
+      .runWith({ secrets: [...afipLookupSecrets], timeoutSeconds: 60, memory: '256MB' })
+      .https.onCall(lookupClientByCuitHandler);
 
