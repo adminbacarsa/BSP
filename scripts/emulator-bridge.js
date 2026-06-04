@@ -18,7 +18,7 @@ const FOLDER_ID = process.env.DRIVE_BACKUP_FOLDER_ID || '0AI2aip_4UuafUk9PVA';
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Empresa-Id, X-Import-Mode, X-File-Name');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Empresa-Id, X-Import-Mode, X-Import-Dev-Mode, X-File-Name');
   res.setHeader('Content-Type', 'application/json');
 }
 
