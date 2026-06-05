@@ -1,5 +1,5 @@
 import { PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
-import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode } from './deploymentRoles';
+import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9,
@@ -31,6 +31,48 @@ export function isPlanningScheduledCoverageShift(t: any): boolean {
   const origin = String(t.origin || '').trim().toUpperCase();
   if (origin === 'INTERRUPTION') return false;
   return true;
+}
+
+/** Pie «Hs. Plan.» / CRM — misma elegibilidad que planificador (sin filtros extra de cobertura SLA). */
+export function isPlanificadorPlannedHoursShift(t: any): boolean {
+  if (!t) return false;
+  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+  const status = String(t.status || '').toLowerCase();
+  if (status.includes('cancel') || status.includes('delet')) return false;
+  if (isOperationalOriginShift(t)) return false;
+  if (!shiftCountsForEmployeeCronoHours(t)) return false;
+  return true;
+}
+
+export function calcPlanificadorShiftHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift) return 0;
+  const code = String(shift.code || '').toUpperCase();
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
+  const stored = Number(shift.hours);
+  if (stored > 0) return Math.min(stored, 24);
+  if (shift.startTime?.seconds && shift.endTime?.seconds) {
+    return Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+  }
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const parseH = (t: string) => {
+      const m = t.match(/^(\d{1,2}):(\d{2})$/);
+      return m ? +m[1] + +m[2] / 60 : null;
+    };
+    const s = parseH(shift.startTime);
+    const e = parseH(shift.endTime);
+    if (s !== null && e !== null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      return Math.max(0, Math.min(dur, 24));
+    }
+  }
+  const fromLookup = SHIFT_HOURS_LOOKUP[code];
+  if (fromLookup !== undefined) return fromLookup;
+  if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
+  return 8;
 }
 
 export function calcPlanningScheduledShiftHours(

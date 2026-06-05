@@ -1580,9 +1580,6 @@ export default function CRMPage() {
                   );
                 })()}
               </div>
-              <p className="px-5 pb-4 text-[10px] text-slate-400 font-medium leading-snug">
-                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = suma por objetivo como el pie «Hs. Plan.» del planificador (excluye REF/ESC/RET, cobertura ops y vacantes).
-              </p>
             </div>
           }
           renderCardSummary={c => {

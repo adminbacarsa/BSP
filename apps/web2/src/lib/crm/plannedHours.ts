@@ -1,9 +1,8 @@
 import { clientRowMatchesClient, type ClientRef } from './clientDataMatch';
 import { getDateKeyInTimezone, isProformaVacancyShift } from './proformaGrid';
-import { shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
 import {
-  calcPlanningScheduledShiftHours,
-  isPlanningScheduledCoverageShift,
+  calcPlanificadorShiftHours,
+  isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
 
 export const CRM_PLANNED_SHIFT_HOURS: Record<string, number> = {
@@ -14,13 +13,13 @@ const NON_PLANNED_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA']);
 
 export function isCrmWorkingShiftCode(code: string): boolean {
   return !NON_PLANNED_CODES.has((code || '').trim().toUpperCase());
-};
+}
 
-/** Alias histórico — misma regla que pie «Hs. Plan.» del planificador. */
+/** Pie «Hs. Plan.» del planificador — excluye REF/ESC/RET, ops y vacantes. */
 export function isCrmPlannedEligibleShift(t: any): boolean {
-  if (!isPlanningScheduledCoverageShift(t)) return false;
+  if (!isPlanificadorPlannedHoursShift(t)) return false;
   if (isProformaVacancyShift(t)) return false;
-  return shiftCountsForEmployeeCronoHours(t);
+  return true;
 }
 
 export const toDateSafe = (val: any): Date | null => {
@@ -39,7 +38,8 @@ export const getDurationHours = (start: Date, end: Date) => {
 };
 
 export function resolveCrmPlannedShiftHours(t: any, _plannedStart?: Date, _plannedEnd?: Date): number {
-  return calcPlanningScheduledShiftHours(t);
+  if (!isCrmPlannedEligibleShift(t)) return 0;
+  return calcPlanificadorShiftHours(t);
 }
 
 export type PlannedHoursRange = { start: Date | null; end: Date | null };
@@ -54,9 +54,7 @@ export function objectiveIdsForClient(client: ClientRef): Set<string> {
   const ids = new Set<string>();
   for (const o of client.objetivos || []) {
     const id = String(o.id ?? '').trim();
-    const name = String(o.name ?? '').trim();
     if (id) ids.add(id);
-    if (name) ids.add(name);
   }
   return ids;
 }
@@ -67,6 +65,18 @@ export function turnoBelongsToObjective(t: any, objectiveId: string): boolean {
   const oid = String(t.objectiveId ?? '').trim();
   const oname = String(t.objectiveName ?? '').trim();
   return oid === target || oname === target;
+}
+
+function turnoMatchesAnyClientObjective(t: any, client: ClientRef): boolean {
+  const objIds = objectiveIdsForClient(client);
+  if (objIds.size === 0) return clientRowMatchesClient(t, client);
+  for (const objId of objIds) {
+    if (turnoBelongsToObjective(t, objId)) return true;
+    const obj = (client.objetivos || []).find((o) => String(o.id ?? '').trim() === objId);
+    const name = String(obj?.name ?? '').trim();
+    if (name && turnoBelongsToObjective(t, name)) return true;
+  }
+  return false;
 }
 
 /** Una celda emp+día por objetivo (último turno gana, como shiftsMap del planificador). */
@@ -81,7 +91,7 @@ export function sumPlannedHoursForObjective(
     if (!isCrmPlannedEligibleShift(t)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanningScheduledShiftHours(t);
+    const hrs = calcPlanificadorShiftHours(t);
     if (hrs <= 0) continue;
     const empId = String(t.employeeId || 'unknown');
     const dateKey = getDateKeyInTimezone(plannedStart);
@@ -95,18 +105,20 @@ export function sumPlannedHoursForClient(
   client: ClientRef,
   range: PlannedHoursRange,
 ): number {
-  const objIds = objectiveIdsForClient(client);
-  if (objIds.size === 0) {
-    return sumPlannedHoursForTurnos(
-      turnos.filter((t) => clientRowMatchesClient(t, client)),
-      range,
-    );
+  const cells = new Map<string, number>();
+  for (const t of turnos) {
+    if (!turnoMatchesAnyClientObjective(t, client)) continue;
+    if (!isCrmPlannedEligibleShift(t)) continue;
+    const plannedStart = toDateSafe(t.startTime);
+    if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
+    const hrs = calcPlanificadorShiftHours(t);
+    if (hrs <= 0) continue;
+    const objId = String(t.objectiveId || t.objectiveName || 'sin-obj');
+    const empId = String(t.employeeId || 'unknown');
+    const dateKey = getDateKeyInTimezone(plannedStart);
+    cells.set(`${objId}_${empId}_${dateKey}`, hrs);
   }
-  let total = 0;
-  for (const objId of objIds) {
-    total += sumPlannedHoursForObjective(turnos, objId, range);
-  }
-  return total;
+  return [...cells.values()].reduce((a, b) => a + b, 0);
 }
 
 export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange): number {
@@ -115,7 +127,7 @@ export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange
     if (!isCrmPlannedEligibleShift(t)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanningScheduledShiftHours(t);
+    const hrs = calcPlanificadorShiftHours(t);
     if (hrs <= 0) continue;
     const objId = String(t.objectiveId || 'sin-obj');
     const empId = String(t.employeeId || 'unknown');
