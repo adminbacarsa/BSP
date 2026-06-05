@@ -477,9 +477,12 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             if (!positionIsActiveOn(pos, dayLetter)) return;
 
             const rawCode = CYCLE_24_MTN[(opening + di) % 24];
-            const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCode) && !!pos.excludedDates?.includes(dateStr);
-            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(rawCode)) ? 'RET' : rawCode;
-            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(rawCode)) ? rawCode : null;
+            // Si el empleado tiene banda fija (shiftCode en planificacionDotacion) y el día es laboral → respetar la banda asignada
+            const fixedBand = ctx.defaultShiftByEmp?.[emp.id]?.toUpperCase();
+            const rawCodeFinal = (fixedBand && WORK_BANDS.has(fixedBand) && WORK_BANDS.has(rawCode)) ? fixedBand : rawCode;
+            const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
+            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? 'RET' : rawCodeFinal;
+            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? rawCodeFinal : null;
 
             const meta = shiftMeta(pos, isExcludedDay ? rawCode : code);
             const isFranco = code === 'F';
