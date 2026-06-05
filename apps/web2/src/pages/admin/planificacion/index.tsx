@@ -2907,7 +2907,9 @@ export default function PlanificacionPage() {
                 where('startTime', '<=', Timestamp.fromDate(lastDay))
             ));
             const batch = writeBatch(db);
-            draftsSnap.docs.forEach(d => batch.update(d.ref, { draft: false }));
+            draftsSnap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .forEach(d => batch.update(d.ref, { draft: false }));
             await batch.commit();
             // 3. Registrar en audit_logs
             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({

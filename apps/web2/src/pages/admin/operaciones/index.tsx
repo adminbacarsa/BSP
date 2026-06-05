@@ -503,12 +503,12 @@ export default function OperacionesPage() {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const logic = useOperacionesMonitor(assignedClientId);
     const session = useOperatorSession();
-    const elapsed = useElapsedTime(session.activeSession?.startTime || null);
+    const elapsed = useElapsedTime(session.mySession?.startTime || null);
     useAutoMonitor({
         isActive: true,
         isAutoMode: session.isAutoMode,
         empresaId,
-        activeOperatorId: session.activeSession?.operatorId || null,
+        activeOperatorId: session.mySession?.operatorId || null,
         processedData: logic.processedData,
     });
     const [isExternalMap, setIsExternalMap] = useState(false);
@@ -527,6 +527,10 @@ export default function OperacionesPage() {
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
     const [absencesPanelOpen, setAbsencesPanelOpen] = useState(true);
+
+    const recentAtendidas = useMemo(() =>
+        empNovedades.filter(n => n.status === 'ATENDIDA' || n.status === 'atendida').slice(0, 8),
+    [empNovedades]);
 
     const pendingNovedades = useMemo(() =>
         empNovedades.filter(n =>
@@ -596,7 +600,14 @@ export default function OperacionesPage() {
 
     const handleAtenderNovedad = async (novedad: any) => {
         try {
-            await updateDoc(doc(db, 'novedades', novedad.id), { status: 'ATENDIDA', atendidaAt: serverTimestamp() });
+            const auth = getAuth();
+            const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+            await updateDoc(doc(db, 'novedades', novedad.id), {
+                status: 'ATENDIDA',
+                atendidaAt: serverTimestamp(),
+                atendidaPor: actorName,
+                atendidaPorUid: auth.currentUser?.uid || null,
+            });
 
             if (novedad.type === 'VACANTE_A_PLANIFICACION') {
                 // Ya fue auto-devuelta, solo informar
@@ -1136,31 +1147,57 @@ export default function OperacionesPage() {
 
                         {/* Barra de sesión compacta */}
                         {session.isAutoMode ? (
-                            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5">
-                                <div className="flex items-center gap-1.5">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
-                                    <span className="text-[10px] font-black text-amber-700 uppercase">Modo Automático</span>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
+                                        <span className="text-[10px] font-black text-amber-700 uppercase">Modo Automático</span>
+                                    </div>
+                                    <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
                                 </div>
-                                <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
+                                {session.activeSessions.length > 0 && (
+                                    <p className="text-[9px] text-amber-800 leading-tight">
+                                        <span className="font-black">En guardia:</span>{' '}
+                                        {session.activeSessions.map(s => s.operatorName).join(' · ')}
+                                    </p>
+                                )}
                             </div>
                         ) : (
-                            <div className={`flex items-center justify-between rounded-lg px-2 py-1 mb-1.5 border ${session.isMySession ? 'bg-emerald-50 border-emerald-200' : 'bg-indigo-50 border-indigo-200'}`}>
-                                <div className="flex items-center gap-1.5">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${session.isMySession ? 'bg-emerald-500' : 'bg-indigo-500'}`}/>
-                                    <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[110px]">{session.activeSession?.operatorName}</span>
-                                    {elapsed && <span className="text-[9px] font-mono text-slate-500 bg-white px-1 py-0.5 rounded border">{elapsed}</span>}
-                                    {!session.isMySession && <span className="text-[9px] text-indigo-600 font-bold bg-indigo-100 px-1 rounded">OTRO OP.</span>}
-                                </div>
-                                {session.isMySession && (
-                                    confirmEndSession ? (
-                                        <div className="flex items-center gap-1">
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>
+                                        <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[110px]">{session.mySession?.operatorName}</span>
+                                        {elapsed && <span className="text-[9px] font-mono text-slate-500 bg-white px-1 py-0.5 rounded border">{elapsed}</span>}
+                                        <span className="text-[9px] text-emerald-700 font-bold bg-emerald-100 px-1 rounded">TU GUARDIA</span>
+                                    </div>
+                                    {confirmEndSession ? (
+                                        <div className="flex items-center gap-1 shrink-0">
                                             <span className="text-[8px] text-rose-600 font-black">¿Confirmar?</span>
-                                            <button onClick={() => { session.endSession(); setConfirmEndSession(false); }} className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700">Sí</button>
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        await session.endSession();
+                                                        toast.success('Sesión finalizada');
+                                                        setConfirmEndSession(false);
+                                                    } catch (e) {
+                                                        console.error(e);
+                                                        toast.error('No se pudo finalizar la sesión');
+                                                    }
+                                                }}
+                                                className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700"
+                                            >Sí</button>
                                             <button onClick={() => setConfirmEndSession(false)} className="px-1.5 py-1 bg-slate-200 text-slate-700 text-[8px] font-black rounded-lg hover:bg-slate-300">No</button>
                                         </div>
                                     ) : (
-                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900">Finalizar Sesión</button>
-                                    )
+                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900 shrink-0">Finalizar Sesión</button>
+                                    )}
+                                </div>
+                                {session.otherSessions.length > 0 && (
+                                    <p className="text-[9px] text-emerald-800 leading-tight">
+                                        <span className="font-black">También en guardia:</span>{' '}
+                                        {session.otherSessions.map(s => s.operatorName).join(' · ')}
+                                    </p>
                                 )}
                             </div>
                         )}
@@ -1465,6 +1502,28 @@ export default function OperacionesPage() {
                                     </div>
                                 );
                             })}
+                            {recentAtendidas.length > 0 && (
+                                <div className="border-t border-slate-100 bg-slate-50/80">
+                                    <p className="px-3 py-1 text-[9px] font-black uppercase text-slate-400">Atendidas recientes</p>
+                                    {recentAtendidas.map((n: any) => {
+                                        const ts = n.atendidaAt?.seconds
+                                            ? new Date(n.atendidaAt.seconds * 1000)
+                                            : n.createdAt?.seconds
+                                                ? new Date(n.createdAt.seconds * 1000)
+                                                : null;
+                                        return (
+                                            <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
+                                                <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
+                                                <span className="flex-1 truncate text-slate-600">{n.objectiveName || n.employeeName || n.type}</span>
+                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || '—'}</span>
+                                                <span className="text-slate-400 font-mono shrink-0 w-10 text-right">
+                                                    {ts ? ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }) : '--'}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-between items-center">
                             <p className="text-[9px] text-slate-400">{empNovedades.filter((n:any)=>n.status==='ATENDIDA').length} atendidas</p>

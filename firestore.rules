@@ -421,5 +421,16 @@ service cloud.firestore {
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
+
+    match /sesiones_operador/{sessionId} {
+      allow read: if request.auth != null && isAdmin() && tenantAdminRead();
+      allow create: if request.auth != null && isAdmin() && tenantAdminCreate()
+        && request.resource.data.operatorId == request.auth.uid
+        && request.resource.data.status == 'ACTIVO';
+      allow update: if request.auth != null && isAdmin()
+        && resource.data.operatorId == request.auth.uid
+        && tenantMatches(resource.data);
+      allow delete: if tenantAdminDelete();
+    }
   }
 }

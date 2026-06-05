@@ -5,7 +5,18 @@ import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery } from '@/lib/multiempresa';
+
+const registerPublishedState = (
+    map: Record<string, boolean>,
+    objectiveId: string,
+    year: number,
+    month: number,
+) => {
+    const oid = String(objectiveId ?? '').trim();
+    if (!oid || !Number.isFinite(year) || !Number.isFinite(month)) return;
+    map[planificacionPublishLookupKey(oid, year, month)] = true;
+};
 
 const getSafeDate = (val: any) => { if (!val) return null; try { if (val.toDate) return val.toDate(); if (val.seconds) return new Date(val.seconds * 1000); return new Date(val); } catch (e) { return null; } };
 const isSameDay = (d1: Date, d2: Date) => d1 && d2 && d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
@@ -88,43 +99,40 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const unsubs: Function[] = [];
 
         const mapEmps = (docs: any[]) => docs.map(d => ({ id: d.id, fullName: `${d.data().lastName} ${d.data().firstName}`, ...d.data() }));
-        const empQ = scopeEmpresa ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId)) : collection(db, 'empleados');
+        const empQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
         unsubs.push(onSnapshot(empQ, snap => {
             const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
             setEmployees(mapEmps(docs));
         }));
 
         const buildObjectives = (docs: any[]) => { const objs: any[] = []; docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); return objs; };
-        const clientsQ = scopeEmpresa ? query(collection(db, 'clients'), where('empresaId', '==', empresaId)) : collection(db, 'clients');
+        const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
         unsubs.push(onSnapshot(clientsQ, snap => {
             const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
             setObjectives(buildObjectives(docs));
         }));
 
-        const svcQ = scopeEmpresa
-            ? query(collection(db, 'servicios_sla'), where('status', '==', 'active'), where('empresaId', '==', empresaId))
-            : query(collection(db, 'servicios_sla'), where('status', '==', 'active'));
+        const svcQ = query(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa), where('status', '==', 'active'));
         unsubs.push(onSnapshot(svcQ, snap => {
             const rows = snap.docs
                 .map(d => ({ id: d.id, ...d.data() } as { id: string; empresaId?: unknown }))
                 .filter(r => belongsToEmpresaView(r, empresaId, migracionCompleta));
             setServicesSLA(rows);
         }));
-        const today = new Date();
-        const yearMonth = `${today.getFullYear()}_${today.getMonth() + 1}`;
-        const planifQ = scopeEmpresa
-            ? query(collection(db, 'planificacion_estados'), where('empresaId', '==', empresaId))
-            : collection(db, 'planificacion_estados');
+        const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
         unsubs.push(onSnapshot(planifQ, snap => {
             const map: Record<string, boolean> = {};
             snap.docs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
+                const data = d.data() as Record<string, unknown>;
                 const parsed = parsePlanificacionEstadoDocId(d.id);
-                if (parsed && `${parsed.year}_${parsed.month}` === yearMonth) {
-                    map[planificacionPublishLookupKey(parsed.objectiveId, parsed.year, parsed.month)] = true;
-                } else if (d.id.endsWith(`_${yearMonth}`)) {
-                    map[d.id] = true;
+                if (parsed) {
+                    registerPublishedState(map, parsed.objectiveId, parsed.year, parsed.month);
                 }
+                const objId = String(data.objectiveId ?? data.objetivoId ?? parsed?.objectiveId ?? '').trim();
+                const y = Number(data.year ?? data.año ?? parsed?.year);
+                const m = Number(data.month ?? data.mes ?? parsed?.month);
+                if (objId) registerPublishedState(map, objId, y, m);
             });
             setPublishStatusMap(map);
         }));
@@ -140,18 +148,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     useEffect(() => {
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
         const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
-        const turnosBase = scopeEmpresa
-            ? query(
-                collection(db, 'turnos'),
-                where('empresaId', '==', empresaId),
-                where('startTime', '>=', Timestamp.fromDate(start)),
-                where('startTime', '<=', Timestamp.fromDate(end)),
-              )
-            : query(
-                collection(db, 'turnos'),
-                where('startTime', '>=', Timestamp.fromDate(start)),
-                where('startTime', '<=', Timestamp.fromDate(end)),
-              );
+        const turnosBase = query(
+            empresaCollectionQuery('turnos', empresaId, scopeEmpresa),
+            where('startTime', '>=', Timestamp.fromDate(start)),
+            where('startTime', '<=', Timestamp.fromDate(end)),
+        );
         const unsub = onSnapshot(turnosBase, (snap) => {
             setRawShifts(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
@@ -610,10 +611,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFullyOp = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || !!s.isReten || s.resolvedBy === 'OPERACIONES';
             if (isFullyOp) return true;
             // SLA_VIRTUAL y planificación: solo auto-ausentar si la planificación está publicada
-            const shiftYM = s.shiftDateObj instanceof Date
-                ? `${s.shiftDateObj.getFullYear()}_${s.shiftDateObj.getMonth() + 1}`
-                : null;
-            return !!shiftYM && !!publishStatusMap[`${s.objectiveId}_${shiftYM}`];
+            if (!(s.shiftDateObj instanceof Date)) return false;
+            const pubKey = planificacionPublishLookupKey(
+                s.objectiveId,
+                s.shiftDateObj.getFullYear(),
+                s.shiftDateObj.getMonth() + 1,
+            );
+            return !!publishStatusMap[pubKey];
         });
         if (!toAbsent.length) return;
 
