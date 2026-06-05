@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadAfipConfigForEmpresa = void 0;
 exports.getAfipEnvConfig = getAfipEnvConfig;
 exports.isAfipConfigured = isAfipConfigured;
 function readPem(name) {
@@ -22,4 +23,6 @@ function getAfipEnvConfig() {
 function isAfipConfigured() {
     return getAfipEnvConfig() !== null;
 }
+var empresaAfipStore_1 = require("./empresaAfipStore");
+Object.defineProperty(exports, "loadAfipConfigForEmpresa", { enumerable: true, get: function () { return empresaAfipStore_1.loadAfipConfigForEmpresa; } });
 //# sourceMappingURL=afipConfig.js.map

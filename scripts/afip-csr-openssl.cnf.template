@@ -1,0 +1,16 @@
+# Plantilla OpenSSL para CSR AFIP (WSAA / WSASS)
+# El script generate-afip-csr.ps1 reemplaza {{CUIT}}, {{O}}, {{CN}}
+
+[ req ]
+default_bits       = 2048
+default_keyfile    = privada.key
+distinguished_name = req_distinguished_name
+prompt             = no
+string_mask        = nombstr
+utf8               = yes
+
+[ req_distinguished_name ]
+C            = AR
+O            = {{O}}
+CN           = {{CN}}
+serialNumber = CUIT {{CUIT}}

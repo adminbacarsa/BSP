@@ -255,6 +255,11 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // PEM AFIP: solo Cloud Functions (Admin SDK). Metadatos públicos en empresas.{afipConfigured,...}
+    match /empresa_afip_credentials/{empresaId} {
+      allow read, write: if false;
+    }
+
     match /roles/{roleId} {
       allow read: if isAdmin() && (isSuperAdmin() || roleReadable(resource.data));
       allow create: if isSuperAdmin() || (

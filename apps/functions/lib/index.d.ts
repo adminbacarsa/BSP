@@ -40,3 +40,5 @@ export declare const processEmpresaMigrateJob: functions.CloudFunction<functions
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledBackup: functions.CloudFunction<unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;
+export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & functions.Runnable<any>;
+export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.Runnable<any>;

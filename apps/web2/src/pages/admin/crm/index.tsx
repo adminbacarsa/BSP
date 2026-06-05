@@ -3,7 +3,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { db, app as firebaseApp } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import {
   addDoc,
   arrayUnion,
@@ -20,7 +20,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Toaster, toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -89,6 +89,7 @@ import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, is
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
+import { callableErrorText } from '@/lib/callableError';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -225,7 +226,7 @@ type ProformaBase = 'requested' | 'planned' | 'executed';
 export default function CRMPage() {
   const router = useRouter();
   const { empresaId, empresa } = useEmpresa();
-  const { isSuperAdmin, allEmpresas } = useAuth();
+  const { user: authUser, isSuperAdmin, allEmpresas } = useAuth();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const tenantAccess = useMemo(
@@ -289,9 +290,13 @@ export default function CRMPage() {
 
   // --- NUEVO CLIENTE ---
   const [newClientOpen, setNewClientOpen] = useState(false);
-  const [newClientForm, setNewClientForm] = useState({ name: '', legalName: '', taxId: '', ivaStatus: '', address: '', city: '', state: '', contactName: '', phone: '', email: '' });
+  const [newClientForm, setNewClientForm] = useState({
+    name: '', legalName: '', taxId: '', ivaStatus: '', address: '', city: '', state: '', postalCode: '',
+    tipoPersona: '', estadoClave: '', actividadPrincipal: '', afipImpuestos: '',
+    contactName: '', phone: '', email: '',
+  });
   const [savingNewClient, setSavingNewClient] = useState(false);
-  const [afipLookupLoading, setAfipLookupLoading] = useState<'new' | 'edit' | null>(null);
+  const [afipLookupLoading, setAfipLookupLoading] = useState<'new' | 'edit' | 'client' | null>(null);
 
   // --- HISTORIAL ---
   const [historyNote, setHistoryNote] = useState('');
@@ -337,7 +342,7 @@ export default function CRMPage() {
   }, [migracionCompleta]);
 
   useEffect(() => {
-    onAuthStateChanged(getAuth(), (u) => {
+    return onAuthStateChanged(auth, (u) => {
       setCurrentUserName(u?.displayName || u?.email || 'Operador');
     });
   }, []);
@@ -745,41 +750,107 @@ export default function CRMPage() {
     address: afip.address || form.address,
     city: afip.city || form.city,
     state: afip.state || form.state,
+    postalCode: afip.postalCode || form.postalCode,
     ivaStatus: afip.ivaStatus || form.ivaStatus,
+    tipoPersona: afip.tipoPersona || form.tipoPersona,
+    estadoClave: afip.estadoClave || form.estadoClave,
+    actividadPrincipal: afip.actividadPrincipal || form.actividadPrincipal,
+    afipImpuestos: afip.afipImpuestos || form.afipImpuestos,
   });
 
-  const handleAfipLookup = async (target: 'new' | 'edit') => {
-    const taxId = target === 'new' ? newClientForm.taxId : String(infoForm.taxId || '');
-    const digits = taxId.replace(/\D/g, '');
-    if (digits.length !== 11) {
-      toast.error('Ingresá un CUIT de 11 dígitos antes de consultar AFIP');
+  const mergeAfipIntoClientRecord = (base: any, afip: AfipClientLookupResult) => ({
+    ...base,
+    taxId: afip.taxId,
+    legalName: afip.legalName,
+    name: String(base?.name || '').trim() || afip.name,
+    address: afip.address || base?.address || '',
+    city: afip.city || base?.city || '',
+    state: afip.state || base?.state || '',
+    postalCode: afip.postalCode || base?.postalCode || '',
+    ivaStatus: afip.ivaStatus || base?.ivaStatus || '',
+    tipoPersona: afip.tipoPersona || base?.tipoPersona || '',
+    estadoClave: afip.estadoClave || base?.estadoClave || '',
+    actividadPrincipal: afip.actividadPrincipal || base?.actividadPrincipal || '',
+    afipImpuestos: afip.afipImpuestos || base?.afipImpuestos || '',
+  });
+
+  const afipLookupErrorToast = (e: unknown) => {
+    const err = e as { code?: string; message?: string };
+    const msg = callableErrorText(e);
+    if (err.code === 'functions/unauthenticated' || /sesión|iniciar sesión/i.test(msg)) {
+      toast.error('Sesión expirada. Cerrá sesión y volvé a entrar, luego probá AFIP de nuevo.');
+    } else if (err.code === 'functions/permission-denied') {
+      toast.error(msg || 'No tenés permiso para consultar AFIP.');
+    } else if (err.code === 'functions/not-found') {
+      toast.error(
+        msg ||
+          'CUIT no encontrado en el padrón AFIP. Si en ARCA web sí aparece, activá certificado de producción en Configuración → Empresas.',
+        { duration: 16_000 },
+      );
+    } else if (err.code === 'functions/failed-precondition' || /401|certificado afip|AFIP rechazó|no configurado/i.test(msg)) {
+      const hint = /no configurado/i.test(msg)
+        ? ' Cargá el certificado en Configuración → Empresas (empresa activa).'
+        : '';
+      toast.error((msg || 'Error de certificado o ambiente AFIP.') + hint, { duration: 14000 });
+    } else toast.error(msg || 'Error al consultar AFIP');
+  };
+
+  const handleAfipLookup = async (target: 'new' | 'edit' | 'client') => {
+    if (!authUser) {
+      toast.error('Sesión expirada. Volvé a iniciar sesión.');
       return;
     }
+    if (!empresaId?.trim()) {
+      toast.error('Seleccioná una empresa en el panel antes de consultar AFIP.');
+      return;
+    }
+    const taxId = target === 'new'
+      ? newClientForm.taxId
+      : target === 'edit'
+        ? String(infoForm.taxId || '')
+        : String(selectedClient?.taxId || '');
+    const digits = String(taxId || '').replace(/\D/g, '');
+    if (digits.length !== 11) {
+      toast.error('El cliente necesita un CUIT de 11 dígitos (cargalo en Editar si falta)');
+      return;
+    }
+
+    if (target === 'new') {
+      setAfipLookupLoading('new');
+      try {
+        const data = await lookupClientByCuitFromAfip(taxId, empresaId);
+        setNewClientForm((f) => mergeAfipIntoClientForm(f, data));
+        toast.success(`Datos cargados desde AFIP: ${data.legalName}`);
+        if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
+      } catch (e: unknown) {
+        afipLookupErrorToast(e);
+      } finally {
+        setAfipLookupLoading(null);
+      }
+      return;
+    }
+
+    if (!selectedClient?.id || !selectedClientWritable) return;
+
     setAfipLookupLoading(target);
     try {
-      const data = await lookupClientByCuitFromAfip(taxId);
-      if (target === 'new') {
-        setNewClientForm((f) => mergeAfipIntoClientForm(f, data));
-      } else {
-        setInfoForm((f: any) => mergeAfipIntoClientForm({
-          name: f.name ?? '',
-          legalName: f.legalName ?? '',
-          taxId: f.taxId ?? '',
-          ivaStatus: f.ivaStatus ?? '',
-          address: f.address ?? '',
-          city: f.city ?? '',
-          state: f.state ?? '',
-          contactName: f.contactName ?? '',
-          phone: f.phone ?? '',
-          email: f.email ?? '',
-        }, data));
+      const fresh = await assertClientWritable(selectedClient.id, selectedClient.name);
+      const data = await lookupClientByCuitFromAfip(taxId, empresaId);
+      const base = target === 'edit' ? { ...fresh, ...infoForm } : fresh;
+      const patch = mergeAfipIntoClientRecord(base, data);
+      if (!patch.name?.trim()) {
+        toast.error('Falta nombre comercial; completalo y volvé a guardar');
+        return;
       }
-      toast.success(`Datos cargados desde AFIP: ${data.legalName}`);
+      const { id: _id, collection: _col, ...patchClean } = patch as Record<string, unknown>;
+      await updateClientForEmpresa(fresh.id, patchClean, empresaId, migracionCompleta, tenantAccess);
+      setSelectedClient({ ...fresh, ...patch });
+      setInfoForm({ ...fresh, ...patch });
+      setIsEditingInfo(false);
+      toast.success(`Ficha actualizada desde AFIP: ${data.legalName}`);
+      if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
     } catch (e: unknown) {
-      const err = e as { code?: string; message?: string };
-      if (err.code === 'functions/not-found') toast.error('CUIT no encontrado en el padrón AFIP');
-      else if (err.code === 'functions/failed-precondition') toast.error(err.message || 'AFIP no configurado en el servidor');
-      else toast.error(err.message || 'Error al consultar AFIP');
+      afipLookupErrorToast(e);
     } finally {
       setAfipLookupLoading(null);
     }
@@ -794,7 +865,11 @@ export default function CRMPage() {
       await addDoc(collection(db, 'clients'), payload);
       toast.success(`"${newClientForm.name}" creado`);
       setNewClientOpen(false);
-      setNewClientForm({ name: '', legalName: '', taxId: '', ivaStatus: '', address: '', city: '', state: '', contactName: '', phone: '', email: '' });
+      setNewClientForm({
+        name: '', legalName: '', taxId: '', ivaStatus: '', address: '', city: '', state: '', postalCode: '',
+        tipoPersona: '', estadoClave: '', actividadPrincipal: '', afipImpuestos: '',
+        contactName: '', phone: '', email: '',
+      });
       fetchClients();
     } catch (e) {
       console.error(e);
@@ -808,8 +883,10 @@ export default function CRMPage() {
     if (!selectedClient?.id) return;
     if (!infoForm?.name) return;
     try {
-      await updateClientForEmpresa(selectedClient.id, infoForm, empresaId, migracionCompleta, tenantAccess);
-      setSelectedClient({ ...selectedClient, ...infoForm });
+      const fresh = await assertClientWritable(selectedClient.id, selectedClient.name);
+      const { id: _id, collection: _col, ...patch } = infoForm as Record<string, unknown>;
+      await updateClientForEmpresa(fresh.id, patch, empresaId, migracionCompleta, tenantAccess);
+      setSelectedClient({ ...fresh, ...patch });
       setIsEditingInfo(false);
       toast.success('Actualizado');
     } catch (e: unknown) {
@@ -1984,13 +2061,27 @@ export default function CRMPage() {
                         <h3 className="text-xl font-black text-slate-800 uppercase">Ficha Técnica</h3>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Datos del cliente</p>
                       </div>
-                      <button
-                        disabled={!selectedClientWritable}
-                        onClick={() => { if (!selectedClientWritable) return; setInfoForm(selectedClient); setIsEditingInfo(!isEditingInfo); }}
-                        className={`font-black text-[10px] uppercase px-4 py-2 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isEditingInfo ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'border border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}
-                      >
-                        {isEditingInfo ? 'Cancelar' : 'Editar'}
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!isEditingInfo && (
+                          <button
+                            type="button"
+                            disabled={!selectedClientWritable || afipLookupLoading === 'client'}
+                            onClick={() => void handleAfipLookup('client')}
+                            className="font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-violet-200 text-violet-700 hover:bg-violet-50 flex items-center gap-1.5 disabled:opacity-40"
+                            title="Consultar AFIP y guardar en la ficha del cliente"
+                          >
+                            {afipLookupLoading === 'client' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            Actualizar desde AFIP
+                          </button>
+                        )}
+                        <button
+                          disabled={!selectedClientWritable}
+                          onClick={() => { if (!selectedClientWritable) return; setInfoForm(selectedClient); setIsEditingInfo(!isEditingInfo); }}
+                          className={`font-black text-[10px] uppercase px-4 py-2 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isEditingInfo ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'border border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}
+                        >
+                          {isEditingInfo ? 'Cancelar' : 'Editar'}
+                        </button>
+                      </div>
                     </div>
 
                     {isEditingInfo ? (
@@ -2021,10 +2112,10 @@ export default function CRMPage() {
                                     disabled={!selectedClientWritable || afipLookupLoading === 'edit'}
                                     onClick={() => void handleAfipLookup('edit')}
                                     className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
-                                    title="Consultar padrón AFIP"
+                                    title="Consultar AFIP y guardar en la ficha"
                                   >
                                     {afipLookupLoading === 'edit' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                    AFIP
+                                    AFIP y guardar
                                   </button>
                                 </div>
                               </div>
@@ -2119,6 +2210,36 @@ export default function CRMPage() {
                                 <p className="font-black text-slate-800">{selectedClient.ivaStatus || '-'}</p>
                               </div>
                             </div>
+                            {(selectedClient.tipoPersona || selectedClient.estadoClave || selectedClient.actividadPrincipal) && (
+                              <div className="grid grid-cols-2 divide-x divide-slate-100">
+                                {selectedClient.tipoPersona ? (
+                                  <div className="px-4 py-3">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Tipo (AFIP)</p>
+                                    <p className="font-black text-slate-800">
+                                      {selectedClient.tipoPersona === 'FISICA' ? 'Persona física' : selectedClient.tipoPersona === 'JURIDICA' ? 'Persona jurídica' : selectedClient.tipoPersona}
+                                    </p>
+                                  </div>
+                                ) : <div className="px-4 py-3" />}
+                                {selectedClient.estadoClave ? (
+                                  <div className="px-4 py-3">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado clave (AFIP)</p>
+                                    <p className="font-black text-slate-800">{selectedClient.estadoClave}</p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                            {selectedClient.actividadPrincipal ? (
+                              <div className="px-4 py-3">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Actividad principal (AFIP)</p>
+                                <p className="font-bold text-slate-700 text-sm leading-snug">{selectedClient.actividadPrincipal}</p>
+                              </div>
+                            ) : null}
+                            {selectedClient.afipImpuestos ? (
+                              <div className="px-4 py-3">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impuestos (AFIP)</p>
+                                <p className="font-bold text-slate-600 text-xs leading-relaxed">{selectedClient.afipImpuestos}</p>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
 
@@ -2142,6 +2263,12 @@ export default function CRMPage() {
                                 <p className="font-black text-slate-800">{selectedClient.state || '-'}</p>
                               </div>
                             </div>
+                            {selectedClient.postalCode ? (
+                              <div className="px-4 py-3">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Código postal</p>
+                                <p className="font-black text-slate-800">{selectedClient.postalCode}</p>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
 

@@ -8,6 +8,7 @@ import { db, functions, auth, storage } from '@/lib/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
+import EmpresaAfipSection from '@/components/admin/config/EmpresaAfipSection';
 
 function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
   const code = err instanceof FirebaseError ? err.code : '';
@@ -512,6 +513,14 @@ export default function EmpresasTab() {
             )}
           </div>
         </div>
+      )}
+
+      {empresa && isSuperAdmin && (
+        <EmpresaAfipSection
+          empresaId={empresa.id}
+          empresaName={empresa.name}
+          empresaCuit={(empresa as { cuit?: string }).cuit}
+        />
       )}
 
       {/* â”€â”€ Color de empresa â”€â”€ */}

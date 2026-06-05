@@ -26,3 +26,5 @@ export function getAfipEnvConfig(): AfipEnvConfig | null {
 export function isAfipConfigured(): boolean {
   return getAfipEnvConfig() !== null;
 }
+
+export { loadAfipConfigForEmpresa } from './empresaAfipStore';

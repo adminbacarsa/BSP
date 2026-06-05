@@ -1,38 +1,47 @@
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Afip = require('@afipsdk/afip.js');
-import { getAfipEnvConfig } from './afipConfig';
+import { loadAfipConfigForEmpresa } from './afipConfig';
+import { assertAfipCertCurrentlyValid, formatAfipCallError } from './afipErrors';
+import { getTaxpayerFromPadron } from './padronConstancia';
 import { normalizeCuitInput } from './normalizeCuit';
 import { mapAfipPersonaToClient, type AfipClientLookupResult } from './mapTaxpayerToClient';
+import { loginWsaaDirect } from './wsaaDirect';
 
-let afipClient: any = null;
-let afipClientKey = '';
+const WS_CONSTANCIA = 'ws_sr_constancia_inscripcion';
 
-function getAfipClient() {
-  const cfg = getAfipEnvConfig();
-  if (!cfg) {
-    throw new Error(
-      'AFIP no configurado. Definí AFIP_CUIT, AFIP_CERT y AFIP_PRIVATE_KEY (Secret Manager o apps/functions/.env en emulador).',
-    );
-  }
-  const key = `${cfg.cuit}:${cfg.production}`;
-  if (!afipClient || afipClientKey !== key) {
-    afipClient = new Afip({
-      CUIT: cfg.cuit,
-      cert: cfg.cert,
-      key: cfg.privateKey,
-      production: cfg.production,
-    });
-    afipClientKey = key;
-  }
-  return afipClient;
-}
-
-export async function lookupTaxpayerByCuit(rawCuit: unknown): Promise<AfipClientLookupResult> {
+export async function lookupTaxpayerByCuit(
+  rawCuit: unknown,
+  empresaId?: string,
+): Promise<AfipClientLookupResult> {
   const cuit = normalizeCuitInput(rawCuit);
   if (!cuit) {
     throw new Error('CUIT inválido. Ingresá 11 dígitos (con o sin guiones).');
   }
-  const afip = getAfipClient();
-  const raw = await afip.RegisterInscriptionProof.getTaxpayerDetails(cuit.numeric);
-  return mapAfipPersonaToClient(raw, cuit);
+  const cfg = await loadAfipConfigForEmpresa(empresaId);
+  if (!cfg) {
+    throw new Error(
+      'AFIP no configurado para esta empresa. Cargá certificado en Configuración → Empresas.',
+    );
+  }
+  assertAfipCertCurrentlyValid(cfg.cert);
+
+  try {
+    const creds = await loginWsaaDirect(
+      cfg.cert,
+      cfg.privateKey,
+      WS_CONSTANCIA,
+      cfg.production,
+      empresaId,
+    );
+    const padron = (await getTaxpayerFromPadron(
+      creds,
+      cfg.cuit,
+      cuit.numeric,
+      cfg.production,
+    )) as Record<string, unknown>;
+    const warning = String(padron.afipWarning ?? '').trim();
+    const result = mapAfipPersonaToClient(padron, cuit);
+    if (warning) result.afipWarning = warning;
+    return result;
+  } catch (e: unknown) {
+    throw new Error(formatAfipCallError(e, cfg.production));
+  }
 }

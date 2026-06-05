@@ -6,3 +6,4 @@ export type AfipEnvConfig = {
 };
 export declare function getAfipEnvConfig(): AfipEnvConfig | null;
 export declare function isAfipConfigured(): boolean;
+export { loadAfipConfigForEmpresa } from './empresaAfipStore';

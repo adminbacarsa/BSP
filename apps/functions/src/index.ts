@@ -45,6 +45,10 @@ import {
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from './assistant/planificacionEstadoKeys';
 import { lookupClientByCuitHandler } from './afip/lookupClientByCuitHandler';
+import {
+  getEmpresaAfipConfigHandler,
+  saveEmpresaAfipCredentialsHandler,
+} from './afip/empresaAfipCredentialsHandler';
 
 // Inicialización de Firebase Admin
 if (!admin.apps.length) {
@@ -2458,20 +2462,22 @@ export const scheduledBackup = functions
   });
 
 // Consulta padrón AFIP (Constancia de Inscripción) — certificado en Secret Manager / .env emulador
-const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY'] as const;
+const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY', 'AFIP_PRODUCTION'] as const;
 const functionsEmulator =
   process.env.FUNCTIONS_EMULATOR === 'true' ||
   Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
   Boolean(process.env.FIRESTORE_EMULATOR_HOST);
-// Tras crear secrets en SM: DEPLOY_AFIP_WITH_SECRETS=true firebase deploy --only functions:lookupClientByCuit
-const bindAfipSecrets = !functionsEmulator && process.env.DEPLOY_AFIP_WITH_SECRETS === 'true';
+// Secrets en SM: montar siempre en Cloud (un deploy sin DEPLOY_AFIP_WITH_SECRETS los dejaba vacíos).
 const lookupClientByCuitRuntime: { timeoutSeconds: number; memory: '256MB'; secrets?: string[] } = {
   timeoutSeconds: 60,
   memory: '256MB',
 };
-if (bindAfipSecrets) lookupClientByCuitRuntime.secrets = [...afipLookupSecrets];
+if (!functionsEmulator) lookupClientByCuitRuntime.secrets = [...afipLookupSecrets];
 
 export const lookupClientByCuit = functionsEmulator
   ? functions.https.onCall(lookupClientByCuitHandler)
   : functions.runWith(lookupClientByCuitRuntime).https.onCall(lookupClientByCuitHandler);
+
+export const saveEmpresaAfipCredentials = functions.https.onCall(saveEmpresaAfipCredentialsHandler);
+export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigHandler);
 

@@ -726,7 +726,13 @@ export async function assertClientWritableForEmpresa(
     const docEmp = String(resolved.data.empresaId ?? '').trim() || 'sin empresa';
     throw new TenantIsolationError(buildTenantBlockedMessage(docEmp, empresaId, action, resolved.id));
   }
-  return { id: resolved.id, collection: resolved.collection, ...resolved.data };
+  // El spread al final: algunos docs legacy traen `id` distinto al docId de Firestore.
+  return { ...resolved.data, id: resolved.id, collection: resolved.collection };
+}
+
+function stripClientMetaFromPatch(data: Record<string, unknown>): Record<string, unknown> {
+  const { id: _id, collection: _col, ...patch } = data;
+  return patch;
 }
 
 export async function updateClientForEmpresa(
@@ -743,7 +749,13 @@ export async function updateClientForEmpresa(
     'guardar',
     access,
   );
-  await updateDocForEmpresa(resolved.collection, resolved.id, data, empresaId, migracionCompleta);
+  await updateDocForEmpresa(
+    resolved.collection,
+    resolved.id,
+    stripClientMetaFromPatch(data),
+    empresaId,
+    migracionCompleta,
+  );
   return resolved.collection;
 }
 

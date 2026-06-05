@@ -1,36 +1,34 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.lookupTaxpayerByCuit = lookupTaxpayerByCuit;
-const Afip = require('@afipsdk/afip.js');
 const afipConfig_1 = require("./afipConfig");
+const afipErrors_1 = require("./afipErrors");
+const padronConstancia_1 = require("./padronConstancia");
 const normalizeCuit_1 = require("./normalizeCuit");
 const mapTaxpayerToClient_1 = require("./mapTaxpayerToClient");
-let afipClient = null;
-let afipClientKey = '';
-function getAfipClient() {
-    const cfg = (0, afipConfig_1.getAfipEnvConfig)();
-    if (!cfg) {
-        throw new Error('AFIP no configurado. Definí AFIP_CUIT, AFIP_CERT y AFIP_PRIVATE_KEY (Secret Manager o apps/functions/.env en emulador).');
-    }
-    const key = `${cfg.cuit}:${cfg.production}`;
-    if (!afipClient || afipClientKey !== key) {
-        afipClient = new Afip({
-            CUIT: cfg.cuit,
-            cert: cfg.cert,
-            key: cfg.privateKey,
-            production: cfg.production,
-        });
-        afipClientKey = key;
-    }
-    return afipClient;
-}
-async function lookupTaxpayerByCuit(rawCuit) {
+const wsaaDirect_1 = require("./wsaaDirect");
+const WS_CONSTANCIA = 'ws_sr_constancia_inscripcion';
+async function lookupTaxpayerByCuit(rawCuit, empresaId) {
     const cuit = (0, normalizeCuit_1.normalizeCuitInput)(rawCuit);
     if (!cuit) {
         throw new Error('CUIT inválido. Ingresá 11 dígitos (con o sin guiones).');
     }
-    const afip = getAfipClient();
-    const raw = await afip.RegisterInscriptionProof.getTaxpayerDetails(cuit.numeric);
-    return (0, mapTaxpayerToClient_1.mapAfipPersonaToClient)(raw, cuit);
+    const cfg = await (0, afipConfig_1.loadAfipConfigForEmpresa)(empresaId);
+    if (!cfg) {
+        throw new Error('AFIP no configurado para esta empresa. Cargá certificado en Configuración → Empresas.');
+    }
+    (0, afipErrors_1.assertAfipCertCurrentlyValid)(cfg.cert);
+    try {
+        const creds = await (0, wsaaDirect_1.loginWsaaDirect)(cfg.cert, cfg.privateKey, WS_CONSTANCIA, cfg.production, empresaId);
+        const padron = (await (0, padronConstancia_1.getTaxpayerFromPadron)(creds, cfg.cuit, cuit.numeric, cfg.production));
+        const warning = String(padron.afipWarning ?? '').trim();
+        const result = (0, mapTaxpayerToClient_1.mapAfipPersonaToClient)(padron, cuit);
+        if (warning)
+            result.afipWarning = warning;
+        return result;
+    }
+    catch (e) {
+        throw new Error((0, afipErrors_1.formatAfipCallError)(e, cfg.production));
+    }
 }
 //# sourceMappingURL=lookupTaxpayer.js.map

@@ -49,6 +49,11 @@ lerna-debug.log*
 # Capturas tutorial (credenciales locales; no commitear)
 docs/tutorial-capture.env
 scripts/tutorial-capture.env
+scripts/afip-csr-*/
+scripts/**/privada.key
+scripts/**/certificado.crt
+scripts/**/afip-cuit.txt
+scripts/**/*.csr
 
 # --- Variables de Entorno (Seguridad y peso) ---
 .env
