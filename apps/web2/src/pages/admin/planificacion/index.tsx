@@ -2992,7 +2992,10 @@ export default function PlanificacionPage() {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selection.start || !selection.end) return; 
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)]; 
-        if (isDateLocked(getDateKey(startDay))) { toast.warning("Periodo cerrado."); return; } 
+        if (isDateLocked(getDateKey(startDay))) {
+            const c = String(shiftConfig?.code || '').toUpperCase();
+            if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.warning("Periodo cerrado — solo podés asignar RET, ESC o Franco en masa."); return; }
+        }
         const minR = Math.min(selection.start.r, selection.end.r); 
         const maxR = Math.max(selection.start.r, selection.end.r); 
         const minC = Math.min(selection.start.c, selection.end.c); 
@@ -3115,7 +3118,11 @@ export default function PlanificacionPage() {
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selectedCell) return; 
-        if (isDateLocked(selectedCell.dateStr)) { toast.error("Periodo cerrado."); return; } 
+        if (isDateLocked(selectedCell.dateStr)) {
+            // Días pasados: solo se permiten RET, ESC y francos (F/FF/FP/FT). Turnos bloqueados.
+            const c = String(shiftConfig.code || '').toUpperCase();
+            if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.error("Periodo cerrado — solo podés asignar RET, ESC o Franco."); return; }
+        }
         if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: solo lectura."); return; }
         if (selectedCell.absence) { toast.warning("El empleado tiene una ausencia/vacaciones registrada: no se puede planificar encima."); return; }
         const posCfg = positionStructure.find((p: any) => p.positionName === positionName);
