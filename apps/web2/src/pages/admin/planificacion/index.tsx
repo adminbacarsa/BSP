@@ -4533,6 +4533,35 @@ export default function PlanificacionPage() {
         }
     };
 
+    /**
+     * Actualiza las métricas de cobertura/SLA cuando se asignan N slots manualmente.
+     * Solo ajusta los contadores — no re-ejecuta el motor de verificación.
+     */
+    const applyCoverageToStats = (coveredCount: number) => {
+        setAutoV2Coverage(prev => {
+            if (!prev) return prev;
+            const newUncovered = Math.max(0, prev.coverage.uncoveredSlots - coveredCount);
+            const newCovered = prev.coverage.coveredSlots + coveredCount;
+            return {
+                ...prev,
+                coverage: {
+                    ...prev.coverage,
+                    uncoveredSlots: newUncovered,
+                    coveredSlots: newCovered,
+                    coverageRatio: prev.coverage.totalSlots > 0 ? newCovered / prev.coverage.totalSlots : 1,
+                },
+                ok: newUncovered === 0 && !prev.restViolations?.length && !prev.licenseConflicts?.length,
+            };
+        });
+        setAutoV2GenStats(prev => {
+            if (!prev) return prev;
+            const newUncovered = Math.max(0, (prev.uncoveredSlots ?? 0) - coveredCount);
+            const slaClosed = newUncovered === 0
+                && (slaVendidas <= 0 || prev.totalBillableHours >= slaVendidas - 0.5);
+            return { ...prev, uncoveredSlots: newUncovered, slaHoursClosed: slaClosed };
+        });
+    };
+
     /** Rebalanceo manual de forma: swaps trabajo↔F/RET entre guardias (sin F→turno unilateral). */
     const rebalanceAutoForm = async () => {
         if (!autoV2LastRun || !autoV2Coverage || !selectedObjective) {
@@ -7500,33 +7529,30 @@ export default function PlanificacionPage() {
                                     };
                                     gapKeys.push(`${gap.absentEmpId}_${gap.dateStr}`);
                                 }
+                                const n = planCoverageModalGaps.length;
                                 setPendingChanges(prev => ({ ...prev, ...updates }));
                                 setAutoCoverageGaps(prev => prev.map(g =>
                                     gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
                                         ? { ...g, coverageType: 'manual' as const, coveredBy: empId, coveredByName: nombre }
                                         : g
                                 ));
-                                setCoverageSelectedDays(prev => {
-                                    const next = new Set(prev);
-                                    gapKeys.forEach(k => next.delete(k));
-                                    return next;
-                                });
-                                toast.success(`${nombre.split(',')[0]} asignado a ${planCoverageModalGaps.length} día(s)`);
+                                setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
+                                // Actualizar métricas de cobertura y SLA para reflejar la asignación
+                                applyCoverageToStats(n);
+                                toast.success(`${nombre.split(',')[0]} asignado a ${n} día(s)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onAssignD12={() => {
                                 const gapKeys = planCoverageModalGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
+                                const n = planCoverageModalGaps.length;
                                 setAutoCoverageGaps(prev => prev.map(g =>
                                     gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
                                         ? { ...g, coverageType: 'manual' as const, coveredBy: 'D12', coveredByName: 'D12 (extensión)' }
                                         : g
                                 ));
-                                setCoverageSelectedDays(prev => {
-                                    const next = new Set(prev);
-                                    gapKeys.forEach(k => next.delete(k));
-                                    return next;
-                                });
-                                toast.success(`D12 confirmado para ${planCoverageModalGaps.length} día(s)`);
+                                setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
+                                applyCoverageToStats(n);
+                                toast.success(`D12 confirmado para ${n} día(s)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onClose={() => setPlanCoverageModalGaps([])}
