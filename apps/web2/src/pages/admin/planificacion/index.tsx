@@ -4091,24 +4091,18 @@ export default function PlanificacionPage() {
                     gen.stats.openingSlotByEmp,
                 );
 
-                // Enriquecer gaps con nombres de empleados y candidatos FT
+                // Enriquecer gaps con nombres (los ftCandidates ya vienen del motor)
                 const empNameMap: Record<string, string> = {};
                 planningDotacionEmployees.forEach((e: any) => { empNameMap[e.id] = e.nombre || e.name || e.id; });
-
-                // Para candidatos FT: quién tiene F (franco) en cada día del mismo objetivo
-                const francoByDate: Record<string, { empId: string; nombre: string; code: string }[]> = {};
-                for (const a of gen.assignments) {
-                    if (a.code === 'F' || a.code === 'FF' || a.code === 'RET') {
-                        if (!francoByDate[a.dateStr]) francoByDate[a.dateStr] = [];
-                        francoByDate[a.dateStr].push({ empId: a.empId, nombre: empNameMap[a.empId] || a.empId, code: a.code });
-                    }
-                }
 
                 const enrichedGaps = covResult.gaps.map(g => ({
                     ...g,
                     absentName: empNameMap[g.absentEmpId] || g.absentEmpId,
                     coveredByName: g.coveredBy ? (empNameMap[g.coveredBy] || g.coveredBy) : undefined,
-                    ftCandidates: g.coverageType === 'ft_required' ? (francoByDate[g.dateStr] || []) : undefined,
+                    ftCandidates: g.ftCandidates?.map(c => ({
+                        ...c,
+                        nombre: empNameMap[c.empId] || c.empId,
+                    })),
                 }));
 
                 setAutoCoverageGaps(enrichedGaps);
@@ -4119,14 +4113,12 @@ export default function PlanificacionPage() {
                         const stCount  = covResult.gaps.filter(g => g.coverageType === 'sin_turno').length;
                         const retCount = covResult.gaps.filter(g => g.coverageType === 'ret').length;
                         const escCount = covResult.gaps.filter(g => g.coverageType === 'esc').length;
-                        const ftCount  = covResult.gaps.filter(g => g.coverageType === 'ft').length;
                         const msgs: string[] = [];
                         if (stCount > 0)  msgs.push(`${stCount} ST`);
                         if (retCount > 0) msgs.push(`${retCount} RET`);
                         if (escCount > 0) msgs.push(`${escCount} ESC`);
-                        if (ftCount > 0)  msgs.push(`${ftCount} FT`);
-                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} sin candidatos`);
-                        if (msgs.length > 0) toast.success(`Cobertura: ${msgs.join(' · ')}`, { duration: 6000 });
+                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren FT manual`);
+                        if (msgs.length > 0) toast.success(`Cobertura automática: ${msgs.join(' · ')}`, { duration: 6000 });
                     }
                 }
             } else {
