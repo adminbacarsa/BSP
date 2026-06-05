@@ -677,7 +677,8 @@ export default function PlanificacionPage() {
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
     const [autoCoverageGaps, setAutoCoverageGaps] = useState<import('@/lib/planificacion/coverageEngine').CoverageGap[]>([]);
-    const [planCoverageModalGap, setPlanCoverageModalGap] = useState<(import('@/lib/planificacion/coverageEngine').CoverageGap & { absentName?: string }) | null>(null);
+    const [planCoverageModalGaps, setPlanCoverageModalGaps] = useState<(import('@/lib/planificacion/coverageEngine').CoverageGap & { absentName?: string })[]>([]);
+    const [coverageSelectedDays, setCoverageSelectedDays] = useState<Set<string>>(new Set());
     const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
     const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
     const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'sla_open'|'done'>('configure');
@@ -3719,7 +3720,8 @@ export default function PlanificacionPage() {
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
             setAutoCoverageGaps([]);
-            setPlanCoverageModalGap(null);
+            setPlanCoverageModalGaps([]);
+            setCoverageSelectedDays(new Set());
         }
     }, [showAutoV2Modal]);
 
@@ -7460,49 +7462,77 @@ export default function PlanificacionPage() {
                 )}
 
                 {/* ── Modal cobertura de ausencias (planificación) ── */}
-                {planCoverageModalGap && (
-                    <PlanningCoverageModal
-                        gap={planCoverageModalGap}
-                        pendingChanges={pendingChanges}
-                        shiftsMap={shiftsMap}
-                        empresaId={empresaId || ''}
-                        positionName={positionStructure[0]?.positionName ?? 'General'}
-                        onAssign={(empId, nombre) => {
-                            const gap = planCoverageModalGap;
-                            const bandMeta: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
-                                M:   { name: 'Mañana',   hours: 8,  startTime: '07:00', endTime: '15:00' },
-                                T:   { name: 'Tarde',    hours: 8,  startTime: '15:00', endTime: '23:00' },
-                                N:   { name: 'Noche',    hours: 8,  startTime: '23:00', endTime: '07:00' },
-                                D12: { name: 'Diurno',   hours: 12, startTime: '07:00', endTime: '19:00' },
-                                N12: { name: 'Nocturno', hours: 12, startTime: '19:00', endTime: '07:00' },
-                            };
-                            const meta = bandMeta[gap.band] ?? bandMeta.M;
-                            setPendingChanges(prev => ({
-                                ...prev,
-                                [`${empId}_${gap.dateStr}`]: {
-                                    isTemp: true,
-                                    employeeId: empId,
-                                    objectiveId: selectedObjective,
-                                    positionName: positionStructure[0]?.positionName ?? 'General',
-                                    code: gap.band,
-                                    name: meta.name,
-                                    hours: meta.hours,
-                                    startTime: meta.startTime,
-                                    endTime: meta.endTime,
-                                    isFranco: false,
-                                },
-                            }));
-                            setAutoCoverageGaps(prev => prev.map(g =>
-                                g.absentEmpId === gap.absentEmpId && g.dateStr === gap.dateStr
-                                    ? { ...g, coverageType: 'manual' as const, coveredBy: empId, coveredByName: nombre }
-                                    : g
-                            ));
-                            toast.success(`Día ${gap.dateStr.slice(8,10)}: ${nombre.split(',')[0]} asignado a banda ${gap.band}`);
-                            setPlanCoverageModalGap(null);
-                        }}
-                        onClose={() => setPlanCoverageModalGap(null)}
-                    />
-                )}
+                {planCoverageModalGaps.length > 0 && (() => {
+                    const bandMeta: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
+                        M:   { name: 'Mañana',   hours: 8,  startTime: '07:00', endTime: '15:00' },
+                        T:   { name: 'Tarde',    hours: 8,  startTime: '15:00', endTime: '23:00' },
+                        N:   { name: 'Noche',    hours: 8,  startTime: '23:00', endTime: '07:00' },
+                        D12: { name: 'Diurno',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                        N12: { name: 'Nocturno', hours: 12, startTime: '19:00', endTime: '07:00' },
+                    };
+                    const objectiveEmpIds = new Set(planningDotacionEmployees.map((e: any) => e.id));
+                    return (
+                        <PlanningCoverageModal
+                            gaps={planCoverageModalGaps}
+                            objectiveEmpIds={objectiveEmpIds}
+                            objLat={selectedObjectiveData?.lat ?? null}
+                            objLng={selectedObjectiveData?.lng ?? null}
+                            pendingChanges={pendingChanges}
+                            shiftsMap={shiftsMap}
+                            empresaId={empresaId || ''}
+                            positionName={positionStructure[0]?.positionName ?? 'General'}
+                            onAssignExternal={(empId, nombre) => {
+                                const updates: Record<string, any> = {};
+                                const gapKeys: string[] = [];
+                                for (const gap of planCoverageModalGaps) {
+                                    const meta = bandMeta[gap.band] ?? bandMeta.M;
+                                    updates[`${empId}_${gap.dateStr}`] = {
+                                        isTemp: true,
+                                        employeeId: empId,
+                                        objectiveId: selectedObjective,
+                                        positionName: positionStructure[0]?.positionName ?? 'General',
+                                        code: gap.band,
+                                        name: meta.name,
+                                        hours: meta.hours,
+                                        startTime: meta.startTime,
+                                        endTime: meta.endTime,
+                                        isFranco: false,
+                                    };
+                                    gapKeys.push(`${gap.absentEmpId}_${gap.dateStr}`);
+                                }
+                                setPendingChanges(prev => ({ ...prev, ...updates }));
+                                setAutoCoverageGaps(prev => prev.map(g =>
+                                    gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
+                                        ? { ...g, coverageType: 'manual' as const, coveredBy: empId, coveredByName: nombre }
+                                        : g
+                                ));
+                                setCoverageSelectedDays(prev => {
+                                    const next = new Set(prev);
+                                    gapKeys.forEach(k => next.delete(k));
+                                    return next;
+                                });
+                                toast.success(`${nombre.split(',')[0]} asignado a ${planCoverageModalGaps.length} día(s)`);
+                                setPlanCoverageModalGaps([]);
+                            }}
+                            onAssignD12={() => {
+                                const gapKeys = planCoverageModalGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
+                                setAutoCoverageGaps(prev => prev.map(g =>
+                                    gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
+                                        ? { ...g, coverageType: 'manual' as const, coveredBy: 'D12', coveredByName: 'D12 (extensión)' }
+                                        : g
+                                ));
+                                setCoverageSelectedDays(prev => {
+                                    const next = new Set(prev);
+                                    gapKeys.forEach(k => next.delete(k));
+                                    return next;
+                                });
+                                toast.success(`D12 confirmado para ${planCoverageModalGaps.length} día(s)`);
+                                setPlanCoverageModalGaps([]);
+                            }}
+                            onClose={() => setPlanCoverageModalGaps([])}
+                        />
+                    );
+                })()}
 
                 {/* ── Modal verificación de cobertura post-generación ── */}
                 {showCoverageModal && autoV2Coverage && createPortal(
@@ -8366,29 +8396,73 @@ export default function PlanificacionPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Sin cobertura ST/RET/ESC → botón por día para abrir modal */}
-                                            {ftGaps.length > 0 && (
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[9px] font-black text-rose-800">Sin cobertura ST/RET/ESC — asignar manualmente:</p>
-                                                    {Object.values(ftByEmp).map(({ nombre, days }) => (
-                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-1.5">
-                                                            <p className="text-[9px] font-black text-rose-800">{nombre}</p>
-                                                            {days.map(gap => (
-                                                                <div key={gap.dateStr} className="flex items-center justify-between gap-2">
-                                                                    <span className="text-[9px] font-bold text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => setPlanCoverageModalGap(gap)}
-                                                                        className="text-[9px] font-black px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shrink-0"
-                                                                    >
-                                                                        Cubrir
-                                                                    </button>
-                                                                </div>
-                                                            ))}
+                                            {/* Sin cobertura ST/RET/ESC → checkboxes multi-día + modal */}
+                                            {ftGaps.length > 0 && (() => {
+                                                const allFtKeys = ftGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
+                                                const allSelected = allFtKeys.every(k => coverageSelectedDays.has(k));
+                                                const someSelected = allFtKeys.some(k => coverageSelectedDays.has(k));
+                                                const selectedGaps = ftGaps.filter(g => coverageSelectedDays.has(`${g.absentEmpId}_${g.dateStr}`));
+                                                return (
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-[9px] font-black text-rose-800">Sin cobertura ST/RET/ESC — seleccioná días:</p>
+                                                            <label className="flex items-center gap-1 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={allSelected}
+                                                                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                                                                    onChange={e => {
+                                                                        setCoverageSelectedDays(prev => {
+                                                                            const next = new Set(prev);
+                                                                            if (e.target.checked) allFtKeys.forEach(k => next.add(k));
+                                                                            else allFtKeys.forEach(k => next.delete(k));
+                                                                            return next;
+                                                                        });
+                                                                    }}
+                                                                    className="w-3 h-3 accent-indigo-600"
+                                                                />
+                                                                <span className="text-[9px] font-bold text-slate-500">Todos</span>
+                                                            </label>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                                        {Object.values(ftByEmp).map(({ nombre, days }) => (
+                                                            <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-1">
+                                                                <p className="text-[9px] font-black text-rose-800">{nombre}</p>
+                                                                {days.map(gap => {
+                                                                    const key = `${gap.absentEmpId}_${gap.dateStr}`;
+                                                                    const isChecked = coverageSelectedDays.has(key);
+                                                                    return (
+                                                                        <label key={gap.dateStr} className="flex items-center justify-between gap-2 cursor-pointer py-0.5">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={isChecked}
+                                                                                    onChange={e => setCoverageSelectedDays(prev => {
+                                                                                        const next = new Set(prev);
+                                                                                        if (e.target.checked) next.add(key);
+                                                                                        else next.delete(key);
+                                                                                        return next;
+                                                                                    })}
+                                                                                    className="w-3 h-3 accent-indigo-600"
+                                                                                />
+                                                                                <span className="text-[9px] font-bold text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
+                                                                            </div>
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ))}
+                                                        {someSelected && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPlanCoverageModalGaps(selectedGaps)}
+                                                                className="w-full py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-black hover:bg-indigo-700 transition-colors"
+                                                            >
+                                                                Asignar cobertura — {selectedGaps.length} día(s)
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
 
                                             {/* Cubiertos: ST / RET / ESC / FT / manual */}
                                             {coveredGaps.length > 0 && (
