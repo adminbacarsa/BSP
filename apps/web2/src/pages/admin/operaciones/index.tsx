@@ -1045,6 +1045,23 @@ export default function OperacionesPage() {
         }
     };
 
+    // --- AUTO-TAB: si hay ausentes/vacantes al cargar, ir directo al tab urgente ---
+    const autoTabDoneRef = useRef(false);
+    useEffect(() => {
+        if (autoTabDoneRef.current) return;
+        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        if (total === 0) return; // datos aún no cargaron
+        autoTabDoneRef.current = true;
+        if (logic.stats.ausentes > 0 && (logic.viewTab === 'PRIORIDAD' || logic.viewTab === 'PLAN')) {
+            logic.setViewTab('AUSENTES' as any);
+            // Compact automático si hay muchos ausentes
+            if (logic.stats.ausentes > 4 && !logic.isCompact) logic.setIsCompact(true);
+        } else if (logic.stats.vacantes > 0 && logic.stats.ausentes === 0 && (logic.viewTab === 'PRIORIDAD' || logic.viewTab === 'PLAN')) {
+            logic.setViewTab('VACANTES' as any);
+            if (logic.stats.vacantes > 4 && !logic.isCompact) logic.setIsCompact(true);
+        }
+    }, [logic.stats.ausentes, logic.stats.vacantes, logic.stats.plan]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // --- SYNC FILTROS ---
     useEffect(() => {
         if (typeof window !== 'undefined') {
@@ -1087,30 +1104,59 @@ export default function OperacionesPage() {
                 const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                 const cubiertos = logic.stats.activos + logic.stats.retenidos;
                 const cobertura = total > 0 ? Math.round((cubiertos / total) * 100) : 0;
-                const barColor = cobertura >= 80 ? 'bg-emerald-500' : cobertura >= 50 ? 'bg-amber-500' : 'bg-rose-500';
-                const pctColor = cobertura >= 80 ? 'text-emerald-600' : cobertura >= 50 ? 'text-amber-600' : 'text-rose-600';
+                const isCrisis  = cobertura < 50;
+                const isWarning = cobertura >= 50 && cobertura < 80;
+                const isOk      = cobertura >= 80;
+                const barColor  = isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500';
+                const pctColor  = isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600';
+                const bannerBg  = isCrisis ? 'bg-rose-50 border-rose-300' : isWarning ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200';
                 return (
-                    <div className="mx-2 mb-2 bg-white border border-slate-200 rounded-xl px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-4 shadow-sm">
-                        <span className="hidden sm:inline text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Estado del día</span>
-                        <div className="flex items-center gap-2 flex-1 min-w-[100px]">
-                            <span className={`text-xl font-black tabular-nums ${pctColor}`}>{cobertura}%</span>
-                            <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${cobertura}%` }}/>
+                    <div className={`mx-2 mb-2 border rounded-xl shadow-sm ${bannerBg}`}>
+                        {/* Fila principal */}
+                        <div className="px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-4">
+                            <div className="flex items-center gap-2">
+                                {isCrisis && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block shrink-0"/>}
+                                <span className={`text-[10px] font-black uppercase tracking-wider shrink-0 ${isCrisis ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
+                                    {isCrisis ? '⚠ COBERTURA CRÍTICA' : isWarning ? '▲ ATENCIÓN' : 'Estado del día'}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-1 min-w-[120px]">
+                                <span className={`text-2xl font-black tabular-nums leading-none ${pctColor}`}>{cobertura}%</span>
+                                <div className="flex-1 h-3 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${barColor} ${isCrisis ? 'animate-pulse' : ''}`} style={{ width: `${cobertura}%` }}/>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+                                {[
+                                    { label: 'Activos',  val: cubiertos,              cls: isOk ? 'text-emerald-600' : 'text-slate-500', bg: 'bg-emerald-50' },
+                                    { label: 'Vacantes', val: logic.stats.vacantes,   cls: logic.stats.vacantes > 0 ? 'text-rose-600 font-black' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                    { label: 'Ausentes', val: logic.stats.ausentes,   cls: logic.stats.ausentes > 0 ? 'text-rose-700 font-black' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                    { label: 'Plan',     val: total,                  cls: 'text-slate-600', bg: 'bg-slate-50' },
+                                ].map(m => (
+                                    <div key={m.label} className={`text-center px-2 py-1 rounded-lg ${m.bg}`}>
+                                        <div className={`text-base leading-none ${m.cls}`}>{m.val}</div>
+                                        <div className="text-[8px] text-slate-400 uppercase mt-0.5 font-bold">{m.label}</div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                            {[
-                                { label: 'Activos', val: logic.stats.activos, cls: 'text-emerald-600' },
-                                { label: 'Vacantes', val: logic.stats.vacantes, cls: 'text-rose-500' },
-                                { label: 'Ausentes', val: logic.stats.ausentes, cls: 'text-rose-700' },
-                                { label: 'Total', val: total, cls: 'text-slate-700' },
-                            ].map(m => (
-                                <div key={m.label} className="text-center">
-                                    <div className={`text-sm font-black leading-none ${m.cls}`}>{m.val}</div>
-                                    <div className="text-[8px] text-slate-400 uppercase mt-0.5">{m.label}</div>
-                                </div>
-                            ))}
-                        </div>
+                        {/* Barra de alertas rápidas cuando hay crisis */}
+                        {isCrisis && (logic.stats.vacantes > 0 || logic.stats.ausentes > 0) && (
+                            <div className="px-3 pb-2 flex gap-2 flex-wrap">
+                                {logic.stats.ausentes > 0 && (
+                                    <button onClick={() => logic.setViewTab('AUSENTES' as any)}
+                                        className="flex items-center gap-1.5 px-3 py-1 bg-rose-600 text-white text-[10px] font-black rounded-lg hover:bg-rose-700 transition-colors">
+                                        <AlertTriangle size={11}/> {logic.stats.ausentes} AUSENTES — Gestionar
+                                    </button>
+                                )}
+                                {logic.stats.vacantes > 0 && (
+                                    <button onClick={() => logic.setViewTab('VACANTES' as any)}
+                                        className="flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-700 border border-rose-300 text-[10px] font-black rounded-lg hover:bg-rose-200 transition-colors">
+                                        <UserX size={11}/> {logic.stats.vacantes} VACANTES — Ver
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
                 );
             })()}
@@ -1233,11 +1279,24 @@ export default function OperacionesPage() {
 
                         {/* Tabs compactos */}
                         <div className="flex p-0.5 bg-slate-100 rounded-lg gap-0.5 overflow-x-auto">
-                            {tabs.map(t => (
-                                <button key={t.id} onClick={() => logic.setViewTab(t.id as any)} className={`flex-1 py-1 text-[9px] font-black uppercase rounded-md transition-all whitespace-nowrap ${logic.viewTab === t.id ? 'bg-white shadow ' + t.color : 'text-slate-400 hover:bg-slate-200'}`}>
-                                    {t.label}<br/><span className="text-[9px]">({t.count || 0})</span>
-                                </button>
-                            ))}
+                            {tabs.map(t => {
+                                const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
+                                const isActive = logic.viewTab === t.id;
+                                return (
+                                    <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
+                                        className={`relative flex-1 py-1 text-[9px] font-black uppercase rounded-md transition-all whitespace-nowrap
+                                            ${isActive
+                                                ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-white shadow ' + t.color)
+                                                : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'text-slate-400 hover:bg-slate-200')
+                                            }`}>
+                                        {isUrgent && !isActive && (
+                                            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"/>
+                                        )}
+                                        {t.label}<br/>
+                                        <span className={`text-[9px] ${isUrgent && isActive ? 'text-rose-100' : ''}`}>({t.count || 0})</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
 

@@ -116,15 +116,46 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
 
       for (const s of lateGuards) {
         processedIds.current.add(`late_${s.id}`);
-        const msg = `${s.employeeName} — ${s.objectiveName}`;
         if (isAutoMode) {
+          const msg = `${s.employeeName} — ${s.objectiveName}`;
           await createNovedad('AUSENCIA_DETECTADA', 'Ausencia Detectada (Auto)',
             `No se presentó: ${msg}`, s, empresaId);
-          toast.warning(`🤖 AUTO: Ausencia — ${msg}`, { duration: 8000 });
-          sendBrowserNotif('Ausencia Detectada', msg);
-        } else {
-          toast.error(`⚠️ No se presentó: ${msg}`, { duration: 15000 });
+        }
+      }
+
+      // Toast consolidado — un solo aviso para todos los tardíos del batch
+      if (lateGuards.length > 0) {
+        if (lateGuards.length === 1) {
+          const s = lateGuards[0];
+          const msg = `${s.employeeName} — ${s.objectiveName}`;
+          if (isAutoMode) {
+            toast.warning(`🤖 AUTO: Ausencia — ${msg}`, { duration: 8000 });
+          } else {
+            toast.error(`⚠️ No se presentó: ${msg}`, {
+              duration: 15000,
+              description: 'Ir al tab AUSENTES para gestionar cobertura',
+            });
+          }
           sendBrowserNotif('⚠️ Guardia no presente', msg);
+        } else {
+          // Múltiples ausentes: un solo toast consolidado
+          const objectives = [...new Set(lateGuards.map(s => s.objectiveName).filter(Boolean))];
+          const objSummary = objectives.slice(0, 2).join(', ') + (objectives.length > 2 ? ` y ${objectives.length - 2} más` : '');
+          if (isAutoMode) {
+            toast.warning(`🤖 AUTO: ${lateGuards.length} ausencias detectadas`, {
+              duration: 10000,
+              description: objSummary,
+            });
+          } else {
+            toast.error(`⚠️ ${lateGuards.length} guardias no se presentaron`, {
+              duration: 20000,
+              description: `Objetivos: ${objSummary} — Ver tab AUSENTES`,
+            });
+          }
+          sendBrowserNotif(
+            `⚠️ ${lateGuards.length} guardias no presentes`,
+            `Objetivos afectados: ${objSummary}`
+          );
         }
       }
 
@@ -141,8 +172,18 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (isAutoMode) {
           await createNovedad('RETENCION_DETECTADA', 'Recargo Automático Detectado', msg, s, empresaId);
         }
+      }
+      if (retentions.length === 1) {
+        const s = retentions[0];
+        const msg = `${s.employeeName} lleva ${s.retentionMinutes}min en ${s.objectiveName}`;
         toast.warning(`⏰ Recargo: ${msg}`, { duration: 10000 });
         sendBrowserNotif('⏰ Guardia en Recargo', msg);
+      } else if (retentions.length > 1) {
+        toast.warning(`⏰ ${retentions.length} guardias en retención`, {
+          duration: 10000,
+          description: retentions.map(s => s.employeeName).slice(0, 3).join(', ') + (retentions.length > 3 ? '...' : ''),
+        });
+        sendBrowserNotif('⏰ Guardias en Retención', `${retentions.length} guardias superaron 30 min`);
       }
 
       // ── Auto-finalización: turnos PRESENT cuyo endTime ya pasó ──
