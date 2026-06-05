@@ -26,6 +26,7 @@ export type CoverageGap = {
     absentName?: string;
     dateStr: string;
     band: string;
+    positionName: string;   // puesto donde está la brecha (del empleado ausente)
     coveredBy: string | null;
     coveredByName?: string;
     /**
@@ -118,7 +119,7 @@ export function applyAbsenceCoverage(
             const assigned = tryAutoAssign(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, neededBand, posName, ctx);
 
             if (assigned) {
-                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: assigned.empId, coverageType: assigned.type });
+                gaps.push({ absentEmpId, dateStr, band: neededBand, positionName: posName, coveredBy: assigned.empId, coverageType: assigned.type });
             } else {
                 // Sin candidatos ST/RET/ESC → listar candidatos FT para decisión manual
                 const ftCandidates = getFtCandidates(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx);
@@ -126,6 +127,7 @@ export function applyAbsenceCoverage(
                     absentEmpId,
                     dateStr,
                     band: neededBand,
+                    positionName: posName,
                     coveredBy: null,
                     coverageType: 'ft_required',
                     ftCandidates,

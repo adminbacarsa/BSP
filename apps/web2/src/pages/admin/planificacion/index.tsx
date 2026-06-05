@@ -7542,7 +7542,7 @@ export default function PlanificacionPage() {
                                         isTemp: true,
                                         employeeId: empId,
                                         objectiveId: selectedObjective,
-                                        positionName: positionStructure[0]?.positionName ?? 'General',
+                                        positionName: gap.positionName || positionStructure[0]?.positionName || 'General',
                                         code: gap.band,
                                         name: meta.name,
                                         hours: meta.hours,
@@ -7594,19 +7594,26 @@ export default function PlanificacionPage() {
                                 for (const gap of planCoverageModalGaps) {
                                     const pair = D12_PAIRS[gap.band];
                                     if (!pair) continue;
+                                    const gapPosName = gap.positionName || '';
                                     const alreadyChanged = new Set<string>();
                                     for (const ext of pair) {
-                                        // Buscar primer compañero del objetivo con esa banda, sin contar ya modificados
+                                        // Buscar primer compañero del MISMO PUESTO con esa banda, sin contar ya modificados
                                         const emp = planningDotacionEmployees.find((e: any) => {
                                             if (alreadyChanged.has(e.id)) return false;
                                             const key = `${e.id}_${gap.dateStr}`;
                                             const asig = d12Updates[key] ?? pendingChanges[key] ?? shiftsMap[key];
-                                            return asig?.code === ext.lookFor;
+                                            if (asig?.code !== ext.lookFor) return false;
+                                            // Verificar que sea del mismo puesto
+                                            if (gapPosName) {
+                                                const empPos = asig?.positionName || empDefaultPos[`${e.id}___${selectedObjective}`] || '';
+                                                if (empPos && empPos !== gapPosName) return false;
+                                            }
+                                            return true;
                                         }) as any | undefined;
                                         if (emp) {
                                             const key = `${emp.id}_${gap.dateStr}`;
                                             const existing = pendingChanges[key] ?? shiftsMap[key] ?? {};
-                                            d12Updates[key] = { ...existing, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective, code: ext.code, name: ext.name, hours: ext.hours, startTime: ext.startTime, endTime: ext.endTime, isFranco: false };
+                                            d12Updates[key] = { ...existing, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective, positionName: gapPosName || existing.positionName, code: ext.code, name: ext.name, hours: ext.hours, startTime: ext.startTime, endTime: ext.endTime, isFranco: false };
                                             alreadyChanged.add(emp.id);
                                             d12Count++;
                                         }
