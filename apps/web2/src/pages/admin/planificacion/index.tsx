@@ -1521,21 +1521,20 @@ export default function PlanificacionPage() {
             const hours = Number(s.hours) || 8;
             const is8h = hours <= 10;
 
-            if (assigned8h.length > 0 && assigned12h.length > 0) {
-                disabled.add(code);
-                return;
-            }
-            if (assigned8h.length > 0) {
-                if (!is8h) { disabled.add(code); return; }
-                if (assigned8h.filter(c => c === code).length >= pax) { disabled.add(code); return; }
-                if (assigned8h.length >= max8hSlots) { disabled.add(code); return; }
-                return;
-            }
-            if (assigned12h.length > 0) {
-                if (is8h) { disabled.add(code); return; }
-                if (assigned12h.filter(c => c === code).length >= pax) { disabled.add(code); return; }
-                if (assigned12h.length >= max12hSlots) { disabled.add(code); return; }
-                return;
+            if (pax === 1) {
+                // 1 pax: no mezclar 8h con 12h (un solo guardia por posición)
+                if (assigned8h.length > 0 && assigned12h.length > 0) { disabled.add(code); return; }
+                if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
+                if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
+                if (assigned8h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
+                if (assigned12h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
+            } else {
+                // Multi-pax: permitir mezcla de 8h y 12h (ej: 2×M + 1×D12 + 1×N12 es válido)
+                // Solo bloquear si el código ya fue asignado PAX veces (saturado)
+                const codeCount = assigned.filter(a => a.code === code).length;
+                if (codeCount >= pax) { disabled.add(code); return; }
+                // Bloquear si el total de turnos ya alcanza el máximo (pax 8h + pax 12h)
+                if (assigned.length >= pax * 2) { disabled.add(code); return; }
             }
         });
         return disabled;
