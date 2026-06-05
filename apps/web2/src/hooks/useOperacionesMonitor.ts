@@ -220,7 +220,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             
             if (isUnassigned && !isReportedToPlanning) return null; 
 
-            const minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
+            const isEarlyStart = !!shift.isEarlyStart;
+            const isAwaitingCoverageCheckIn = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
+                (isEarlyStart || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
+
+            let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
+            if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
             const isRetention = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
             if (isRetention) retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
@@ -246,6 +251,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
+                isEarlyStart, isAwaitingCoverageCheckIn,
                 minutesUntilStart, minutesPastStart, retentionMinutes, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
             };
         }).filter(Boolean);
@@ -381,9 +387,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const hoy = list.filter((s:any) => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
         switch (viewTab) {
             case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention) && !s.isFranco);
-            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent);
-            case 'PLAN':       return hoy.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned);
+            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
+            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
+            case 'PLAN':       return hoy.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
             case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
             case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention);
             case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned);
@@ -392,7 +398,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             default:           return hoy;
         }
     }, [processedData, viewTab, filterText, selectedClientId, now]);
-    const stats = useMemo(() => { const hoy = processedData.filter(s => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+    const stats = useMemo(() => { const hoy = processedData.filter(s => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {

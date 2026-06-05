@@ -339,6 +339,18 @@ export default function TacticalMapView() {
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else { setCoverageData({ isOpen: true, shift: vacShift }); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
+            } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
+                const targetShift = novedad.shiftId
+                    ? logic.processedData.find((s: any) => s.id === novedad.shiftId)
+                    : logic.processedData.find((s: any) => s.employeeId === novedad.employeeId && s.objectiveId === novedad.objectiveId && !s.isPresent && !s.isCompleted);
+                if (targetShift) {
+                    setHandoverData({ isOpen: true, shift: targetShift });
+                    logic.setViewTab('PRIORIDAD');
+                    toast.info(`Dar presente a ${targetShift.employeeName || novedad.employeeName || 'guardia'}`);
+                } else {
+                    logic.setViewTab('PRIORIDAD');
+                    toast.info('Buscá al guardia en PRIORIDAD para dar presente.');
+                }
             } else if (novedad.type === 'AUSENCIA_AUTO' || novedad.type === 'RELEVO_NO_PRESENTADO') {
                 logic.setViewTab('AUSENTES'); toast.info('Gestionar desde pestaña AUSENTES');
             } else if (novedad.type === 'AUSENCIA_CORTO_PLAZO' || novedad.type === 'AVISO_AUSENCIA_ANTICIPADA') {

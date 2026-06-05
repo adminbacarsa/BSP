@@ -337,7 +337,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const now = new Date();
     const start = toDate(shift.shiftDateObj);
     const diff = (now.getTime() - start.getTime()) / 60000;
-    const canCheckIn = diff >= -15 && diff <= 60 && !shift.isPresent;
+    const canCheckIn = !shift.isPresent && (
+        shift.isEarlyStart ||
+        shift.isAwaitingCoverageCheckIn ||
+        shift.origin === 'RETEN' ||
+        !!shift.isReten ||
+        (diff >= -15 && diff <= 120)
+    );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
 
@@ -352,6 +358,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">⏱ LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
+    else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isPresent)        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isAbsent)         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
@@ -378,6 +385,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isUnassigned && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>{!shift.isReportedToPlanning && <button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>}</>)}
                 {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] text-indigo-400 italic px-1 shrink-0">↑ planif.</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
+                {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
+                    <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
+                )}
                 {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
                     ? <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>
@@ -427,10 +437,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {viewTab === 'PLAN' && (<>
                         <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><PlayCircle size={11}/>DAR PRESENTE</button>
                         {diff >= 5
-                            ? (!isAutoMode && <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>AUSENTE</button>)
+                            ? <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>AUSENTE</button>
                             : <button onClick={() => onNovedadAbsence(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-sky-50 text-sky-700 border border-sky-200 rounded-lg text-[10px] font-bold hover:bg-sky-100 transition-colors"><BellRing size={11}/>NOVEDAD</button>
                         }
                     </>)}
+                    {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
+                        <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors"><PlayCircle size={11}/>DAR PRESENTE</button>
+                    )}
                     {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<>
                         <button onClick={() => onOpenCheckout(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:bg-purple-700 transition-colors"><LogOut size={11}/>SALIDA</button>
                         <button onClick={() => onOpenInterrupt(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] font-bold hover:bg-red-100 transition-colors"><Siren size={11}/>BAJA</button>
@@ -598,6 +611,25 @@ export default function OperacionesPage() {
         setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
     }, [logic.processedData]);
 
+    const openHandoverFromNovedad = (novedad: any) => {
+        const targetShift = novedad.shiftId
+            ? logic.processedData.find((s: any) => s.id === novedad.shiftId)
+            : logic.processedData.find((s: any) =>
+                s.employeeId === novedad.employeeId &&
+                s.objectiveId === novedad.objectiveId &&
+                !s.isPresent && !s.isCompleted
+            );
+        if (targetShift) {
+            setHandoverData({ isOpen: true, shift: targetShift });
+            logic.setViewTab('PRIORIDAD');
+            toast.info(`Dar presente a ${targetShift.employeeName || novedad.employeeName || 'guardia'}`);
+            return true;
+        }
+        logic.setViewTab('PRIORIDAD');
+        toast.info('Buscá al guardia en PRIORIDAD para dar presente.');
+        return false;
+    };
+
     const handleAtenderNovedad = async (novedad: any) => {
         try {
             const auth = getAuth();
@@ -644,6 +676,9 @@ export default function OperacionesPage() {
                     logic.setViewTab('VACANTES');
                     toast.info('Usá el botón CUBRIR en la vacante correspondiente');
                 }
+
+            } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
+                openHandoverFromNovedad(novedad);
 
             } else if (novedad.type === 'AUSENCIA_AUTO' || novedad.type === 'RELEVO_NO_PRESENTADO') {
                 logic.setViewTab('AUSENTES');
@@ -1514,12 +1549,15 @@ export default function OperacionesPage() {
                                 const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
                                 const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
 
-                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
-                                const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
+                                const isAdelanto = n.type === 'ADELANTO_TURNO';
+                                const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO' || n.type === 'RETENCION';
+
+                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAdelanto || isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
+                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isAdelanto ? 'ADEL.' : isConvocado ? 'CONV.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
+                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
+                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
+                                const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
+                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
                                 const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
                                     ? ` · ${n.minutesBeforeShift}min`
                                     : '';
