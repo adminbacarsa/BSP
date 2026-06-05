@@ -7565,42 +7565,60 @@ export default function PlanificacionPage() {
                                 setPlanCoverageModalGaps([]);
                             }}
                             onAssignD12={() => {
-                                // D12 interno: busca el compañero de banda adyacente y le cambia el turno real
-                                // N ausente → T worker → N12 | M ausente → T worker → D12 | T ausente → M worker → D12
-                                const D12_ADJ: Record<string, { lookFor: string; code: string; name: string; hours: number; startTime: string; endTime: string }> = {
-                                    N: { lookFor: 'T',   code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
-                                    M: { lookFor: 'T',   code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
-                                    T: { lookFor: 'M',   code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                // D12 interno: D12 + N12 = cubre las 24hs con 2 guardias en vez de 3 (M+T+N).
+                                // Cada banda ausente requiere DOS cambios en la grilla:
+                                //   N ausente → T→N12 (cubre 19-07) + M→D12 (cubre 07-19, reemplaza el T vacante)
+                                //   M ausente → T→D12 (cubre 07-19) + N→N12 (cubre 19-07, reemplaza el T vacante)
+                                //   T ausente → M→D12 (cubre 07-19) + N→N12 (cubre 19-07)
+                                type Ext = { lookFor: string; code: string; name: string; hours: number; startTime: string; endTime: string };
+                                const D12_PAIRS: Record<string, [Ext, Ext]> = {
+                                    N: [
+                                        { lookFor: 'T', code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
+                                        { lookFor: 'M', code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                    ],
+                                    M: [
+                                        { lookFor: 'T', code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                        { lookFor: 'N', code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
+                                    ],
+                                    T: [
+                                        { lookFor: 'M', code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                        { lookFor: 'N', code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
+                                    ],
                                 };
                                 const gapKeys = planCoverageModalGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
                                 const n = planCoverageModalGaps.length;
                                 const d12Updates: Record<string, any> = {};
                                 let d12Count = 0;
                                 for (const gap of planCoverageModalGaps) {
-                                    const adj = D12_ADJ[gap.band];
-                                    if (!adj) continue;
-                                    // Buscar primer compañero del objetivo con la banda adyacente ese día
-                                    const adjEmp = planningDotacionEmployees.find((e: any) => {
-                                        const key = `${e.id}_${gap.dateStr}`;
-                                        const asig = pendingChanges[key] ?? shiftsMap[key];
-                                        return asig?.code === adj.lookFor;
-                                    }) as any | undefined;
-                                    if (adjEmp) {
-                                        const key = `${adjEmp.id}_${gap.dateStr}`;
-                                        const existing = pendingChanges[key] ?? shiftsMap[key] ?? {};
-                                        d12Updates[key] = { ...existing, isTemp: true, employeeId: adjEmp.id, objectiveId: selectedObjective, code: adj.code, name: adj.name, hours: adj.hours, startTime: adj.startTime, endTime: adj.endTime, isFranco: false };
-                                        d12Count++;
+                                    const pair = D12_PAIRS[gap.band];
+                                    if (!pair) continue;
+                                    const alreadyChanged = new Set<string>();
+                                    for (const ext of pair) {
+                                        // Buscar primer compañero del objetivo con esa banda, sin contar ya modificados
+                                        const emp = planningDotacionEmployees.find((e: any) => {
+                                            if (alreadyChanged.has(e.id)) return false;
+                                            const key = `${e.id}_${gap.dateStr}`;
+                                            const asig = d12Updates[key] ?? pendingChanges[key] ?? shiftsMap[key];
+                                            return asig?.code === ext.lookFor;
+                                        }) as any | undefined;
+                                        if (emp) {
+                                            const key = `${emp.id}_${gap.dateStr}`;
+                                            const existing = pendingChanges[key] ?? shiftsMap[key] ?? {};
+                                            d12Updates[key] = { ...existing, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective, code: ext.code, name: ext.name, hours: ext.hours, startTime: ext.startTime, endTime: ext.endTime, isFranco: false };
+                                            alreadyChanged.add(emp.id);
+                                            d12Count++;
+                                        }
                                     }
                                 }
                                 if (Object.keys(d12Updates).length > 0) setPendingChanges(prev => ({ ...prev, ...d12Updates }));
                                 setAutoCoverageGaps(prev => prev.map(g =>
                                     gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
-                                        ? { ...g, coverageType: 'manual' as const, coveredBy: 'D12', coveredByName: 'D12 (extensión)' }
+                                        ? { ...g, coverageType: 'manual' as const, coveredBy: 'D12', coveredByName: 'D12+N12 (extensión)' }
                                         : g
                                 ));
                                 setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
                                 applyCoverageToStats(n);
-                                toast.success(`D12 aplicado a ${d12Count} turno(s) en ${n} día(s)`);
+                                toast.success(`D12+N12 aplicado: ${d12Count} turno(s) extendido(s) en ${n} día(s)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onClose={() => setPlanCoverageModalGaps([])}
