@@ -534,7 +534,7 @@ export default function OperacionesPage() {
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     const [isGrouped, setIsGrouped] = useState(true);
-    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'>('reciente');
+    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
@@ -708,6 +708,10 @@ export default function OperacionesPage() {
 
     const prevPendingCount = useRef(0);
     useEffect(() => {
+        if (pendingNovedades.length > prevPendingCount.current && !bitacoraOpen) {
+            setBitacoraOpen(true);
+            setBitacoraTab('alertas');
+        }
         if (pendingNovedades.length > prevPendingCount.current) {
             setNotifPanelOpen(true);
         }
@@ -1138,7 +1142,9 @@ export default function OperacionesPage() {
             {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
                 const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                 const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                const cobertura = total > 0 ? Math.round((cubiertos / total) * 100) : 0;
+                // Solo sobre turnos que debieron iniciar (excluye los planificados para más tarde)
+                const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
                 const isCrisis  = cobertura < 50;
                 const isWarning = cobertura >= 50 && cobertura < 80;
                 const isOk      = cobertura >= 80;
@@ -1156,7 +1162,14 @@ export default function OperacionesPage() {
                                 </span>
                             </div>
                             <div className="flex items-center gap-2 flex-1 min-w-[120px]">
-                                <span className={`text-2xl font-black tabular-nums leading-none ${pctColor}`}>{cobertura}%</span>
+                                <div className="shrink-0">
+                                    <span className={`text-2xl font-black tabular-nums leading-none block ${pctColor}`}>{cobertura}%</span>
+                                    {logic.stats.plan > 0 && (
+                                        <span className="text-[8px] font-bold text-slate-400 leading-none whitespace-nowrap">
+                                            +{logic.stats.plan} en espera
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="flex-1 h-3 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
                                     <div className={`h-full rounded-full transition-all duration-500 ${barColor} ${isCrisis ? 'animate-pulse' : ''}`} style={{ width: `${cobertura}%` }}/>
                                 </div>
@@ -1408,27 +1421,29 @@ export default function OperacionesPage() {
                       {bitacoraOpen && (<>
                         <div className="px-2 py-1 border-b border-slate-100 flex items-center gap-1 bg-slate-50" onClick={e => e.stopPropagation()}>
                           {([
-                            { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length },
-                            { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return a.includes('CHECK')||a.includes('ABSENT')||a.includes('HANDOVER')||a.includes('COVERAGE')||a.includes('FRANCO')||a.includes('INTERRUPT')||a.includes('GUARD')||a.includes('TURNO'); }).length },
+                            { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length, urgent: false },
+                            { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return a.includes('CHECK')||a.includes('ABSENT')||a.includes('HANDOVER')||a.includes('COVERAGE')||a.includes('FRANCO')||a.includes('INTERRUPT')||a.includes('GUARD')||a.includes('TURNO'); }).length, urgent: false },
+                            { id:'alertas' as const,     label:'Novedades',   count: pendingNovedades.length, urgent: pendingNovedades.length > 0 },
                           ]).map(t => (
                             <button key={t.id} onClick={() => setBitacoraTab(t.id)}
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors ${bitacoraTab===t.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-100'}`}>
+                              className={`relative flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
+                                ${bitacoraTab===t.id
+                                  ? (t.urgent ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white')
+                                  : (t.urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
+                              {t.id === 'alertas' && <Siren size={10}/>}
                               {t.label}
-                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
+                              <span className={`text-[9px] font-black px-1 rounded-full
+                                ${bitacoraTab===t.id ? 'bg-white/20' : t.urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>
+                                {t.count}
+                              </span>
                             </button>
                           ))}
-                          <button onClick={() => setNotifPanelOpen(v => !v)}
-                            className={`relative flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors ml-1 ${notifPanelOpen ? 'bg-rose-600 text-white' : pendingNovedades.length > 0 ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100'}`}>
-                            <Siren size={11}/>
-                            Alertas
-                            {pendingNovedades.length > 0 && (
-                              <span className={`text-[9px] font-black px-1 rounded-full ${notifPanelOpen ? 'bg-white/20' : 'bg-rose-500 text-white'} ${!notifPanelOpen ? 'animate-pulse' : ''}`}>{pendingNovedades.length}</span>
-                            )}
-                          </button>
                           <button onClick={generateDailyReport} className="ml-auto p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg" title="Exportar PDF">
                             <Printer size={11}/>
                           </button>
                         </div>
+                        {/* ── Tab Actividad / Operaciones ── */}
+                        {bitacoraTab !== 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           <table className="w-full text-[10px] text-left">
                             <thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0">
@@ -1464,6 +1479,66 @@ export default function OperacionesPage() {
                             </tbody>
                           </table>
                         </div>
+                        )}
+
+                        {/* ── Tab Novedades (inline, siempre accesible) ── */}
+                        {bitacoraTab === 'alertas' && (
+                        <div className="flex-1 overflow-y-auto">
+                          {pendingNovedades.length === 0 ? (
+                            <div className="p-6 text-center">
+                              <CheckCircle size={24} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
+                              <p className="text-xs font-bold text-slate-400">Sin novedades pendientes</p>
+                            </div>
+                          ) : pendingNovedades.map((n: any) => {
+                            const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                            const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
+                            const isRetencion = n.type === 'RETENCION_LARGA';
+                            const isRelevo = n.type === 'POSICION_SIN_RELEVO';
+                            const isAbsence = n.type === 'AUSENCIA_AUTO' || n.type === 'AUSENCIA_OPERATIVA';
+                            const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
+                            const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO';
+                            const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
+                            const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC' : isConvocado ? 'CONV' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
+                            const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
+                            const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
+                            return (
+                              <div key={n.id} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors`}>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-12 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                    {n.employeeName && n.objectiveName
+                                      ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                      : n.objectiveName || n.employeeName || n.type}
+                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                  </p>
+                                  <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                                </div>
+                                <span className="text-[9px] text-slate-400 font-mono shrink-0">
+                                  {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
+                                </span>
+                                <button onClick={() => handleAtenderNovedad(n)}
+                                  className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title="Atender">
+                                  <CheckCircle size={11}/>
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {recentAtendidas.length > 0 && (
+                            <div className="border-t border-slate-100 bg-slate-50/80">
+                              <p className="px-3 py-1 text-[9px] font-black uppercase text-slate-400">Atendidas recientes</p>
+                              {recentAtendidas.slice(0,5).map((n: any) => (
+                                <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
+                                  <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
+                                  <span className="flex-1 truncate text-slate-500">{n.objectiveName || n.employeeName || n.type}</span>
+                                  <span className="text-slate-300 font-mono text-[8px]">
+                                    {n.atendidaAt?.seconds ? new Date(n.atendidaAt.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : ''}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        )}
                       </>)}
                     </div>
                 </div>

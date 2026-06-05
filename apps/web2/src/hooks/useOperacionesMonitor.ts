@@ -375,7 +375,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             });
         });
 
-        return [...realShifts, ...virtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
+        // ── Deduplicar realShifts por id (evita que un doc duplicado en Firestore se muestre dos veces)
+        const seenIds = new Set<string>();
+        const dedupedRealShifts = realShifts.filter(s => {
+            if (seenIds.has(s.id)) return false;
+            seenIds.add(s.id);
+            return true;
+        });
+
+        // ── Suprimir vacantes virtuales cuando ya existe un turno AUSENTE para el mismo slot
+        //    (el ausente se muestra en AUSENTES, no hace falta duplicar en VACANTES)
+        const absentSlots = dedupedRealShifts.filter(s => s.isAbsent && s.objectiveId && s.positionName);
+        const filteredVirtualVacancies = virtualVacancies.filter(v => {
+            if (!v.shiftDateObj || !v.endDateObj) return true;
+            return !absentSlots.some(a =>
+                a.objectiveId === v.objectiveId &&
+                (a.positionName || '').trim().toLowerCase() === (v.positionName || '').trim().toLowerCase() &&
+                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [a])
+            );
+        });
+
+        return [...dedupedRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [rawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
     // ... Resto del hook igual ...
