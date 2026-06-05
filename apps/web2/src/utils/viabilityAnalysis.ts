@@ -1,7 +1,10 @@
 /**
  * Viabilidad demanda SLA vs dotación elegible (Análisis operativo).
- * Mismo criterio de días activos que calcPositionMonthHours en analisis/index.tsx.
+ * Horas/demanda SLA: mismo motor que Servicios, Dashboard y CRM.
  */
+
+import { slaHoursForPositionOnDay } from '@/lib/servicios/slaHoursCalculator';
+import type { ServicePosition } from '@/services/slaService';
 
 const JS_DAY_MAP = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -12,44 +15,24 @@ function parseYmd(ymd: string): Date {
 
 /** Horas de cobertura de un puesto en un día calendario (0 si fuera de vigencia del servicio). */
 export function hoursForPositionOnDay(
-  pos: { coverageType?: string; allowedShiftTypes?: Array<{ days?: string[]; hours?: number }>; quantity?: number },
+  pos: ServicePosition,
   day: Date,
   srvStartStr: string,
-  srvEndStr: string
+  srvEndStr: string,
+  excludedDates?: string[],
 ): number {
-  const sStart = parseYmd(srvStartStr);
-  const sEnd = parseYmd(srvEndStr);
-  const cur = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12, 0, 0, 0);
-  if (cur < sStart || cur > sEnd) return 0;
-
-  const dc = JS_DAY_MAP[cur.getDay()];
-  if (pos.coverageType === '24hs') return 24;
-  if (
-    pos.coverageType === '12hs_diurno' ||
-    pos.coverageType === '12hs_nocturno' ||
-    pos.coverageType === '12hs'
-  ) {
-    return 12;
-  }
-  if (pos.coverageType === 'custom') {
-    let h = 0;
-    (pos.allowedShiftTypes || []).forEach((s: { days?: string[]; hours?: number }) => {
-      if (!s.days || s.days.length === 0 || s.days.includes(dc)) h += s.hours || 0;
-    });
-    return h;
-  }
-  return 0;
+  return slaHoursForPositionOnDay(pos, day, srvStartStr, srvEndStr, excludedDates);
 }
 
 /** Pax en paralelo requeridos ese día (suma quantity por puesto con cobertura > 0). */
 export function requiredConcurrentPaxForServiceDay(
-  srv: { startDate?: string; endDate?: string; positions?: Array<{ coverageType?: string; allowedShiftTypes?: unknown[]; quantity?: number }> },
-  day: Date
+  srv: { startDate?: string; endDate?: string; positions?: ServicePosition[]; excludedDates?: string[] },
+  day: Date,
 ): number {
   if (!srv.startDate || !srv.endDate) return 0;
   let pax = 0;
   for (const pos of srv.positions || []) {
-    const h = hoursForPositionOnDay(pos, day, srv.startDate, srv.endDate);
+    const h = hoursForPositionOnDay(pos, day, srv.startDate, srv.endDate, srv.excludedDates);
     if (h > 0) pax += pos.quantity ?? 1;
   }
   return pax;
@@ -85,12 +68,12 @@ export function employeeEligibleForService(
   },
   clientId: string,
   objectiveId: string,
-  objectiveName: string
+  objectiveName: string,
 ): boolean {
   const objRestr = (emp.restriccionesObjetivo || []).find(
     (r) =>
       r.objectiveId === objectiveId ||
-      (!!objectiveName && r.objectiveName === objectiveName)
+      (!!objectiveName && r.objectiveName === objectiveName),
   );
   if (objRestr) return false;
   const clientRestr = (emp.restriccionesCliente || []).find((r) => r.clientId === clientId);
@@ -126,15 +109,10 @@ export type ViabilityDayRow = {
   letter: string;
   requiredPax: number;
   eligiblePool: number;
-  /** Empleados elegibles ausentes ese día (colección `ausencias`). */
   absentThatDay: number;
-  /** Empleados elegibles con franco asignado ese día (planificación). */
   francoThatDay: number;
-  /** Empleados elegibles con licencia volcada en planificación ese día (V/L/E/A/AA/PG). */
   licenciaThatDay: number;
-  /** Empleados elegibles con turno operativo en otro objetivo ese día. */
   enOtroObjThatDay: number;
-  /** Total de elegibles no disponibles ese día (deduplicado). */
   noDisponibleThatDay: number;
   availablePax: number;
   gap: number;
@@ -151,7 +129,7 @@ export type ViabilityMonthSummary = {
 };
 
 export function buildViabilityRangeReport(
-  srv: { startDate?: string; endDate?: string; positions?: unknown[]; clientId?: string; objectiveId?: string; objectiveName?: string },
+  srv: { startDate?: string; endDate?: string; positions?: ServicePosition[]; excludedDates?: string[]; clientId?: string; objectiveId?: string; objectiveName?: string },
   rangeStart: Date,
   rangeEnd: Date,
   employees: Array<{
@@ -160,14 +138,14 @@ export function buildViabilityRangeReport(
     restriccionesCliente?: Array<{ clientId?: string }>;
   }>,
   ausencias: Array<{ employeeId?: string; startDate?: unknown; endDate?: unknown }>,
-  turnos: TurnoLike[] = []
+  turnos: TurnoLike[] = [],
 ): ViabilityMonthSummary {
   const clientId = String(srv.clientId || '');
   const objectiveId = String(srv.objectiveId || '');
   const objectiveName = String(srv.objectiveName || '');
 
   const eligible = employees.filter((e) =>
-    employeeEligibleForService(e, clientId, objectiveId, objectiveName)
+    employeeEligibleForService(e, clientId, objectiveId, objectiveName),
   );
   const eligibleIds = new Set(eligible.map((e) => e.id));
   const eligiblePool = eligible.length;
@@ -175,7 +153,6 @@ export function buildViabilityRangeReport(
   const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 12, 0, 0, 0);
   const end = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 12, 0, 0, 0);
 
-  // Agrupa turnos por día calendario para resolver franco / licencia / asignado a otro objetivo en O(1) por día.
   type DayBuckets = {
     franco: Set<string>;
     licencia: Set<string>;
@@ -207,7 +184,6 @@ export function buildViabilityRangeReport(
       b.licencia.add(eid);
       continue;
     }
-    // turno operativo asignado a otro objetivo
     const oid = String(t.objectiveId || '').trim();
     if (oid && oid !== objectiveId) b.enOtroObj.add(eid);
   }
@@ -293,7 +269,7 @@ export function buildViabilityRangeReport(
 }
 
 export function buildViabilityMonthReport(
-  srv: { startDate?: string; endDate?: string; positions?: unknown[]; clientId?: string; objectiveId?: string; objectiveName?: string },
+  srv: { startDate?: string; endDate?: string; positions?: ServicePosition[]; excludedDates?: string[]; clientId?: string; objectiveId?: string; objectiveName?: string },
   year: number,
   month: number,
   employees: Array<{
@@ -302,7 +278,7 @@ export function buildViabilityMonthReport(
     restriccionesCliente?: Array<{ clientId?: string }>;
   }>,
   ausencias: Array<{ employeeId?: string; startDate?: unknown; endDate?: unknown }>,
-  turnos: TurnoLike[] = []
+  turnos: TurnoLike[] = [],
 ): ViabilityMonthSummary {
   const mStart = new Date(year, month, 1, 12, 0, 0, 0);
   const mEnd = new Date(year, month + 1, 0, 12, 0, 0, 0);

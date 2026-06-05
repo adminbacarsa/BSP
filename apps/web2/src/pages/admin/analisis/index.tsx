@@ -15,6 +15,10 @@ import {
 } from 'lucide-react';
 import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
 import {
+  calculateSlaHoursForDateRange,
+  countSlaDemandDaysInRange,
+} from '@/lib/servicios/slaHoursCalculator';
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
   PieChart, Pie, RadialBarChart, RadialBar, AreaChart, Area, Treemap,
@@ -163,17 +167,6 @@ const getPeriodRange = (mode: PeriodMode, y: number, m: number, dayInMonth: numb
   return { start, end, labelShort: `Año ${y}`, daysCount: isLeapYear(y) ? 366 : 365 };
 };
 
-/** Inicio (00:00) y fin inclusive (23:59:59) del contrato en fecha local YYYY-MM-DD. */
-const contractDayBounds = (srvStart: string, srvEnd: string): { sStart: Date; sEnd: Date } | null => {
-  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(srvStart || '').trim());
-  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(srvEnd || '').trim());
-  if (!a || !b) return null;
-  const sStart = new Date(Number(a[1]), Number(a[2]) - 1, Number(a[3]), 0, 0, 0, 0);
-  const sEnd = new Date(Number(b[1]), Number(b[2]) - 1, Number(b[3]), 23, 59, 59, 999);
-  if (Number.isNaN(sStart.getTime()) || Number.isNaN(sEnd.getTime())) return null;
-  return { sStart, sEnd };
-};
-
 /** Tope hs/guardia en el período: prorrateo CCT usando días con demanda SLA cuando aplica. */
 const capHsPerGuardInPeriod = (
   mode: PeriodMode,
@@ -205,64 +198,16 @@ const capHsPerGuardInPeriod = (
   return Math.max(1, Math.round(efectiveHsMonthly * (Math.min(demand, cal) / diasPorGuardia)));
 };
 
-/** Horas de un puesto en un día calendario (0 si fuera de vigencia). */
-const calcPositionDayHours = (pos: any, srvStart: string, srvEnd: string, day: Date): number => {
-  const b = contractDayBounds(srvStart, srvEnd);
-  if (!b) return 0;
-  const cur = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12, 0, 0, 0);
-  if (cur < b.sStart || cur > b.sEnd) return 0;
-  const dc = JS_DAY_MAP[cur.getDay()];
-  let h = 0;
-  if (pos.coverageType === '24hs') h = 24;
-  else if (
-    pos.coverageType === '12hs_diurno' ||
-    pos.coverageType === '12hs_nocturno' ||
-    pos.coverageType === '12hs'
-  ) {
-    h = 12;
-  } else if (pos.coverageType === 'custom') {
-    (pos.allowedShiftTypes || []).forEach((s: any) => {
-      if (!s.days || s.days.length === 0 || s.days.includes(dc)) h += s.hours || 0;
-    });
-  }
-  return h * (pos.quantity || 1);
-};
-
-/**
- * Días calendario del rango analizado donde hay al menos 1 hs teórica SLA (intersección vigencia contrato × período).
- */
-const countDemandDaysInRange = (services: any[], rangeStart: Date, rangeEnd: Date): number => {
-  const rs = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 12, 0, 0, 0);
-  const re = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 12, 0, 0, 0);
-  let n = 0;
-  for (let d = new Date(rs); d <= re; d.setDate(d.getDate() + 1)) {
-    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
-    let sum = 0;
-    for (const srv of services) {
-      if (!srv?.startDate || !srv?.endDate) continue;
-      sum += (srv.positions || []).reduce(
-        (acc: number, pos: any) => acc + calcPositionDayHours(pos, srv.startDate, srv.endDate, day),
-        0
-      );
-    }
-    if (sum > 0) n++;
-  }
-  return n;
-};
-
-/** quotaHsPerGuard: cupo mensual CCT (p. ej. 192) o hs por turno en vista día/semana (8 o 12). */
+/** Horas SLA del servicio en un rango (motor compartido con Servicios/CRM). */
 const calcSrvDateRange = (srv: any, rangeStart: Date, rangeEnd: Date, quotaHsPerGuard = 192) => {
-  const rs = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate(), 12, 0, 0, 0);
-  const re = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate(), 12, 0, 0, 0);
-  let total = 0;
-  for (let d = new Date(rs); d <= re; d.setDate(d.getDate() + 1)) {
-    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
-    total += (srv.positions || []).reduce(
-      (sum: number, pos: any) => sum + calcPositionDayHours(pos, srv.startDate, srv.endDate, day),
-      0
-    );
-  }
-  const hours = Math.round(total);
+  const hours = calculateSlaHoursForDateRange(
+    srv.positions || [],
+    srv.startDate,
+    srv.endDate,
+    srv.excludedDates,
+    rangeStart,
+    rangeEnd,
+  );
   const guards = hours > 0 ? Math.ceil(hours / quotaHsPerGuard) : 0;
   const surplus = guards * quotaHsPerGuard - hours;
   return { hours, guards, surplus: Math.round(surplus) };
@@ -465,7 +410,7 @@ export default function AnalisisPage() {
   const periodKey = `${periodMode}:${periodRange.start.getTime()}:${periodRange.end.getTime()}`;
 
   const slaDemandDaysInPeriod = useMemo(
-    () => countDemandDaysInRange(services, periodRange.start, periodRange.end),
+    () => countSlaDemandDaysInRange(services, periodRange.start, periodRange.end),
     [services, periodKey]
   );
 

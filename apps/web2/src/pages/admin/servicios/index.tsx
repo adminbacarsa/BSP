@@ -22,21 +22,15 @@ import {
   collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, TenantIsolationError,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
+import {
+  analyzeShiftComposition,
+  calculateMonthlyBreakdown,
+  computePositionDayComposition,
+  parseYmdToLocalDate,
+  WEEK_DAY_CODES,
+} from '@/lib/servicios/slaHoursCalculator';
 
 import { toYyyyMmDd } from '@/lib/firestoreDates';
-
-function parseYmdToLocalDate(ymd: string): Date | null {
-  const core = (ymd || '').trim().slice(0, 10);
-  if (core.length < 10) return null;
-  const y = parseInt(core.slice(0, 4), 10);
-  const mo = parseInt(core.slice(5, 7), 10);
-  const d = parseInt(core.slice(8, 10), 10);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
-  const dt = new Date(y, mo - 1, d);
-  if (Number.isNaN(dt.getTime())) return null;
-  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
-  return dt;
-}
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -67,8 +61,6 @@ function formatHmLinear(linearMin: number): string {
   const mm = x % 60;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
-
-const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
@@ -244,41 +236,8 @@ export default function ServiciosSLAPage() {
       }
   };
 
-  // --- MOTOR DE CÁLCULO LEGAL (CCT 422/05) ---
-  const analyzeShiftComposition = (start: string, end: string) => {
-    const [h1, m1] = start.split(':').map(Number);
-    const [h2, m2] = end.split(':').map(Number);
-    
-    let startMin = h1 * 60 + m1;
-    let endMin = h2 * 60 + m2;
-    if (endMin < startMin) endMin += 24 * 60; 
-
-    const durationMin = endMin - startMin;
-    let nightMinutes = 0;
-
-    // ✅ CORRECCIÓN LEGAL: 21:00 HS
-    // Rango Nocturno: 21:00 (1260 min) a 06:00 (360 min)
-    const NIGHT_START = 21 * 60; // 1260
-    const NIGHT_END = 6 * 60;    // 360
-
-    for (let t = startMin; t < endMin; t++) {
-        const modT = t % 1440; 
-        // Lógica: Es noche si es < 06:00 O >= 21:00
-        if (modT < NIGHT_END || modT >= NIGHT_START) { 
-            nightMinutes++;
-        }
-    }
-
-    return {
-        total: parseFloat((durationMin / 60).toFixed(2)),
-        night: parseFloat((nightMinutes / 60).toFixed(2)),
-        day: parseFloat(((durationMin - nightMinutes) / 60).toFixed(2))
-    };
-  };
-
-  const calculateShiftHours = (start: string, end: string) => {
-    return analyzeShiftComposition(start, end).total;
-  };
+  // --- MOTOR DE CÁLCULO (compartido con Dashboard y CRM vía slaHoursCalculator) ---
+  const calculateShiftHours = (start: string, end: string) => analyzeShiftComposition(start, end).total;
 
   const rebuild24hsVariants = (anchorM: string, anchorD12: string): ShiftVariant[] => {
     const m0 = parseHm(anchorM);
@@ -305,48 +264,6 @@ export default function ServiciosSLAPage() {
     ];
   };
 
-  const computePositionDayComposition = (pos: ServicePosition, dayCode: string) => {
-    let dayTotal = 0;
-    let dayNight = 0;
-    const addVariant = (v: ShiftVariant) => {
-      const comp = analyzeShiftComposition(v.startTime, v.endTime);
-      dayTotal += comp.total;
-      dayNight += comp.night;
-    };
-    if (pos.coverageType === '24hs') {
-      const shifts = pos.allowedShiftTypes || [];
-      const m = shifts.find((s) => s.code === 'M');
-      const t = shifts.find((s) => s.code === 'T');
-      const n = shifts.find((s) => s.code === 'N');
-      const d12 = shifts.find((s) => s.code === 'D12');
-      const n12 = shifts.find((s) => s.code === 'N12');
-      if (m && t && n) {
-        addVariant(m);
-        addVariant(t);
-        addVariant(n);
-      } else if (d12 && n12) {
-        addVariant(d12);
-        addVariant(n12);
-      } else {
-        addVariant(SHIFT_VARIANTS_DB['D12']);
-        addVariant(SHIFT_VARIANTS_DB['N12']);
-      }
-    } else if (pos.coverageType === '12hs_diurno') {
-      addVariant(SHIFT_VARIANTS_DB['D12']);
-    } else if (pos.coverageType === '12hs_nocturno') {
-      addVariant(SHIFT_VARIANTS_DB['N12']);
-    } else if (pos.coverageType === 'custom') {
-      (pos.allowedShiftTypes || []).forEach((shift) => {
-        if (shift.days && shift.days.length > 0) {
-          if (shift.days.includes(dayCode)) addVariant(shift);
-        } else {
-          addVariant(shift);
-        }
-      });
-    }
-    return { dayTotal, dayNight };
-  };
-
   const formatPositionDailyCoverageLabel = (pos: ServicePosition) => {
     const totals = WEEK_DAY_CODES.map((d) => computePositionDayComposition(pos, d).dayTotal);
     const min = Math.min(...totals);
@@ -355,59 +272,6 @@ export default function ServiciosSLAPage() {
     if (max < 1e-6) return '—';
     if (Math.abs(min - max) < 1e-6) return `${r(max)} hs/día`;
     return `${r(min)}–${r(max)} hs/día`;
-  };
-
-  const calculateMonthlyBreakdown = (positions: ServicePosition[], startStr: string, endStr: string, excludedDates?: string[]) => {
-    const startNorm = (startStr || '').trim().slice(0, 10);
-    const endNorm = (endStr || '').trim().slice(0, 10);
-    if (!startNorm || !endNorm || positions.length === 0) return [];
-
-    let current = parseYmdToLocalDate(startNorm);
-    const end = parseYmdToLocalDate(endNorm);
-    if (!current || !end) return [];
-
-    const slaExcluded = new Set(excludedDates || []);
-
-    const monthAccumulator: Record<string, {
-        name: string, days: number, totalHours: number, nightHours: number, weekendHours: number
-    }> = {};
-
-    while (current <= end) {
-        const year = current.getFullYear();
-        const month = current.getMonth();
-        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-        const monthName = current.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-        const dayIdx = current.getDay();
-        const dayCode = WEEK_DAY_CODES[dayIdx];
-        const isWeekend = (dayIdx === 0 || dayIdx === 6);
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
-
-        if (!monthAccumulator[monthKey]) {
-            monthAccumulator[monthKey] = {
-                name: monthName.charAt(0).toUpperCase() + monthName.slice(1),
-                days: 0, totalHours: 0, nightHours: 0, weekendHours: 0
-            };
-        }
-
-        monthAccumulator[monthKey].days++;
-
-        if (!slaExcluded.has(dateStr)) {
-            positions.forEach(pos => {
-                // fecha excluida a nivel SLA o a nivel puesto específico
-                const posExcluded = pos.excludedDates && pos.excludedDates.includes(dateStr);
-                if (posExcluded) return;
-                const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
-                const q = pos.quantity;
-                monthAccumulator[monthKey].totalHours += (dayTotal * q);
-                monthAccumulator[monthKey].nightHours += (dayNight * q);
-                if (isWeekend) monthAccumulator[monthKey].weekendHours += (dayTotal * q);
-            });
-        }
-        current.setDate(current.getDate() + 1);
-    }
-    return Object.entries(monthAccumulator)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([monthKey, row]) => ({ ...row, monthKey }));
   };
 
   const monthlyBreakdown = useMemo(

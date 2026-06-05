@@ -90,52 +90,32 @@ import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
 import { callableErrorText } from '@/lib/callableError';
+import {
+  calculateMonthlyBreakdown,
+  calculateSlaHoursForDateRange,
+} from '@/lib/servicios/slaHoursCalculator';
+import { resolveShiftDurationHours, shouldBillShiftToObjective } from '@/hooks/useReportes';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// --- MOTOR DE CÁLCULO (CCT 422/05) ---
-const analyzeShiftComposition = (start: string, end: string) => {
-  const [h1, m1] = start.split(':').map(Number);
-  const [h2, m2] = end.split(':').map(Number);
-  let startMin = h1 * 60 + m1;
-  let endMin = h2 * 60 + m2;
-  if (endMin < startMin) endMin += 1440;
-  return (endMin - startMin) / 60;
-};
-
-const JS_DAY_MAP = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-
-const calculateMonthlySLA = (positions: any[], startStr: string, endStr: string) => {
-  if (!positions || positions.length === 0 || !startStr || !endStr) return 0;
-  const sParts = startStr.split('-').map(Number);
-  const eParts = endStr.split('-').map(Number);
-  let current = new Date(sParts[0], sParts[1] - 1, sParts[2]);
-  const end = new Date(eParts[0], eParts[1] - 1, eParts[2]);
-  let totalAccumulator = 0;
-  while (current <= end) {
-    const dayCode = JS_DAY_MAP[current.getDay()];
-    positions.forEach((pos: any) => {
-      let dayTotal = 0;
-      if (pos.coverageType === '24hs') dayTotal = 24;
-      else if (pos.coverageType === '12hs_diurno' || pos.coverageType === '12hs_nocturno') dayTotal = 12;
-      else if (pos.coverageType === 'custom' && pos.allowedShiftTypes) {
-        pos.allowedShiftTypes.forEach((shift: any) => {
-          if (shift.days && shift.days.length > 0) {
-            if (shift.days.includes(dayCode)) dayTotal += analyzeShiftComposition(shift.startTime, shift.endTime);
-          } else {
-            dayTotal += analyzeShiftComposition(shift.startTime, shift.endTime);
-          }
-        });
-      }
-      totalAccumulator += dayTotal * (pos.quantity || 1);
-    });
-    current.setDate(current.getDate() + 1);
-  }
-  return Math.round(totalAccumulator);
-};
-
 const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8 };
 const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes((code || '').toUpperCase());
+
+const sumContractSlaHours = (
+  positions: any[],
+  startStr: string,
+  endStr: string,
+  excludedDates: string[] | undefined,
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+) => {
+  if (rangeStart || rangeEnd) {
+    return calculateSlaHoursForDateRange(positions, startStr, endStr, excludedDates, rangeStart, rangeEnd);
+  }
+  return Math.round(
+    calculateMonthlyBreakdown(positions, startStr, endStr, excludedDates).reduce((acc, m) => acc + m.totalHours, 0),
+  );
+};
 
 const getDateKeyInTimezone = (date: Date) => {
   const parts = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
@@ -176,40 +156,6 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
   const e = end && max ? (end < max ? end : max) : (end || max);
   if (s && e && s > e) return null;
   return { start: s, end: e };
-};
-
-const calculateSLAForRange = (positions: any[], startStr: string, endStr: string, rangeStart: Date | null, rangeEnd: Date | null) => {
-  if (!positions || positions.length === 0 || !startStr || !endStr) return 0;
-  const sParts = startStr.split('-').map(Number);
-  const eParts = endStr.split('-').map(Number);
-  const start = new Date(sParts[0], sParts[1] - 1, sParts[2]);
-  const end = new Date(eParts[0], eParts[1] - 1, eParts[2]);
-  const clamped = clampDateRange(start, end, rangeStart, rangeEnd);
-  if (!clamped?.start || !clamped?.end) return 0;
-
-  let current = new Date(clamped.start);
-  const last = new Date(clamped.end);
-  let total = 0;
-  while (current <= last) {
-    const dayCode = JS_DAY_MAP[current.getDay()];
-    positions.forEach((pos: any) => {
-      let dayTotal = 0;
-      if (pos.coverageType === '24hs') dayTotal = 24;
-      else if (pos.coverageType === '12hs_diurno' || pos.coverageType === '12hs_nocturno') dayTotal = 12;
-      else if (pos.coverageType === 'custom' && pos.allowedShiftTypes) {
-        pos.allowedShiftTypes.forEach((shift: any) => {
-          if (shift.days && shift.days.length > 0) {
-            if (shift.days.includes(dayCode)) dayTotal += analyzeShiftComposition(shift.startTime, shift.endTime);
-          } else {
-            dayTotal += analyzeShiftComposition(shift.startTime, shift.endTime);
-          }
-        });
-      }
-      total += dayTotal * (pos.quantity || 1);
-    });
-    current.setDate(current.getDate() + 1);
-  }
-  return Math.round(total);
 };
 
 const getDurationHours = (start: Date, end: Date) => {
@@ -637,7 +583,9 @@ export default function CRMPage() {
           : belongsToEmpresaView(s, empresaId, migracionCompleta);
         if (!slaOk || !s.clientId) return;
         const cid = String(s.clientId).trim();
-        const hrs = rangeMode === 'all' ? calculateMonthlySLA(s.positions, s.startDate, s.endDate) : calculateSLAForRange(s.positions, s.startDate, s.endDate, start, end);
+        const hrs = rangeMode === 'all'
+          ? sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null)
+          : sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, start, end);
         slaByClient[cid] = (slaByClient[cid] || 0) + (Number(hrs) || 0);
       });
 
@@ -671,15 +619,11 @@ export default function CRMPage() {
           const cid = String(t.clientId ?? '').trim();
           if (!cid || !tenantClientIds.has(cid)) return;
         }
-        if (!t.clientId || !t.startTime || !t.endTime || typeof t.startTime.toDate !== 'function') return;
-        if (!validEmp[t.employeeId]) return;
+        if (!t.clientId || !t.startTime || typeof t.startTime.toDate !== 'function') return;
         if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;
 
         const status = String(t.status || '').toLowerCase();
         if (status.includes('cancel') || status.includes('delet')) return;
-
-        const code = String((t.code || t.type || '')).trim().toUpperCase();
-        if (!isWorkingCode(code)) return;
 
         const cid = String(t.clientId).trim();
 
@@ -689,13 +633,16 @@ export default function CRMPage() {
         const realEnd = toDateSafe(t.realEndTime);
 
         if (plannedStart && plannedEnd && (!start || (plannedStart >= start && plannedStart <= (end as Date)))) {
-          let hrs = Number(t.hours) || getDurationHours(plannedStart, plannedEnd);
-          if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-          if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-          plannedByClient[cid] = (plannedByClient[cid] || 0) + hrs;
+          if (shouldBillShiftToObjective(t)) {
+            const hrs = resolveShiftDurationHours(t, SHIFT_CODE_HOURS, { forObjectiveBilling: true });
+            if (hrs > 0) plannedByClient[cid] = (plannedByClient[cid] || 0) + hrs;
+          }
         }
 
         if (realStart && realEnd && (!start || (realStart >= start && realStart <= (end as Date)))) {
+          if (!validEmp[t.employeeId]) return;
+          const code = String((t.code || t.type || '')).trim().toUpperCase();
+          if (!isWorkingCode(code)) return;
           let hrs = getDurationHours(realStart, realEnd);
           if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
           if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
@@ -1527,7 +1474,10 @@ export default function CRMPage() {
   const baseHours = useMemo(() => {
     if (!selectedClient) return 0;
     const { start, end } = getProformaRange();
-    const requested = Math.round((clientServices || []).reduce((acc, s) => acc + calculateSLAForRange(s.positions, s.startDate, s.endDate, start, end), 0));
+    const requested = Math.round((clientServices || []).reduce(
+      (acc, s) => acc + sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, start, end),
+      0,
+    ));
     if (proformaBase === 'requested') return requested;
     if (proformaBase === 'planned') return proformaTotals.planned;
     return proformaTotals.executed;
@@ -1634,6 +1584,9 @@ export default function CRMPage() {
                   );
                 })()}
               </div>
+              <p className="px-5 pb-4 text-[10px] text-slate-400 font-medium leading-snug">
+                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = turnos facturables del mes en Firestore (incluye vacantes; excluye francos, retén y licencias).
+              </p>
             </div>
           }
           renderCardSummary={c => {
@@ -2387,7 +2340,10 @@ export default function CRMPage() {
                           const iconColor = c.type === 'abierto' ? 'bg-amber-100 text-amber-600' : c.type === 'temporal' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500';
                           const cStart = c.startDate ? new Date(c.startDate) : null;
                           const cEnd = c.endDate ? new Date(c.endDate) : null;
-                          const slaInRange = c.type === 'cerrado' ? Math.round((clientServices || []).reduce((acc, s) => acc + calculateSLAForRange(s.positions, s.startDate, s.endDate, cStart, cEnd), 0)) : null;
+                          const slaInRange = c.type === 'cerrado' ? Math.round((clientServices || []).reduce(
+                            (acc, s) => acc + sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, cStart, cEnd),
+                            0,
+                          )) : null;
                           const contractHours = Math.round(Number(c.totalHours) || 0);
                           const ok = slaInRange !== null ? contractHours === slaInRange : false;
                           const isExpanded = editingContractId === c.id;
@@ -2662,7 +2618,7 @@ export default function CRMPage() {
                         <div className="space-y-3">
                           {sortedServices.map((s) => {
                             const positions: any[] = Array.isArray(s.positions) ? s.positions : [];
-                            const slaHs = calculateMonthlySLA(s.positions, s.startDate, s.endDate);
+                            const slaHs = sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null);
                             const isExpanded = expandedServiceId === s.id;
 
                             return (

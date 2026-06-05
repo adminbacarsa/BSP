@@ -74,13 +74,13 @@ function parseYmd(s: string): Date | null {
 }
 
 function totalCoverageHoursOnDay(
-    srv: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions'>,
+    srv: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions' | 'excludedDates'>,
     day: Date,
 ): number {
     if (!srv.startDate || !srv.endDate) return 0;
     let sum = 0;
     for (const pos of srv.positions || []) {
-        const h = hoursForPositionOnDay(pos, day, srv.startDate, srv.endDate);
+        const h = hoursForPositionOnDay(pos, day, srv.startDate, srv.endDate, srv.excludedDates);
         sum += h * (pos.quantity ?? 1);
     }
     return sum;

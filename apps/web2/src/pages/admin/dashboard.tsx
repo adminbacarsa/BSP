@@ -11,24 +11,13 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
+import { calculateSlaHoursForMonth, serviceOverlapsMonth } from '@/lib/servicios/slaHoursCalculator';
 import { auth, db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts';
-
-// ─── FERIADOS NACIONALES ARGENTINA 2025-2026 ─────────────────────────────────
-const AR_HOLIDAYS = new Set([
-  '2025-01-01','2025-02-03','2025-02-04','2025-03-24','2025-04-02','2025-04-18',
-  '2025-05-01','2025-05-25','2025-06-16','2025-06-20','2025-07-09','2025-08-17',
-  '2025-10-12','2025-11-20','2025-12-08','2025-12-25',
-  '2026-01-01','2026-02-16','2026-02-17','2026-03-24','2026-04-02','2026-04-03',
-  '2026-05-01','2026-05-25','2026-06-15','2026-06-20','2026-07-09','2026-08-17',
-  '2026-10-12','2026-11-20','2026-12-08','2026-12-25',
-]);
-
-const isHoliday = (d: Date) => AR_HOLIDAYS.has(d.toISOString().split('T')[0]);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4'];
@@ -240,45 +229,6 @@ function AdminDashboard() {
     if (d.lastUpdated) setLastUpdated(new Date(d.lastUpdated));
   };
 
-  // ── CÁLCULO SLA HORAS MES ACTUAL ─────────────────────────────────────────
-  const calcSlaHours = (positions: any[], startDate: string, endDate: string) => {
-    if (!startDate || !endDate || !positions?.length) return { total: 0, night: 0, holiday: 0 };
-    const JS_DAY = ['D','L','M','X','J','V','S'];
-    let total = 0, night = 0, holiday = 0;
-
-    const s = new Date(startDate + 'T00:00:00');
-    const e = new Date(endDate + 'T23:59:59');
-    // solo el mes actual
-    const mStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const mEnd   = new Date(today.getFullYear(), today.getMonth()+1, 0, 23, 59, 59);
-    const from = s > mStart ? s : mStart;
-    const to   = e < mEnd   ? e : mEnd;
-
-    let cur = new Date(from);
-    while (cur <= to) {
-      const dayCode = JS_DAY[cur.getDay()];
-      const isHol   = isHoliday(cur);
-      positions.forEach((pos: any) => {
-        const qty = pos.quantity || 1;
-        let dayH = 0, nightH = 0;
-        const cov = pos.coverageType || '24hs';
-        if (cov === '24hs')           { dayH = 24; nightH = 9; }  // 21-06 = 9h nocturnas
-        else if (cov === '12hs_diurno')  { dayH = 12; nightH = 0; }
-        else if (cov === '12hs_nocturno') { dayH = 12; nightH = 11; } // 19-06 = 11h nocturnas
-        else if (cov === 'custom') {
-          (pos.allowedShiftTypes || []).forEach((v: any) => {
-            const inDay = !v.days?.length || v.days.includes(dayCode);
-            if (inDay) { dayH += v.hours || 0; }
-          });
-        }
-        total   += dayH * qty;
-        night   += nightH * qty;
-        if (isHol) holiday += dayH * qty;
-      });
-      cur.setDate(cur.getDate() + 1);
-    }
-    return { total, night, holiday };
-  };
 
   // ── FETCH PRINCIPAL (queries en paralelo) ────────────────────────────────
   const fetchAll = async (background = false) => {
@@ -323,19 +273,22 @@ function AdminDashboard() {
         oCount += (data.objetivos || data.objectives || []).length;
       });
 
-      // 2. SERVICIOS SLA
+      // 2. SERVICIOS SLA (mismo motor que Servicios & SLA y CRM)
       let svcCount = 0, totalSlaH = 0, nightSlaH = 0, holSlaH = 0;
       const svcList: {client:string; objective:string; hrs:number}[] = [];
+      const kpiYear = today.getFullYear();
+      const kpiMonth = today.getMonth();
       svcSnap.forEach(doc => {
         const d = doc.data();
         if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         const sd = d.startDate || '', ed = d.endDate || '';
-        if (sd <= monthStr + '-31' && ed >= monthStr + '-01') {
-          svcCount++;
-          const { total, night, holiday } = calcSlaHours(d.positions || [], sd, ed);
-          totalSlaH += total; nightSlaH += night; holSlaH += holiday;
-          if (total > 0) svcList.push({ client: d.clientName || 'Cliente', objective: d.objectiveName || 'Objetivo', hrs: Math.round(total) });
-        }
+        if (!serviceOverlapsMonth(sd, ed, kpiYear, kpiMonth)) return;
+        svcCount++;
+        const { total, night, holiday } = calculateSlaHoursForMonth(
+          d.positions || [], sd, ed, d.excludedDates, kpiYear, kpiMonth,
+        );
+        totalSlaH += total; nightSlaH += night; holSlaH += holiday;
+        if (total > 0) svcList.push({ client: d.clientName || 'Cliente', objective: d.objectiveName || 'Objetivo', hrs: Math.round(total) });
       });
 
       // 3. EMPLEADOS
