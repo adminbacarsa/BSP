@@ -3,25 +3,26 @@ import Head from 'next/head';
 import {
   Shield, Users, Clock, AlertTriangle,
   Briefcase, Activity, Calendar,
-  AlertOctagon, UserCheck, TrendingUp, Zap, MapPin,
-  Building2, BarChart3, PieChart as PieChartIcon, LayoutDashboard, UserX, Target, Filter,
-  Sun, Moon, Star, Coffee, RefreshCw, CheckCircle2, XCircle, Info, ChevronRight
+  UserCheck, TrendingUp, Building2,
+  PieChart as PieChartIcon, LayoutDashboard, UserX,
+  Sun, RefreshCw, CheckCircle2, XCircle, Info,
+  AlertCircle, ArrowRight, CalendarClock, UserMinus,
+  TrendingDown, Layers, Zap
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { calculateSlaHoursForMonth, serviceOverlapsMonth } from '@/lib/servicios/slaHoursCalculator';
-import { auth, db } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
 } from 'recharts';
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4'];
-
 const fmt = (n: number, decimals = 0) => n.toLocaleString('es-AR', { maximumFractionDigits: decimals });
 
 const SectionLabel = ({ label }: { label: string }) => (
@@ -31,7 +32,7 @@ const SectionLabel = ({ label }: { label: string }) => (
   </div>
 );
 
-// ─── RADIAL PROGRESS ────────────────────────────────────────────────────────
+// ─── RADIAL PROGRESS ──────────────────────────────────────────────────────────
 const RadialProgress = ({ pct, color, size = 76 }: { pct: number; color: string; size?: number }) => {
   const r = size / 2 - 7;
   const circ = 2 * Math.PI * r;
@@ -46,68 +47,55 @@ const RadialProgress = ({ pct, color, size = 76 }: { pct: number; color: string;
   );
 };
 
-// ─── KPI CARD ────────────────────────────────────────────────────────────────
-const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, progress }: any) => (
-  <div
-    role="group"
-    aria-label={title}
-    className={`px-4 py-4 rounded-xl border transition-all flex flex-col gap-2.5 ${noData ? 'opacity-55' : ''}`}
-    style={{
-      backgroundColor: 'var(--surf)',
-      borderColor: alert ? 'rgba(239,68,68,0.4)' : 'var(--border)',
-      borderTop: `2px solid var(--company-primary, #6366f1)`,
-    }}>
-    <div className="flex items-start gap-3">
-      <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '22' }}>
-        <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
+// ─── KPI CARD ─────────────────────────────────────────────────────────────────
+const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, progress, href }: any) => {
+  const inner = (
+    <div
+      role="group"
+      aria-label={title}
+      className={`px-4 py-4 rounded-xl border transition-all flex flex-col gap-2.5 ${noData ? 'opacity-55' : ''} ${href ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+      style={{
+        backgroundColor: 'var(--surf)',
+        borderColor: alert ? 'rgba(239,68,68,0.4)' : 'var(--border)',
+        borderTop: `2px solid ${alert ? '#ef4444' : 'var(--company-primary, #6366f1)'}`,
+      }}>
+      <div className="flex items-start gap-3">
+        <div className="p-2 rounded-lg shrink-0 flex items-center justify-center" style={{ background: color + '22' }}>
+          <Icon size={16} color={color} strokeWidth={2.5} aria-hidden="true" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[9px] font-black uppercase tracking-wider leading-tight truncate" style={{ color: 'var(--txt3)' }}>{title}</p>
+          <p className="text-2xl font-black leading-tight" style={{ color: noData ? 'var(--txt3)' : (alert ? '#ef4444' : 'var(--txt)') }}>
+            {noData ? '—' : value}
+          </p>
+          {subtext && <p className="text-[10px] font-medium leading-tight mt-0.5 truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
+        </div>
+        {href && <ArrowRight size={12} style={{ color: 'var(--txt3)', marginTop: 4 }} className="shrink-0"/>}
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[9px] font-black uppercase tracking-wider leading-tight truncate" style={{ color: 'var(--txt3)' }}>{title}</p>
-        <p className="text-2xl font-black leading-tight" style={{ color: noData ? 'var(--txt3)' : 'var(--txt)' }}>
-          {noData ? '—' : value}
-        </p>
-        {subtext && <p className="text-[10px] font-medium leading-tight mt-0.5 truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
-      </div>
-    </div>
-    {progress !== undefined && (
-      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
-        <div className="h-full rounded-full transition-all duration-700"
-          style={{ width: `${Math.min(100, Math.max(0, progress))}%`, backgroundColor: alert ? '#ef4444' : color }}/>
-      </div>
-    )}
-  </div>
-);
-
-// ─── BADGE ───────────────────────────────────────────────────────────────────
-const StatusBadge = ({ ok, label }: { ok: boolean; label: string }) => (
-  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold
-    ${ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
-    {ok ? <CheckCircle2 size={11}/> : <XCircle size={11}/>} {label}
-  </span>
-);
-
-// ─── TOOLTIP ─────────────────────────────────────────────────────────────────
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-xl border px-4 py-3" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', color: 'var(--txt)' }}>
-      <p className="text-xs font-bold mb-1" style={{ color: 'var(--txt3)' }}>{label}</p>
-      <p className="text-lg font-black" style={{ color: 'var(--company-primary, #6366f1)' }}>{payload[0].value}</p>
+      {progress !== undefined && (
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+          <div className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${Math.min(100, Math.max(0, progress))}%`, backgroundColor: alert ? '#ef4444' : color }}/>
+        </div>
+      )}
     </div>
   );
+  if (href) return <a href={href} className="block no-underline">{inner}</a>;
+  return inner;
 };
 
-// ─── TIPOS ───────────────────────────────────────────────────────────────────
+// ─── TIPOS ────────────────────────────────────────────────────────────────────
 interface LicenciaRow { empName: string; reason: string; from: string; to: string; }
+interface RiesgoRow { name: string; client: string; vacPct: number; absPct: number; }
+interface ClientHrs { name: string; hrs: number; pct: number; }
 
-// ─── COMPONENT ───────────────────────────────────────────────────────────────
-const CACHE_KEY_PREFIX = 'dashboard_cache_v3';
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+// ─── CACHE ────────────────────────────────────────────────────────────────────
+const CACHE_KEY_PREFIX = 'dashboard_cache_v4';
+const CACHE_TTL = 5 * 60 * 1000;
 
 function cacheKeyForEmpresa(empresaId: string) {
   return `${CACHE_KEY_PREFIX}_${empresaId || 'legacy'}`;
 }
-
 function saveCache(empresaId: string, data: Record<string, any>) {
   try { localStorage.setItem(cacheKeyForEmpresa(empresaId), JSON.stringify({ ts: Date.now(), data })); } catch {}
 }
@@ -120,58 +108,107 @@ function loadCache(empresaId: string): Record<string, any> | null {
   } catch { return null; }
 }
 
+// ─── COMPONENT ────────────────────────────────────────────────────────────────
 function AdminDashboard() {
   const { empresaId, empresa, loadingEmpresa } = useEmpresa();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
+
   const [loading, setLoading]           = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshKey, setRefreshKey]     = useState(0);
   const [lastUpdated, setLastUpdated]   = useState<Date | null>(null);
   const [fromCache, setFromCache]       = useState(false);
 
-  // Estructura
-  const [clientsCount, setClientsCount]         = useState(0);
-  const [objectivesCount, setObjectivesCount]   = useState(0);
+  // ── Estructura
+  const [clientsCount, setClientsCount]               = useState(0);
+  const [objectivesCount, setObjectivesCount]         = useState(0);
   const [activeServicesCount, setActiveServicesCount] = useState(0);
-  const [slaTotalHrs, setSlaTotalHrs]           = useState(0);
-  const [slaNightHrs, setSlaNightHrs]           = useState(0);
-  const [slaHolidayHrs, setSlaHolidayHrs]       = useState(0);
-  const [activeServicesList, setActiveServicesList] = useState<{client:string; objective:string; hrs:number}[]>([]);
+  const [slaTotalHrs, setSlaTotalHrs]                 = useState(0);
+  const [slaNightHrs, setSlaNightHrs]                 = useState(0);
+  const [slaHolidayHrs, setSlaHolidayHrs]             = useState(0);
+  const [slaWeekendHrs, setSlaWeekendHrs]             = useState(0);
+  const [activeServicesList, setActiveServicesList]   = useState<{client:string; objective:string; hrs:number}[]>([]);
 
-  // Personal
+  // ── Personal
   const [totalEmployees, setTotalEmployees]     = useState(0);
   const [enServicioHoy, setEnServicioHoy]       = useState(0);
   const [presentesHoy, setPresentesHoy]         = useState(0);
   const [enServicioActivo, setEnServicioActivo] = useState(0);
   const [francoHoy, setFrancoHoy]               = useState(0);
   const [vacantesHoy, setVacantesHoy]           = useState(0);
-
-  // Planificación
-  const [hasPlanificacion, setHasPlanificacion] = useState(false);
-  const [coveragePct, setCoveragePct]           = useState(0);
-  const [absentHoy, setAbsentHoy]               = useState(0);
+  const [ausentesHoy, setAusentesHoy]           = useState(0);
   const [novedadesHoy, setNovedadesHoy]         = useState(0);
 
-  // KPI: horas promedio por vigilador
+  // ── Planificación
+  const [hasPlanificacion, setHasPlanificacion] = useState(false);
+  const [coveragePct, setCoveragePct]           = useState(0);
+
+  // ── KPI horas promedio
   const [avgHrsVigilador, setAvgHrsVigilador]           = useState(0);
-  const [monthTotalPlannedHrs, setMonthTotalPlannedHrs] = useState(0);
   const [vigiladoresConTurno, setVigiladoresConTurno]   = useState(0);
 
-  // Licencias
-  const [licencias, setLicencias]               = useState<LicenciaRow[]>([]);
+  // ── Licencias
+  const [licencias, setLicencias]                 = useState<LicenciaRow[]>([]);
   const [licenciasByReason, setLicenciasByReason] = useState<{name:string; value:number; color:string}[]>([]);
 
-  // Ausencias históricas
-  const [absenceChart, setAbsenceChart]         = useState<{name:string; value:number}[]>([]);
+  // ── Ausencias históricas
+  const [absenceChart, setAbsenceChart] = useState<{name:string; value:number}[]>([]);
 
-  // Distribución objetivos
-  const [distChart, setDistChart]               = useState<{name:string; value:number}[]>([]);
+  // ── Distribución objetivos
+  const [distChart, setDistChart] = useState<{name:string; value:number}[]>([]);
 
-  const today = new Date();
+  // ── NUEVOS: Cumplimiento real
+  const [realHoursMonth, setRealHoursMonth]         = useState(0);
+  const [plannedHrsMonth, setPlannedHrsMonth]       = useState(0);
+
+  // ── NUEVOS: Servicios en riesgo
+  const [serviciosEnRiesgo, setServiciosEnRiesgo] = useState<RiesgoRow[]>([]);
+
+  // ── NUEVOS: Gestión comercial
+  const [concentracionPct, setConcentracionPct] = useState(0);
+  const [topClientes, setTopClientes]           = useState<ClientHrs[]>([]);
+  const [serviciosPorVencer, setServiciosPorVencer] = useState<{client:string; objective:string; dias:number}[]>([]);
+
+  // ── NUEVOS: Personal estratégico
+  const [empleadosSinTurno, setEmpleadosSinTurno] = useState(0);
+  const [tasaAusentismo30, setTasaAusentismo30]   = useState(0);
+
+  const today    = new Date();
   const todayStr = today.toISOString().split('T')[0];
-  const monthStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
 
-  // Carga caché al montar y arranca fetch; re-corre cuando cambia empresaId
+  // ── SEMÁFORO (derivado)
+  const semaforo = useMemo((): 'verde' | 'amarillo' | 'rojo' | 'gris' => {
+    if (!hasPlanificacion) return 'gris';
+    const cumplimientoReal = plannedHrsMonth > 0 ? (realHoursMonth / plannedHrsMonth) * 100 : 100;
+    if (coveragePct < 90 || vacantesHoy > 3 || cumplimientoReal < 85) return 'rojo';
+    if (coveragePct < 95 || vacantesHoy > 0 || serviciosEnRiesgo.length > 0 || serviciosPorVencer.filter(s => s.dias <= 15).length > 0) return 'amarillo';
+    return 'verde';
+  }, [hasPlanificacion, coveragePct, vacantesHoy, serviciosEnRiesgo, serviciosPorVencer, realHoursMonth, plannedHrsMonth]);
+
+  // ── ALERTAS CRÍTICAS (derivado)
+  const alertasCriticas = useMemo(() => {
+    const list: { type: 'error' | 'warning' | 'info'; msg: string; href?: string }[] = [];
+    if (vacantesHoy > 0)
+      list.push({ type: 'error', msg: `${vacantesHoy} puesto${vacantesHoy > 1 ? 's' : ''} vacante${vacantesHoy > 1 ? 's' : ''} sin cubrir hoy`, href: '/admin/planificacion' });
+    if (novedadesHoy > 0)
+      list.push({ type: 'warning', msg: `${novedadesHoy} novedad${novedadesHoy > 1 ? 'es' : ''} registrada${novedadesHoy > 1 ? 's' : ''} hoy`, href: '/admin/operaciones' });
+    if (serviciosPorVencer.filter(s => s.dias <= 15).length > 0) {
+      const n = serviciosPorVencer.filter(s => s.dias <= 15).length;
+      list.push({ type: 'error', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 15 días`, href: '/admin/servicios' });
+    } else if (serviciosPorVencer.filter(s => s.dias <= 30).length > 0) {
+      const n = serviciosPorVencer.filter(s => s.dias <= 30).length;
+      list.push({ type: 'warning', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 30 días`, href: '/admin/servicios' });
+    }
+    if (serviciosEnRiesgo.length > 0)
+      list.push({ type: 'warning', msg: `${serviciosEnRiesgo.length} servicio${serviciosEnRiesgo.length > 1 ? 's' : ''} con cobertura baja este mes`, href: '/admin/planificacion' });
+    if (empleadosSinTurno > 0)
+      list.push({ type: 'info', msg: `${empleadosSinTurno} empleado${empleadosSinTurno > 1 ? 's' : ''} sin turno asignado este mes`, href: '/admin/empleados' });
+    if (concentracionPct >= 70)
+      list.push({ type: 'warning', msg: `Concentración de riesgo: top 3 clientes representan el ${concentracionPct}% de las horas`, href: '/admin/crm' });
+    return list;
+  }, [vacantesHoy, novedadesHoy, serviciosPorVencer, serviciosEnRiesgo, empleadosSinTurno, concentracionPct]);
+
+  // ─── LIFECYCLE ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (loadingEmpresa || !empresaId) return;
     const cached = loadCache(empresaId);
@@ -187,14 +224,12 @@ function AdminDashboard() {
     }
   }, [loadingEmpresa, empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refresh manual o por refreshKey
   useEffect(() => {
     if (refreshKey === 0 || !empresaId) return;
     setIsRefreshing(true);
     fetchAll(true);
   }, [refreshKey, empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh cada 5 minutos en segundo plano
   useEffect(() => {
     if (!empresaId) return;
     const t = setInterval(() => { setIsRefreshing(true); fetchAll(true); }, CACHE_TTL);
@@ -208,6 +243,7 @@ function AdminDashboard() {
     setSlaTotalHrs(d.slaTotalHrs ?? 0);
     setSlaNightHrs(d.slaNightHrs ?? 0);
     setSlaHolidayHrs(d.slaHolidayHrs ?? 0);
+    setSlaWeekendHrs(d.slaWeekendHrs ?? 0);
     setActiveServicesList(d.activeServicesList ?? []);
     setTotalEmployees(d.totalEmployees ?? 0);
     setEnServicioHoy(d.enServicioHoy ?? 0);
@@ -215,31 +251,37 @@ function AdminDashboard() {
     setEnServicioActivo(d.enServicioActivo ?? 0);
     setFrancoHoy(d.francoHoy ?? 0);
     setVacantesHoy(d.vacantesHoy ?? 0);
+    setAusentesHoy(d.ausentesHoy ?? 0);
+    setNovedadesHoy(d.novedadesHoy ?? 0);
     setHasPlanificacion(d.hasPlanificacion ?? false);
     setCoveragePct(d.coveragePct ?? 0);
-    setAbsentHoy(d.absentHoy ?? 0);
-    setNovedadesHoy(d.novedadesHoy ?? 0);
     setAvgHrsVigilador(d.avgHrsVigilador ?? 0);
-    setMonthTotalPlannedHrs(d.monthTotalPlannedHrs ?? 0);
     setVigiladoresConTurno(d.vigiladoresConTurno ?? 0);
     setLicencias(d.licencias ?? []);
     setLicenciasByReason(d.licenciasByReason ?? []);
     setAbsenceChart(d.absenceChart ?? []);
     setDistChart(d.distChart ?? []);
+    setRealHoursMonth(d.realHoursMonth ?? 0);
+    setPlannedHrsMonth(d.plannedHrsMonth ?? 0);
+    setServiciosEnRiesgo(d.serviciosEnRiesgo ?? []);
+    setConcentracionPct(d.concentracionPct ?? 0);
+    setTopClientes(d.topClientes ?? []);
+    setServiciosPorVencer(d.serviciosPorVencer ?? []);
+    setEmpleadosSinTurno(d.empleadosSinTurno ?? 0);
+    setTasaAusentismo30(d.tasaAusentismo30 ?? 0);
     if (d.lastUpdated) setLastUpdated(new Date(d.lastUpdated));
   };
 
-
-  // ── FETCH PRINCIPAL (queries en paralelo) ────────────────────────────────
+  // ─── FETCH PRINCIPAL ──────────────────────────────────────────────────────
   const fetchAll = async (background = false) => {
     if (!empresaId) return;
     if (!background) setLoading(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-      const todayStart = new Date(today); todayStart.setHours(0,0,0,0);
-      const todayEnd   = new Date(today); todayEnd.setHours(23,59,59,999);
+      const todayStart = new Date(today); todayStart.setHours(0, 0, 0, 0);
+      const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      const monthEnd   = new Date(today.getFullYear(), today.getMonth()+1, 0, 23, 59, 59);
+      const monthEnd   = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
 
       const clientsQ = scopeEmpresa
         ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
@@ -254,14 +296,17 @@ function AdminDashboard() {
         ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId))
         : collection(db, 'ausencias');
 
-      // Todas las queries en paralelo
       const [clientsSnap, svcSnap, empSnap, ausSnap, turnosSnap, monthTurnosSnap] = await Promise.all([
         getDocs(clientsQ),
         getDocs(svcQ),
         getDocs(empQ),
         getDocs(ausQ),
-        getDocs(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(todayStart)), where('startTime', '<=', Timestamp.fromDate(todayEnd)))),
-        getDocs(query(collection(db, 'turnos'), where('startTime', '>=', Timestamp.fromDate(monthStart)), where('startTime', '<=', Timestamp.fromDate(monthEnd)))),
+        getDocs(query(collection(db, 'turnos'),
+          where('startTime', '>=', Timestamp.fromDate(todayStart)),
+          where('startTime', '<=', Timestamp.fromDate(todayEnd)))),
+        getDocs(query(collection(db, 'turnos'),
+          where('startTime', '>=', Timestamp.fromDate(monthStart)),
+          where('startTime', '<=', Timestamp.fromDate(monthEnd)))),
       ]);
 
       // 1. CLIENTES
@@ -273,21 +318,20 @@ function AdminDashboard() {
         oCount += (data.objetivos || data.objectives || []).length;
       });
 
-      // 2. SERVICIOS SLA (mismo motor que Servicios & SLA y CRM)
-      let svcCount = 0, totalSlaH = 0, nightSlaH = 0, holSlaH = 0;
+      // 2. SERVICIOS SLA
+      let svcCount = 0, totalSlaH = 0, nightSlaH = 0, holSlaH = 0, wkndSlaH = 0;
       const svcList: {client:string; objective:string; hrs:number}[] = [];
-      const kpiYear = today.getFullYear();
-      const kpiMonth = today.getMonth();
+      const kpiYear = today.getFullYear(), kpiMonth = today.getMonth();
       svcSnap.forEach(doc => {
         const d = doc.data();
         if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         const sd = d.startDate || '', ed = d.endDate || '';
         if (!serviceOverlapsMonth(sd, ed, kpiYear, kpiMonth)) return;
         svcCount++;
-        const { total, night, holiday } = calculateSlaHoursForMonth(
+        const { total, night, holiday, weekend } = calculateSlaHoursForMonth(
           d.positions || [], sd, ed, d.excludedDates, kpiYear, kpiMonth,
         );
-        totalSlaH += total; nightSlaH += night; holSlaH += holiday;
+        totalSlaH += total; nightSlaH += night; holSlaH += holiday; wkndSlaH += weekend;
         if (total > 0) svcList.push({ client: d.clientName || 'Cliente', objective: d.objectiveName || 'Objetivo', hrs: Math.round(total) });
       });
 
@@ -333,13 +377,13 @@ function AdminDashboard() {
 
       // 6. TURNOS HOY
       const NON_SERVICE_TODAY = new Set(['F','FF','V','L','A','E','AA','AUS']);
-      let activeGuards = new Set<string>(), francoGuards = new Set<string>();
+      const activeGuards = new Set<string>(), francoGuards = new Set<string>();
+      const presentesSet = new Set<string>(), enServicioActivoSet = new Set<string>();
       let vacantes = 0, absent = 0, novedades = 0, totalTurnos = 0;
-      let presentesHoy = new Set<string>(), enServicioActivo = new Set<string>();
       turnosSnap.forEach(doc => {
         const s = doc.data();
         if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
-        if (s.status === 'Canceled') return;
+        if (s.status === 'Canceled' || s.status === 'CANCELED') return;
         if (s.employeeId && s.employeeId !== 'VACANTE' && !empMap[s.employeeId]) return;
         totalTurnos++;
         if (!s.employeeId || s.employeeId === 'VACANTE') { vacantes++; return; }
@@ -348,51 +392,135 @@ function AdminDashboard() {
         if (!NON_SERVICE_TODAY.has(code)) activeGuards.add(s.employeeId);
         if (s.status === 'ABSENT') absent++;
         if (s.hasNovedad) novedades++;
-        // Presentes reales (marcaron check-in)
-        if (s.isPresent || s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isCompleted) presentesHoy.add(s.employeeId);
-        // En servicio activo (presentes que aún no completaron)
-        if ((s.isPresent || s.status === 'PRESENT') && s.status !== 'COMPLETED' && !s.isCompleted) enServicioActivo.add(s.employeeId);
+        if (s.isPresent || s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isCompleted) presentesSet.add(s.employeeId);
+        if ((s.isPresent || s.status === 'PRESENT') && s.status !== 'COMPLETED' && !s.isCompleted) enServicioActivoSet.add(s.employeeId);
       });
 
-      // 7. HORAS PLANIFICADAS MES
+      // 7. HORAS PLANIFICADAS Y REALES DEL MES
       const SHIFT_HRS: Record<string,number> = { M:8,T:8,N:8,D12:12,N12:12,FT:8 };
       const NON_WORKING = new Set(['F','FF','V','L','A','E','AA','AUS']);
-      let mTotalHrs = 0;
+      let mTotalHrs = 0, mRealHrs = 0;
       const empHrsMap: Record<string,number> = {};
+
+      // Para servicios en riesgo: agrupar por objetivo
+      const objRiesgoMap: Record<string, {client:string;name:string;total:number;vacantes:number;ausentes:number}> = {};
+
       monthTurnosSnap.forEach(doc => {
         const s = doc.data();
         if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
-        if (s.status === 'Canceled') return;
+        if (s.status === 'Canceled' || s.status === 'CANCELED') return;
+
+        // Servicios en riesgo (agrupa todos, incluyendo vacantes)
+        const objKey = s.objectiveId || s.objectiveName || 'unknown';
+        if (objKey !== 'unknown') {
+          if (!objRiesgoMap[objKey]) objRiesgoMap[objKey] = {
+            client: s.clientName || 'Cliente',
+            name: s.objectiveName || 'Objetivo',
+            total: 0, vacantes: 0, ausentes: 0,
+          };
+          objRiesgoMap[objKey].total++;
+          if (!s.employeeId || s.employeeId === 'VACANTE') objRiesgoMap[objKey].vacantes++;
+          if (s.status === 'ABSENT') objRiesgoMap[objKey].ausentes++;
+        }
+
+        // Horas planificadas (solo turnos con empleado asignado)
         if (!s.employeeId || s.employeeId === 'VACANTE' || !empMap[s.employeeId]) return;
         const code = (s.code || s.type || '').toString().toUpperCase();
         if (NON_WORKING.has(code)) return;
         const hrs = Number(s.hours) || SHIFT_HRS[code] || 8;
         mTotalHrs += hrs;
         empHrsMap[s.employeeId] = (empHrsMap[s.employeeId] || 0) + hrs;
+
+        // Horas reales (turnos completados con timestamps)
+        const rStart = s.realStartTime?.seconds
+          ? new Date(s.realStartTime.seconds * 1000)
+          : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds * 1000) : null;
+        const rEnd = s.realEndTime?.seconds
+          ? new Date(s.realEndTime.seconds * 1000)
+          : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds * 1000) : null;
+        if (rStart && rEnd && rEnd > rStart) {
+          mRealHrs += (rEnd.getTime() - rStart.getTime()) / 3600000;
+        }
       });
 
+      // 8. SERVICIOS EN RIESGO (>3% vacantes+ausencias, mínimo 5 turnos)
+      const riesgoList = Object.values(objRiesgoMap)
+        .filter(o => o.total >= 5 && (o.vacantes + o.ausentes) / o.total > 0.03)
+        .map(o => ({
+          name: o.name.length > 22 ? o.name.slice(0, 22) + '…' : o.name,
+          client: o.client.length > 18 ? o.client.slice(0, 18) + '…' : o.client,
+          vacPct: Math.round((o.vacantes / o.total) * 100),
+          absPct: Math.round((o.ausentes / o.total) * 100),
+        }))
+        .sort((a,b) => (b.vacPct + b.absPct) - (a.vacPct + a.absPct))
+        .slice(0, 5);
+
+      // 9. CONCENTRACIÓN DE RIESGO (por cliente)
+      const clientHrsAgg: Record<string, number> = {};
+      svcList.forEach(s => { clientHrsAgg[s.client] = (clientHrsAgg[s.client] || 0) + s.hrs; });
+      const clientHrsSorted = Object.entries(clientHrsAgg).sort((a,b) => b[1] - a[1]);
+      const top3Total = clientHrsSorted.slice(0, 3).reduce((a,[,v]) => a + v, 0);
+      const concPct = totalSlaH > 0 ? Math.round((top3Total / totalSlaH) * 100) : 0;
+      const topClientsArr: ClientHrs[] = clientHrsSorted.slice(0, 5).map(([name, hrs]) => ({
+        name: name.length > 22 ? name.slice(0, 22) + '…' : name,
+        hrs: Math.round(hrs),
+        pct: totalSlaH > 0 ? Math.round((hrs / totalSlaH) * 100) : 0,
+      }));
+
+      // 10. SERVICIOS POR VENCER (próximos 60 días)
+      const porVencerList: {client:string; objective:string; dias:number}[] = [];
+      svcSnap.forEach(doc => {
+        const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
+        if (!d.endDate) return;
+        const end = new Date(d.endDate + 'T23:59:59');
+        const dias = Math.ceil((end.getTime() - today.getTime()) / 86400000);
+        if (dias >= 0 && dias <= 60) {
+          porVencerList.push({
+            client: d.clientName || 'Cliente',
+            objective: d.objectiveName || 'Objetivo',
+            dias,
+          });
+        }
+      });
+      porVencerList.sort((a,b) => a.dias - b.dias);
+
+      // 11. EMPLEADOS SIN TURNO ESTE MES
+      const sinTurnoCount = Math.max(0, totalEmp - Object.keys(empHrsMap).length);
+
+      // 12. TASA AUSENTISMO 30 DÍAS
+      const totalAbs30 = Object.values(absMap30).reduce((a,b) => a + b, 0);
+      const tasaAus30 = totalEmp > 0 ? parseFloat((totalAbs30 / totalEmp * 100).toFixed(1)) : 0;
+
       const hasPlan = totalTurnos > 0 && totalEmp > 0;
-      const vigCount = Object.keys(empHrsMap).length;
       const now = new Date();
 
-      // Construir objeto de estado completo
       const newState = {
         clientsCount: cCount, objectivesCount: oCount,
         activeServicesCount: svcCount,
-        slaTotalHrs: Math.round(totalSlaH), slaNightHrs: Math.round(nightSlaH), slaHolidayHrs: Math.round(holSlaH),
-        activeServicesList: svcList.sort((a,b) => b.hrs - a.hrs).slice(0,6),
+        slaTotalHrs: Math.round(totalSlaH), slaNightHrs: Math.round(nightSlaH), slaHolidayHrs: Math.round(holSlaH), slaWeekendHrs: Math.round(wkndSlaH),
+        activeServicesList: svcList.sort((a,b) => b.hrs - a.hrs),
         totalEmployees: totalEmp,
         enServicioHoy: activeGuards.size, francoHoy: francoGuards.size, vacantesHoy: vacantes,
-        presentesHoy: presentesHoy.size, enServicioActivo: enServicioActivo.size,
+        presentesHoy: presentesSet.size, enServicioActivo: enServicioActivoSet.size,
+        ausentesHoy: absent, novedadesHoy: novedades,
         hasPlanificacion: hasPlan,
         coveragePct: hasPlan && totalTurnos > 0 ? ((totalTurnos - vacantes - absent) / totalTurnos) * 100 : 0,
-        absentHoy: absent, novedadesHoy: novedades,
         avgHrsVigilador: totalEmp > 0 ? Math.round(totalSlaH / totalEmp) : 0,
-        monthTotalPlannedHrs: Math.round(totalSlaH), vigiladoresConTurno: totalEmp,
+        vigiladoresConTurno: totalEmp,
         licencias: licRows.slice(0, 8),
         licenciasByReason: Object.entries(licReasonMap).map(([name, value], i) => ({ name, value, color: COLORS[i % COLORS.length] })).sort((a,b) => b.value - a.value),
-        absenceChart: Object.entries(absMap30).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0,6),
-        distChart: Object.entries(distMap).map(([name, value]) => ({ name: name.length > 16 ? name.slice(0,16)+'…' : name, value })).sort((a,b) => b.value - a.value).slice(0,6),
+        absenceChart: Object.entries(absMap30).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 6),
+        distChart: Object.entries(distMap).map(([name, value]) => ({ name: name.length > 16 ? name.slice(0,16)+'…' : name, value })).sort((a,b) => b.value - a.value).slice(0, 6),
+        // Nuevos
+        realHoursMonth: Math.round(mRealHrs),
+        plannedHrsMonth: Math.round(mTotalHrs),
+        serviciosEnRiesgo: riesgoList,
+        concentracionPct: concPct,
+        topClientes: topClientsArr,
+        serviciosPorVencer: porVencerList.slice(0, 6),
+        empleadosSinTurno: sinTurnoCount,
+        tasaAusentismo30: tasaAus30,
         lastUpdated: now.toISOString(),
       };
 
@@ -407,10 +535,19 @@ function AdminDashboard() {
     }
   };
 
-  // ── DERIVADOS ─────────────────────────────────────────────────────────────
-  const francoCount = francoHoy;
-  const normalHrs   = Math.max(0, slaTotalHrs - slaNightHrs - slaHolidayHrs);
+  // ── DERIVADOS
+  const normalHrs = Math.max(0, slaTotalHrs - slaNightHrs - slaHolidayHrs);
+  const cumplimientoRealPct = plannedHrsMonth > 0 ? Math.min(100, (realHoursMonth / plannedHrsMonth) * 100) : 0;
+  const brechaPct = plannedHrsMonth > 0 ? Math.max(0, ((plannedHrsMonth - realHoursMonth) / plannedHrsMonth) * 100) : 0;
 
+  const semaforoConfig = {
+    verde:    { label: 'OPERACIÓN NORMAL',    color: '#10b981', bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.3)' },
+    amarillo: { label: 'ATENCIÓN REQUERIDA',  color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.3)' },
+    rojo:     { label: 'SITUACIÓN CRÍTICA',   color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.3)' },
+    gris:     { label: 'SIN DATOS',           color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.3)' },
+  }[semaforo];
+
+  // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <DashboardLayout>
       <Head><title>Panel de Control | CronoApp</title></Head>
@@ -470,22 +607,71 @@ function AdminDashboard() {
           </div>
         ) : (
           <>
-            {/* ── SECCIÓN 1: ESTRUCTURA OPERATIVA ─────────────────────────── */}
+            {/* ══ BLOQUE 1: SEMÁFORO EJECUTIVO ══════════════════════════════ */}
+            <SectionLabel label="Estado de la Operación" />
+            <div className="mb-6 rounded-xl border p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:items-center"
+              style={{ backgroundColor: semaforoConfig.bg, borderColor: semaforoConfig.border, borderLeft: `4px solid ${semaforoConfig.color}` }}>
+
+              {/* Estado */}
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: semaforoConfig.color + '22' }}>
+                  {semaforo === 'verde' && <CheckCircle2 size={20} color={semaforoConfig.color}/>}
+                  {semaforo === 'amarillo' && <AlertTriangle size={20} color={semaforoConfig.color}/>}
+                  {semaforo === 'rojo' && <AlertCircle size={20} color={semaforoConfig.color}/>}
+                  {semaforo === 'gris' && <Info size={20} color={semaforoConfig.color}/>}
+                </div>
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: semaforoConfig.color }}>ESTADO GENERAL</p>
+                  <p className="text-base font-black leading-tight" style={{ color: semaforoConfig.color }}>{semaforoConfig.label}</p>
+                </div>
+              </div>
+
+              {/* Divisor */}
+              <div className="hidden sm:block w-px self-stretch" style={{ backgroundColor: semaforoConfig.border }}/>
+              <div className="sm:hidden h-px" style={{ backgroundColor: semaforoConfig.border }}/>
+
+              {/* Alertas */}
+              <div className="flex-1 min-w-0">
+                {alertasCriticas.length === 0 ? (
+                  <p className="text-sm font-bold text-emerald-700">Sin alertas activas — operación dentro de parámetros</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {alertasCriticas.map((a, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        {a.type === 'error'   && <AlertCircle size={13} className="text-red-500 shrink-0"/>}
+                        {a.type === 'warning' && <AlertTriangle size={13} className="text-amber-500 shrink-0"/>}
+                        {a.type === 'info'    && <Info size={13} className="text-blue-500 shrink-0"/>}
+                        <span className="text-xs font-semibold" style={{ color: 'var(--txt)' }}>{a.msg}</span>
+                        {a.href && (
+                          <a href={a.href} className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline"
+                            style={{ color: 'var(--company-primary,#6366f1)' }}>
+                            Ver <ArrowRight size={10}/>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ══ BLOQUE 2: ESTRUCTURA OPERATIVA ════════════════════════════ */}
             <SectionLabel label="Estructura Operativa" />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
               <KpiCard title="Clientes Activos" value={clientsCount}
                 icon={Building2} color="#6366f1"
                 subtext={`${objectivesCount} objetivos`}
-                noData={clientsCount === 0}/>
+                noData={clientsCount === 0} href="/admin/crm"/>
               <KpiCard title="Servicios Activos" value={activeServicesCount}
                 icon={Briefcase} color="#0ea5e9"
                 subtext={today.toLocaleString('es-AR',{month:'long',year:'numeric'})}
-                noData={activeServicesCount === 0}/>
+                noData={activeServicesCount === 0} href="/admin/servicios"/>
               <KpiCard title="Empleados en Nómina" value={totalEmployees}
                 icon={Users} color="#10b981"
                 subtext={totalEmployees > 0 ? `${enServicioHoy} asignados hoy` : 'Sin personal'}
                 progress={totalEmployees > 0 ? (enServicioHoy / totalEmployees) * 100 : undefined}
-                noData={totalEmployees === 0}/>
+                noData={totalEmployees === 0} href="/admin/empleados"/>
               <KpiCard title="Horas SLA del Mes" value={fmt(slaTotalHrs)}
                 icon={Clock} color="#8b5cf6"
                 subtext={activeServicesCount > 0 ? `${activeServicesCount} servicio${activeServicesCount>1?'s':''}` : 'Sin servicios'}
@@ -498,50 +684,72 @@ function AdminDashboard() {
                 noData={avgHrsVigilador === 0}/>
             </div>
 
-            {/* ── SECCIÓN 2: ESTADO HOY ─────────────────────────────────── */}
-            <SectionLabel label="Estado del Día" />
+            {/* ══ BLOQUE 3: PERSONAL HOY ═════════════════════════════════════ */}
+            <SectionLabel label="Personal Hoy" />
             {!hasPlanificacion && (
               <div className="mb-4 flex items-center gap-3 p-3.5 rounded-xl border"
                 style={{ backgroundColor: 'var(--surf)', borderColor: 'rgba(245,158,11,0.35)', borderLeft: '3px solid #f59e0b' }}>
                 <Info size={15} className="text-amber-500 shrink-0"/>
-                <p className="text-sm font-bold text-amber-600">Sin planificación cargada para hoy — los indicadores operativos no están disponibles.</p>
+                <p className="text-sm font-bold text-amber-600">Sin planificación cargada para hoy.</p>
               </div>
             )}
-            {hasPlanificacion && vacantesHoy > 0 && (
-              <div className="mb-4 flex items-center gap-3 p-3.5 rounded-xl border"
-                style={{ backgroundColor: 'var(--surf)', borderColor: 'rgba(239,68,68,0.35)', borderLeft: '3px solid #ef4444' }}>
-                <AlertTriangle size={15} className="text-red-500 shrink-0"/>
-                <p className="text-sm font-bold text-red-600">{vacantesHoy} puesto{vacantesHoy>1?'s':''} vacante{vacantesHoy>1?'s':''} sin cubrir hoy</p>
-              </div>
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              <KpiCard title="En Servicio" value={enServicioHoy}
+                icon={Activity} color="#6366f1"
+                subtext={`de ${totalEmployees} en nómina`}
+                progress={totalEmployees > 0 ? (enServicioHoy / totalEmployees) * 100 : undefined}
+                noData={!hasPlanificacion} href="/admin/operaciones"/>
+              <KpiCard title="Presentes" value={presentesHoy}
+                icon={UserCheck} color="#10b981"
+                subtext={hasPlanificacion ? `de ${enServicioHoy} planificados` : 'Sin plan'}
+                progress={hasPlanificacion && enServicioHoy > 0 ? (presentesHoy / enServicioHoy) * 100 : undefined}
+                noData={!hasPlanificacion}/>
+              <KpiCard title="Ausentes" value={ausentesHoy}
+                icon={UserMinus} color="#ef4444"
+                subtext="confirmados hoy"
+                alert={ausentesHoy > 0}
+                noData={!hasPlanificacion}/>
+              <KpiCard title="De Franco" value={francoHoy}
+                icon={Sun} color="#06b6d4"
+                subtext="según planificación"
+                noData={!hasPlanificacion}/>
+              <KpiCard title="Vacantes" value={vacantesHoy}
+                icon={AlertTriangle} color="#f59e0b"
+                subtext="puestos sin cubrir"
+                alert={vacantesHoy > 0}
+                noData={!hasPlanificacion} href="/admin/planificacion"/>
+              <KpiCard title="Novedades" value={novedadesHoy}
+                icon={Zap} color="#8b5cf6"
+                subtext="registradas hoy"
+                alert={novedadesHoy > 0}
+                noData={!hasPlanificacion} href="/admin/operaciones"/>
+            </div>
 
-              {/* ── Cumplimiento — card grande, 2 columnas ── */}
-              <div
-                className={`sm:col-span-2 lg:col-span-2 px-5 py-5 rounded-xl border transition-all ${!hasPlanificacion ? 'opacity-55' : ''}`}
-                style={{
-                  backgroundColor: 'var(--surf)',
-                  borderColor: hasPlanificacion && coveragePct < 95 ? 'rgba(239,68,68,0.4)' : 'var(--border)',
-                  borderTop: '2px solid var(--company-primary, #6366f1)',
-                }}>
+            {/* ══ BLOQUE 4: CUMPLIMIENTO OPERATIVO ══════════════════════════ */}
+            <SectionLabel label="Cumplimiento Operativo" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+              {/* Cobertura hoy + horas reales vs planificadas */}
+              <div className="rounded-xl border p-5 flex flex-col gap-4"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
+
+                {/* Cobertura hoy */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>CUMPLIMIENTO HOY</p>
+                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>COBERTURA HOY</p>
                     <p className="text-4xl font-black leading-tight mt-1" style={{
                       color: !hasPlanificacion ? 'var(--txt3)' : coveragePct >= 95 ? '#10b981' : '#ef4444'
                     }}>
                       {hasPlanificacion ? `${coveragePct.toFixed(1)}%` : '—'}
                     </p>
                     <p className="text-[10px] font-medium mt-1" style={{ color: 'var(--txt3)' }}>
-                      {!hasPlanificacion
-                        ? 'Sin planificación'
-                        : coveragePct >= 95
-                          ? '✓ Dentro de parámetros'
-                          : '⚠ Por debajo del umbral (95%)'}
+                      {!hasPlanificacion ? 'Sin planificación'
+                        : coveragePct >= 95 ? '✓ Dentro de parámetros'
+                        : '⚠ Por debajo del umbral (95%)'}
                     </p>
                     {hasPlanificacion && (
-                      <div className="mt-3">
-                        <div className="flex justify-between text-[10px] font-bold mb-1.5" style={{ color: 'var(--txt3)' }}>
+                      <div className="mt-2">
+                        <div className="flex justify-between text-[10px] font-bold mb-1" style={{ color: 'var(--txt3)' }}>
                           <span>{presentesHoy} presentes</span>
                           <span>de {enServicioHoy} planificados</span>
                         </div>
@@ -555,89 +763,271 @@ function AdminDashboard() {
                       </div>
                     )}
                   </div>
-                  <div className="relative shrink-0 self-start">
-                    <RadialProgress
-                      pct={hasPlanificacion ? coveragePct : 0}
-                      color={!hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444'}
-                      size={76}
-                    />
+                  <div className="relative shrink-0">
+                    <RadialProgress pct={hasPlanificacion ? coveragePct : 0}
+                      color={!hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444'} size={76}/>
                     <div className="absolute inset-0 flex items-center justify-center">
                       <Shield size={22} style={{ color: !hasPlanificacion ? '#94a3b8' : coveragePct >= 95 ? '#10b981' : '#ef4444' }}/>
                     </div>
                   </div>
                 </div>
+
+                {/* Divisor */}
+                <div className="h-px" style={{ backgroundColor: 'var(--border)' }}/>
+
+                {/* Horas reales vs planificadas del mes */}
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-wider mb-3" style={{ color: 'var(--txt3)' }}>
+                    HORAS TRABAJADAS — MES ACTUAL
+                  </p>
+                  <div className="flex items-end gap-6">
+                    <div>
+                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Reales</p>
+                      <p className="text-2xl font-black" style={{ color: 'var(--txt)' }}>{fmt(realHoursMonth)}<span className="text-sm font-bold ml-1">hs</span></p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Planificadas</p>
+                      <p className="text-2xl font-black" style={{ color: 'var(--txt3)' }}>{fmt(plannedHrsMonth)}<span className="text-sm font-bold ml-1">hs</span></p>
+                    </div>
+                    {plannedHrsMonth > 0 && (
+                      <div className="ml-auto text-right">
+                        <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Cumplimiento</p>
+                        <p className="text-xl font-black" style={{ color: cumplimientoRealPct >= 90 ? '#10b981' : '#f59e0b' }}>
+                          {cumplimientoRealPct.toFixed(1)}%
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  {plannedHrsMonth > 0 && (
+                    <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+                      <div className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${Math.min(100, cumplimientoRealPct)}%`, backgroundColor: cumplimientoRealPct >= 90 ? '#10b981' : '#f59e0b' }}/>
+                    </div>
+                  )}
+                  {realHoursMonth === 0 && plannedHrsMonth > 0 && (
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--txt3)' }}>Sin horas reales registradas aún</p>
+                  )}
+                </div>
               </div>
 
-              {/* Presentes */}
-              <KpiCard title="Presentes Hoy" value={presentesHoy}
-                icon={UserCheck} color="#10b981"
-                subtext={hasPlanificacion ? `de ${enServicioHoy} planificados` : 'Sin planificación'}
-                progress={hasPlanificacion && enServicioHoy > 0 ? (presentesHoy/enServicioHoy)*100 : undefined}
-                noData={!hasPlanificacion}/>
-
-              {/* En Servicio */}
-              <KpiCard title="En Servicio" value={enServicioActivo}
-                icon={Activity} color="#6366f1"
-                subtext="Activos ahora"
-                noData={!hasPlanificacion}/>
-
-              {/* De Franco */}
-              <KpiCard title="De Franco" value={francoCount}
-                icon={Sun} color="#06b6d4"
-                subtext={hasPlanificacion ? 'estimado' : 'Sin planificación'}
-                noData={!hasPlanificacion && totalEmployees === 0}/>
+              {/* Servicios en riesgo */}
+              <div className="rounded-xl border p-5 flex flex-col"
+                style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <AlertTriangle size={16} className="text-amber-500"/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Servicios en Riesgo</h3>
+                  <span className="text-[10px]" style={{ color: 'var(--txt3)' }}>— % vacantes + ausencias este mes</span>
+                </div>
+                {serviciosEnRiesgo.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center gap-2 py-6">
+                    <CheckCircle2 size={28} className="text-emerald-400"/>
+                    <p className="text-sm font-bold text-emerald-600">Todos los servicios con cobertura normal</p>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col gap-2">
+                    {serviciosEnRiesgo.map((s, i) => (
+                      <div key={i} className="flex flex-col gap-1 px-3 py-2.5 rounded-lg"
+                        style={{ backgroundColor: 'var(--app-bg)', border: '1px solid var(--border)' }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-black truncate" style={{ color: 'var(--txt)' }}>{s.name}</p>
+                            <p className="text-[10px] truncate" style={{ color: 'var(--txt3)' }}>{s.client}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            {s.vacPct > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{s.vacPct}% vac.</span>
+                            )}
+                            {s.absPct > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">{s.absPct}% aus.</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+                          <div className="h-full rounded-full" style={{
+                            width: `${Math.min(100, s.vacPct + s.absPct)}%`,
+                            backgroundColor: s.vacPct + s.absPct > 15 ? '#ef4444' : '#f59e0b'
+                          }}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* ── SECCIÓN 3: HORAS SLA ─────────────────────────────────── */}
+            {/* ══ BLOQUE 5: GESTIÓN COMERCIAL ═══════════════════════════════ */}
+            <SectionLabel label="Gestión Comercial" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+              {/* Concentración de riesgo */}
+              <div className="rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Layers size={16} style={{ color: 'var(--company-primary,#6366f1)' }}/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Concentración por Cliente</h3>
+                </div>
+                <p className="text-[10px] mb-4" style={{ color: 'var(--txt3)' }}>
+                  Top 3 clientes representan el{' '}
+                  <span className="font-black" style={{ color: concentracionPct >= 70 ? '#ef4444' : concentracionPct >= 50 ? '#f59e0b' : '#10b981' }}>
+                    {concentracionPct}%
+                  </span>
+                  {' '}de las horas contratadas
+                  {concentracionPct >= 70 && ' — riesgo de concentración alto'}
+                </p>
+                {topClientes.length === 0 ? (
+                  <p className="text-xs" style={{ color: 'var(--txt3)' }}>Sin datos de servicios</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {topClientes.map((c, i) => (
+                      <div key={i} className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold truncate max-w-[60%]" style={{ color: 'var(--txt)' }}>{c.name}</span>
+                          <span className="text-xs font-black shrink-0" style={{ color: 'var(--txt3)' }}>
+                            {fmt(c.hrs)} hs · <span style={{ color: 'var(--txt)' }}>{c.pct}%</span>
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
+                          <div className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${c.pct}%`, backgroundColor: COLORS[i % COLORS.length] }}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Contratos por vencer */}
+              <div className="rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <CalendarClock size={16} className="text-rose-500"/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Contratos por Vencer</h3>
+                  <span className="text-[10px]" style={{ color: 'var(--txt3)' }}>— próximos 60 días</span>
+                </div>
+                {serviciosPorVencer.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-6 gap-2">
+                    <CheckCircle2 size={28} className="text-emerald-400"/>
+                    <p className="text-sm font-bold text-emerald-600">Sin contratos próximos a vencer</p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
+                    {serviciosPorVencer.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between px-4 py-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-black truncate" style={{ color: 'var(--txt)' }}>{s.client}</p>
+                          <p className="text-[10px] truncate" style={{ color: 'var(--txt3)' }}>{s.objective}</p>
+                        </div>
+                        <span className={`ml-3 shrink-0 text-[11px] font-black px-2.5 py-1 rounded-full ${
+                          s.dias <= 15
+                            ? 'bg-red-100 text-red-700 border border-red-200'
+                            : s.dias <= 30
+                              ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                              : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}>
+                          {s.dias === 0 ? 'Hoy' : s.dias === 1 ? 'Mañana' : `${s.dias} días`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ══ BLOQUE 6: PERSONAL ESTRATÉGICO ════════════════════════════ */}
+            <SectionLabel label="Personal — Indicadores Estratégicos" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+              <KpiCard
+                title="Sin Turno Este Mes"
+                value={empleadosSinTurno}
+                icon={UserX} color="#ef4444"
+                subtext={`de ${totalEmployees} empleados activos`}
+                alert={empleadosSinTurno > 0}
+                progress={totalEmployees > 0 ? (empleadosSinTurno / totalEmployees) * 100 : undefined}
+                noData={totalEmployees === 0}
+                href="/admin/empleados"
+              />
+              <KpiCard
+                title="Tasa Ausentismo 30d"
+                value={`${tasaAusentismo30}%`}
+                icon={TrendingDown} color={tasaAusentismo30 > 10 ? '#ef4444' : tasaAusentismo30 > 5 ? '#f59e0b' : '#10b981'}
+                subtext="ausencias / dotación"
+                alert={tasaAusentismo30 > 10}
+                noData={totalEmployees === 0}
+              />
+              <KpiCard
+                title="Licencias Activas"
+                value={licencias.length}
+                icon={Calendar} color="#8b5cf6"
+                subtext={licencias.length > 0 ? licencias.map(l => l.reason).filter((v,i,a) => a.indexOf(v)===i).join(' · ') : 'Sin licencias hoy'}
+                noData={false}
+              />
+            </div>
+
+            {/* ══ BLOQUE 7: HORAS SLA ═══════════════════════════════════════ */}
             <SectionLabel label="Horas SLA — Mes Actual" />
             {slaTotalHrs === 0 ? (
               <div className="mb-6 p-5 rounded-xl border text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin horas SLA proyectadas para el mes</p>
               </div>
             ) : (() => {
+              const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+              const hsPorDia = slaTotalHrs / daysInMonth;
+              const hsPorEmp = totalEmployees > 0 ? slaTotalHrs / totalEmployees : 0;
+              const nightPct = slaTotalHrs > 0 ? Math.round((slaNightHrs   / slaTotalHrs) * 100) : 0;
+              const holPct   = slaTotalHrs > 0 ? Math.round((slaHolidayHrs / slaTotalHrs) * 100) : 0;
+              const dayPct   = Math.max(0, 100 - nightPct - holPct);
               const slaSegments = [
-                { label: 'Diurnas',   value: normalHrs,      color: '#f97316' },
-                { label: 'Nocturnas', value: slaNightHrs,    color: '#fb923c' },
-                { label: 'Plus Feriados', value: slaHolidayHrs, color: '#fdba74' },
+                { label: 'Diurnas',       value: normalHrs,     pct: dayPct,   color: '#f97316' },
+                { label: 'Nocturnas',     value: slaNightHrs,   pct: nightPct, color: '#a855f7' },
+                { label: 'Plus Feriados', value: slaHolidayHrs, pct: holPct,   color: '#10b981' },
               ].filter(s => s.value > 0);
               return (
-                <div className="mb-6 rounded-xl border p-5 flex items-center gap-6"
-                  style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
-                  {/* Donut chart */}
-                  <div className="shrink-0" style={{ width: 110, height: 110 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={slaSegments}
-                          cx="50%" cy="50%"
-                          innerRadius={32} outerRadius={50}
-                          paddingAngle={3}
-                          dataKey="value"
-                          stroke="none"
-                        >
-                          {slaSegments.map((s, i) => <Cell key={i} fill={s.color}/>)}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{ borderRadius:'10px', border:'1px solid var(--border)', backgroundColor:'var(--surf)', color:'var(--txt)', boxShadow:'none', fontSize:11 }}
-                          formatter={(v: any) => [`${fmt(v)} hs`, '']}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
+                <div className="mb-6 space-y-3">
+                  {/* Fila 1: KPIs numéricos */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* Total */}
+                    <div className="rounded-xl border p-4 flex flex-col gap-1"
+                      style={{ backgroundColor:'var(--surf)', borderColor:'var(--border)', borderTop:'2px solid var(--company-primary,#6366f1)' }}>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color:'var(--txt3)' }}>TOTAL MES</p>
+                      <p className="text-2xl font-black" style={{ color:'var(--txt)' }}>{fmt(slaTotalHrs)}<span className="text-sm font-bold ml-1">hs</span></p>
+                      <p className="text-[10px]" style={{ color:'var(--txt3)' }}>{today.toLocaleString('es-AR',{month:'long',year:'numeric'})}</p>
+                    </div>
+                    {/* Hs/día */}
+                    <div className="rounded-xl border p-4 flex flex-col gap-1"
+                      style={{ backgroundColor:'var(--surf)', borderColor:'var(--border)', borderTop:'2px solid #f97316' }}>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color:'var(--txt3)' }}>HS / DÍA PROMEDIO</p>
+                      <p className="text-2xl font-black" style={{ color:'var(--txt)' }}>{fmt(hsPorDia, 0)}<span className="text-sm font-bold ml-1">hs</span></p>
+                      <p className="text-[10px]" style={{ color:'var(--txt3)' }}>{daysInMonth} días en el mes</p>
+                    </div>
+                    {/* Hs/empleado */}
+                    <div className="rounded-xl border p-4 flex flex-col gap-1"
+                      style={{ backgroundColor:'var(--surf)', borderColor:'var(--border)', borderTop:'2px solid #10b981' }}>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color:'var(--txt3)' }}>HS / EMPLEADO</p>
+                      <p className="text-2xl font-black" style={{ color:'var(--txt)' }}>{fmt(hsPorEmp, 0)}<span className="text-sm font-bold ml-1">hs</span></p>
+                      <p className="text-[10px]" style={{ color:'var(--txt3)' }}>{totalEmployees} empleados en nómina</p>
+                    </div>
+                    {/* Nocturnidad */}
+                    <div className="rounded-xl border p-4 flex flex-col gap-1"
+                      style={{ backgroundColor:'var(--surf)', borderColor:'var(--border)', borderTop:'2px solid #a855f7' }}>
+                      <p className="text-[9px] font-black uppercase tracking-wider" style={{ color:'var(--txt3)' }}>HS CON PLUS SALARIAL</p>
+                      <p className="text-2xl font-black" style={{ color:'var(--txt)' }}>{nightPct + holPct}<span className="text-sm font-bold ml-1">%</span></p>
+                      <p className="text-[10px]" style={{ color:'var(--txt3)' }}>{fmt(slaNightHrs + slaHolidayHrs)} hs (noct. + fer.)</p>
+                    </div>
                   </div>
-                  {/* Texto + leyenda */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-black" style={{ color: 'var(--txt)' }}>Horas SLA por turno</p>
-                    <p className="text-[10px] font-medium mb-3" style={{ color: 'var(--txt3)' }}>
-                      {today.toLocaleString('es-AR',{month:'long',year:'numeric'})} · {fmt(slaTotalHrs)} hs totales
-                    </p>
-                    <div className="space-y-2">
+
+                  {/* Fila 2: Breakdown por turno con barras */}
+                  <div className="rounded-xl border p-5"
+                    style={{ backgroundColor:'var(--surf)', borderColor:'var(--border)' }}>
+                    <p className="text-[9px] font-black uppercase tracking-wider mb-4" style={{ color:'var(--txt3)' }}>DISTRIBUCIÓN POR TIPO DE TURNO</p>
+                    <div className="space-y-3">
                       {slaSegments.map((s, i) => (
-                        <div key={i} className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}/>
-                            <span className="text-xs font-bold truncate" style={{ color: 'var(--txt3)' }}>{s.label}</span>
+                        <div key={i} className="flex items-center gap-3">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}/>
+                          <span className="text-xs font-bold w-28 shrink-0" style={{ color:'var(--txt)' }}>{s.label}</span>
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor:'var(--border)' }}>
+                            <div className="h-full rounded-full transition-all duration-700"
+                              style={{ width:`${s.pct}%`, backgroundColor: s.color }}/>
                           </div>
-                          <span className="text-sm font-black shrink-0" style={{ color: 'var(--txt)' }}>{fmt(s.value)} hs</span>
+                          <span className="text-xs font-black w-16 text-right shrink-0" style={{ color:'var(--txt)' }}>{fmt(s.value)} hs</span>
+                          <span className="text-[10px] font-bold w-8 text-right shrink-0" style={{ color:'var(--txt3)' }}>{s.pct}%</span>
                         </div>
                       ))}
                     </div>
@@ -646,14 +1036,12 @@ function AdminDashboard() {
               );
             })()}
 
-            {/* ── SECCIÓN 4: LICENCIAS ─────────────────────────────────── */}
+            {/* ══ BLOQUE 8: LICENCIAS ACTIVAS ═══════════════════════════════ */}
             <SectionLabel label="Licencias Activas" />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-
-              {/* Licencias activas hoy */}
               <div className="lg:col-span-2 rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2 mb-4">
-                  <Coffee size={16} className="text-amber-500"/>
+                  <Calendar size={16} className="text-amber-500"/>
                   <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Hoy</h3>
                   {licencias.length > 0 && (
                     <span className="ml-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-black">{licencias.length}</span>
@@ -667,7 +1055,7 @@ function AdminDashboard() {
                 ) : (
                   <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
                     {licencias.map((lic, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity">
+                      <div key={i} className="flex items-center justify-between px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-black text-[11px] shrink-0">
                             {lic.empName.charAt(0).toUpperCase()}
@@ -685,8 +1073,6 @@ function AdminDashboard() {
                   </div>
                 )}
               </div>
-
-              {/* Licencias por motivo */}
               <div className="rounded-xl border p-5 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2 mb-4">
                   <PieChartIcon size={16} style={{ color: 'var(--company-primary, #6366f1)' }}/>
@@ -711,11 +1097,9 @@ function AdminDashboard() {
               </div>
             </div>
 
-            {/* ── SECCIÓN 5: SERVICIOS + AUSENCIAS ─────────────────────── */}
+            {/* ══ BLOQUE 9: SERVICIOS + AUSENCIAS ═══════════════════════════ */}
             <SectionLabel label="Servicios y Ausencias" />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-
-              {/* Servicios activos este mes */}
               <div className="rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2 mb-4">
                   <Briefcase size={16} className="text-blue-500"/>
@@ -729,30 +1113,36 @@ function AdminDashboard() {
                     <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin servicios activos este mes</p>
                   </div>
                 ) : (
-                  <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
-                    {activeServicesList.map((svc, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-3 hover:opacity-80 transition-opacity">
-                        <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                            style={{ backgroundColor: 'rgba(99,102,241,0.08)' }}>
-                            <Shield size={13} style={{ color: 'var(--company-primary, #6366f1)' }}/>
+                  <>
+                    <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)', maxHeight: 320, overflowY: 'auto' }}>
+                      {activeServicesList.map((svc, i) => (
+                        <div key={i} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-black w-5 text-center shrink-0" style={{ color: 'var(--txt3)' }}>{i + 1}</span>
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                              style={{ backgroundColor: 'rgba(99,102,241,0.08)' }}>
+                              <Shield size={13} style={{ color: 'var(--company-primary, #6366f1)' }}/>
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{svc.client}</p>
+                              <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>{svc.objective}</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{svc.client}</p>
-                            <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>{svc.objective}</p>
-                          </div>
+                          <span className="text-xs font-black px-2.5 py-1 rounded-xl shrink-0"
+                            style={{ color: 'var(--company-primary, #6366f1)', backgroundColor: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                            {fmt(svc.hrs)} hs
+                          </span>
                         </div>
-                        <span className="text-xs font-black px-2.5 py-1 rounded-xl shrink-0"
-                          style={{ color: 'var(--company-primary, #6366f1)', backgroundColor: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                          {fmt(svc.hrs)} hs
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    {activeServicesList.length > 5 && (
+                      <p className="text-[10px] text-center mt-2" style={{ color: 'var(--txt3)' }}>
+                        {activeServicesList.length} servicios · scroll para ver todos
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
-
-              {/* Ausencias últimos 30 días */}
               <div className="rounded-xl border p-5 flex flex-col" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2 mb-4">
                   <UserX size={16} className="text-rose-500"/>
@@ -764,7 +1154,7 @@ function AdminDashboard() {
                   <div className="flex-1 w-full" style={{minHeight: 200}}>
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={absenceChart} layout="vertical" margin={{left:10, right:36, top:4, bottom:4}}>
-                        <XAxis type="number" hide/>
+                        <XAxis type="number" hide domain={[0, 'dataMax']}/>
                         <YAxis dataKey="name" type="category" width={130}
                           tick={{fontSize:10, fontWeight:600, fill:'#6b7280'}} axisLine={false} tickLine={false}/>
                         <Tooltip cursor={{fill:'rgba(0,0,0,0.04)'}}
@@ -778,7 +1168,7 @@ function AdminDashboard() {
               </div>
             </div>
 
-            {/* ── SECCIÓN 6: ACCESOS RÁPIDOS ───────────────────────────── */}
+            {/* ══ BLOQUE 10: ACCESOS RÁPIDOS ════════════════════════════════ */}
             <SectionLabel label="Accesos Rápidos" />
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
@@ -787,17 +1177,20 @@ function AdminDashboard() {
                 { href:'/admin/crm',           icon: Building2, color:'#0ea5e9',  label:'Comercial',     sub:'Clientes y objetivos' },
                 { href:'/admin/servicios',     icon: Briefcase, color:'#8b5cf6',  label:'Servicios SLA', sub:'Puestos y proyecciones' },
               ].map(({ href, icon: Icon, color, label, sub }) => (
-                <button key={href} onClick={() => window.location.href = href}
-                  className="p-4 sm:p-5 rounded-xl border transition-all text-left group flex flex-col gap-3 hover:opacity-80"
+                <a key={href} href={href}
+                  className="p-4 sm:p-5 rounded-xl border transition-all text-left flex flex-col gap-3 hover:shadow-md hover:-translate-y-0.5 no-underline"
                   style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: color + '22' }}>
                     <Icon size={16} color={color} strokeWidth={2.5}/>
                   </div>
-                  <div>
-                    <p className="font-black text-sm leading-tight" style={{ color: 'var(--txt)' }}>{label}</p>
-                    <p className="text-[11px] font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{sub}</p>
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <p className="font-black text-sm leading-tight" style={{ color: 'var(--txt)' }}>{label}</p>
+                      <p className="text-[11px] font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{sub}</p>
+                    </div>
+                    <ArrowRight size={14} style={{ color: 'var(--txt3)' }}/>
                   </div>
-                </button>
+                </a>
               ))}
             </div>
           </>

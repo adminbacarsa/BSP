@@ -19,12 +19,16 @@ import {
   countSlaDemandDaysInRange,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
+  calcPlanificadorShiftHours,
   calcPlanningScheduledShiftHours,
   isOperationalOriginShift,
+  isPlanificadorPlannedHoursShift,
   isPlanningScheduledCoverageShift,
 } from '@/lib/planificacion/planningScheduledHours';
 import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
-import { getDateKeyInTimezone } from '@/lib/crm/proformaGrid';
+import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
+import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
+import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
@@ -216,8 +220,9 @@ const calcSrvMonth = (srv: any, y: number, m: number, efectiveHs = 192) => {
 
 /** Horas programadas de cobertura — mismo criterio que pie «Hs. Plan.» del planificador. */
 const shiftDur = (t: any): number => {
-  if (!isPlanningScheduledCoverageShift(t)) return 0;
-  return calcPlanningScheduledShiftHours(t);
+  if (!isPlanificadorPlannedHoursShift(t)) return 0;
+  if (isProformaVacancyShift(t)) return 0;
+  return calcPlanificadorShiftHours(t);
 };
 
 const DURATION_WIDGET_EXCLUDED_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
@@ -818,6 +823,35 @@ export default function AnalisisPage() {
     };
   }, [ausencias, employees, capHsPerGuardPeriod, periodKey]);
 
+  const objectiveAliasesFromServices = useMemo(() => {
+    const aliases: Record<string, { canonicalId: string; name: string; clientId?: string }> = {};
+    const register = (
+      meta: { canonicalId: string; name: string; clientId?: string },
+      key: string,
+    ) => {
+      const k = String(key || '').trim();
+      if (k) aliases[k] = meta;
+    };
+    for (const srv of services) {
+      const cid = String(srv.clientId ?? '').trim();
+      const oid = String(srv.objectiveId ?? '').trim();
+      const name = String(srv.objectiveName ?? oid).trim();
+      const canonicalId = oid || name;
+      if (!canonicalId) continue;
+      const meta = { canonicalId, name, clientId: cid };
+      register(meta, canonicalId);
+      if (oid) register(meta, oid);
+      if (name) register(meta, name);
+      if (cid && name) register(meta, `${cid}_${name}`);
+    }
+    return aliases;
+  }, [services]);
+
+  const vigenteServices = useMemo(
+    () => pickVigenteSlasForPeriod(services, new Date(periodRange.start), new Date(periodRange.end)),
+    [services, periodKey],
+  );
+
   // ── Theoretical ──────────────────────────────────────────────────────────────
   /**
    * Día/semana: TURNOS = ⌈hs / hsTurno⌉ y GUARDIAS = ⌈hs/día / hsTurno⌉ ≈ guardias en simultáneo en el día pico operativo.
@@ -828,12 +862,14 @@ export default function AnalisisPage() {
     const re = new Date(periodRange.end);
     let totalHours = 0;
     const active: any[] = [];
-    services.forEach(srv => {
+    vigenteServices.forEach(srv => {
       if (!srv.startDate || !srv.endDate) return;
-      const { hours, guards, surplus } = calcSrvDateRange(srv, rs, re, guardQuotaHs);
+      const hours = slaHoursForServiceInRange(srv, rs, re);
+      const guards = hours > 0 ? Math.ceil(hours / guardQuotaHs) : 0;
+      const surplus = guards * guardQuotaHs - hours;
       if (hours === 0) return;
       totalHours += hours;
-      active.push({ ...srv, monthHours: hours, guardsNeeded: guards, surplusHs: surplus });
+      active.push({ ...srv, monthHours: hours, guardsNeeded: guards, surplusHs: Math.round(surplus) });
     });
 
     const isShortPeriod = periodMode === 'day' || periodMode === 'week';
@@ -858,7 +894,7 @@ export default function AnalisisPage() {
       demandDays,
       active,
     };
-  }, [services, guardQuotaHs, capHsPerGuardPeriod, hsTurnoPlanif, periodMode, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
+  }, [vigenteServices, guardQuotaHs, capHsPerGuardPeriod, hsTurnoPlanif, periodMode, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
 
   useEffect(() => {
     const rs = new Date(periodRange.start);
@@ -866,7 +902,7 @@ export default function AnalisisPage() {
     const activeIds: string[] = [];
     services.forEach((srv: any) => {
       if (!srv.startDate || !srv.endDate) return;
-      const { hours } = calcSrvDateRange(srv, rs, re, guardQuotaHs);
+      const hours = slaHoursForServiceInRange(srv, rs, re);
       if (hours > 0) activeIds.push(srv.id);
     });
     if (activeIds.length === 0) {
@@ -881,9 +917,15 @@ export default function AnalisisPage() {
     const empNameMap = new Map(employees.map((e: any) => [
       e.id, e.lastName ? `${e.lastName}, ${e.firstName||''}`.trim() : (e.name||e.id),
     ]));
-    const objInfoMap = new Map(services.map((s: any) => [
-      s.objectiveId, { name: s.objectiveName||s.objectiveId, client: s.clientName||'Sin Cliente' },
-    ]));
+    const objInfoMap = new Map<string, { name: string; client: string }>();
+    vigenteServices.forEach((s: any) => {
+      const canonicalId = resolveCanonicalObjectiveId(s, objectiveAliasesFromServices) || String(s.objectiveId ?? '').trim();
+      if (!canonicalId) return;
+      const info = { name: s.objectiveName || canonicalId, client: s.clientName || 'Sin Cliente' };
+      objInfoMap.set(canonicalId, info);
+      if (s.objectiveId) objInfoMap.set(String(s.objectiveId), info);
+      if (s.objectiveName) objInfoMap.set(String(s.objectiveName), info);
+    });
     const byGuard = new Map<string,{name:string;hours:number;shifts:number}>();
     const byObj   = new Map<string,{name:string;client:string;scheduled:number;vacant:number}>();
     type ShiftBd = { schCount:number; vacCount:number; schHours:number; vacHours:number };
@@ -895,9 +937,9 @@ export default function AnalisisPage() {
     let scheduledHours = 0, vacantHours = 0;
 
     turnos.forEach((t: any) => {
-      if (!isPlanningScheduledCoverageShift(t)) return;
-      if (!shiftCountsForEmployeeCronoHours(t)) return;
-      const dur = calcPlanningScheduledShiftHours(t);
+      if (!isPlanificadorPlannedHoursShift(t)) return;
+      if (isProformaVacancyShift(t)) return;
+      const dur = calcPlanificadorShiftHours(t);
       if (dur <= 0) return;
       const code = String(t.code || '').trim().toUpperCase() || '—';
       const empNameU = String(t.employeeName || '').trim().toUpperCase();
@@ -913,7 +955,9 @@ export default function AnalisisPage() {
       const empName = empNameMap.get(t.employeeId) || t.employeeName || empId;
       const dateKey = getDateKeyInTimezone(plannedStart);
       const cellKey = `${empId}_${dateKey}`;
-      const ok = t.objectiveId || 'SIN_OBJETIVO';
+      const ok = resolveCanonicalObjectiveId(t, objectiveAliasesFromServices)
+        || String(t.objectiveId ?? '').trim()
+        || 'SIN_OBJETIVO';
       const cell: ObjCell = { dur, isVacant, code, employeeId: empId, empName };
       const perObj = objCells.get(ok) || new Map<string, ObjCell>();
       perObj.set(cellKey, cell);
@@ -954,7 +998,7 @@ export default function AnalisisPage() {
       scheduledHours: Math.round(scheduledHours),
       vacantHours: Math.round(vacantHours),
     };
-  }, [turnos, employees, services]);
+  }, [turnos, employees, vigenteServices, objectiveAliasesFromServices]);
 
   const shiftDurationBreakdown = useMemo(() => {
     type CodeAcc = { count: number; vacant: number; hours: number; coverageCount: number; coverageHours: number };
@@ -2504,7 +2548,13 @@ export default function AnalisisPage() {
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {theoretical.active.map(srv => {
-                          const obj = actual.byObjective.find(o => o.id === srv.objectiveId);
+                          const srvCanon = resolveCanonicalObjectiveId(srv, objectiveAliasesFromServices)
+                            || String(srv.objectiveId ?? '').trim();
+                          const obj = actual.byObjective.find(o =>
+                            o.id === srvCanon
+                            || o.id === srv.objectiveId
+                            || o.name === srv.objectiveName,
+                          );
                           const scheduled = obj?.scheduled??0, vacant = obj?.vacant??0;
                           const cov = srv.monthHours>0 ? Math.round(scheduled/srv.monthHours*100) : 0;
                           return (

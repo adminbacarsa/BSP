@@ -92,7 +92,6 @@ import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/servi
 import { callableErrorText } from '@/lib/callableError';
 import {
   calculateMonthlyBreakdown,
-  calculateSlaHoursForDateRange,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
   CRM_PLANNED_SHIFT_HOURS,
@@ -106,6 +105,7 @@ import {
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
+import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -119,9 +119,11 @@ const sumContractSlaHours = (
   excludedDates: string[] | undefined,
   rangeStart: Date | null,
   rangeEnd: Date | null,
+  totalMonthlyHours?: number,
 ) => {
-  if (rangeStart || rangeEnd) {
-    return calculateSlaHoursForDateRange(positions, startStr, endStr, excludedDates, rangeStart, rangeEnd);
+  if (rangeStart && rangeEnd) {
+    const srv = { positions, startDate: startStr, endDate: endStr, excludedDates, totalMonthlyHours };
+    return slaHoursForServiceInRange(srv, rangeStart, rangeEnd);
   }
   return Math.round(
     calculateMonthlyBreakdown(positions, startStr, endStr, excludedDates).reduce((acc, m) => acc + m.totalHours, 0),
@@ -571,6 +573,7 @@ export default function CRMPage() {
       }));
       const plannedRange: PlannedHoursRange = { start, end };
 
+      const slaDocsByClient = new Map<string, any[]>();
       sSla.forEach((d) => {
         const s = d.data() as any;
         const slaOk = scopeEmpresa
@@ -578,10 +581,18 @@ export default function CRMPage() {
           : belongsToEmpresaView(s, empresaId, migracionCompleta);
         if (!slaOk || !s.clientId) return;
         const cid = String(s.clientId).trim();
-        const hrs = rangeMode === 'all'
-          ? sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null)
-          : sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, start, end);
-        slaByClient[cid] = (slaByClient[cid] || 0) + (Number(hrs) || 0);
+        const arr = slaDocsByClient.get(cid) || [];
+        arr.push({ id: d.id, ...s });
+        slaDocsByClient.set(cid, arr);
+      });
+
+      clientRefs.forEach((clientRef) => {
+        const clientSlas = slaDocsByClient.get(clientRef.id) || [];
+        if (rangeMode === 'all') {
+          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, null, null);
+        } else {
+          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, start, end);
+        }
       });
 
       sContracts.forEach((d) => {
@@ -1401,7 +1412,11 @@ export default function CRMPage() {
         objectives: grids,
       });
 
-      setProformaTotals({ planned: Math.round(planned.total), executed: Math.round(executed.total), loading: false });
+      setProformaTotals({
+        planned: Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end })),
+        executed: Math.round(executed.total),
+        loading: false,
+      });
     } catch (e) {
       console.error(e);
       setProformaTotals((p) => ({ ...p, loading: false }));
@@ -1470,10 +1485,7 @@ export default function CRMPage() {
   const baseHours = useMemo(() => {
     if (!selectedClient) return 0;
     const { start, end } = getProformaRange();
-    const requested = Math.round((clientServices || []).reduce(
-      (acc, s) => acc + sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, start, end),
-      0,
-    ));
+    const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end));
     if (proformaBase === 'requested') return requested;
     if (proformaBase === 'planned') return proformaTotals.planned;
     return proformaTotals.executed;
@@ -2333,10 +2345,9 @@ export default function CRMPage() {
                           const iconColor = c.type === 'abierto' ? 'bg-amber-100 text-amber-600' : c.type === 'temporal' ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500';
                           const cStart = c.startDate ? new Date(c.startDate) : null;
                           const cEnd = c.endDate ? new Date(c.endDate) : null;
-                          const slaInRange = c.type === 'cerrado' ? Math.round((clientServices || []).reduce(
-                            (acc, s) => acc + sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, cStart, cEnd),
-                            0,
-                          )) : null;
+                          const slaInRange = c.type === 'cerrado' ? Math.round(
+                            sumVigenteSlaHoursInRange(clientServices || [], cStart || new Date(0), cEnd || new Date()),
+                          ) : null;
                           const contractHours = Math.round(Number(c.totalHours) || 0);
                           const ok = slaInRange !== null ? contractHours === slaInRange : false;
                           const isExpanded = editingContractId === c.id;
@@ -2611,7 +2622,7 @@ export default function CRMPage() {
                         <div className="space-y-3">
                           {sortedServices.map((s) => {
                             const positions: any[] = Array.isArray(s.positions) ? s.positions : [];
-                            const slaHs = sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null);
+                            const slaHs = sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null, s.totalMonthlyHours);
                             const isExpanded = expandedServiceId === s.id;
 
                             return (

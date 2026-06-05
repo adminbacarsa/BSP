@@ -1,5 +1,9 @@
 import type { ProformaDayCell, ProformaEmployeeRow, ProformaObjectiveGrid, ProformaExportBundle, ProformaSummaryRow } from './proformaTypes';
 import {
+  calcPlanificadorShiftHours,
+  isPlanificadorPlannedHoursShift,
+} from '@/lib/planificacion/planningScheduledHours';
+import {
   type ObjectiveMeta,
   resolveCanonicalObjectiveId,
   resolveObjectiveDisplayName,
@@ -196,6 +200,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   const aliases = opts.objectiveAliases || {};
 
   for (const t of opts.turnos) {
+    if (!isPlanificadorPlannedHoursShift(t)) continue;
     if (isProformaVacancyShift(t)) continue;
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
@@ -236,20 +241,11 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
       totalNight: 0,
     };
 
-    let hrs = Number(t.hours);
-    if (!Number.isFinite(hrs) || hrs <= 0) hrs = getDurationHours(start, end);
-    if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-    if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
+    let hrs = calcPlanificadorShiftHours(t);
+    if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 
     const cell = cellFromShift(dateKey, code, start, end, hrs);
     const row = byObjective[objId].employees[empId];
-    const prev = row.days[dateKey];
-    if (prev && prev.hours > 0 && cell.hours > 0) {
-      cell.hours += prev.hours;
-      cell.dayHours += prev.dayHours;
-      cell.nightHours += prev.nightHours;
-      cell.display = formatHoursHm(cell.hours);
-    }
     row.days[dateKey] = cell;
   }
 

@@ -91,6 +91,15 @@ export async function loadClientSlaForClient(
   return [...byId.values()];
 }
 
+function toDateSafe(val: unknown): Date | null {
+  if (!val) return null;
+  if (typeof (val as { toDate?: () => Date })?.toDate === 'function') return (val as { toDate: () => Date }).toDate();
+  if (typeof (val as { seconds?: number })?.seconds === 'number') return new Date((val as { seconds: number }).seconds * 1000);
+  if (val instanceof Date) return val;
+  const d = new Date(val as string | number);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export async function loadClientTurnosForClient(
   client: ClientRef,
   start: Date,
@@ -100,13 +109,16 @@ export async function loadClientTurnosForClient(
   const byId = new Map<string, any>();
   const aliases = getClientIdAliases(client.id);
 
+  const addIfInRange = (id: string, data: Record<string, unknown>) => {
+    const st = toDateSafe(data.startTime);
+    if (!st || st < start || st > end) return;
+    byId.set(id, { id, ...data, clientId: client.id });
+  };
+
   await Promise.all(
     aliases.map(async (cid) => {
       const snap = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', cid)));
-      snap.docs.forEach((d) => {
-        const data = d.data() as Record<string, unknown>;
-        byId.set(d.id, { id: d.id, ...data, clientId: client.id });
-      });
+      snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
     }),
   );
 
