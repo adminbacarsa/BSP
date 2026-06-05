@@ -13,7 +13,7 @@ export const SHIFT_STYLES: any = {
 };
 /**
  * Horas por código para SLAs / UI cuando la celda no trae `hours` explícitos.
- * RET = 0: no suma a liquidación ni a racha CCT; el "×8h" de stand-by es solo estimación (`RET_STANDBY_REFERENCE_HOURS`).
+ * RET = 0 en cobertura SLA; en liquidación ver `resolveRetLiquidationHours` (8h stand-by o turno usado).
  */
 export const SHIFT_HOURS_LOOKUP: any = {
     M: 8,

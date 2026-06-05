@@ -23,7 +23,7 @@ import {
   isOperationalOriginShift,
   isPlanningScheduledCoverageShift,
 } from '@/lib/planificacion/planningScheduledHours';
-import { deploymentShiftHours, isDeploymentSurplusCode, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
+import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
 import { getDateKeyInTimezone } from '@/lib/crm/proformaGrid';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -230,6 +230,7 @@ const isDurationWidgetShift = (t: any): boolean => {
   const origin = String(t.origin || '').trim().toUpperCase();
   if (origin === 'SLA_VIRTUAL' || origin === 'INTERRUPTION') return false;
   if (isOperationalOriginShift(t)) return false;
+  if (isDeploymentOrPoolShift(t)) return true;
   const code = String(t.code || '').trim().toUpperCase();
   if (DURATION_WIDGET_EXCLUDED_CODES.has(code)) return false;
   return true;
@@ -237,9 +238,7 @@ const isDurationWidgetShift = (t: any): boolean => {
 
 const resolveDurationWidgetHours = (t: any): number => {
   if (!isDurationWidgetShift(t)) return 0;
-  const code = String(t.code || '').trim().toUpperCase();
-  if (code === 'RET') return 0;
-  if (isDeploymentSurplusCode(code)) return deploymentShiftHours(t);
+  if (isDeploymentOrPoolShift(t)) return resolveDeploymentStatHours(t);
   const planned = calcPlanningScheduledShiftHours(t);
   if (planned > 0) return planned;
   if (t?.startTime?.seconds && t?.endTime?.seconds) {
@@ -991,11 +990,14 @@ export default function AnalisisPage() {
     turnos.forEach((t: any) => {
       if (!isDurationWidgetShift(t)) return;
       const code = String(t.code || '').trim().toUpperCase() || '—';
-      let dur = resolveDurationWidgetHours(t);
+      const dur = resolveDurationWidgetHours(t);
       let bucketDur = dur;
       if (bucketDur <= 0 && code === 'RET') bucketDur = 8;
       if (bucketDur <= 0) return;
-      const isCoverage = isPlanningScheduledCoverageShift(t) && dur > 0;
+      const isCoverage =
+        isPlanningScheduledCoverageShift(t) &&
+        shiftCountsForEmployeeCronoHours(t) &&
+        dur > 0;
       const empNameU = String(t.employeeName || '').trim().toUpperCase();
       const isVacant =
         !t.employeeId ||
@@ -1069,6 +1071,34 @@ export default function AnalisisPage() {
           .sort((a, b) => b.totalHours - a.totalHours),
       }));
   }, [turnos, services]);
+
+  /** RET / REF / ESC — estadística operativa (no suman cobertura SLA ni hs planificadas del objetivo). */
+  const deploymentStats = useMemo(() => {
+    type Row = { count: number; vacant: number; hours: number };
+    const acc: Record<'RET' | 'REF' | 'ESC', Row> = {
+      RET: { count: 0, vacant: 0, hours: 0 },
+      REF: { count: 0, vacant: 0, hours: 0 },
+      ESC: { count: 0, vacant: 0, hours: 0 },
+    };
+    turnos.forEach((t: any) => {
+      if (!isDurationWidgetShift(t)) return;
+      const kind = deploymentStatKind(t);
+      if (!kind) return;
+      const empNameU = String(t.employeeName || '').trim().toUpperCase();
+      const isVacant =
+        !t.employeeId ||
+        t.employeeId === 'VACANTE' ||
+        empNameU === 'VACANTE' ||
+        empNameU.startsWith('VACANTE:') ||
+        !!t.isUnassigned;
+      acc[kind].count += 1;
+      if (isVacant) acc[kind].vacant += 1;
+      acc[kind].hours += resolveDeploymentStatHours(t);
+    });
+    return acc;
+  }, [turnos]);
+
+  const deploymentStatsTotal = deploymentStats.RET.count + deploymentStats.REF.count + deploymentStats.ESC.count;
 
   const durationDetail = useMemo(() => {
     if (expandedDuration === null) return null;
@@ -1774,6 +1804,37 @@ export default function AnalisisPage() {
               subtext={loadTurnos?'Cargando...':`${actual.vacantHours.toLocaleString('es-AR')} hs vacantes`}/>
           </div>
 
+          {!loadTurnos && deploymentStatsTotal > 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/60 dark:bg-amber-950/20 p-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400 mb-3">
+                Despliegue · estadística operativa (no suma hs planificadas SLA)
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {([
+                  { kind: 'RET' as const, label: 'RET · guardia pasiva', hint: 'Stand-by · liquidación 8 hs si no se usó' },
+                  { kind: 'REF' as const, label: 'REF · superposición', hint: 'Conocer objetivo · solo liquidación' },
+                  { kind: 'ESC' as const, label: 'ESC · escuela', hint: 'Conocer cliente/objetivo · solo liquidación' },
+                ]).map(({ kind, label, hint }) => {
+                  const row = deploymentStats[kind];
+                  if (row.count === 0) return null;
+                  return (
+                    <div key={kind} className="bg-white dark:bg-slate-800 rounded-xl px-4 py-3 border border-amber-100 dark:border-amber-900/40">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${codeBadgeClass(kind)}`}>{kind}</span>
+                        <span className="text-lg font-black text-slate-800 dark:text-white">{row.count.toLocaleString('es-AR')}</span>
+                      </div>
+                      <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{label}</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">{Math.round(row.hours).toLocaleString('es-AR')} hs ref. · {hint}</p>
+                      {row.vacant > 0 && (
+                        <p className="text-[9px] font-bold text-amber-600 mt-1">{row.vacant} vacante(s)</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── Panel viabilidad global ──────────────────────────────────── */}
           {theoretical.totalHours > 0 && (
             <div className={`rounded-xl border p-4 ${
@@ -2241,7 +2302,7 @@ export default function AnalisisPage() {
                 <SectionCard title={`Turnos planificados por duración · ${periodRange.labelShort}`} icon={Clock} loading={loadTurnos}>
                   <div className="p-5 space-y-4">
                     <p className="text-[10px] text-slate-400 font-medium -mt-1">
-                      Clic en una tarjeta para ver el desglose por código (M, T, N, REF, ESC, D12, N12…). Clic en un código para ver por objetivo.
+                      Clic en una tarjeta para ver desglose por código. Los KPIs de cobertura SLA excluyen RET, REF y ESC; esos turnos aparecen abajo en estadística de despliegue y en el drill-down marcados como «no cobertura».
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                       {shiftDurationBreakdown.map(d => {
@@ -2275,9 +2336,9 @@ export default function AnalisisPage() {
                             </div>
                             <p className="text-xl font-black text-slate-800 dark:text-white leading-none">{d.count.toLocaleString('es-AR')}</p>
                             <p className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
-                              turnos · {Math.round(d.hours).toLocaleString('es-AR')} hs
-                              {d.coverageHours > 0 && d.coverageHours !== d.hours && (
-                                <span className="text-emerald-600 normal-case"> · {d.coverageHours.toLocaleString('es-AR')} hs cobertura</span>
+                              turnos · {Math.round(d.coverageHours).toLocaleString('es-AR')} hs cobertura
+                              {d.hours > d.coverageHours && (
+                                <span className="text-orange-600 normal-case"> · +{(d.hours - d.coverageHours).toLocaleString('es-AR')} hs despliegue</span>
                               )}
                             </p>
                             {d.vacant > 0 && (
@@ -2305,7 +2366,7 @@ export default function AnalisisPage() {
                         </p>
                         <p className="text-[9px] font-bold text-slate-400 uppercase">turnos programados</p>
                         <p className="text-[9px] font-black text-indigo-400">
-                          {shiftDurationBreakdown.reduce((s,d) => s+d.hours, 0).toLocaleString('es-AR')} hs totales
+                          {shiftDurationBreakdown.reduce((s,d) => s+d.coverageHours, 0).toLocaleString('es-AR')} hs cobertura SLA
                         </p>
                       </button>
                     </div>
@@ -2369,7 +2430,7 @@ export default function AnalisisPage() {
                                         />
                                       </div>
                                       {!row.countsAsCoverage && row.count > 0 && (
-                                        <p className="text-[8px] text-orange-600 font-bold mt-0.5">No suma cobertura SLA (REF/ESC/RET)</p>
+                                        <p className="text-[8px] text-orange-600 font-bold mt-0.5">Estadística / liquidación — no cobertura SLA</p>
                                       )}
                                     </div>
                                     <ChevronDown size={12} className={`shrink-0 text-slate-400 transition-transform ${isCodeSelected ? 'rotate-180' : ''}`}/>

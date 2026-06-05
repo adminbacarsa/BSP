@@ -1,7 +1,19 @@
 /**
- * RET (pool), REF (refuerzo desplegado) y ESC (escuela) — roles de despliegue en planificación.
- * REF y ESC no cuentan cobertura SLA ni horas planificadas (cobertura extra / formación sin puesto real).
+ * Roles de despliegue en planificación (no suman hs planificadas / cobertura SLA del objetivo):
+ *
+ * - **RET** (pool / guardia pasiva): stand-by en el objetivo. No suma hs planificadas.
+ *   Liquidación: si ese día trabajó turno operativo (M/T/N…) liquida ese turno; si no fue
+ *   usado, 8 hs una vez pasada la jornada del día.
+ *
+ * - **REF** (superposición): conocer el objetivo sin cubrir puesto SLA. Solo liquidación.
+ *
+ * - **ESC** (escuela): conocer cliente/objetivo sin sobrecargar turno. Solo liquidación.
+ *
+ * En **Análisis** sí se contabilizan turnos RET/REF/ESC para estadística operativa
+ * (conteo y hs de referencia), separados de los KPIs de cobertura SLA.
  */
+
+import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 
 export type DeploymentRole = 'REGULAR' | 'POOL' | 'SURPLUS' | 'TRAINING';
 export type SurplusIntent = 'HORAS' | 'FORMACION';
@@ -39,15 +51,41 @@ export function deploymentRoleFromCode(code: string | undefined | null): Deploym
     return 'REGULAR';
 }
 
+export function normalizeDeploymentShiftCode(raw: unknown): string {
+    return String(raw ?? '').trim().toUpperCase();
+}
+
+/** REF, ESC, RET y turnos marcados como despliegue / pool — no suman hs planificadas SLA. */
+export function isDeploymentOrPoolShift(t: {
+    code?: unknown;
+    type?: unknown;
+    isRefuerzo?: boolean;
+    isEscuela?: boolean;
+    isReten?: boolean;
+    deploymentRole?: unknown;
+} | null | undefined): boolean {
+    if (!t) return false;
+    const code = normalizeDeploymentShiftCode(t.code || t.type);
+    if (isDeploymentPoolCode(code) || isDeploymentSurplusCode(code)) return true;
+    if (code === 'RET' || code === 'REF' || code === 'ESC') return true;
+    if (t.isRefuerzo === true || t.isEscuela === true || t.isReten === true) return true;
+    const role = String(t.deploymentRole || deploymentRoleFromCode(code)).toUpperCase();
+    return role === 'POOL' || role === 'SURPLUS' || role === 'TRAINING';
+}
+
 export function deploymentShiftHours(shift: {
     code?: unknown;
     hours?: unknown;
     deploymentBand?: unknown;
+    isRefuerzo?: boolean;
+    isEscuela?: boolean;
+    isReten?: boolean;
+    deploymentRole?: unknown;
 } | null | undefined): number {
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
-    if (code === 'RET') return 0;
-    if (isDeploymentSurplusCode(code)) {
+    if (code === 'RET' || shift.isReten === true) return 0;
+    if (isDeploymentSurplusCode(code) || shift.isRefuerzo === true || shift.isEscuela === true) {
         const band = String(shift.deploymentBand || 'M').toUpperCase();
         const h = Number(shift.hours);
         if (h > 0) return h;
@@ -56,17 +94,65 @@ export function deploymentShiftHours(shift: {
     return 0;
 }
 
+export type DeploymentStatKind = 'RET' | 'REF' | 'ESC';
+
+/** Clasifica turno de despliegue para estadísticas (Análisis). */
+export function deploymentStatKind(t: {
+    code?: unknown;
+    type?: unknown;
+    isRefuerzo?: boolean;
+    isEscuela?: boolean;
+    isReten?: boolean;
+    deploymentRole?: unknown;
+} | null | undefined): DeploymentStatKind | null {
+    if (!isDeploymentOrPoolShift(t)) return null;
+    const code = normalizeDeploymentShiftCode(t?.code || t?.type);
+    if (code === 'RET' || t?.isReten === true) return 'RET';
+    if (code === 'ESC' || t?.isEscuela === true || String(t?.deploymentRole || '').toUpperCase() === 'TRAINING') {
+        return 'ESC';
+    }
+    return 'REF';
+}
+
+/** Horas de referencia para estadística operativa (no cobertura SLA). */
+export function resolveDeploymentStatHours(t: Parameters<typeof deploymentStatKind>[0]): number {
+    const kind = deploymentStatKind(t);
+    if (!kind) return 0;
+    if (kind === 'RET') return RET_STANDBY_REFERENCE_HOURS;
+    return deploymentShiftHours(t) || RET_STANDBY_REFERENCE_HOURS;
+}
+
+/** Turno operativo real (M/T/N…) que reemplaza el pago stand-by RET del mismo día. */
+export function isRegularLiquidationWorkShift(t: {
+    code?: unknown;
+    type?: unknown;
+    isRefuerzo?: boolean;
+    isEscuela?: boolean;
+    isReten?: boolean;
+    deploymentRole?: unknown;
+} | null | undefined): boolean {
+    if (!t || String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+    if (isDeploymentOrPoolShift(t)) return false;
+    const code = normalizeDeploymentShiftCode(t.code || t.type);
+    const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+    return !nonWork.has(code);
+}
+
 /** Turnos que suman horas planificadas del empleado (CCT / totales del cronograma). */
 export function shiftCountsForEmployeeCronoHours(shift: {
     code?: unknown;
+    type?: unknown;
     hours?: unknown;
     deploymentBand?: unknown;
     isDeleted?: boolean;
+    isRefuerzo?: boolean;
+    isEscuela?: boolean;
+    isReten?: boolean;
+    deploymentRole?: unknown;
 } | null | undefined): boolean {
     if (!shift || shift.isDeleted) return false;
+    if (isDeploymentOrPoolShift(shift)) return false;
     const code = String(shift.code || '').toUpperCase();
-    if (isDeploymentSurplusCode(code)) return false;
-    if (isDeploymentPoolCode(code)) return false;
     const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
     return !nonWork.has(code);
 }

@@ -14,6 +14,12 @@ import {
 } from '@/lib/multiempresa';
 import { iterateCalendarDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES, resolveLeaveCode } from '@/lib/planificacion/leaveCoverage';
+import {
+    deploymentShiftHours,
+    isDeploymentOrPoolShift,
+    isRegularLiquidationWorkShift,
+} from '@/lib/planificacion/deploymentRoles';
+import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retén: no computan horas de liquidación del empleado.
@@ -23,7 +29,7 @@ export const PAID_LEAVE_CODES = new Set(['V', 'L', 'PG', 'E', 'A']);
 export const PERIOD_ONLY_CODES = new Set(['V']);
 /** Licencias/enfermedad justificadas: computan jornada estándar (8h). */
 export const PAID_DAY_LEAVE_CODES = new Set(['L', 'PG', 'E', 'A']);
-const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA', 'RET']);
+const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA']);
 // REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
 const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
@@ -274,6 +280,27 @@ export function filterObjectiveReportShifts(
     return withoutVirtual.filter(s => keepIds.has(s.id));
 }
 
+/** RET stand-by se omite si el mismo día hay turno operativo (M/T/N…) — liquida ese turno. */
+export function prepareShiftsForEmployeeLiquidation(shifts: any[]): any[] {
+    const byDay = new Map<string, any[]>();
+    for (const s of shifts) {
+        const dk = shiftCalendarDateKey(s) || `__${s.id || Math.random()}`;
+        (byDay.get(dk) ?? (byDay.set(dk, []), byDay.get(dk)!)).push(s);
+    }
+    const operativeDays = new Set<string>();
+    for (const [dk, dayShifts] of byDay) {
+        if (dk.startsWith('__')) continue;
+        if (dayShifts.some(isRegularLiquidationWorkShift)) operativeDays.add(dk);
+    }
+    return shifts.filter((s) => {
+        const code = String(s.code || '').toUpperCase();
+        const isRet = code === 'RET' || s.isReten === true;
+        if (!isRet) return true;
+        const dk = shiftCalendarDateKey(s);
+        return !(dk && operativeDays.has(dk));
+    });
+}
+
 /** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
 export function resolveShiftDurationHours(
     shift: {
@@ -283,6 +310,11 @@ export function resolveShiftDurationHours(
         endTime?: { seconds?: number; _seconds?: number };
         isAbsent?: boolean;
         status?: string;
+        isReten?: boolean;
+        isRefuerzo?: boolean;
+        isEscuela?: boolean;
+        deploymentRole?: unknown;
+        deploymentBand?: unknown;
     },
     lookup: Record<string, number> = SHIFT_HOURS_LOOKUP,
     opts?: { unjustifiedAbsent?: boolean; forObjectiveBilling?: boolean },
@@ -293,6 +325,24 @@ export function resolveShiftDurationHours(
     );
 
     if (opts?.forObjectiveBilling && !isObjectiveBillableCode(rawCode)) return 0;
+
+    const isRet = rawCode === 'RET' || shift.isReten === true;
+    if (isRet) {
+        if (opts?.forObjectiveBilling) return 0;
+        const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
+        if (endSec && new Date(endSec * 1000) > new Date()) return 0;
+        return RET_STANDBY_REFERENCE_HOURS;
+    }
+
+    if (!opts?.forObjectiveBilling && isDeploymentOrPoolShift(shift)) {
+        const deployH = deploymentShiftHours(shift);
+        if (deployH > 0) {
+            const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
+            if (endSec && new Date(endSec * 1000) > new Date()) return 0;
+            return deployH;
+        }
+    }
+
     if (ZERO_HOUR_CODES.has(rawCode) || PERIOD_ONLY_CODES.has(rawCode) || isUnjustAbsent) return 0;
 
     if (PAID_DAY_LEAVE_CODES.has(rawCode)) {
@@ -365,14 +415,25 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (d.type === 'NOVEDAD') return;
 
             const rawCode = (d.code || '').trim().toUpperCase();
-            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET'].includes(rawCode)) return;
+            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode)) return;
 
             const start = d.startTime.toDate();
             const end = d.endTime.toDate();
+            const isRet = rawCode === 'RET' || d.isReten === true;
+            let duration: number;
 
-            let duration = (end.getTime() - start.getTime()) / 3600000;
-            if (duration < 0 || duration > 24 || isNaN(duration)) {
-                duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
+            if (isRet) {
+                if (end > new Date()) return;
+                duration = RET_STANDBY_REFERENCE_HOURS;
+            } else if (isDeploymentOrPoolShift(d)) {
+                duration = deploymentShiftHours(d);
+                if (duration <= 0) return;
+                if (end > new Date()) return;
+            } else {
+                duration = (end.getTime() - start.getTime()) / 3600000;
+                if (duration < 0 || duration > 24 || isNaN(duration)) {
+                    duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
+                }
             }
 
             const night = getNightDuration(start, end);
@@ -871,7 +932,9 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             const empRows = Object.keys(empGroups).map(empId => {
-                const shifts = dedupeShiftsByAbsencePriority(empGroups[empId]);
+                const shifts = prepareShiftsForEmployeeLiquidation(
+                    dedupeShiftsByAbsencePriority(empGroups[empId]),
+                );
                 const stats = calculateStatsExact(shifts, holidaysData);
 
                 const ftCount = shifts.filter((s:any) => s.isFrancoTrabajado || s.code === 'FT').length;
