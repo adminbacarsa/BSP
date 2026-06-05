@@ -2829,25 +2829,47 @@ export default function PlanificacionPage() {
         if (!selectedObjective) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        if (slaVendidas > 0) {
-            const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-            const plannedRounded = Math.round(totalPlanned);
-            const slaRounded = Math.round(slaVendidas);
-            if (plannedRounded !== slaRounded) {
-                const delta = slaRounded - plannedRounded;
-                toast.error(
-                    delta > 0
-                        ? `No se puede publicar: ${plannedRounded}h planificadas ≠ ${slaRounded}h vendidas (SLA). Faltan ${delta}h.`
-                        : `No se puede publicar: ${plannedRounded}h planificadas superan ${slaRounded}h vendidas (SLA) en ${-delta}h.`,
-                    { duration: 9000 },
-                );
-                return;
-            }
+        const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
+        const plannedRounded = Math.round(totalPlanned);
+        const slaRounded = Math.round(slaVendidas);
+        const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
+        const coverageGapDays = objectiveCoverageGapReport
+            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
+            : 0;
+        const hasCoverageGaps = coverageGapDays > 0;
+
+        if (!isSuperAdmin && slaHoursMismatch) {
+            const delta = slaRounded - plannedRounded;
+            toast.error(
+                delta > 0
+                    ? `No se puede publicar: ${plannedRounded}h planificadas ≠ ${slaRounded}h vendidas (SLA). Faltan ${delta}h.`
+                    : `No se puede publicar: ${plannedRounded}h planificadas superan ${slaRounded}h vendidas (SLA) en ${-delta}h.`,
+                { duration: 9000 },
+            );
+            return;
         }
+
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const isAlreadyPublished = !!publishStatusMap[publishLookupKey];
-        const verb = isAlreadyPublished ? 'ya fue publicado. ¿Volver a notificar todos los cambios desde la última publicación?' : '¿Publicar cronograma? Se notificará a todos los empleados del objetivo.';
+        let verb = isAlreadyPublished
+            ? 'El cronograma ya fue publicado. ¿Volver a notificar todos los cambios desde la última publicación?'
+            : '¿Publicar cronograma? Se notificará a todos los empleados del objetivo.';
+        if (isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)) {
+            const warnings: string[] = [];
+            if (slaHoursMismatch) {
+                const delta = slaRounded - plannedRounded;
+                warnings.push(
+                    delta > 0
+                        ? `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (faltan ${delta}h).`
+                        : `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (excede ${-delta}h).`,
+                );
+            }
+            if (hasCoverageGaps) {
+                warnings.push(`Cobertura: ${coverageGapDays} día(s) con huecos respecto al esquema SLA.`);
+            }
+            verb = `[SUPERADMIN — sin validación SLA/cobertura]\n\n${warnings.join('\n')}\n\n¿Publicar igual?`;
+        }
         if (!confirm(verb)) return;
         setIsPublishing(true);
         try {
@@ -2882,7 +2904,9 @@ export default function PlanificacionPage() {
             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                 action: 'PUBLICACION_CRONOGRAMA',
                 module: 'PLANIFICADOR',
-                details: `Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s) · ${month}/${year}`,
+                details: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)
+                    ? `[OVERRIDE SA] Cronograma publicado sin validación SLA/cobertura — ${draftsSnap.docs.length} turno(s) · ${month}/${year}`
+                    : `Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s) · ${month}/${year}`,
                 timestamp: serverTimestamp(),
                 actorName,
                 actorUid: getAuth().currentUser?.uid || null,
@@ -5506,7 +5530,10 @@ export default function PlanificacionPage() {
                                             <button
                                                 onClick={handlePublish}
                                                 disabled={isPublishing}
-                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0)) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                    ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
+                                                    : undefined}
+                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : isSuperAdmin ? 'bg-indigo-600 hover:bg-indigo-700 ring-1 ring-indigo-300/50' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                                             >
                                                 {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
                                                 {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
