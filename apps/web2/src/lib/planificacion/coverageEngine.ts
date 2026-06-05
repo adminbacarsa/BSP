@@ -2,13 +2,16 @@
  * Motor de cobertura automática para ausencias conocidas (V/L/E/A/PG/AA).
  * Se ejecuta como post-procesado sobre las asignaciones del motor 6+2 bandas fijas.
  *
- * Prioridad de cobertura:
- *  1. RET libre  → convierte a la banda del ausente
- *  2. F/FF libre → convierte a la banda del ausente (Franco Trabajado)
- *  3. ft_required → sin candidatos disponibles (operador gestiona desde Operaciones)
+ * Prioridad (menor a mayor costo):
+ *  1. ST  — empleado sin turno asignado ese día (libre)
+ *  2. RET — retención pasiva (stand-by)
+ *  3. ESC — escuela/capacitación (se redirige al puesto)
+ *  4. FT  — franco trabajado (último recurso)
+ *  → ft_required si no hay ningún candidato disponible
  *
- * La cobertura se activa cuando el total de trabajadores en la banda < qty requerido
- * por el puesto (ej: qty=2 → necesita 2×N por día).
+ * Días franco del ausente (F/FF en su ciclo 6+2): el período de licencia puede
+ * abarcarlos pero NO requieren cobertura — se saltan silenciosamente.
+ * Puestos sin operación ese día: si el conteo actual ≥ qty no se genera brecha.
  */
 
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
@@ -23,11 +26,8 @@ export type CoverageGap = {
     band: string;
     coveredBy: string | null;
     coveredByName?: string;
-    /** ret = cubierto por RET auto · ft = cubierto por franco trabajado auto
-     *  manual = asignado desde el wizard · ft_required = sin candidatos disponibles
-     *  franco_natural = el día de ausencia es franco del ciclo (error en RRHH)
-     */
-    coverageType: 'ret' | 'ft' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural' | 'manual';
+    /** Tipo de cobertura aplicada o motivo de la brecha */
+    coverageType: 'sin_turno' | 'ret' | 'esc' | 'ft' | 'ft_required' | 'uncovered' | 'manual';
     ftCandidates?: { empId: string; nombre: string; code: string }[];
 };
 
@@ -37,7 +37,6 @@ export type AbsenceCoverageResult = {
     coveredCount: number;
     ftRequiredCount: number;
     uncoveredCount: number;
-    francoNaturalCount: number;
 };
 
 function is24hs(pos: V2PositionDef): boolean {
@@ -92,11 +91,9 @@ export function applyAbsenceCoverage(
             if (di < 0) continue;
 
             const neededBand = CYCLE_24_MTN[(opening + di) % 24] as string;
-            if (!WORK_BANDS.has(neededBand)) {
-                // Día franco natural del ciclo — la ausencia solapa con un descanso (error en RRHH)
-                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'franco_natural' });
-                continue;
-            }
+
+            // Día franco del ausente dentro del período de licencia → sin brecha (comportamiento normal)
+            if (!WORK_BANDS.has(neededBand)) continue;
 
             // Contar trabajadores activos en esa banda ese día
             let actualBandCount = 0;
@@ -107,39 +104,95 @@ export function applyAbsenceCoverage(
                 if (ai !== undefined && result[ai].code === neededBand) actualBandCount++;
             }
 
-            if (actualBandCount >= qty) continue; // ya cubierto
+            // Cobertura suficiente: no se necesita acción
+            if (actualBandCount >= qty) continue;
 
-            // Prioridad 1: RET libre
-            const retCandidate = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['RET']);
-            if (retCandidate) {
-                const ai = aIdx.get(`${retCandidate}__${dateStr}`)!;
-                const meta = shiftMetaForBand(neededBand);
-                result[ai] = { ...result[ai], positionName: posName || result[ai].positionName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false };
-                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: retCandidate, coverageType: 'ret' });
-                continue;
+            // Asignar primer candidato disponible según prioridad CCT
+            const assigned = tryAssign(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, neededBand, posName, ctx);
+            if (assigned) {
+                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: assigned.empId, coverageType: assigned.type });
+            } else {
+                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'ft_required' });
             }
-
-            // Prioridad 2: F/FF libre (Franco Trabajado)
-            const francoCandidate = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['F', 'FF']);
-            if (francoCandidate) {
-                const ai = aIdx.get(`${francoCandidate}__${dateStr}`)!;
-                const meta = shiftMetaForBand(neededBand);
-                result[ai] = { ...result[ai], positionName: posName || result[ai].positionName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false };
-                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: francoCandidate, coverageType: 'ft' });
-                continue;
-            }
-
-            // Sin candidato disponible
-            gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'ft_required' });
         }
     }
 
     const coveredCount = gaps.filter(g => g.coveredBy !== null).length;
     const ftRequiredCount = gaps.filter(g => g.coverageType === 'ft_required').length;
     const uncoveredCount = gaps.filter(g => g.coverageType === 'uncovered').length;
-    const francoNaturalCount = gaps.filter(g => g.coverageType === 'franco_natural').length;
 
-    return { assignments: result, gaps, coveredCount, ftRequiredCount, uncoveredCount, francoNaturalCount };
+    return { assignments: result, gaps, coveredCount, ftRequiredCount, uncoveredCount };
+}
+
+/**
+ * Intenta asignar cobertura en el orden de prioridad CCT:
+ * ST (sin turno) → RET → ESC → F/FF (FT)
+ * Devuelve el empId y tipo de cobertura si se encontró candidato, null si no.
+ */
+function tryAssign(
+    result: V2Assignment[],
+    aIdx: Map<string, number>,
+    objectiveEmpIds: Set<string>,
+    absentEmpId: string,
+    dateStr: string,
+    neededBand: string,
+    posName: string,
+    ctx: V2EngineContext,
+): { empId: string; type: CoverageGap['coverageType'] } | null {
+    const meta = shiftMetaForBand(neededBand);
+
+    // Busca candidato por código y asigna
+    const assign = (empId: string) => {
+        const ai = aIdx.get(`${empId}__${dateStr}`);
+        if (ai === undefined) return false;
+        result[ai] = {
+            ...result[ai],
+            positionName: posName || result[ai].positionName,
+            code: neededBand,
+            name: meta.name,
+            hours: meta.hours,
+            startTime: meta.startTime,
+            endTime: meta.endTime,
+            isFranco: false,
+        };
+        return true;
+    };
+
+    // Candidato sin turno: no tiene entrada en el índice para ese día
+    for (const empId of objectiveEmpIds) {
+        if (empId === absentEmpId) continue;
+        if (ctx.absences[empId]?.has(dateStr)) continue;
+        if (!aIdx.has(`${empId}__${dateStr}`)) {
+            // Sin asignación ese día — crear nueva entrada
+            result.push({
+                empId,
+                dateStr,
+                positionName: posName,
+                code: neededBand,
+                name: meta.name,
+                hours: meta.hours,
+                startTime: meta.startTime,
+                endTime: meta.endTime,
+                isFranco: false,
+            });
+            aIdx.set(`${empId}__${dateStr}`, result.length - 1);
+            return { empId, type: 'sin_turno' };
+        }
+    }
+
+    // RET libre
+    const retId = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['RET']);
+    if (retId && assign(retId)) return { empId: retId, type: 'ret' };
+
+    // ESC libre
+    const escId = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['ESC']);
+    if (escId && assign(escId)) return { empId: escId, type: 'esc' };
+
+    // F/FF libre (FT — último recurso)
+    const ftId = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['F', 'FF']);
+    if (ftId && assign(ftId)) return { empId: ftId, type: 'ft' };
+
+    return null;
 }
 
 function findByCode(
