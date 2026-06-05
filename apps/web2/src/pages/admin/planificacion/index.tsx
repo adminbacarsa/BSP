@@ -8396,70 +8396,76 @@ export default function PlanificacionPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Sin cobertura ST/RET/ESC → checkboxes multi-día + modal */}
+                                            {/* Sin cobertura ST/RET/ESC → filas clicables multi-selección */}
                                             {ftGaps.length > 0 && (() => {
                                                 const allFtKeys = ftGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
-                                                const allSelected = allFtKeys.every(k => coverageSelectedDays.has(k));
                                                 const someSelected = allFtKeys.some(k => coverageSelectedDays.has(k));
+                                                const allSelected = allFtKeys.every(k => coverageSelectedDays.has(k));
                                                 const selectedGaps = ftGaps.filter(g => coverageSelectedDays.has(`${g.absentEmpId}_${g.dateStr}`));
+                                                const toggle = (key: string) => setCoverageSelectedDays(prev => {
+                                                    const next = new Set(prev);
+                                                    next.has(key) ? next.delete(key) : next.add(key);
+                                                    return next;
+                                                });
                                                 return (
                                                     <div className="space-y-1.5">
                                                         <div className="flex items-center justify-between">
-                                                            <p className="text-[9px] font-black text-rose-800">Sin cobertura ST/RET/ESC — seleccioná días:</p>
-                                                            <label className="flex items-center gap-1 cursor-pointer">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={allSelected}
-                                                                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
-                                                                    onChange={e => {
-                                                                        setCoverageSelectedDays(prev => {
-                                                                            const next = new Set(prev);
-                                                                            if (e.target.checked) allFtKeys.forEach(k => next.add(k));
-                                                                            else allFtKeys.forEach(k => next.delete(k));
-                                                                            return next;
-                                                                        });
-                                                                    }}
-                                                                    className="w-3 h-3 accent-indigo-600"
-                                                                />
-                                                                <span className="text-[9px] font-bold text-slate-500">Todos</span>
-                                                            </label>
+                                                            <p className="text-[9px] font-black text-rose-800">Seleccioná días a cubrir:</p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCoverageSelectedDays(allSelected
+                                                                    ? new Set()
+                                                                    : new Set(allFtKeys)
+                                                                )}
+                                                                className="text-[9px] font-black text-indigo-600 hover:text-indigo-800"
+                                                            >
+                                                                {allSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                                                            </button>
                                                         </div>
                                                         {Object.values(ftByEmp).map(({ nombre, days }) => (
-                                                            <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-1">
-                                                                <p className="text-[9px] font-black text-rose-800">{nombre}</p>
+                                                            <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white overflow-hidden">
+                                                                <div className="px-2.5 py-1.5 bg-rose-50 border-b border-rose-100">
+                                                                    <p className="text-[9px] font-black text-rose-800">{nombre}</p>
+                                                                </div>
                                                                 {days.map(gap => {
                                                                     const key = `${gap.absentEmpId}_${gap.dateStr}`;
                                                                     const isChecked = coverageSelectedDays.has(key);
                                                                     return (
-                                                                        <label key={gap.dateStr} className="flex items-center justify-between gap-2 cursor-pointer py-0.5">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <input
-                                                                                    type="checkbox"
-                                                                                    checked={isChecked}
-                                                                                    onChange={e => setCoverageSelectedDays(prev => {
-                                                                                        const next = new Set(prev);
-                                                                                        if (e.target.checked) next.add(key);
-                                                                                        else next.delete(key);
-                                                                                        return next;
-                                                                                    })}
-                                                                                    className="w-3 h-3 accent-indigo-600"
-                                                                                />
-                                                                                <span className="text-[9px] font-bold text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
-                                                                            </div>
-                                                                        </label>
+                                                                        <button
+                                                                            key={gap.dateStr}
+                                                                            type="button"
+                                                                            onClick={() => toggle(key)}
+                                                                            className={`w-full flex items-center justify-between px-3 py-2 border-b border-slate-100 last:border-b-0 transition-colors text-left ${
+                                                                                isChecked
+                                                                                    ? 'bg-indigo-600 text-white'
+                                                                                    : 'bg-white hover:bg-slate-50 text-slate-700'
+                                                                            }`}
+                                                                        >
+                                                                            <span className="text-[10px] font-bold">
+                                                                                Día {gap.dateStr.slice(8, 10)} · {gap.band}
+                                                                            </span>
+                                                                            <span className={`text-[9px] font-black ${isChecked ? 'text-white/80' : 'text-slate-400'}`}>
+                                                                                {isChecked ? '✓' : '○'}
+                                                                            </span>
+                                                                        </button>
                                                                     );
                                                                 })}
                                                             </div>
                                                         ))}
-                                                        {someSelected && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setPlanCoverageModalGaps(selectedGaps)}
-                                                                className="w-full py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-black hover:bg-indigo-700 transition-colors"
-                                                            >
-                                                                Asignar cobertura — {selectedGaps.length} día(s)
-                                                            </button>
-                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            disabled={!someSelected}
+                                                            onClick={() => someSelected && setPlanCoverageModalGaps(selectedGaps)}
+                                                            className={`w-full py-2.5 rounded-lg text-[10px] font-black transition-colors ${
+                                                                someSelected
+                                                                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                            }`}
+                                                        >
+                                                            {someSelected
+                                                                ? `Asignar cobertura — ${selectedGaps.length} día(s) seleccionado(s)`
+                                                                : 'Seleccioná al menos un día'}
+                                                        </button>
                                                     </div>
                                                 );
                                             })()}
