@@ -4092,11 +4092,13 @@ export default function PlanificacionPage() {
                 if (autoCoverAbsences) {
                     finalGenAssignments = covResult.assignments;
                     if (covResult.gaps.length > 0) {
+                        const retCount = covResult.gaps.filter(g => g.coverageType === 'ret').length;
+                        const ftAutoCount = covResult.gaps.filter(g => g.coverageType === 'ft').length;
                         const msgs: string[] = [];
-                        if (covResult.coveredCount > 0) msgs.push(`${covResult.coveredCount} cubierto(s) por RET`);
-                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren FT`);
-                        if (covResult.francoNaturalCount > 0) msgs.push(`${covResult.francoNaturalCount} día(s) en franco del ciclo`);
-                        toast.info(`Análisis ausencias: ${msgs.join(' · ')}`, { duration: 6000 });
+                        if (retCount > 0) msgs.push(`${retCount} por RET`);
+                        if (ftAutoCount > 0) msgs.push(`${ftAutoCount} por FT (franco trabajado)`);
+                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} sin candidatos`);
+                        if (msgs.length > 0) toast.success(`Cobertura automática: ${msgs.join(' · ')}`, { duration: 6000 });
                     }
                 }
             } else {
@@ -8271,7 +8273,7 @@ export default function PlanificacionPage() {
                                     };
 
                                     const francoGaps = autoCoverageGaps.filter(g => g.coverageType === 'franco_natural');
-                                    const coveredGaps = autoCoverageGaps.filter(g => g.coverageType === 'ret' || g.coverageType === 'manual');
+                                    const coveredGaps = autoCoverageGaps.filter(g => g.coverageType === 'ret' || g.coverageType === 'ft' || g.coverageType === 'manual');
                                     const ftGaps = autoCoverageGaps.filter(g => g.coverageType === 'ft_required');
 
                                     const ftByEmp: Record<string, { nombre: string; days: typeof ftGaps }> = {};
@@ -8291,6 +8293,7 @@ export default function PlanificacionPage() {
                                                 <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Cobertura ausencias</p>
                                                 <div className="flex gap-1 flex-wrap">
                                                     {coveredGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">{coveredGaps.length} cubiertos ✓</span>}
+                                                    {!autoCoverAbsences && ftGaps.length > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">activá cobertura auto</span>}
                                                     {ftGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">{ftGaps.length} sin cubrir</span>}
                                                     {francoGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">{francoGaps.length} error RRHH</span>}
                                                 </div>
@@ -8353,7 +8356,7 @@ export default function PlanificacionPage() {
                                                     {coveredGaps.map(g => (
                                                         <div key={`${g.absentEmpId}_${g.dateStr}`} className="flex justify-between text-[9px] font-bold text-teal-700">
                                                             <span>{g.absentName?.split(',')[0]} · día {g.dateStr.slice(8,10)} · {g.band}</span>
-                                                            <span>{g.coveredByName?.split(',')[0]} {g.coverageType === 'manual' ? '(FT)' : '(RET)'}</span>
+                                                            <span>{g.coveredByName?.split(',')[0]} {g.coverageType === 'ret' ? '(RET)' : '(FT)'}</span>
                                                         </div>
                                                     ))}
                                                 </div>

@@ -2,11 +2,13 @@
  * Motor de cobertura automática para ausencias conocidas (V/L/E/A/PG/AA).
  * Se ejecuta como post-procesado sobre las asignaciones del motor 6+2 bandas fijas.
  *
- * Prioridad: RET libre (1) → ft_required (2, solo marca — no asigna franco trabajado).
- * "Sin turno" = empleado sin ninguna asignación ese día (prácticamente inexistente en 6+2).
+ * Prioridad de cobertura:
+ *  1. RET libre  → convierte a la banda del ausente
+ *  2. F/FF libre → convierte a la banda del ausente (Franco Trabajado)
+ *  3. ft_required → sin candidatos disponibles (operador gestiona desde Operaciones)
  *
  * La cobertura se activa cuando el total de trabajadores en la banda < qty requerido
- * por el puesto (ej: qty=4 → necesita 4×M, 4×T, 4×N por día).
+ * por el puesto (ej: qty=2 → necesita 2×N por día).
  */
 
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
@@ -21,7 +23,11 @@ export type CoverageGap = {
     band: string;
     coveredBy: string | null;
     coveredByName?: string;
-    coverageType: 'ret' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural' | 'manual';
+    /** ret = cubierto por RET auto · ft = cubierto por franco trabajado auto
+     *  manual = asignado desde el wizard · ft_required = sin candidatos disponibles
+     *  franco_natural = el día de ausencia es franco del ciclo (error en RRHH)
+     */
+    coverageType: 'ret' | 'ft' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural' | 'manual';
     ftCandidates?: { empId: string; nombre: string; code: string }[];
 };
 
@@ -42,12 +48,6 @@ function is24hs(pos: V2PositionDef): boolean {
 /**
  * Aplica cobertura automática de ausencias pre-declaradas sobre el crono generado.
  * Solo actúa en el motor fixedBandFloater (necesita `openingSlotByEmp`).
- *
- * Flujo por cada ausencia:
- *  1. Determina la banda esperada del ausente (CYCLE_24_MTN[opening+di]).
- *  2. Cuenta cuántos trabajadores activos hay en esa banda ese día.
- *  3. Si actual < qty requerido por el puesto → brecha real.
- *  4. Busca: RET libre → si nada → ft_required (aviso).
  */
 export function applyAbsenceCoverage(
     assignments: V2Assignment[],
@@ -57,21 +57,18 @@ export function applyAbsenceCoverage(
     const aIdx = new Map<string, number>();
     assignments.forEach((a, i) => aIdx.set(`${a.empId}__${a.dateStr}`, i));
 
-    // Empleados válidos del objetivo en ctx
     const objectiveEmpIds = new Set(
         ctx.employees
             .filter(e => !ctx.objectiveId || e.preferredObjectiveId === ctx.objectiveId)
             .map(e => e.id),
     );
 
-    // Puesto por empleado (para resolver qty)
     const empToPosition: Record<string, string> = {};
     if (ctx.defaultPositionByEmp) {
         for (const [empId, posName] of Object.entries(ctx.defaultPositionByEmp)) {
             empToPosition[empId] = posName;
         }
     }
-    // Para empleados sin puesto explícito, usar la positionName del primer assignment
     for (const a of assignments) {
         if (!empToPosition[a.empId] && a.positionName) {
             empToPosition[a.empId] = a.positionName;
@@ -86,7 +83,6 @@ export function applyAbsenceCoverage(
         const opening = openingSlotByEmp[absentEmpId];
         if (opening === undefined) continue;
 
-        // Puesto y qty del empleado ausente
         const posName = empToPosition[absentEmpId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName && is24hs(p));
         const qty = pos ? Math.max(1, Number(pos.qty) || 1) : 1;
@@ -97,12 +93,12 @@ export function applyAbsenceCoverage(
 
             const neededBand = CYCLE_24_MTN[(opening + di) % 24] as string;
             if (!WORK_BANDS.has(neededBand)) {
-                // Día franco natural del ciclo 6+2 — la ausencia solapa con un descanso (error en RRHH)
+                // Día franco natural del ciclo — la ausencia solapa con un descanso (error en RRHH)
                 gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'franco_natural' });
                 continue;
             }
 
-            // Contar trabajadores activos en esa banda ese día (excluyendo al ausente)
+            // Contar trabajadores activos en esa banda ese día
             let actualBandCount = 0;
             for (const id of objectiveEmpIds) {
                 if (id === absentEmpId) continue;
@@ -111,33 +107,29 @@ export function applyAbsenceCoverage(
                 if (ai !== undefined && result[ai].code === neededBand) actualBandCount++;
             }
 
-            // Si ya hay suficientes → patchRetForAbsences ya cubrió o no hacía falta
-            if (actualBandCount >= qty) continue;
+            if (actualBandCount >= qty) continue; // ya cubierto
 
-            // Brecha real: falta (qty - actualBandCount) trabajadores en neededBand
-
-            // Candidato RET libre: floater con RET ese día del mismo objetivo
-            const retCandidate = findRetFree(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx);
-            if (retCandidate !== null) {
-                const ai = aIdx.get(`${retCandidate}__${dateStr}`);
-                if (ai !== undefined && result[ai].code === 'RET') {
-                    const meta = shiftMetaForBand(neededBand);
-                    result[ai] = {
-                        ...result[ai],
-                        positionName: posName || result[ai].positionName,
-                        code: neededBand,
-                        name: meta.name,
-                        hours: meta.hours,
-                        startTime: meta.startTime,
-                        endTime: meta.endTime,
-                        isFranco: false,
-                    };
-                    gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: retCandidate, coverageType: 'ret' });
-                    continue;
-                }
+            // Prioridad 1: RET libre
+            const retCandidate = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['RET']);
+            if (retCandidate) {
+                const ai = aIdx.get(`${retCandidate}__${dateStr}`)!;
+                const meta = shiftMetaForBand(neededBand);
+                result[ai] = { ...result[ai], positionName: posName || result[ai].positionName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false };
+                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: retCandidate, coverageType: 'ret' });
+                continue;
             }
 
-            // Sin candidato RET → FT requerido (operador debe gestionar manualmente)
+            // Prioridad 2: F/FF libre (Franco Trabajado)
+            const francoCandidate = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['F', 'FF']);
+            if (francoCandidate) {
+                const ai = aIdx.get(`${francoCandidate}__${dateStr}`)!;
+                const meta = shiftMetaForBand(neededBand);
+                result[ai] = { ...result[ai], positionName: posName || result[ai].positionName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false };
+                gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: francoCandidate, coverageType: 'ft' });
+                continue;
+            }
+
+            // Sin candidato disponible
             gaps.push({ absentEmpId, dateStr, band: neededBand, coveredBy: null, coverageType: 'ft_required' });
         }
     }
@@ -150,24 +142,26 @@ export function applyAbsenceCoverage(
     return { assignments: result, gaps, coveredCount, ftRequiredCount, uncoveredCount, francoNaturalCount };
 }
 
-function findRetFree(
+function findByCode(
     assignments: V2Assignment[],
     aIdx: Map<string, number>,
     objectiveEmpIds: Set<string>,
     absentEmpId: string,
     dateStr: string,
     ctx: V2EngineContext,
+    codes: string[],
 ): string | null {
+    const codeSet = new Set(codes);
     for (const empId of objectiveEmpIds) {
         if (empId === absentEmpId) continue;
         if (ctx.absences[empId]?.has(dateStr)) continue;
         const ai = aIdx.get(`${empId}__${dateStr}`);
-        if (ai !== undefined && assignments[ai].code === 'RET') return empId;
+        if (ai !== undefined && codeSet.has(assignments[ai].code)) return empId;
     }
     return null;
 }
 
-function shiftMetaForBand(band: string): { name: string; hours: number; startTime: string; endTime?: string } {
+function shiftMetaForBand(band: string): { name: string; hours: number; startTime: string; endTime: string } {
     const defaults: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
         M:   { name: 'Mañana',   hours: 8,  startTime: '07:00', endTime: '15:00' },
         T:   { name: 'Tarde',    hours: 8,  startTime: '15:00', endTime: '23:00' },
