@@ -143,6 +143,7 @@ import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
 import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
+import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
@@ -676,6 +677,7 @@ export default function PlanificacionPage() {
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
     const [autoCoverageGaps, setAutoCoverageGaps] = useState<import('@/lib/planificacion/coverageEngine').CoverageGap[]>([]);
+    const [planCoverageModalGap, setPlanCoverageModalGap] = useState<(import('@/lib/planificacion/coverageEngine').CoverageGap & { absentName?: string }) | null>(null);
     const [autoV2GeminiLoading, setAutoV2GeminiLoading] = useState(false);
     const [autoV2GeminiSummary, setAutoV2GeminiSummary] = useState<string | null>(null);
     const [autoWizardStep, setAutoWizardStep] = useState<'configure'|'detecting'|'verified'|'sla_open'|'done'>('configure');
@@ -3717,6 +3719,7 @@ export default function PlanificacionPage() {
             setAutoV2GenStats(null);
             setAutoV2GeminiSummary(null);
             setAutoCoverageGaps([]);
+            setPlanCoverageModalGap(null);
         }
     }, [showAutoV2Modal]);
 
@@ -7456,6 +7459,51 @@ export default function PlanificacionPage() {
                     document.body
                 )}
 
+                {/* ── Modal cobertura de ausencias (planificación) ── */}
+                {planCoverageModalGap && (
+                    <PlanningCoverageModal
+                        gap={planCoverageModalGap}
+                        pendingChanges={pendingChanges}
+                        shiftsMap={shiftsMap}
+                        empresaId={empresaId || ''}
+                        positionName={positionStructure[0]?.positionName ?? 'General'}
+                        onAssign={(empId, nombre) => {
+                            const gap = planCoverageModalGap;
+                            const bandMeta: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
+                                M:   { name: 'Mañana',   hours: 8,  startTime: '07:00', endTime: '15:00' },
+                                T:   { name: 'Tarde',    hours: 8,  startTime: '15:00', endTime: '23:00' },
+                                N:   { name: 'Noche',    hours: 8,  startTime: '23:00', endTime: '07:00' },
+                                D12: { name: 'Diurno',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                N12: { name: 'Nocturno', hours: 12, startTime: '19:00', endTime: '07:00' },
+                            };
+                            const meta = bandMeta[gap.band] ?? bandMeta.M;
+                            setPendingChanges(prev => ({
+                                ...prev,
+                                [`${empId}_${gap.dateStr}`]: {
+                                    isTemp: true,
+                                    employeeId: empId,
+                                    objectiveId: selectedObjective,
+                                    positionName: positionStructure[0]?.positionName ?? 'General',
+                                    code: gap.band,
+                                    name: meta.name,
+                                    hours: meta.hours,
+                                    startTime: meta.startTime,
+                                    endTime: meta.endTime,
+                                    isFranco: false,
+                                },
+                            }));
+                            setAutoCoverageGaps(prev => prev.map(g =>
+                                g.absentEmpId === gap.absentEmpId && g.dateStr === gap.dateStr
+                                    ? { ...g, coverageType: 'manual' as const, coveredBy: empId, coveredByName: nombre }
+                                    : g
+                            ));
+                            toast.success(`Día ${gap.dateStr.slice(8,10)}: ${nombre.split(',')[0]} asignado a banda ${gap.band}`);
+                            setPlanCoverageModalGap(null);
+                        }}
+                        onClose={() => setPlanCoverageModalGap(null)}
+                    />
+                )}
+
                 {/* ── Modal verificación de cobertura post-generación ── */}
                 {showCoverageModal && autoV2Coverage && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCoverageModal(false)}>
@@ -8318,36 +8366,23 @@ export default function PlanificacionPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Sin candidatos — días sin nadie disponible */}
+                                            {/* Sin cobertura ST/RET/ESC → botón por día para abrir modal */}
                                             {ftGaps.length > 0 && (
-                                                <div className="space-y-2">
-                                                    <p className="text-[9px] font-black text-rose-800">Sin cobertura disponible — elegí quién cubre:</p>
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[9px] font-black text-rose-800">Sin cobertura ST/RET/ESC — asignar manualmente:</p>
                                                     {Object.values(ftByEmp).map(({ nombre, days }) => (
-                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-2">
+                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-1.5">
                                                             <p className="text-[9px] font-black text-rose-800">{nombre}</p>
                                                             {days.map(gap => (
-                                                                <div key={gap.dateStr} className="space-y-1">
-                                                                    <div className="flex items-center justify-between">
-                                                                        <span className="text-[9px] font-black text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
-                                                                        <span className="text-[8px] font-bold text-violet-600">D12 activo en compañeros</span>
-                                                                    </div>
-                                                                    {gap.ftCandidates && gap.ftCandidates.length > 0 ? (
-                                                                        <div className="flex flex-wrap gap-1">
-                                                                            {gap.ftCandidates.map(c => (
-                                                                                <button
-                                                                                    key={c.empId}
-                                                                                    type="button"
-                                                                                    onClick={() => assignGap(c.empId, c.nombre, gap.dateStr, gap.band, gap.absentEmpId)}
-                                                                                    className="text-[9px] font-black px-2 py-1 rounded-lg border-2 border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-200 hover:border-rose-500 transition-colors"
-                                                                                    title={`Asignar ${c.nombre} — actualmente ${c.code}`}
-                                                                                >
-                                                                                    {c.nombre.split(',')[0].trim()} <span className="opacity-60">({c.code})</span>
-                                                                                </button>
-                                                                            ))}
-                                                                        </div>
-                                                                    ) : (
-                                                                        <p className="text-[9px] font-bold text-slate-400">Sin candidatos disponibles ese día</p>
-                                                                    )}
+                                                                <div key={gap.dateStr} className="flex items-center justify-between gap-2">
+                                                                    <span className="text-[9px] font-bold text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setPlanCoverageModalGap(gap)}
+                                                                        className="text-[9px] font-black px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shrink-0"
+                                                                    >
+                                                                        Cubrir
+                                                                    </button>
                                                                 </div>
                                                             ))}
                                                         </div>
