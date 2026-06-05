@@ -20,8 +20,11 @@ import {
 } from '@/lib/servicios/slaHoursCalculator';
 import {
   calcPlanningScheduledShiftHours,
+  isOperationalOriginShift,
   isPlanningScheduledCoverageShift,
 } from '@/lib/planificacion/planningScheduledHours';
+import { deploymentShiftHours, isDeploymentSurplusCode, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
+import { getDateKeyInTimezone } from '@/lib/crm/proformaGrid';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
@@ -217,6 +220,46 @@ const shiftDur = (t: any): number => {
   return calcPlanningScheduledShiftHours(t);
 };
 
+const DURATION_WIDGET_EXCLUDED_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+
+const isDurationWidgetShift = (t: any): boolean => {
+  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+  const status = String(t.status || '').toLowerCase();
+  if (status.includes('cancel') || status.includes('delet')) return false;
+  if (t.isFranco === true) return false;
+  const origin = String(t.origin || '').trim().toUpperCase();
+  if (origin === 'SLA_VIRTUAL' || origin === 'INTERRUPTION') return false;
+  if (isOperationalOriginShift(t)) return false;
+  const code = String(t.code || '').trim().toUpperCase();
+  if (DURATION_WIDGET_EXCLUDED_CODES.has(code)) return false;
+  return true;
+};
+
+const resolveDurationWidgetHours = (t: any): number => {
+  if (!isDurationWidgetShift(t)) return 0;
+  const code = String(t.code || '').trim().toUpperCase();
+  if (code === 'RET') return 0;
+  if (isDeploymentSurplusCode(code)) return deploymentShiftHours(t);
+  const planned = calcPlanningScheduledShiftHours(t);
+  if (planned > 0) return planned;
+  if (t?.startTime?.seconds && t?.endTime?.seconds) {
+    return Math.max(0, Math.min((t.endTime.seconds - t.startTime.seconds) / 3600, 24));
+  }
+  return 0;
+};
+
+const codeBadgeClass = (code: string) => {
+  if (code === 'M') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400';
+  if (code === 'T') return 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400';
+  if (code === 'N') return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400';
+  if (code === 'D12') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400';
+  if (code === 'N12') return 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400';
+  if (code === 'REF') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400';
+  if (code === 'ESC') return 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-400';
+  if (code === 'RET') return 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300';
+  return 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+};
+
 const shortName = (s: string, len = 14) => (s || '').length > len ? (s || '').substring(0, len) + '…' : (s || '');
 
 const formatYmdLocal = (d: Date) => {
@@ -356,6 +399,8 @@ export default function AnalisisPage() {
   const [hsTurnoPlanif, setHsTurnoPlanif] = useState<8 | 12>(8);
   const efectiveHours = diasPorGuardia * 8; // 192 o 200 hs/guardia (CCT 422/05)
   const [expandedObjId,    setExpandedObjId]    = useState<string|null>(null);
+  const [expandedDuration, setExpandedDuration] = useState<number | 'all' | null>(null);
+  const [expandedDurationCode, setExpandedDurationCode] = useState<string | null>(null);
   const [showAusentismo,   setShowAusentismo]   = useState(false);
 
   const [services,    setServices]    = useState<any[]>([]);
@@ -845,15 +890,17 @@ export default function AnalisisPage() {
     type ShiftBd = { schCount:number; vacCount:number; schHours:number; vacHours:number };
     type ObjDet  = { byCode:Map<string,ShiftBd>; guards:Map<string,{name:string;hours:number;shifts:number}> };
     const byObjDetail = new Map<string, ObjDet>();
-    // shift duration analysis: key = duration in hours (rounded to nearest 0.5)
-    const byDuration  = new Map<number,{count:number;vacant:number;hours:number;codes:Set<string>}>();
+    type ObjCell = { dur: number; isVacant: boolean; code: string; employeeId: string; empName: string };
+    const objCells = new Map<string, Map<string, ObjCell>>();
+    const guardCells = new Map<string, ObjCell>();
     let scheduledHours = 0, vacantHours = 0;
 
     turnos.forEach((t: any) => {
       if (!isPlanningScheduledCoverageShift(t)) return;
-      const code = String(t.code || '').trim().toUpperCase() || '—';
-      const dur = shiftDur(t);
+      if (!shiftCountsForEmployeeCronoHours(t)) return;
+      const dur = calcPlanningScheduledShiftHours(t);
       if (dur <= 0) return;
+      const code = String(t.code || '').trim().toUpperCase() || '—';
       const empNameU = String(t.employeeName || '').trim().toUpperCase();
       const isVacant =
         !t.employeeId ||
@@ -861,45 +908,277 @@ export default function AnalisisPage() {
         empNameU === 'VACANTE' ||
         empNameU.startsWith('VACANTE:') ||
         !!t.isUnassigned;
-      if (!isVacant) {
-        const empName = empNameMap.get(t.employeeId) || t.employeeName || t.employeeId;
-        const g = byGuard.get(t.employeeId) || { name: empName, hours: 0, shifts: 0 };
-        byGuard.set(t.employeeId, { ...g, hours: g.hours+dur, shifts: g.shifts+1 });
-        scheduledHours += dur;
-      } else { vacantHours += dur; }
+      const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
+      if (!plannedStart) return;
+      const empId = String(t.employeeId || 'unknown');
+      const empName = empNameMap.get(t.employeeId) || t.employeeName || empId;
+      const dateKey = getDateKeyInTimezone(plannedStart);
+      const cellKey = `${empId}_${dateKey}`;
       const ok = t.objectiveId || 'SIN_OBJETIVO';
-      const objInfo = objInfoMap.get(t.objectiveId) || { name: t.objectiveName||t.objectiveId||ok, client: t.clientName||'Sin Cliente' };
-      const o = byObj.get(ok) || { name: objInfo.name, client: objInfo.client, scheduled: 0, vacant: 0 };
-      byObj.set(ok, { ...o, scheduled: o.scheduled+(isVacant?0:dur), vacant: o.vacant+(isVacant?dur:0) });
-      // per-objective detail
-      const det = byObjDetail.get(ok) || { byCode: new Map<string,ShiftBd>(), guards: new Map<string,{name:string;hours:number;shifts:number}>() };
-      const bd = det.byCode.get(code) || { schCount:0, vacCount:0, schHours:0, vacHours:0 };
-      if (isVacant) { bd.vacCount++; bd.vacHours += dur; }
-      else          { bd.schCount++; bd.schHours += dur; }
-      det.byCode.set(code, bd);
-      if (!isVacant && t.employeeId) {
-        const en = empNameMap.get(t.employeeId) || t.employeeName || t.employeeId;
-        const gd = det.guards.get(t.employeeId) || { name: en, hours: 0, shifts: 0 };
-        det.guards.set(t.employeeId, { name: gd.name, hours: gd.hours+dur, shifts: gd.shifts+1 });
-      }
-      byObjDetail.set(ok, det);
-      // shift duration breakdown
-      const dk = Math.round(dur * 2) / 2; // bucket to nearest 0.5h
-      const dd = byDuration.get(dk) || { count:0, vacant:0, hours:0, codes:new Set<string>() };
-      dd.count++; if (isVacant) dd.vacant++; dd.hours += dur; dd.codes.add(code);
-      byDuration.set(dk, dd);
+      const cell: ObjCell = { dur, isVacant, code, employeeId: empId, empName };
+      const perObj = objCells.get(ok) || new Map<string, ObjCell>();
+      perObj.set(cellKey, cell);
+      objCells.set(ok, perObj);
+      guardCells.set(cellKey, cell);
     });
+
+    objCells.forEach((cells, ok) => {
+      const objInfo = objInfoMap.get(ok) || { name: ok, client: 'Sin Cliente' };
+      const det = byObjDetail.get(ok) || { byCode: new Map<string, ShiftBd>(), guards: new Map<string,{name:string;hours:number;shifts:number}>() };
+      cells.forEach(({ dur, isVacant, code, employeeId, empName }) => {
+        if (!isVacant) scheduledHours += dur;
+        else vacantHours += dur;
+        const o = byObj.get(ok) || { name: objInfo.name, client: objInfo.client, scheduled: 0, vacant: 0 };
+        byObj.set(ok, { ...o, scheduled: o.scheduled + (isVacant ? 0 : dur), vacant: o.vacant + (isVacant ? dur : 0) });
+        const bd = det.byCode.get(code) || { schCount: 0, vacCount: 0, schHours: 0, vacHours: 0 };
+        if (isVacant) { bd.vacCount++; bd.vacHours += dur; }
+        else { bd.schCount++; bd.schHours += dur; }
+        det.byCode.set(code, bd);
+        if (!isVacant && employeeId && employeeId !== 'unknown') {
+          const gd = det.guards.get(employeeId) || { name: empName, hours: 0, shifts: 0 };
+          det.guards.set(employeeId, { name: gd.name, hours: gd.hours + dur, shifts: gd.shifts + 1 });
+        }
+      });
+      byObjDetail.set(ok, det);
+    });
+
+    guardCells.forEach(({ dur, isVacant, employeeId, empName }) => {
+      if (isVacant || !employeeId || employeeId === 'unknown') return;
+      const g = byGuard.get(employeeId) || { name: empName, hours: 0, shifts: 0 };
+      byGuard.set(employeeId, { ...g, hours: g.hours + dur, shifts: g.shifts + 1 });
+    });
+
     return {
       byGuard: [...byGuard.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => b.hours-a.hours),
       byObjective: [...byObj.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => (b.scheduled+b.vacant)-(a.scheduled+a.vacant)),
       byObjDetail,
-      byDuration: [...byDuration.entries()]
-        .sort((a,b) => a[0]-b[0])
-        .map(([dur,d]) => ({ dur, count:d.count, vacant:d.vacant, hours:Math.round(d.hours), codes:[...d.codes].sort() })),
       scheduledHours: Math.round(scheduledHours),
       vacantHours: Math.round(vacantHours),
     };
   }, [turnos, employees, services]);
+
+  const shiftDurationBreakdown = useMemo(() => {
+    type CodeAcc = { count: number; vacant: number; hours: number; coverageCount: number; coverageHours: number };
+    type ObjAcc = { id: string; name: string; client: string; byCode: Map<string, CodeAcc> };
+    type DurAcc = {
+      count: number;
+      vacant: number;
+      hours: number;
+      coverageHours: number;
+      codes: Set<string>;
+      byCode: Map<string, CodeAcc>;
+      byObjective: Map<string, ObjAcc>;
+    };
+
+    const objInfoMap = new Map(services.map((s: any) => [
+      s.objectiveId,
+      { name: s.objectiveName || s.objectiveId, client: s.clientName || 'Sin Cliente' },
+    ]));
+    const byDur = new Map<number, DurAcc>();
+
+    const touchCode = (map: Map<string, CodeAcc>, code: string, isVacant: boolean, hrs: number, isCoverage: boolean) => {
+      const row = map.get(code) || { count: 0, vacant: 0, hours: 0, coverageCount: 0, coverageHours: 0 };
+      row.count += 1;
+      if (isVacant) row.vacant += 1;
+      row.hours += hrs;
+      if (isCoverage) {
+        row.coverageCount += 1;
+        row.coverageHours += hrs;
+      }
+      map.set(code, row);
+    };
+
+    turnos.forEach((t: any) => {
+      if (!isDurationWidgetShift(t)) return;
+      const code = String(t.code || '').trim().toUpperCase() || '—';
+      let dur = resolveDurationWidgetHours(t);
+      let bucketDur = dur;
+      if (bucketDur <= 0 && code === 'RET') bucketDur = 8;
+      if (bucketDur <= 0) return;
+      const isCoverage = isPlanningScheduledCoverageShift(t) && dur > 0;
+      const empNameU = String(t.employeeName || '').trim().toUpperCase();
+      const isVacant =
+        !t.employeeId ||
+        t.employeeId === 'VACANTE' ||
+        empNameU === 'VACANTE' ||
+        empNameU.startsWith('VACANTE:') ||
+        !!t.isUnassigned;
+      const dk = Math.round(bucketDur * 2) / 2;
+
+      const bucket = byDur.get(dk) || {
+        count: 0,
+        vacant: 0,
+        hours: 0,
+        coverageHours: 0,
+        codes: new Set<string>(),
+        byCode: new Map<string, CodeAcc>(),
+        byObjective: new Map<string, ObjAcc>(),
+      };
+      bucket.count += 1;
+      if (isVacant) bucket.vacant += 1;
+      bucket.hours += dur;
+      if (isCoverage) bucket.coverageHours += dur;
+      bucket.codes.add(code);
+      touchCode(bucket.byCode, code, isVacant, dur, isCoverage);
+
+      const oid = String(t.objectiveId || 'SIN_OBJETIVO');
+      const objInfo = objInfoMap.get(t.objectiveId) || {
+        name: t.objectiveName || t.objectiveId || oid,
+        client: t.clientName || 'Sin Cliente',
+      };
+      const objRow = bucket.byObjective.get(oid) || {
+        id: oid,
+        name: objInfo.name,
+        client: objInfo.client,
+        byCode: new Map<string, CodeAcc>(),
+      };
+      touchCode(objRow.byCode, code, isVacant, dur, isCoverage);
+      bucket.byObjective.set(oid, objRow);
+      byDur.set(dk, bucket);
+    });
+
+    const serializeCodeRows = (map: Map<string, CodeAcc>) =>
+      [...map.entries()]
+        .map(([code, row]) => ({
+          code,
+          count: row.count,
+          vacant: row.vacant,
+          hours: Math.round(row.hours),
+          coverageCount: row.coverageCount,
+          coverageHours: Math.round(row.coverageHours),
+          countsAsCoverage: row.coverageHours > 0,
+        }))
+        .sort((a, b) => b.hours - a.hours || b.count - a.count);
+
+    return [...byDur.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([dur, d]) => ({
+        dur,
+        count: d.count,
+        vacant: d.vacant,
+        hours: Math.round(d.hours),
+        coverageHours: Math.round(d.coverageHours),
+        codes: [...d.codes].sort(),
+        codeRows: serializeCodeRows(d.byCode),
+        byObjective: [...d.byObjective.values()]
+          .map((o) => ({
+            ...o,
+            codeRows: serializeCodeRows(o.byCode),
+            totalHours: Math.round([...o.byCode.values()].reduce((s, r) => s + r.hours, 0)),
+          }))
+          .sort((a, b) => b.totalHours - a.totalHours),
+      }));
+  }, [turnos, services]);
+
+  const durationDetail = useMemo(() => {
+    if (expandedDuration === null) return null;
+    if (expandedDuration === 'all') {
+      type CodeAcc = { count: number; vacant: number; hours: number; coverageHours: number };
+      const merged = new Map<string, CodeAcc>();
+      shiftDurationBreakdown.forEach((bucket) => {
+        bucket.codeRows.forEach((row) => {
+          const prev = merged.get(row.code) || { count: 0, vacant: 0, hours: 0, coverageHours: 0 };
+          merged.set(row.code, {
+            count: prev.count + row.count,
+            vacant: prev.vacant + row.vacant,
+            hours: prev.hours + row.hours,
+            coverageHours: prev.coverageHours + row.coverageHours,
+          });
+        });
+      });
+      const codeRows = [...merged.entries()]
+        .map(([code, row]) => ({
+          code,
+          count: row.count,
+          vacant: row.vacant,
+          hours: row.hours,
+          coverageCount: row.coverageHours > 0 ? row.count - row.vacant : 0,
+          coverageHours: row.coverageHours,
+          countsAsCoverage: row.coverageHours > 0,
+        }))
+        .sort((a, b) => b.hours - a.hours || b.count - a.count);
+      return {
+        label: 'Todos los turnos',
+        dur: null as number | null,
+        count: shiftDurationBreakdown.reduce((s, d) => s + d.count, 0),
+        hours: shiftDurationBreakdown.reduce((s, d) => s + d.hours, 0),
+        coverageHours: shiftDurationBreakdown.reduce((s, d) => s + d.coverageHours, 0),
+        codeRows,
+        byObjective: [] as typeof shiftDurationBreakdown[0]['byObjective'],
+      };
+    }
+    const bucket = shiftDurationBreakdown.find((d) => d.dur === expandedDuration);
+    if (!bucket) return null;
+    return {
+      label: `Turnos de ${bucket.dur}h`,
+      dur: bucket.dur,
+      count: bucket.count,
+      hours: bucket.hours,
+      coverageHours: bucket.coverageHours,
+      codeRows: bucket.codeRows,
+      byObjective: bucket.byObjective,
+    };
+  }, [expandedDuration, shiftDurationBreakdown]);
+
+  const durationObjectiveRows = useMemo(() => {
+    if (!expandedDurationCode) return [];
+
+    if (expandedDuration === 'all') {
+      type Merged = { id: string; name: string; client: string; count: number; vacant: number; hours: number };
+      const map = new Map<string, Merged>();
+      shiftDurationBreakdown.forEach((bucket) => {
+        bucket.byObjective.forEach((obj) => {
+          const codeRow = obj.codeRows.find((r) => r.code === expandedDurationCode);
+          if (!codeRow) return;
+          const prev = map.get(obj.id) || {
+            id: obj.id,
+            name: obj.name,
+            client: obj.client,
+            count: 0,
+            vacant: 0,
+            hours: 0,
+          };
+          map.set(obj.id, {
+            ...prev,
+            count: prev.count + codeRow.count,
+            vacant: prev.vacant + codeRow.vacant,
+            hours: prev.hours + codeRow.hours,
+          });
+        });
+      });
+      return [...map.values()]
+        .filter((o) => o.count > 0)
+        .sort((a, b) => b.hours - a.hours)
+        .map((o) => ({
+          id: o.id,
+          name: o.name,
+          client: o.client,
+          row: {
+            code: expandedDurationCode,
+            count: o.count,
+            vacant: o.vacant,
+            hours: o.hours,
+            coverageCount: 0,
+            coverageHours: 0,
+            countsAsCoverage: false,
+          },
+        }));
+    }
+
+    if (!durationDetail) return [];
+    return durationDetail.byObjective
+      .map((obj) => {
+        const row = obj.codeRows.find((r) => r.code === expandedDurationCode);
+        if (!row || row.count === 0) return null;
+        return { ...obj, row };
+      })
+      .filter(Boolean) as Array<{
+        id: string;
+        name: string;
+        client: string;
+        row: (typeof durationDetail.codeRows)[0];
+      }>;
+  }, [durationDetail, expandedDuration, expandedDurationCode, shiftDurationBreakdown]);
 
   const art12Report = useMemo(() => {
     const empById = new Map(employees.map((e: any) => [e.id, e]));
@@ -1958,47 +2237,184 @@ export default function AnalisisPage() {
               )}
 
               {/* Distribución por duración de turno */}
-              {!loadTurnos && actual.byDuration.length > 0 && (
+              {!loadTurnos && shiftDurationBreakdown.length > 0 && (
                 <SectionCard title={`Turnos planificados por duración · ${periodRange.labelShort}`} icon={Clock} loading={loadTurnos}>
-                  <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                    {actual.byDuration.map(d => {
-                      const progPct = d.count > 0 ? Math.round((d.count - d.vacant) / d.count * 100) : 0;
-                      const color =
-                        d.dur <= 8  ? '#4f46e5' :
-                        d.dur <= 12 ? '#7c3aed' :
-                                      '#0891b2';
-                      return (
-                        <div key={d.dur} className="bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3 border border-slate-100 dark:border-slate-700 flex flex-col gap-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xl font-black" style={{ color }}>{d.dur}h</span>
-                            <div className="flex gap-0.5 flex-wrap justify-end max-w-[80px]">
-                              {d.codes.map(c => (
-                                <span key={c} className="text-[8px] font-black px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300">{c}</span>
-                              ))}
+                  <div className="p-5 space-y-4">
+                    <p className="text-[10px] text-slate-400 font-medium -mt-1">
+                      Clic en una tarjeta para ver el desglose por código (M, T, N, REF, ESC, D12, N12…). Clic en un código para ver por objetivo.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                      {shiftDurationBreakdown.map(d => {
+                        const progPct = d.count > 0 ? Math.round((d.count - d.vacant) / d.count * 100) : 0;
+                        const isSelected = expandedDuration === d.dur;
+                        const color =
+                          d.dur <= 8  ? '#4f46e5' :
+                          d.dur <= 12 ? '#7c3aed' :
+                                        '#0891b2';
+                        return (
+                          <button
+                            key={d.dur}
+                            type="button"
+                            onClick={() => {
+                              setExpandedDurationCode(null);
+                              setExpandedDuration(isSelected ? null : d.dur);
+                            }}
+                            className={`text-left bg-slate-50 dark:bg-slate-700/40 rounded-xl p-3 border flex flex-col gap-1.5 transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+                              isSelected
+                                ? 'border-indigo-400 ring-2 ring-indigo-300/60 shadow-md'
+                                : 'border-slate-100 dark:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xl font-black" style={{ color }}>{d.dur}h</span>
+                              <div className="flex gap-0.5 flex-wrap justify-end max-w-[80px]">
+                                {d.codes.map(c => (
+                                  <span key={c} className={`text-[8px] font-black px-1 py-0.5 rounded ${codeBadgeClass(c)}`}>{c}</span>
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-xl font-black text-slate-800 dark:text-white leading-none">{d.count.toLocaleString('es-AR')}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
+                              turnos · {Math.round(d.hours).toLocaleString('es-AR')} hs
+                              {d.coverageHours > 0 && d.coverageHours !== d.hours && (
+                                <span className="text-emerald-600 normal-case"> · {d.coverageHours.toLocaleString('es-AR')} hs cobertura</span>
+                              )}
+                            </p>
+                            {d.vacant > 0 && (
+                              <p className="text-[9px] font-black text-amber-600">{d.vacant} vacantes ({100-progPct}%)</p>
+                            )}
+                            <div className="h-1 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden mt-auto">
+                              <div className="h-full rounded-full" style={{ width:`${progPct}%`, background: color }}/>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedDurationCode(null);
+                          setExpandedDuration(expandedDuration === 'all' ? null : 'all');
+                        }}
+                        className={`text-left bg-slate-900 dark:bg-slate-900 rounded-xl p-3 flex flex-col gap-1.5 col-span-2 sm:col-span-1 border transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+                          expandedDuration === 'all' ? 'border-indigo-400 ring-2 ring-indigo-300/40' : 'border-transparent'
+                        }`}
+                      >
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total</p>
+                        <p className="text-xl font-black text-white leading-none">
+                          {shiftDurationBreakdown.reduce((s,d) => s+d.count, 0).toLocaleString('es-AR')}
+                        </p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">turnos programados</p>
+                        <p className="text-[9px] font-black text-indigo-400">
+                          {shiftDurationBreakdown.reduce((s,d) => s+d.hours, 0).toLocaleString('es-AR')} hs totales
+                        </p>
+                      </button>
+                    </div>
+
+                    {durationDetail && (
+                      <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 p-4 animate-in slide-in-from-top-2">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">{durationDetail.label}</p>
+                            <p className="text-sm font-black text-slate-800 dark:text-white">
+                              {durationDetail.count.toLocaleString('es-AR')} turnos · {durationDetail.hours.toLocaleString('es-AR')} hs
+                              {durationDetail.coverageHours > 0 && (
+                                <span className="text-emerald-600 font-bold text-xs ml-2">
+                                  ({durationDetail.coverageHours.toLocaleString('es-AR')} hs cobertura SLA)
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setExpandedDuration(null); setExpandedDurationCode(null); }}
+                            className="text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 px-2 py-1 rounded-lg hover:bg-white/60"
+                          >
+                            Cerrar
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                              <Activity size={10}/> Por código de turno
+                            </p>
+                            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                              {durationDetail.codeRows.map((row) => {
+                                const isCodeSelected = expandedDurationCode === row.code;
+                                const progPct = row.count > 0 ? Math.round(((row.count - row.vacant) / row.count) * 100) : 0;
+                                return (
+                                  <button
+                                    key={row.code}
+                                    type="button"
+                                    onClick={() => setExpandedDurationCode(isCodeSelected ? null : row.code)}
+                                    className={`w-full flex items-center gap-2.5 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 shadow-sm text-left transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer ${
+                                      isCodeSelected ? 'ring-2 ring-indigo-400' : ''
+                                    }`}
+                                  >
+                                    <span className={`w-9 text-center text-[9px] font-black rounded-lg px-1 py-0.5 shrink-0 ${codeBadgeClass(row.code)}`}>
+                                      {row.code}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex justify-between text-[10px] mb-1 gap-2">
+                                        <span className="font-bold text-slate-600 dark:text-slate-300">
+                                          {row.count.toLocaleString('es-AR')} turnos
+                                          {row.vacant > 0 && <span className="text-amber-600"> · {row.vacant} vac</span>}
+                                        </span>
+                                        <span className="text-slate-400 font-medium shrink-0">{row.hours.toLocaleString('es-AR')} hs</span>
+                                      </div>
+                                      <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                        <div
+                                          className={`h-full rounded-full ${progPct === 100 ? 'bg-emerald-500' : progPct >= 70 ? 'bg-indigo-500' : 'bg-rose-500'}`}
+                                          style={{ width: `${progPct}%` }}
+                                        />
+                                      </div>
+                                      {!row.countsAsCoverage && row.count > 0 && (
+                                        <p className="text-[8px] text-orange-600 font-bold mt-0.5">No suma cobertura SLA (REF/ESC/RET)</p>
+                                      )}
+                                    </div>
+                                    <ChevronDown size={12} className={`shrink-0 text-slate-400 transition-transform ${isCodeSelected ? 'rotate-180' : ''}`}/>
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
-                          <p className="text-xl font-black text-slate-800 dark:text-white leading-none">{d.count.toLocaleString('es-AR')}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase leading-tight">turnos · {Math.round(d.hours).toLocaleString('es-AR')} hs</p>
-                          {d.vacant > 0 && (
-                            <p className="text-[9px] font-black text-amber-600">{d.vacant} vacantes ({100-progPct}%)</p>
-                          )}
-                          <div className="h-1 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden mt-auto">
-                            <div className="h-full rounded-full" style={{ width:`${progPct}%`, background: color }}/>
+
+                          <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
+                              <Target size={10}/>
+                              {expandedDurationCode
+                                ? `Objetivos · código ${expandedDurationCode}`
+                                : 'Por objetivo (clic en un código)'}
+                            </p>
+                            {!expandedDurationCode ? (
+                              <p className="text-[10px] text-slate-400 italic py-6 text-center">
+                                Elegí M, T, N, D12, N12, REF o ESC para ver en qué servicios aparecen.
+                              </p>
+                            ) : durationObjectiveRows.length === 0 ? (
+                              <p className="text-[10px] text-slate-400 italic py-6 text-center">Sin turnos de este código en el período.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                                {durationObjectiveRows.map((obj) => (
+                                  <div key={obj.id} className="flex items-center gap-2.5 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 shadow-sm">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-[10px] font-black text-slate-700 dark:text-white uppercase truncate">{obj.name}</p>
+                                      <p className="text-[9px] text-slate-400 font-bold truncate">{obj.client}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-[10px] font-black text-indigo-600">{obj.row.count} turnos</p>
+                                      <p className="text-[9px] text-slate-400">{obj.row.hours.toLocaleString('es-AR')} hs</p>
+                                      {obj.row.vacant > 0 && (
+                                        <p className="text-[8px] font-bold text-amber-600">{obj.row.vacant} vac</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      );
-                    })}
-                    {/* totales */}
-                    <div className="bg-slate-900 dark:bg-slate-900 rounded-xl p-3 flex flex-col gap-1.5 col-span-2 sm:col-span-1">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total</p>
-                      <p className="text-xl font-black text-white leading-none">
-                        {actual.byDuration.reduce((s,d) => s+d.count, 0).toLocaleString('es-AR')}
-                      </p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase">turnos programados</p>
-                      <p className="text-[9px] font-black text-indigo-400">
-                        {(actual.scheduledHours+actual.vacantHours).toLocaleString('es-AR')} hs totales
-                      </p>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </SectionCard>
               )}

@@ -101,7 +101,7 @@ import {
   isCrmWorkingShiftCode,
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
-  shiftPlannedStartInRange,
+  sumPlannedHoursForClient,
   toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
@@ -607,30 +607,27 @@ export default function CRMPage() {
         if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
       });
 
-      sTurnos.forEach((d) => {
-        const t = d.data() as any;
-        if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
+      const allTurnos = sTurnos.docs.map((d) => ({ id: d.id, ...d.data() as any }))
+        .filter((t) => belongsToEmpresaView(t, empresaId, migracionCompleta));
 
-        const cid = resolveClientIdForTurno(t, clientRefs);
-        if (!cid) return;
-        if (scopeEmpresa && !tenantClientIds.has(cid)) return;
-        if (!t.startTime || typeof t.startTime.toDate !== 'function') return;
+      clientRefs.forEach((clientRef) => {
+        plannedByClient[clientRef.id] = Math.round(
+          sumPlannedHoursForClient(allTurnos, clientRef, plannedRange),
+        );
+      });
+
+      allTurnos.forEach((t) => {
         if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;
 
         const status = String(t.status || '').toLowerCase();
         if (status.includes('cancel') || status.includes('delet')) return;
 
-        const plannedStart = toDateSafe(t.startTime);
-        const plannedEnd = toDateSafe(t.endTime);
+        const cid = resolveClientIdForTurno(t, clientRefs);
+        if (!cid) return;
+        if (scopeEmpresa && !tenantClientIds.has(cid)) return;
+
         const realStart = toDateSafe(t.realStartTime);
         const realEnd = toDateSafe(t.realEndTime);
-
-        if (plannedStart && plannedEnd && shiftPlannedStartInRange(plannedStart, plannedRange)) {
-          if (isCrmPlannedEligibleShift(t)) {
-            const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd);
-            if (hrs > 0) plannedByClient[cid] = (plannedByClient[cid] || 0) + hrs;
-          }
-        }
 
         if (realStart && realEnd && (!start || (realStart >= start && realStart <= (end as Date)))) {
           if (!validEmp[t.employeeId]) return;
@@ -1300,6 +1297,8 @@ export default function CRMPage() {
         target.byObjective[oKey].positions[pKey].byDay[dateKey] = (target.byObjective[oKey].positions[pKey].byDay[dateKey] || 0) + hours;
       };
 
+      const plannedCells = new Map<string, { hrs: number; objectiveName: string; positionName: string; dateKey: string }>();
+
       turnosList.forEach((t) => {
         if (!isCrmPlannedEligibleShift(t)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
@@ -1315,8 +1314,12 @@ export default function CRMPage() {
 
         if (plannedStart && plannedEnd && plannedStart >= start && plannedStart <= end) {
           const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd);
-          planned.total += hrs;
-          add(planned, objectiveName, positionName, getDateKeyInTimezone(plannedStart), hrs);
+          if (hrs > 0) {
+            const objId = String(t.objectiveId || objectiveName);
+            const empId = String(t.employeeId || 'unknown');
+            const dateKey = getDateKeyInTimezone(plannedStart);
+            plannedCells.set(`${objId}_${empId}_${dateKey}`, { hrs, objectiveName, positionName, dateKey });
+          }
         }
 
         if (realStart && realEnd && realStart >= start && realStart <= end) {
@@ -1328,6 +1331,11 @@ export default function CRMPage() {
             add(executed, objectiveName, positionName, getDateKeyInTimezone(realStart), hrs);
           }
         }
+      });
+
+      plannedCells.forEach(({ hrs, objectiveName, positionName, dateKey }) => {
+        planned.total += hrs;
+        add(planned, objectiveName, positionName, dateKey, hrs);
       });
 
       const breakdownSource = proformaDetailMode === 'executed' ? executed : proformaDetailMode === 'planned' ? planned : (clientContracts || []).some((c) => c.type === 'abierto') ? executed : planned;
@@ -1573,7 +1581,7 @@ export default function CRMPage() {
                 })()}
               </div>
               <p className="px-5 pb-4 text-[10px] text-slate-400 font-medium leading-snug">
-                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = mismo criterio que Prefactura (incluye borradores; excluye vacantes, francos y licencias).
+                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = suma por objetivo como el pie «Hs. Plan.» del planificador (excluye REF/ESC/RET, cobertura ops y vacantes).
               </p>
             </div>
           }
