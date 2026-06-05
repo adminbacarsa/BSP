@@ -4,6 +4,8 @@ import {
   calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
+import type { SlaExclusionContext } from './slaExclusionForPlanned';
+import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 
 export const CRM_PLANNED_SHIFT_HOURS: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8,
@@ -15,10 +17,11 @@ export function isCrmWorkingShiftCode(code: string): boolean {
   return !NON_PLANNED_CODES.has((code || '').trim().toUpperCase());
 }
 
-/** Pie «Hs. Plan.» del planificador — excluye REF/ESC/RET, ops y vacantes. */
-export function isCrmPlannedEligibleShift(t: any): boolean {
+/** Pie «Hs. Plan.» del planificador — excluye REF/ESC/RET, ops, vacantes y días/puestos excluidos SLA. */
+export function isCrmPlannedEligibleShift(t: any, slaExclusion?: SlaExclusionContext): boolean {
   if (!isPlanificadorPlannedHoursShift(t)) return false;
   if (isProformaVacancyShift(t)) return false;
+  if (slaExclusion && isTurnoOnSlaExcludedSlot(t, slaExclusion)) return false;
   return true;
 }
 
@@ -84,11 +87,12 @@ export function sumPlannedHoursForObjective(
   turnos: any[],
   objectiveId: string,
   range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
 ): number {
   const cells = new Map<string, number>();
   for (const t of turnos) {
     if (!turnoBelongsToObjective(t, objectiveId)) continue;
-    if (!isCrmPlannedEligibleShift(t)) continue;
+    if (!isCrmPlannedEligibleShift(t, slaExclusion)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
     const hrs = calcPlanificadorShiftHours(t);
@@ -104,11 +108,12 @@ export function sumPlannedHoursForClient(
   turnos: any[],
   client: ClientRef,
   range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
 ): number {
   const cells = new Map<string, number>();
   for (const t of turnos) {
     if (!turnoMatchesAnyClientObjective(t, client)) continue;
-    if (!isCrmPlannedEligibleShift(t)) continue;
+    if (!isCrmPlannedEligibleShift(t, slaExclusion)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
     const hrs = calcPlanificadorShiftHours(t);

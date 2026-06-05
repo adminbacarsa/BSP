@@ -1106,6 +1106,12 @@ export default function PlanificacionPage() {
                 const existing = shiftsMap[key];
                 const activeShift = pending && !pending.isDeleted ? pending : existing;
                 if (!activeShift) return;
+                const dateStr = getDateKey(day);
+                const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
+                const posConfig = shiftPos
+                    ? positionStructure.find((p: any) => p.positionName === shiftPos)
+                    : undefined;
+                if (posConfig && isPosExcludedOnDate(posConfig, dateStr)) return;
                 if (pending && !pending.isDeleted) {
                     if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
                         String(activeShift.objectiveId) !== String(selectedObjective)) return;
@@ -1116,7 +1122,7 @@ export default function PlanificacionPage() {
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {

@@ -106,6 +106,7 @@ import {
 } from '@/lib/crm/plannedHours';
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
+import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -622,8 +623,12 @@ export default function CRMPage() {
         .filter((t) => belongsToEmpresaView(t, empresaId, migracionCompleta));
 
       clientRefs.forEach((clientRef) => {
+        const clientSlas = slaDocsByClient.get(clientRef.id) || [];
+        const exStart = start ?? new Date(2000, 0, 1);
+        const exEnd = end ?? new Date(2099, 11, 31);
+        const slaExclusion = buildSlaExclusionContext(clientSlas, exStart, exEnd);
         plannedByClient[clientRef.id] = Math.round(
-          sumPlannedHoursForClient(allTurnos, clientRef, plannedRange),
+          sumPlannedHoursForClient(allTurnos, clientRef, plannedRange, slaExclusion),
         );
       });
 
@@ -1293,6 +1298,8 @@ export default function CRMPage() {
         slaInRange,
       );
 
+      const slaExclusion = buildSlaExclusionContext(servicesForProforma, start, end);
+
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
@@ -1311,7 +1318,7 @@ export default function CRMPage() {
       const plannedCells = new Map<string, { hrs: number; objectiveName: string; positionName: string; dateKey: string }>();
 
       turnosList.forEach((t) => {
-        if (!isCrmPlannedEligibleShift(t)) return;
+        if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
         const plannedStart = toDateSafe(t.startTime);
@@ -1384,7 +1391,7 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = turnosList.filter((t) => isCrmPlannedEligibleShift(t)) as any[];
+      const turnos = turnosList.filter((t) => isCrmPlannedEligibleShift(t, slaExclusion)) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const grids = buildProformaObjectiveGrids({
         turnos,
@@ -1392,6 +1399,7 @@ export default function CRMPage() {
         clientId: selectedClient.id,
         objectiveAliases,
         slaInRange,
+        slaExclusion,
         start,
         end,
         mode: proformaDetailMode,
@@ -1413,7 +1421,7 @@ export default function CRMPage() {
       });
 
       setProformaTotals({
-        planned: Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end })),
+        planned: Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion)),
         executed: Math.round(executed.total),
         loading: false,
       });

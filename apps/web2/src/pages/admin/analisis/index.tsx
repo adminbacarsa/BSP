@@ -29,6 +29,7 @@ import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind
 import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
+import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
@@ -852,6 +853,11 @@ export default function AnalisisPage() {
     [services, periodKey],
   );
 
+  const slaExclusionCtx = useMemo(
+    () => buildSlaExclusionContext(services, new Date(periodRange.start), new Date(periodRange.end)),
+    [services, periodKey],
+  );
+
   // ── Theoretical ──────────────────────────────────────────────────────────────
   /**
    * Día/semana: TURNOS = ⌈hs / hsTurno⌉ y GUARDIAS = ⌈hs/día / hsTurno⌉ ≈ guardias en simultáneo en el día pico operativo.
@@ -939,6 +945,7 @@ export default function AnalisisPage() {
     turnos.forEach((t: any) => {
       if (!isPlanificadorPlannedHoursShift(t)) return;
       if (isProformaVacancyShift(t)) return;
+      if (isTurnoOnSlaExcludedSlot(t, slaExclusionCtx)) return;
       const dur = calcPlanificadorShiftHours(t);
       if (dur <= 0) return;
       const code = String(t.code || '').trim().toUpperCase() || '—';
@@ -998,7 +1005,7 @@ export default function AnalisisPage() {
       scheduledHours: Math.round(scheduledHours),
       vacantHours: Math.round(vacantHours),
     };
-  }, [turnos, employees, vigenteServices, objectiveAliasesFromServices]);
+  }, [turnos, employees, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
 
   const shiftDurationBreakdown = useMemo(() => {
     type CodeAcc = { count: number; vacant: number; hours: number; coverageCount: number; coverageHours: number };

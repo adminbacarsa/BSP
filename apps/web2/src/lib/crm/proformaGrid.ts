@@ -8,6 +8,8 @@ import {
   resolveCanonicalObjectiveId,
   resolveObjectiveDisplayName,
 } from './objectiveIdentity';
+import type { SlaExclusionContext } from './slaExclusionForPlanned';
+import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 
 const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, GU: 8, EN: 9 };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -173,6 +175,7 @@ export type BuildProformaGridsOpts = {
   end: Date;
   mode: 'auto' | 'planned' | 'executed';
   useExecutedForAuto: boolean;
+  slaExclusion?: SlaExclusionContext;
 };
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, start: Date, end: Date): boolean {
@@ -202,6 +205,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   for (const t of opts.turnos) {
     if (!isPlanificadorPlannedHoursShift(t)) continue;
     if (isProformaVacancyShift(t)) continue;
+    if (opts.slaExclusion && isTurnoOnSlaExcludedSlot(t, opts.slaExclusion)) continue;
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
     const plannedStart = toDateSafe(t.startTime);
