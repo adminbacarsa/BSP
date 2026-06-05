@@ -74,12 +74,23 @@ console.log('══════════════════════�
 ensureWorktree();
 
 console.log('\n▶ npm install en worktree de deploy ...');
-const install = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install'], {
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+// --ignore-scripts evita que el postinstall del root llame npm --prefix apps/web2 install
+// dentro del proceso npm ya en curso (loop infinito en Windows).
+const install = spawnSync(npm, ['install', '--ignore-scripts'], {
   cwd: DEPLOY_DIR,
   stdio: 'inherit',
   shell: process.platform === 'win32',
 });
 if (install.status !== 0) process.exit(install.status ?? 1);
+// Instalar deps de web2 explícitamente (postinstall omitido arriba)
+console.log('\n▶ npm install web2 ...');
+const installWeb2 = spawnSync(npm, ['install', '--prefix', 'apps/web2'], {
+  cwd: DEPLOY_DIR,
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+});
+if (installWeb2.status !== 0) process.exit(installWeb2.status ?? 1);
 
 syncEnvLocal();
 runDeploy(DEPLOY_DIR, args);
