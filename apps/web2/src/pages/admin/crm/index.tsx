@@ -85,7 +85,7 @@ import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
 import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
-import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
+import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
@@ -94,12 +94,23 @@ import {
   calculateMonthlyBreakdown,
   calculateSlaHoursForDateRange,
 } from '@/lib/servicios/slaHoursCalculator';
-import { resolveShiftDurationHours, shouldBillShiftToObjective } from '@/hooks/useReportes';
+import {
+  CRM_PLANNED_SHIFT_HOURS,
+  getDurationHours,
+  isCrmPlannedEligibleShift,
+  isCrmWorkingShiftCode,
+  resolveClientIdForTurno,
+  resolveCrmPlannedShiftHours,
+  shiftPlannedStartInRange,
+  toDateSafe,
+  type PlannedHoursRange,
+} from '@/lib/crm/plannedHours';
+import type { ClientRef } from '@/lib/crm/clientDataMatch';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8 };
-const isWorkingCode = (code: string) => !['F', 'FF', 'V', 'L', 'A', 'E', 'AA'].includes((code || '').toUpperCase());
+const SHIFT_CODE_HOURS = CRM_PLANNED_SHIFT_HOURS;
+const isWorkingCode = isCrmWorkingShiftCode;
 
 const sumContractSlaHours = (
   positions: any[],
@@ -134,34 +145,11 @@ const monthRangeYmd = (year: number, month: number) => {
   };
 };
 
-/** Prefactura: incluye borradores (crono no publicado); excluye cancelados y novedades. */
-const isShiftEligibleForProforma = (t: any) => {
-  const status = String(t.status || '').toLowerCase();
-  if (status.includes('cancel') || status.includes('delet')) return false;
-  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
-  return true;
-};
-
-const toDateSafe = (val: any) => {
-  if (!val) return null;
-  if (typeof val?.toDate === 'function') return val.toDate();
-  if (typeof val?.seconds === 'number') return new Date(val.seconds * 1000);
-  if (val instanceof Date) return val;
-  const d = new Date(val);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
-
 const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, max: Date | null) => {
   const s = start && min ? (start > min ? start : min) : (start || min);
   const e = end && max ? (end < max ? end : max) : (end || max);
   if (s && e && s > e) return null;
   return { start: s, end: e };
-};
-
-const getDurationHours = (start: Date, end: Date) => {
-  const diff = (end.getTime() - start.getTime()) / 3600000;
-  if (diff >= 0) return diff;
-  return diff + 24;
 };
 
 type RangeMode = 'month' | 'year' | 'all';
@@ -575,6 +563,13 @@ export default function CRMPage() {
       const executedByClient: Record<string, number> = {};
       const contractedByClient: Record<string, number> = {};
       const closedByClient: Record<string, number> = {};
+      const clientRefs: ClientRef[] = clients.map((c) => ({
+        id: c.id,
+        name: c.name,
+        legalName: c.legalName,
+        objetivos: c.objetivos || [],
+      }));
+      const plannedRange: PlannedHoursRange = { start, end };
 
       sSla.forEach((d) => {
         const s = d.data() as any;
@@ -615,26 +610,24 @@ export default function CRMPage() {
       sTurnos.forEach((d) => {
         const t = d.data() as any;
         if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
-        if (scopeEmpresa) {
-          const cid = String(t.clientId ?? '').trim();
-          if (!cid || !tenantClientIds.has(cid)) return;
-        }
-        if (!t.clientId || !t.startTime || typeof t.startTime.toDate !== 'function') return;
+
+        const cid = resolveClientIdForTurno(t, clientRefs);
+        if (!cid) return;
+        if (scopeEmpresa && !tenantClientIds.has(cid)) return;
+        if (!t.startTime || typeof t.startTime.toDate !== 'function') return;
         if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;
 
         const status = String(t.status || '').toLowerCase();
         if (status.includes('cancel') || status.includes('delet')) return;
-
-        const cid = String(t.clientId).trim();
 
         const plannedStart = toDateSafe(t.startTime);
         const plannedEnd = toDateSafe(t.endTime);
         const realStart = toDateSafe(t.realStartTime);
         const realEnd = toDateSafe(t.realEndTime);
 
-        if (plannedStart && plannedEnd && (!start || (plannedStart >= start && plannedStart <= (end as Date)))) {
-          if (shouldBillShiftToObjective(t)) {
-            const hrs = resolveShiftDurationHours(t, SHIFT_CODE_HOURS, { forObjectiveBilling: true });
+        if (plannedStart && plannedEnd && shiftPlannedStartInRange(plannedStart, plannedRange)) {
+          if (isCrmPlannedEligibleShift(t)) {
+            const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd);
             if (hrs > 0) plannedByClient[cid] = (plannedByClient[cid] || 0) + hrs;
           }
         }
@@ -1308,8 +1301,7 @@ export default function CRMPage() {
       };
 
       turnosList.forEach((t) => {
-        if (!isShiftEligibleForProforma(t)) return;
-        if (isProformaVacancyShift(t)) return;
+        if (!isCrmPlannedEligibleShift(t)) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
         const plannedStart = toDateSafe(t.startTime);
@@ -1322,13 +1314,9 @@ export default function CRMPage() {
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
         if (plannedStart && plannedEnd && plannedStart >= start && plannedStart <= end) {
-          if (isWorkingCode(code)) {
-            let hrs = Number(t.hours) || getDurationHours(plannedStart, plannedEnd);
-            if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-            if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-            planned.total += hrs;
-            add(planned, objectiveName, positionName, getDateKeyInTimezone(plannedStart), hrs);
-          }
+          const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd);
+          planned.total += hrs;
+          add(planned, objectiveName, positionName, getDateKeyInTimezone(plannedStart), hrs);
         }
 
         if (realStart && realEnd && realStart >= start && realStart <= end) {
@@ -1377,7 +1365,7 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = turnosList.filter((t) => isShiftEligibleForProforma(t) && !isProformaVacancyShift(t)) as any[];
+      const turnos = turnosList.filter((t) => isCrmPlannedEligibleShift(t)) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const grids = buildProformaObjectiveGrids({
         turnos,
@@ -1585,7 +1573,7 @@ export default function CRMPage() {
                 })()}
               </div>
               <p className="px-5 pb-4 text-[10px] text-slate-400 font-medium leading-snug">
-                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = turnos facturables del mes en Firestore (incluye vacantes; excluye francos, retén y licencias).
+                SLA = horas del contrato (mismo cálculo que Servicios). Planificado = mismo criterio que Prefactura (incluye borradores; excluye vacantes, francos y licencias).
               </p>
             </div>
           }

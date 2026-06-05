@@ -19,6 +19,10 @@ import {
   countSlaDemandDaysInRange,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
+  calcPlanningScheduledShiftHours,
+  isPlanningScheduledCoverageShift,
+} from '@/lib/planificacion/planningScheduledHours';
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
   PieChart, Pie, RadialBarChart, RadialBar, AreaChart, Area, Treemap,
@@ -32,19 +36,7 @@ const OPERATIVE_CODES = new Set(['M','T','N','D12','N12','PU','GU','FT']);
 const FRANCO_SHIFT_CODES = new Set(['F', 'FF', 'FP']);
 /** Turnos no operativos desde planificación/RRHH (vacaciones, licencias, enfermedad, ART, PG…). */
 const LICENCIA_SHIFT_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
-/** Códigos que NO son cobertura de puesto (no suman hs programadas/operativas). */
-const NON_COVERAGE_SHIFT_CODES = new Set([
-  ...FRANCO_SHIFT_CODES,
-  ...LICENCIA_SHIFT_CODES,
-  'RET', // retén disponible — en planificador no cuenta como cobertura del puesto
-]);
-/** Determina si un turno aporta cobertura operativa real (suma horas) — alineado con el planificador. */
-const isCoverageShift = (t: any): boolean => {
-  const code = String(t?.code || '').trim().toUpperCase();
-  if (NON_COVERAGE_SHIFT_CODES.has(code)) return false;
-  if (t?.isFranco === true) return false;
-  return true;
-};
+const isCoverageShift = isPlanningScheduledCoverageShift;
 
 const parseAbsenceInstant = (v: any, endOfDay: boolean): Date | null => {
   if (v == null) return null;
@@ -219,24 +211,10 @@ const calcSrvMonth = (srv: any, y: number, m: number, efectiveHs = 192) => {
   return calcSrvDateRange(srv, start, end, efectiveHs);
 };
 
-/** Fallback de horas por código de turno (alineado con planificador y reportes). */
-const SHIFT_HOURS_LOOKUP_FALLBACK: Record<string, number> = {
-  M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 12, EN: 9, FT: 8, C: 8,
-  F: 0, FF: 0, FP: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0, RET: 0,
-};
-
-/** Mismo orden que el planificador: campo hours > diferencia start/end > fallback por código.
- * Franco/licencias/retén no suman horas de cobertura (aunque el documento tenga ventana horaria de 8h). */
+/** Horas programadas de cobertura — mismo criterio que pie «Hs. Plan.» del planificador. */
 const shiftDur = (t: any): number => {
-  if (!isCoverageShift(t)) return 0;
-  const stored = Number(t?.hours);
-  if (Number.isFinite(stored) && stored > 0) return Math.min(stored, 24);
-  if (t?.startTime?.seconds && t?.endTime?.seconds) {
-    return Math.max(0, Math.min((t.endTime.seconds - t.startTime.seconds) / 3600, 24));
-  }
-  const code = String(t?.code || '').trim().toUpperCase();
-  if (code in SHIFT_HOURS_LOOKUP_FALLBACK) return SHIFT_HOURS_LOOKUP_FALLBACK[code];
-  return 0;
+  if (!isPlanningScheduledCoverageShift(t)) return 0;
+  return calcPlanningScheduledShiftHours(t);
 };
 
 const shortName = (s: string, len = 14) => (s || '').length > len ? (s || '').substring(0, len) + '…' : (s || '');
@@ -872,11 +850,7 @@ export default function AnalisisPage() {
     let scheduledHours = 0, vacantHours = 0;
 
     turnos.forEach((t: any) => {
-      if (!isCoverageShift(t)) return;
-      // Las vacantes virtuales (SLA_VIRTUAL, alertas de operaciones, remanentes por interrupción)
-      // son placeholders auto-generados; el planificador los ignora porque no son planificación real.
-      const origin = String(t.origin || '').trim().toUpperCase();
-      if (origin === 'SLA_VIRTUAL' || origin === 'INTERRUPTION') return;
+      if (!isPlanningScheduledCoverageShift(t)) return;
       const code = String(t.code || '').trim().toUpperCase() || '—';
       const dur = shiftDur(t);
       if (dur <= 0) return;
