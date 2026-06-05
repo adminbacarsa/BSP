@@ -4555,9 +4555,10 @@ export default function PlanificacionPage() {
 
     /**
      * Actualiza las métricas de cobertura/SLA cuando se asignan N slots manualmente.
-     * Solo ajusta los contadores — no re-ejecuta el motor de verificación.
+     * extraHours: horas billables adicionales generadas (ej: extensiones D12 = d12Count×4h,
+     *             cobertura externa = gaps×8h). Suma a totalBillableHours para cerrar el SLA.
      */
-    const applyCoverageToStats = (coveredCount: number) => {
+    const applyCoverageToStats = (coveredCount: number, extraHours = 0) => {
         setAutoV2Coverage(prev => {
             if (!prev) return prev;
             const newUncovered = Math.max(0, prev.coverage.uncoveredSlots - coveredCount);
@@ -4576,9 +4577,10 @@ export default function PlanificacionPage() {
         setAutoV2GenStats(prev => {
             if (!prev) return prev;
             const newUncovered = Math.max(0, (prev.uncoveredSlots ?? 0) - coveredCount);
+            const newBillable = prev.totalBillableHours + extraHours;
             const slaClosed = newUncovered === 0
-                && (slaVendidas <= 0 || prev.totalBillableHours >= slaVendidas - 0.5);
-            return { ...prev, uncoveredSlots: newUncovered, slaHoursClosed: slaClosed };
+                && (slaVendidas <= 0 || newBillable >= slaVendidas - 0.5);
+            return { ...prev, uncoveredSlots: newUncovered, totalBillableHours: newBillable, slaHoursClosed: slaClosed };
         });
     };
 
@@ -7558,9 +7560,10 @@ export default function PlanificacionPage() {
                                         : g
                                 ));
                                 setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
-                                // Actualizar métricas de cobertura y SLA para reflejar la asignación
-                                applyCoverageToStats(n);
-                                toast.success(`${nombre.split(',')[0]} asignado a ${n} día(s)`);
+                                // Cobertura externa: cada día asignado agrega horas de la banda (N=8h, M=8h, T=8h)
+                                const bandHrs = bandMeta[planCoverageModalGaps[0]?.band ?? 'N']?.hours ?? 8;
+                                applyCoverageToStats(n, n * bandHrs);
+                                toast.success(`${nombre.split(',')[0]} asignado a ${n} día(s) (+${n * bandHrs}h)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onAssignD12={() => {
@@ -7616,8 +7619,9 @@ export default function PlanificacionPage() {
                                         : g
                                 ));
                                 setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
-                                applyCoverageToStats(n);
-                                toast.success(`D12+N12 aplicado: ${d12Count} turno(s) extendido(s) en ${n} día(s)`);
+                                // Cada extensión (T→N12 o M→D12) agrega 4h billables (de 8h a 12h)
+                                applyCoverageToStats(n, d12Count * 4);
+                                toast.success(`D12+N12 aplicado: ${d12Count} turno(s) extendido(s) en ${n} día(s) (+${d12Count * 4}h)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onClose={() => setPlanCoverageModalGaps([])}
