@@ -21,7 +21,7 @@ export type CoverageGap = {
     band: string;
     coveredBy: string | null;
     coveredByName?: string;
-    coverageType: 'ret' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural';
+    coverageType: 'ret' | 'sin_turno' | 'ft_required' | 'uncovered' | 'franco_natural' | 'manual';
     ftCandidates?: { empId: string; nombre: string; code: string }[];
 };
 

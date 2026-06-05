@@ -8234,10 +8234,46 @@ export default function PlanificacionPage() {
 
                                 {/* Panel de cobertura de ausencias — visible si hay gaps (siempre se analiza con pipeline floater) */}
                                 {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoCoverageGaps.length > 0 && (() => {
+                                    const bandMeta: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
+                                        M: { name: 'Mañana',   hours: 8, startTime: '07:00', endTime: '15:00' },
+                                        T: { name: 'Tarde',    hours: 8, startTime: '15:00', endTime: '23:00' },
+                                        N: { name: 'Noche',    hours: 8, startTime: '23:00', endTime: '07:00' },
+                                        D12:{ name: 'Diurno',  hours:12, startTime: '07:00', endTime: '19:00' },
+                                        N12:{ name: 'Nocturno',hours:12, startTime: '19:00', endTime: '07:00' },
+                                    };
+
+                                    const assignGap = (candidateEmpId: string, candidateName: string, dateStr: string, band: string, absentEmpId: string) => {
+                                        const meta = bandMeta[band] ?? bandMeta.M;
+                                        const posName = positionStructure[0]?.positionName ?? 'General';
+                                        // Actualizar grilla: cambiar el turno del candidato en ese día
+                                        setPendingChanges(prev => ({
+                                            ...prev,
+                                            [`${candidateEmpId}_${dateStr}`]: {
+                                                isTemp: true,
+                                                employeeId: candidateEmpId,
+                                                objectiveId: selectedObjective,
+                                                positionName: posName,
+                                                code: band,
+                                                name: meta.name,
+                                                hours: meta.hours,
+                                                startTime: meta.startTime,
+                                                endTime: meta.endTime,
+                                                isFranco: false,
+                                            },
+                                        }));
+                                        // Marcar gap como cubierto manualmente
+                                        setAutoCoverageGaps(prev => prev.map(g =>
+                                            g.absentEmpId === absentEmpId && g.dateStr === dateStr
+                                                ? { ...g, coverageType: 'manual' as const, coveredBy: candidateEmpId, coveredByName: candidateName }
+                                                : g
+                                        ));
+                                        toast.success(`Día ${dateStr.slice(8,10)}: ${candidateName.split(',')[0]} asignado a banda ${band}`, { duration: 3000 });
+                                    };
+
                                     const francoGaps = autoCoverageGaps.filter(g => g.coverageType === 'franco_natural');
-                                    const retGaps = autoCoverageGaps.filter(g => g.coverageType === 'ret');
+                                    const coveredGaps = autoCoverageGaps.filter(g => g.coverageType === 'ret' || g.coverageType === 'manual');
                                     const ftGaps = autoCoverageGaps.filter(g => g.coverageType === 'ft_required');
-                                    // Agrupar FT gaps por empleado ausente
+
                                     const ftByEmp: Record<string, { nombre: string; days: typeof ftGaps }> = {};
                                     for (const g of ftGaps) {
                                         if (!ftByEmp[g.absentEmpId]) ftByEmp[g.absentEmpId] = { nombre: g.absentName || g.absentEmpId, days: [] };
@@ -8248,12 +8284,13 @@ export default function PlanificacionPage() {
                                         if (!francoByEmp[g.absentEmpId]) francoByEmp[g.absentEmpId] = { nombre: g.absentName || g.absentEmpId, days: [] };
                                         francoByEmp[g.absentEmpId].days.push(g);
                                     }
+
                                     return (
                                         <div className="rounded-xl border-2 border-amber-200 bg-amber-50/80 px-3 py-2.5 space-y-2.5">
                                             <div className="flex items-center justify-between">
                                                 <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Cobertura ausencias</p>
-                                                <div className="flex gap-1">
-                                                    {retGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">{retGaps.length} RET ✓</span>}
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {coveredGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">{coveredGaps.length} cubiertos ✓</span>}
                                                     {ftGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">{ftGaps.length} sin cubrir</span>}
                                                     {francoGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">{francoGaps.length} error RRHH</span>}
                                                 </div>
@@ -8262,53 +8299,61 @@ export default function PlanificacionPage() {
                                             {/* Franco natural — error de carga en RRHH */}
                                             {francoGaps.length > 0 && (
                                                 <div className="rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-2">
-                                                    <p className="text-[9px] font-black text-orange-800 mb-1.5">⚠ Días de licencia que son franco del ciclo 6+2</p>
-                                                    <p className="text-[9px] font-bold text-orange-700 mb-1.5">Estos días no necesitan cobertura — la licencia está mal cargada en RRHH (no puede incluir francos).</p>
+                                                    <p className="text-[9px] font-black text-orange-800 mb-1">⚠ Días de licencia en franco del ciclo — corregir en RRHH</p>
+                                                    <p className="text-[9px] text-orange-700 mb-1.5">La licencia no puede incluir días de franco. No se necesita cobertura en estos días.</p>
                                                     {Object.values(francoByEmp).map(({ nombre, days }) => (
                                                         <div key={days[0].absentEmpId} className="text-[9px] font-bold text-orange-900">
-                                                            {nombre}: días {days.map(d => d.dateStr.slice(8, 10)).join(', ')} — corregir en RRHH
+                                                            {nombre}: días {days.map(d => d.dateStr.slice(8, 10)).join(', ')}
                                                         </div>
                                                     ))}
                                                 </div>
                                             )}
 
-                                            {/* FT required — días laborales sin RET disponible */}
+                                            {/* FT required — días sin RET, mostrar candidatos asignables */}
                                             {ftGaps.length > 0 && (
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[9px] font-black text-rose-800">Días laborales de ausencia sin RET disponible</p>
+                                                <div className="space-y-2">
+                                                    <p className="text-[9px] font-black text-rose-800">Días laborales sin cobertura — elegí quién cubre:</p>
                                                     {Object.values(ftByEmp).map(({ nombre, days }) => (
-                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5">
-                                                            <p className="text-[9px] font-black text-rose-800 mb-1">{nombre}</p>
-                                                            <div className="space-y-1">
-                                                                {days.map(gap => (
-                                                                    <div key={gap.dateStr} className="flex items-start justify-between gap-1">
-                                                                        <span className="text-[9px] font-bold text-rose-700">Día {gap.dateStr.slice(8, 10)} · banda {gap.band}</span>
-                                                                        <div className="text-right">
-                                                                            {gap.ftCandidates && gap.ftCandidates.length > 0 ? (
-                                                                                <div className="text-[9px] font-bold text-slate-600">
-                                                                                    FT: {gap.ftCandidates.slice(0, 2).map(c => c.nombre.split(' ')[0]).join(', ')}
-                                                                                    {gap.ftCandidates.length > 2 ? ` +${gap.ftCandidates.length - 2}` : ''}
-                                                                                </div>
-                                                                            ) : (
-                                                                                <span className="text-[9px] font-bold text-slate-400">sin candidatos</span>
-                                                                            )}
-                                                                        </div>
+                                                        <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white px-2.5 py-2 space-y-2">
+                                                            <p className="text-[9px] font-black text-rose-800">{nombre}</p>
+                                                            {days.map(gap => (
+                                                                <div key={gap.dateStr} className="space-y-1">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-[9px] font-black text-slate-700">Día {gap.dateStr.slice(8, 10)} · {gap.band}</span>
+                                                                        <span className="text-[8px] font-bold text-violet-600">D12 activo en compañeros</span>
                                                                     </div>
-                                                                ))}
-                                                            </div>
-                                                            <p className="text-[8px] font-bold text-violet-700 mt-1">D12+N12 activo en compañeros · gestionar FT desde Operaciones</p>
+                                                                    {gap.ftCandidates && gap.ftCandidates.length > 0 ? (
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {gap.ftCandidates.map(c => (
+                                                                                <button
+                                                                                    key={c.empId}
+                                                                                    type="button"
+                                                                                    onClick={() => assignGap(c.empId, c.nombre, gap.dateStr, gap.band, gap.absentEmpId)}
+                                                                                    className="text-[9px] font-black px-2 py-1 rounded-lg border-2 border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-200 hover:border-rose-500 transition-colors"
+                                                                                    title={`Asignar ${c.nombre} — actualmente ${c.code}`}
+                                                                                >
+                                                                                    {c.nombre.split(',')[0].trim()} <span className="opacity-60">({c.code})</span>
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <p className="text-[9px] font-bold text-slate-400">Sin candidatos disponibles ese día</p>
+                                                                    )}
+                                                                </div>
+                                                            ))}
                                                         </div>
                                                     ))}
                                                 </div>
                                             )}
 
-                                            {/* Cubiertos por RET */}
-                                            {retGaps.length > 0 && (
-                                                <div className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1.5">
-                                                    <p className="text-[9px] font-black text-teal-800 mb-1">✓ Cubiertos por RET</p>
-                                                    {retGaps.map(g => (
-                                                        <div key={`${g.absentEmpId}_${g.dateStr}`} className="text-[9px] font-bold text-teal-700">
-                                                            Día {g.dateStr.slice(8, 10)} · {g.absentName?.split(' ')[0]} → {g.coveredByName?.split(',')[0]} ({g.band})
+                                            {/* Cubiertos (RET auto + manual) */}
+                                            {coveredGaps.length > 0 && (
+                                                <div className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1.5 space-y-0.5">
+                                                    <p className="text-[9px] font-black text-teal-800 mb-1">✓ Cubiertos</p>
+                                                    {coveredGaps.map(g => (
+                                                        <div key={`${g.absentEmpId}_${g.dateStr}`} className="flex justify-between text-[9px] font-bold text-teal-700">
+                                                            <span>{g.absentName?.split(',')[0]} · día {g.dateStr.slice(8,10)} · {g.band}</span>
+                                                            <span>{g.coveredByName?.split(',')[0]} {g.coverageType === 'manual' ? '(FT)' : '(RET)'}</span>
                                                         </div>
                                                     ))}
                                                 </div>
