@@ -828,8 +828,14 @@ export default function PlanificacionPage() {
                 ids.add(shift.employeeId);
             }
         }
+        // Incluir empleados asignados temporalmente via pendingChanges (cobertura externa de planificación)
+        for (const change of Object.values(pendingChanges) as any[]) {
+            if (change?.objectiveId === selectedObjective && change?.employeeId && !change?.isDeleted) {
+                ids.add(change.employeeId);
+            }
+        }
         return ids;
-    }, [shiftsMap, selectedObjective]);
+    }, [shiftsMap, pendingChanges, selectedObjective]);
 
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
@@ -7521,6 +7527,7 @@ export default function PlanificacionPage() {
                             objectiveEmpIds={objectiveEmpIds}
                             objLat={selectedObjectiveData?.lat ?? null}
                             objLng={selectedObjectiveData?.lng ?? null}
+                            objectiveId={selectedObjective}
                             pendingChanges={pendingChanges}
                             shiftsMap={shiftsMap}
                             empresaId={empresaId || ''}
@@ -7558,8 +7565,34 @@ export default function PlanificacionPage() {
                                 setPlanCoverageModalGaps([]);
                             }}
                             onAssignD12={() => {
+                                // D12 interno: busca el compañero de banda adyacente y le cambia el turno real
+                                // N ausente → T worker → N12 | M ausente → T worker → D12 | T ausente → M worker → D12
+                                const D12_ADJ: Record<string, { lookFor: string; code: string; name: string; hours: number; startTime: string; endTime: string }> = {
+                                    N: { lookFor: 'T',   code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
+                                    M: { lookFor: 'T',   code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                    T: { lookFor: 'M',   code: 'D12', name: 'Diurno 12h',   hours: 12, startTime: '07:00', endTime: '19:00' },
+                                };
                                 const gapKeys = planCoverageModalGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
                                 const n = planCoverageModalGaps.length;
+                                const d12Updates: Record<string, any> = {};
+                                let d12Count = 0;
+                                for (const gap of planCoverageModalGaps) {
+                                    const adj = D12_ADJ[gap.band];
+                                    if (!adj) continue;
+                                    // Buscar primer compañero del objetivo con la banda adyacente ese día
+                                    const adjEmp = planningDotacionEmployees.find((e: any) => {
+                                        const key = `${e.id}_${gap.dateStr}`;
+                                        const asig = pendingChanges[key] ?? shiftsMap[key];
+                                        return asig?.code === adj.lookFor;
+                                    }) as any | undefined;
+                                    if (adjEmp) {
+                                        const key = `${adjEmp.id}_${gap.dateStr}`;
+                                        const existing = pendingChanges[key] ?? shiftsMap[key] ?? {};
+                                        d12Updates[key] = { ...existing, isTemp: true, employeeId: adjEmp.id, objectiveId: selectedObjective, code: adj.code, name: adj.name, hours: adj.hours, startTime: adj.startTime, endTime: adj.endTime, isFranco: false };
+                                        d12Count++;
+                                    }
+                                }
+                                if (Object.keys(d12Updates).length > 0) setPendingChanges(prev => ({ ...prev, ...d12Updates }));
                                 setAutoCoverageGaps(prev => prev.map(g =>
                                     gapKeys.includes(`${g.absentEmpId}_${g.dateStr}`)
                                         ? { ...g, coverageType: 'manual' as const, coveredBy: 'D12', coveredByName: 'D12 (extensión)' }
@@ -7567,7 +7600,7 @@ export default function PlanificacionPage() {
                                 ));
                                 setCoverageSelectedDays(prev => { const next = new Set(prev); gapKeys.forEach(k => next.delete(k)); return next; });
                                 applyCoverageToStats(n);
-                                toast.success(`D12 confirmado para ${n} día(s)`);
+                                toast.success(`D12 aplicado a ${d12Count} turno(s) en ${n} día(s)`);
                                 setPlanCoverageModalGaps([]);
                             }}
                             onClose={() => setPlanCoverageModalGaps([])}

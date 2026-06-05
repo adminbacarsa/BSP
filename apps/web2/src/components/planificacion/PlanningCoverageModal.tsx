@@ -14,12 +14,29 @@ import type { CoverageGap } from '@/lib/planificacion/coverageEngine';
 
 // ─── tipos ────────────────────────────────────────────────────────────────────
 
+// Nivel de experiencia en el objetivo (mayor = más arriba en la lista)
+type ExperienciaNivel = 'TITULAR' | 'CONOCIDO' | 'ESCUELA' | 'NINGUNO';
+const NIVEL_SCORE: Record<ExperienciaNivel, number> = { TITULAR: 4, CONOCIDO: 3, ESCUELA: 2, NINGUNO: 0 };
+
+function computeNivel(exp: any): ExperienciaNivel {
+    if (!exp) return 'NINGUNO';
+    const reg = Number(exp.turnosRegulares ?? 0);
+    const esc = Number(exp.turnosEscuela ?? 0);
+    const ref = Number(exp.turnosRefuerzo ?? 0);
+    if (reg >= 10 || (reg + ref) >= 15) return 'TITULAR';
+    if (reg >= 3 || esc >= 3) return 'CONOCIDO';
+    if (esc >= 1) return 'ESCUELA';
+    return 'NINGUNO';
+}
+
 type EmpRow = {
     id: string;
     nombre: string;
     currentCode: string | null;
     category: 'ST' | 'RET' | 'ESC' | 'FT' | 'OCUPADO';
     km: number | null;
+    nivel: ExperienciaNivel;
+    turnosObj: number; // total turnos en el objetivo
 };
 
 type Props = {
@@ -27,6 +44,7 @@ type Props = {
     objectiveEmpIds: Set<string>;                       // empleados del objetivo (excluir)
     objLat?: number | null;
     objLng?: number | null;
+    objectiveId?: string | null;                        // para leer historial
     pendingChanges: Record<string, any>;
     shiftsMap: Record<string, any>;
     empresaId: string;
@@ -87,7 +105,7 @@ function codeToCategory(code: string | null): EmpRow['category'] {
 // ─── componente ───────────────────────────────────────────────────────────────
 
 export default function PlanningCoverageModal({
-    gaps, objectiveEmpIds, objLat, objLng,
+    gaps, objectiveEmpIds, objLat, objLng, objectiveId,
     pendingChanges, shiftsMap, empresaId, positionName,
     onAssignExternal, onAssignD12, onClose,
 }: Props) {
@@ -147,14 +165,23 @@ export default function PlanningCoverageModal({
                     if (c && BUSY_CODES.has(c)) { worstCode = c; break; }
                 }
 
-                rows.push({ id: d.id, nombre, currentCode: worstCode, category: codeToCategory(worstCode), km });
+                // Historial en el objetivo (experienciaObjetivos)
+                const exp = objectiveId ? (data.experienciaObjetivos?.[objectiveId] ?? null) : null;
+                const nivel = computeNivel(exp);
+                const turnosObj = exp
+                    ? (Number(exp.turnosRegulares ?? 0) + Number(exp.turnosEscuela ?? 0) + Number(exp.turnosRefuerzo ?? 0))
+                    : 0;
+
+                rows.push({ id: d.id, nombre, currentCode: worstCode, category: codeToCategory(worstCode), km, nivel, turnosObj });
             }
 
-            // Orden: categoría (ST>RET>ESC>FT>OCUPADO) luego por km (nulos al final) luego nombre
+            // Orden: 1° categoría (ST>RET>ESC>FT>OCUPADO) · 2° nivel en objetivo (TITULAR>CONOCIDO>ESCUELA>NINGUNO) · 3° km · 4° nombre
             rows.sort((a, b) => {
                 const ca = CATEGORY_ORDER.indexOf(a.category);
                 const cb = CATEGORY_ORDER.indexOf(b.category);
                 if (ca !== cb) return ca - cb;
+                const na = NIVEL_SCORE[a.nivel]; const nb = NIVEL_SCORE[b.nivel];
+                if (na !== nb) return nb - na; // mayor nivel primero
                 if (a.km != null && b.km != null) return a.km - b.km;
                 if (a.km != null) return -1;
                 if (b.km != null) return 1;
@@ -287,7 +314,14 @@ export default function PlanningCoverageModal({
                                                     >
                                                         <div className="flex items-center gap-2 min-w-0">
                                                             <User size={13} className="shrink-0 opacity-60"/>
-                                                            <span className="text-[11px] font-black truncate text-slate-800">{emp.nombre}</span>
+                                                            <div className="min-w-0">
+                                                                <span className="text-[11px] font-black truncate text-slate-800 block">{emp.nombre}</span>
+                                                                {emp.nivel !== 'NINGUNO' && (
+                                                                    <span className={`text-[8px] font-bold ${emp.nivel === 'TITULAR' ? 'text-amber-700' : emp.nivel === 'CONOCIDO' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                                                        ★ {emp.nivel} · {emp.turnosObj}t
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <div className="flex items-center gap-1.5 shrink-0">
                                                             {emp.km != null && (
@@ -355,9 +389,14 @@ export default function PlanningCoverageModal({
                             <p className="text-[11px] font-bold text-slate-500">
                                 cubre a {absentName} · {daysLabel} · banda {bandLabel}
                             </p>
-                            {selected.km != null && (
-                                <p className="text-[10px] font-bold text-slate-400">{selected.km} km del objetivo</p>
-                            )}
+                            <div className="flex items-center justify-center gap-3 text-[10px] font-bold text-slate-400">
+                                {selected.km != null && <span>{selected.km} km</span>}
+                                {selected.nivel !== 'NINGUNO' && (
+                                    <span className={selected.nivel === 'TITULAR' ? 'text-amber-700' : 'text-indigo-600'}>
+                                        ★ {selected.nivel}
+                                    </span>
+                                )}
+                            </div>
                             {selected.category === 'FT' && (
                                 <p className="text-[10px] font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">
                                     ⚠ FT: el empleado tiene franco ese día — confirmar disponibilidad
