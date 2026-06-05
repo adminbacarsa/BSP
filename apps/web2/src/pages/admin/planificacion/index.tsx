@@ -7550,7 +7550,11 @@ export default function PlanificacionPage() {
                                         endTime: meta.endTime,
                                         isFranco: false,
                                     };
-                                    gapKeys.push(`${gap.absentEmpId}_${gap.dateStr}`);
+                                    // Marcar la celda del ausente con quién lo cubre → aparece en "4. CUBIERTO POR"
+                                    const absentKey = `${gap.absentEmpId}_${gap.dateStr}`;
+                                    const existingAbsent = pendingChanges[absentKey] || shiftsMap[absentKey] || {};
+                                    updates[absentKey] = { ...existingAbsent, coveredBy: nombre };
+                                    gapKeys.push(absentKey);
                                 }
                                 const n = planCoverageModalGaps.length;
                                 setPendingChanges(prev => ({ ...prev, ...updates }));
@@ -7618,6 +7622,12 @@ export default function PlanificacionPage() {
                                             d12Count++;
                                         }
                                     }
+                                }
+                                // Marcar la celda del ausente con "D12+N12" → visible en "4. CUBIERTO POR"
+                                for (const gap of planCoverageModalGaps) {
+                                    const absentKey = `${gap.absentEmpId}_${gap.dateStr}`;
+                                    const existingAbsent = pendingChanges[absentKey] || shiftsMap[absentKey] || {};
+                                    d12Updates[absentKey] = { ...existingAbsent, coveredBy: 'D12+N12 (extensión)' };
                                 }
                                 if (Object.keys(d12Updates).length > 0) setPendingChanges(prev => ({ ...prev, ...d12Updates }));
                                 setAutoCoverageGaps(prev => prev.map(g =>
