@@ -1912,79 +1912,153 @@ export default function PlanificacionPage() {
     // ============================================================================
 
     const renderLegend = () => {
-        const selectedStyle = selectedRef ? SHIFT_STYLES[selectedRef] : '';
-        const selectedDesc = selectedRef ? LEGEND_DESCRIPTIONS[selectedRef] : '';
-        const selectedRange = selectedRef ? SHIFT_RANGES[selectedRef] : null;
-        const selectedHours = selectedRef ? SHIFT_HOURS_LOOKUP[selectedRef] : 0;
+        const legendGroups = [
+            {
+                title: 'Turnos de Trabajo',
+                items: [
+                    { code: 'M',   name: 'Mañana',         sub: '07:00–15:00 · 8h · computa SLA' },
+                    { code: 'T',   name: 'Tarde',           sub: '15:00–23:00 · 8h · computa SLA' },
+                    { code: 'N',   name: 'Noche',           sub: '23:00–07:00 · 8h · computa SLA' },
+                    { code: 'D12', name: 'Diurno 12h',      sub: '07:00–19:00 · 12h · computa SLA' },
+                    { code: 'N12', name: 'Nocturno 12h',    sub: '19:00–07:00 · 12h · computa SLA' },
+                    { code: 'PU',  name: 'Puesto Único',    sub: 'Horario personalizado' },
+                ],
+            },
+            {
+                title: 'Francos / Descansos',
+                items: [
+                    { code: 'F',  name: 'Franco',               sub: 'Descanso planificado CCT (6+2)' },
+                    { code: 'FF', name: 'Franco compensatorio',  sub: 'Devolución de día trabajado' },
+                    { code: 'FT', name: 'Franco Trabajado',      sub: 'Cubre ausencia — pago doble CCT' },
+                ],
+            },
+            {
+                title: 'Ausencias / Licencias',
+                items: [
+                    { code: 'V',  name: 'Vacaciones',       sub: 'Período vacacional planificado · pago' },
+                    { code: 'L',  name: 'Licencia',         sub: 'Licencia general (art. CCT) · pago' },
+                    { code: 'E',  name: 'Enfermedad',       sub: 'Baja médica con certificado · pago' },
+                    { code: 'A',  name: 'ART / Autorizada', sub: 'Ausencia autorizada o ART · pago' },
+                    { code: 'PG', name: 'Permiso Gremial',  sub: 'Actividad sindical · pago' },
+                    { code: 'AA', name: 'Injustificada',    sub: 'Sin justificación ni cert. · sin pago · punto rojo' },
+                ],
+            },
+            {
+                title: 'Operativos (no computan SLA)',
+                items: [
+                    { code: 'RET', name: 'Retén (stand-by)',     sub: 'Disponible para cubrir ausencias' },
+                    { code: 'REF', name: 'Refuerzo',             sub: 'Cobertura extra programada · 8h' },
+                    { code: 'ESC', name: 'Escuela / formación',  sub: 'Capacitación en puesto · 8h' },
+                ],
+            },
+            {
+                title: 'Sistema',
+                items: [
+                    { code: 'C',            name: 'Consolidado',       sub: 'Turno fichado por el guardia · 8h' },
+                    { code: 'LOCKED',       name: 'Bloqueado',         sub: 'Período cerrado o fecha pasada' },
+                    { code: 'SWAP',         name: 'Permuta activa',    sub: 'Intercambio de turno confirmado' },
+                    { code: 'SWAP_PENDING', name: 'Permuta pendiente', sub: 'Aguarda autorización del supervisor' },
+                ],
+            },
+        ];
+
+        const SectionHeader = ({ title }: { title: string }) => (
+            <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">{title}</span>
+                <span className="flex-1 h-px bg-slate-100"/>
+            </div>
+        );
 
         return (
             <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowLegend(false)}>
-                <div className="bg-white w-full max-w-2xl rounded-xl p-6 shadow-2xl relative border border-slate-100 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center mb-6 pb-3 border-b border-slate-100 shrink-0">
+                <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl relative border border-slate-100 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shadow-sm">
-                                <Info size={24} strokeWidth={2.5}/>
+                                <Info size={22} strokeWidth={2.5}/>
                             </div>
                             <div>
-                                <h3 className="text-xl font-black text-slate-800 tracking-tight">Referencias Operativas</h3>
-                                <p className="text-slate-500 font-bold text-xs">Haga clic en un ícono para ver detalles</p>
+                                <h3 className="text-lg font-black text-slate-800 tracking-tight">Referencias Operativas</h3>
+                                <p className="text-slate-400 text-xs">CCT 422/05 — Seguridad Privada</p>
                             </div>
                         </div>
                         <button onClick={() => setShowLegend(false)} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
                             <X size={20}/>
                         </button>
                     </div>
-                    <div className="overflow-y-auto custom-scrollbar pr-2 mb-4">
-                        <div className="grid grid-cols-5 gap-3">
-                            {Object.entries(SHIFT_STYLES).map(([code, styleClass]: [string, any]) => (
-                                <button key={code} onClick={() => setSelectedRef(code)} className={`aspect-square rounded-xl flex flex-col items-center justify-center gap-1 transition-all border-2 ${selectedRef === code ? 'border-indigo-600 shadow-lg ring-2 ring-indigo-100 scale-105 z-10' : 'border-transparent hover:bg-slate-50 hover:scale-105'}`}>
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black border shadow-sm ${styleClass}`}>
-                                        {code === 'CONSOLIDATED' ? 'C' : code}
-                                    </div>
-                                    <span className="text-[9px] font-bold text-slate-400">{code === 'CONSOLIDATED' ? 'C' : code}</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="mt-auto pt-4 border-t border-slate-100 shrink-0 min-h-[80px]">
-                        {selectedRef ? (
-                            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 animate-in slide-in-from-bottom-2 fade-in duration-300">
-                                <div className="flex items-center gap-4">
-                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black border shadow-md ${selectedStyle}`}>
-                                        {selectedRef === 'CONSOLIDATED' ? 'C' : selectedRef}
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="text-sm font-black text-slate-800">{selectedDesc || 'Sin descripción'}</h4>
-                                        <div className="flex gap-4 mt-1">
-                                            {selectedRange ? (
-                                                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 shadow-sm flex items-center gap-1">
-                                                    <Clock size={10}/> {selectedRange}
-                                                </span>
-                                            ) : selectedHours > 0 && (
-                                                <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border shadow-sm flex items-center gap-1">
-                                                    <Clock size={10}/> {selectedHours} hs carga
-                                                </span>
-                                            )}
+
+                    <div className="overflow-y-auto custom-scrollbar px-5 py-4 flex flex-col gap-4">
+                        {legendGroups.map(group => (
+                            <div key={group.title}>
+                                <SectionHeader title={group.title}/>
+                                <div className="grid grid-cols-2 gap-1">
+                                    {group.items.map(item => (
+                                        <div key={item.code} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition-colors">
+                                            <div className={`w-9 h-9 rounded-lg shrink-0 flex items-center justify-center text-[10px] font-black border shadow-sm ${SHIFT_STYLES[item.code] || 'bg-slate-100 text-slate-600 border-slate-300'}`}>
+                                                {item.code === 'SWAP_PENDING' ? 'S!' : item.code}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-black text-slate-700 leading-tight">{item.name}</p>
+                                                <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{item.sub}</p>
+                                            </div>
                                         </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+
+                        <div>
+                            <SectionHeader title="Indicadores de Estado"/>
+                            <div className="grid grid-cols-2 gap-1">
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center">
+                                        <div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white shadow-sm ring-1 ring-slate-100"/>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Presente</p>
+                                        <p className="text-[10px] text-slate-400">Guardia confirmó presencia</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center">
+                                        <div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-white shadow-sm ring-1 ring-slate-100"/>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Ausente</p>
+                                        <p className="text-[10px] text-slate-400">No registró presencia · también en AA</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center">
+                                        <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"/>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Conflicto</p>
+                                        <p className="text-[10px] text-slate-400">Turnos superpuestos detectados</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className={`w-9 h-9 rounded-lg shrink-0 flex items-center justify-center text-[9px] font-black border ${OTHER_OBJECTIVE_CELL_STYLE}`}>M</div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Otro objetivo</p>
+                                        <p className="text-[10px] text-slate-400">Turno en objetivo diferente</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center text-sm font-black text-pink-700 bg-pink-100 border border-pink-200">♀</div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Solo femenino</p>
+                                        <p className="text-[10px] text-slate-400">Puesto requiere guardia femenina</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center text-sm font-black text-blue-700 bg-blue-100 border border-blue-200">♂</div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Solo masculino</p>
+                                        <p className="text-[10px] text-slate-400">Puesto requiere guardia masculino</p>
                                     </div>
                                 </div>
                             </div>
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-slate-300 font-bold text-xs italic gap-2 py-2">
-                                <MousePointerClick size={16}/> Seleccione un código
-                            </div>
-                        )}
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-slate-100 shrink-0">
-                         <h5 className="text-[9px] font-black uppercase text-slate-400 mb-2 flex items-center gap-1"><ShieldCheck size={10}/> Estados</h5>
-                        <div className="flex flex-wrap gap-4">
-                            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Presente</span></div>
-                            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-white shadow-sm ring-1 ring-slate-100"></div><span className="text-[10px] font-bold text-slate-600">Ausente</span></div>
-                            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-white border border-slate-300 flex items-center justify-center"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div></div><span className="text-[10px] font-bold text-slate-600">Conflicto</span></div>
-                            <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${SHIFT_STYLES['RET']}`}>RET</div><span className="text-[10px] font-bold text-slate-600">Retén (disponible)</span></div>
-                            <div className="flex items-center gap-1.5"><div className={`w-5 h-3 rounded text-[7px] font-black flex items-center justify-center ${OTHER_OBJECTIVE_CELL_STYLE}`}>M</div><span className="text-[10px] font-bold text-slate-600">Otro objetivo</span></div>
-                            <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-pink-700 bg-pink-100 border border-pink-200 px-1.5 py-0.5 rounded">♀ F</span><span className="text-[10px] font-bold text-slate-600">Puesto solo femenino</span></div>
-                            <div className="flex items-center gap-1.5"><span className="text-[9px] font-black text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">♂ M</span><span className="text-[10px] font-bold text-slate-600">Puesto solo masculino</span></div>
                         </div>
                     </div>
                 </div>
