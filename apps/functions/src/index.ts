@@ -1680,6 +1680,7 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
 // =========================================================
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
+export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 
 // =========================================================
 // Payroll API (HTTP) — para sistemas de liquidación externos

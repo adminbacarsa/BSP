@@ -88,13 +88,20 @@ export const onTurnoWrite = functions
       // Eliminación
       eventType = 'TURNO_ELIMINADO';
     } else if (!before) {
-      // Creación
+      // Creación directa (no draft) — puede ser un turno operativo (retén, cobertura)
+      // Si viene con draft:true, no hacer nada (se notificará vía onCronogramaPublished al publicar)
+      if (after.draft === true) return;
       const isFranco = after.code === 'F' || after.isFranco;
       eventType = isFranco ? 'FRANCO_ASIGNADO' : 'TURNO_NUEVO';
     } else {
       // Modificación — solo notificar si cambió algo relevante
       const relevantFields = ['startTime', 'endTime', 'code', 'objectiveName', 'clientName', 'positionName', 'isFranco'];
       const changed = relevantFields.some(f => JSON.stringify(before[f]) !== JSON.stringify(after[f]));
+
+      // Silenciar: publicación masiva (draft:true → draft:false sin otros cambios)
+      // La notificación consolidada la envía onCronogramaPublished
+      if (before.draft === true && after.draft === false && !changed) return;
+
       if (!changed) return;
 
       // Si se convirtió en franco
