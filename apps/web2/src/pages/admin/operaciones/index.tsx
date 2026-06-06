@@ -1545,13 +1545,19 @@ export default function OperacionesPage() {
 
                 {/* ── PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa ── */}
                 {!isExternalMap && <div className="absolute bottom-8 left-8 z-[1000]">
-                {!notifPanelOpen ? (
+                {(() => {
+                    // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)
+                    const _now = new Date();
+                    const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                    const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
+                    const totalAlerts = pendingNovedades.length + priorityShiftsPanel.length;
+                    return !notifPanelOpen ? (
                     <button onClick={() => setNotifPanelOpen(true)}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white'}`}>
-                        <Siren size={15} className={(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'animate-pulse' : ''}/>
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${totalAlerts > 0 ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white'}`}>
+                        <Siren size={15} className={totalAlerts > 0 ? 'animate-pulse' : ''}/>
                         Alertas
-                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>
-                            {pendingNovedades.length + logic.stats.prioridad}
+                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${totalAlerts > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>
+                            {totalAlerts}
                         </span>
                     </button>
                 ) : (
@@ -1559,14 +1565,13 @@ export default function OperacionesPage() {
                         <div className="px-3 py-2.5 bg-slate-900 rounded-t-2xl flex items-center gap-2">
                             <Siren size={14} className="text-rose-400 shrink-0"/>
                             <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
-                            {(pendingNovedades.length + logic.stats.prioridad) > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{pendingNovedades.length + logic.stats.prioridad}</span>}
+                            {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
                             <button onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
                         </div>
 
-                        {/* ── Sección PRIORIDAD ── */}
-                        {logic.stats.prioridad > 0 && (() => {
-                            // Mismo filtro que stats.prioridad en useOperacionesMonitor para evitar badge fantasma
-                            const priorityShifts = logic.processedData.filter((s: any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
+                        {/* ── Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) ── */}
+                        {priorityShiftsPanel.length > 0 && (() => {
+                            const priorityShifts = priorityShiftsPanel;
                             return (
                                 <div className="border-b border-slate-200">
                                     <div className="px-3 py-1 bg-rose-50 flex items-center gap-1.5">
@@ -1703,7 +1708,8 @@ export default function OperacionesPage() {
                             <p className="text-[9px] text-slate-400">{pendingNovedades.length} pendientes</p>
                         </div>
                     </div>
-                )}
+                );
+                })()}
                 </div>}
             </div>
 
