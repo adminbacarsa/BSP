@@ -271,11 +271,51 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 3: cold-start usa el conjunto canónico para mantener 6-apart garantizado
-        const missingZones = (['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z));
-        withoutTrail.sort((a, b) => a.localeCompare(b));
+        // Paso 2c: reubicar empleados con banda fija a su zona correcta.
+        // Si el trailing los dejó en una zona distinta, se los mueve al slot canónico
+        // de su banda; el empleado desplazado de esa zona pasa a cold-start.
+        for (const empId of [...withTrail]) {
+            if (out[empId] === undefined) continue;
+            const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+            if (!fixedBand || !WORK_BANDS.has(fixedBand)) continue;
+            const currentZone = bandZone(out[empId]);
+            if ((currentZone as string) === fixedBand) continue;
+            const targetSlot = canonicalForZone[fixedBand];
+            if (targetSlot === undefined) continue;
+            // Si hay otro empleado trailing ocupando la zona destino, desplazarlo a cold-start.
+            const displaced = withTrail.find(
+                id => id !== empId && out[id] !== undefined && (bandZone(out[id]) as string) === fixedBand,
+            );
+            if (displaced) {
+                usedZones.delete(fixedBand);
+                delete out[displaced];
+                withoutTrail.push(displaced);
+            }
+            usedZones.delete(currentZone);
+            usedZones.set(fixedBand as 'M' | 'T' | 'N', true);
+            out[empId] = targetSlot;
+        }
+
+        // Paso 3: cold-start — empleados con banda fija tienen prioridad de zona.
+        const availableZones = new Set((['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z)));
+        // Primero los de banda fija (para que reserven su zona), luego el resto ordenado.
+        withoutTrail.sort((a, b) => {
+            const fa = ctx.defaultShiftByEmp?.[a]?.toUpperCase();
+            const fb = ctx.defaultShiftByEmp?.[b]?.toUpperCase();
+            const ha = (fa && WORK_BANDS.has(fa)) ? 1 : 0;
+            const hb = (fb && WORK_BANDS.has(fb)) ? 1 : 0;
+            if (ha !== hb) return hb - ha; // banda fija primero
+            return a.localeCompare(b);
+        });
         withoutTrail.forEach((empId, i) => {
-            const zone = missingZones[i] ?? ((['M', 'T', 'N', 'F'] as const)[i % 4]);
+            const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+            let zone: string;
+            if (fixedBand && WORK_BANDS.has(fixedBand) && availableZones.has(fixedBand)) {
+                zone = fixedBand;
+            } else {
+                zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
+            }
+            availableZones.delete(zone);
             out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
         });
 
