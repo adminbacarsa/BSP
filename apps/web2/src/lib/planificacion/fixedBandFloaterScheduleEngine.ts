@@ -462,6 +462,26 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     const empSubgroup = new Map<string, string[]>();
     subgroups.forEach(sub => sub.forEach(id => empSubgroup.set(id, sub)));
 
+    // subgroupDisplacement: para cada empleado en un subgrupo que contiene un fijo-N/M/T,
+    // registra la banda fija y el opening del fijo. En el loop de asignación, cuando el
+    // empleado "choca" con la banda fija (su ciclo natural daría N pero N ya la cubre el fijo),
+    // se sustituye por el código que el fijo "resignó" (su ciclo sin override).
+    // Esto mantiene la garantía matemática 1M+1T+1N+1F por subgrupo en todos los días.
+    const subgroupDisplacement = new Map<string, { fixedBand: string; fixedOpening: number }>();
+    for (const subGroup of subgroups) {
+        const fixedEmpId = subGroup.find(id => {
+            const fb = ctx.defaultShiftByEmp?.[id]?.toUpperCase();
+            return fb && WORK_BANDS.has(fb) && openingSlotByEmp[id] !== undefined;
+        });
+        if (!fixedEmpId) continue;
+        const fixedBand = ctx.defaultShiftByEmp![fixedEmpId].toUpperCase();
+        const fixedOpening = openingSlotByEmp[fixedEmpId];
+        for (const empId of subGroup) {
+            if (empId === fixedEmpId) continue;
+            subgroupDisplacement.set(empId, { fixedBand, fixedOpening });
+        }
+    }
+
     const primaryShiftByEmp: Record<string, string | null> = {};
 
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31
@@ -529,10 +549,23 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const dayLetter = ctx.getDayLetter(dateStr);
             if (!positionIsActiveOn(pos, dayLetter)) return;
 
-            const rawCode = CYCLE_24_MTN[(opening + di) % 24];
-            // Si el empleado tiene banda fija (shiftCode en planificacionDotacion) y el día es laboral → respetar la banda asignada
-            const fixedBand = ctx.defaultShiftByEmp?.[emp.id]?.toUpperCase();
-            const rawCodeFinal = (fixedBand && WORK_BANDS.has(fixedBand) && WORK_BANDS.has(rawCode)) ? fixedBand : rawCode;
+            const rawCode = CYCLE_24_MTN[(opening + di) % 24] as string;
+            const ownFixedBand = ctx.defaultShiftByEmp?.[emp.id]?.toUpperCase();
+            let rawCodeFinal: string;
+            if (ownFixedBand && WORK_BANDS.has(ownFixedBand) && WORK_BANDS.has(rawCode)) {
+                // Empleado con banda fija: siempre trabaja su banda en días laborales.
+                rawCodeFinal = ownFixedBand;
+            } else {
+                const disp = subgroupDisplacement.get(emp.id);
+                if (disp && rawCode === disp.fixedBand && WORK_BANDS.has(rawCode)) {
+                    // El ciclo natural da la misma banda que el fijo del subgrupo.
+                    // Sustituir por lo que el fijo "resignó" para mantener 1M+1T+1N+1F.
+                    const naturalOfFixed = CYCLE_24_MTN[(disp.fixedOpening + di) % 24] as string;
+                    rawCodeFinal = WORK_BANDS.has(naturalOfFixed) ? naturalOfFixed : rawCode;
+                } else {
+                    rawCodeFinal = rawCode;
+                }
+            }
             const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
             const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? 'RET' : rawCodeFinal;
             if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? rawCodeFinal : null;
