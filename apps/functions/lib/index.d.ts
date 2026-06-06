@@ -27,6 +27,7 @@ export declare const activateAndSetPassword: functions.HttpsFunction & functions
 export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
+export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { payrollApi } from './payroll-api/handler';
 export declare const sendTestNotification: functions.HttpsFunction & functions.Runnable<any>;
 export declare const autoCompletarTurnos: functions.CloudFunction<unknown>;

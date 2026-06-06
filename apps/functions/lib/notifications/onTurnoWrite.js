@@ -85,12 +85,16 @@ exports.onTurnoWrite = functions
         eventType = 'TURNO_ELIMINADO';
     }
     else if (!before) {
+        if (after.draft === true)
+            return;
         const isFranco = after.code === 'F' || after.isFranco;
         eventType = isFranco ? 'FRANCO_ASIGNADO' : 'TURNO_NUEVO';
     }
     else {
         const relevantFields = ['startTime', 'endTime', 'code', 'objectiveName', 'clientName', 'positionName', 'isFranco'];
         const changed = relevantFields.some(f => JSON.stringify(before[f]) !== JSON.stringify(after[f]));
+        if (before.draft === true && after.draft === false && !changed)
+            return;
         if (!changed)
             return;
         const nowFranco = after.code === 'F' || after.isFranco;

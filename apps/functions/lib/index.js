@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -780,6 +780,125 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     catch (e) {
         console.warn('[requestCheckIn] No se pudo crear novedad:', e?.message);
     }
+    try {
+        const objectiveId = shiftData.objectiveId || '';
+        const positionName = (shiftData.positionName || '').trim().toLowerCase();
+        const empresaId = shiftData.empresaId || null;
+        const incomingName = shiftData.employeeName || 'Un guardia';
+        const objectiveName = shiftData.objectiveName || '';
+        if (objectiveId && positionName && empresaId) {
+            const activeSnap = await db.collection('turnos')
+                .where('empresaId', '==', empresaId)
+                .where('objectiveId', '==', objectiveId)
+                .where('isPresent', '==', true)
+                .where('isCompleted', '==', false)
+                .get();
+            const toRelieve = activeSnap.docs.filter(d => {
+                const dat = d.data();
+                return (dat.positionName || '').trim().toLowerCase() === positionName
+                    && d.id !== shiftId
+                    && dat.employeeId !== empId;
+            });
+            for (const outDoc of toRelieve) {
+                const outData = outDoc.data();
+                const outEmpId = outData.employeeId;
+                const outName = outData.employeeName || 'Guardia';
+                const outPosName = outData.positionName || '';
+                await outDoc.ref.update({
+                    isCompleted: true,
+                    isPresent: false,
+                    status: 'COMPLETED',
+                    realEndTime: admin.firestore.FieldValue.serverTimestamp(),
+                    relievedBy: empId,
+                    relievedByName: incomingName,
+                    relievedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    autoRelevo: true,
+                });
+                await db.collection('novedades').add({
+                    type: 'RELEVO_AUTOMATICO',
+                    status: 'ATENDIDA',
+                    empresaId,
+                    objectiveId,
+                    objectiveName,
+                    positionName: outPosName,
+                    employeeId: empId,
+                    employeeName: incomingName,
+                    relievedEmployeeId: outEmpId,
+                    relievedEmployeeName: outName,
+                    description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    autoProcessed: true,
+                    source: 'AUTO_RELEVO',
+                });
+                const outEmpDoc = await db.collection('empleados').doc(outEmpId).get();
+                const outEmpUid = outEmpDoc.exists ? outEmpDoc.data()?.uid : undefined;
+                const [byEmpId, byUid] = await Promise.all([
+                    db.collection('device_tokens').where('employeeId', '==', outEmpId).get(),
+                    outEmpUid
+                        ? db.collection('device_tokens').where('uid', '==', outEmpUid).get()
+                        : Promise.resolve({ docs: [] }),
+                ]);
+                const tokenSet = new Set();
+                [...byEmpId.docs, ...byUid.docs].forEach(d => {
+                    const t = d.data()?.token;
+                    if (typeof t === 'string' && t.length > 10)
+                        tokenSet.add(t);
+                });
+                const tokens = Array.from(tokenSet);
+                const notifTitle = '✅ Turno finalizado — relevado';
+                const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
+                let notifDocId = null;
+                try {
+                    const notifRef = await db.collection('user_notifications').add({
+                        uid: outEmpUid || null,
+                        employeeId: outEmpId,
+                        title: notifTitle,
+                        body: notifBody,
+                        type: 'RELEVO_AUTOMATICO',
+                        turnoId: outDoc.id,
+                        read: false,
+                        readAt: null,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                    notifDocId = notifRef.id;
+                }
+                catch (e) {
+                    console.warn('[requestCheckIn] Error guardando notificación relevo:', e?.message);
+                }
+                if (tokens.length > 0) {
+                    try {
+                        const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+                        await admin.messaging().sendEachForMulticast({
+                            data: {
+                                type: 'RELEVO_AUTOMATICO',
+                                title: notifTitle,
+                                body: notifBody,
+                                turnoId: outDoc.id,
+                                employeeId: outEmpId,
+                                notificationId: notifDocId || '',
+                                link,
+                            },
+                            webpush: {
+                                headers: { Urgency: 'high' },
+                                fcmOptions: { link },
+                            },
+                            tokens,
+                        });
+                        console.log(`[requestCheckIn] Relevo push enviado a ${outName} (${tokens.length} token/s)`);
+                    }
+                    catch (e) {
+                        console.warn('[requestCheckIn] Error enviando push relevo:', e?.message);
+                    }
+                }
+                else {
+                    console.warn(`[requestCheckIn] Sin tokens para ${outName} (${outEmpId})`);
+                }
+            }
+        }
+    }
+    catch (e) {
+        console.warn('[requestCheckIn] Error en auto-relevo:', e?.message);
+    }
     return { success: true };
 });
 exports.registrarFichadaManual = functions.https.onCall(async (data, context) => {
@@ -1252,6 +1371,8 @@ var onNovedadCreated_1 = require("./notifications/onNovedadCreated");
 Object.defineProperty(exports, "onNovedadCreated", { enumerable: true, get: function () { return onNovedadCreated_1.onNovedadCreated; } });
 var onTurnoWrite_1 = require("./notifications/onTurnoWrite");
 Object.defineProperty(exports, "onTurnoWrite", { enumerable: true, get: function () { return onTurnoWrite_1.onTurnoWrite; } });
+var onCronogramaPublished_1 = require("./notifications/onCronogramaPublished");
+Object.defineProperty(exports, "onCronogramaPublished", { enumerable: true, get: function () { return onCronogramaPublished_1.onCronogramaPublished; } });
 var handler_1 = require("./payroll-api/handler");
 Object.defineProperty(exports, "payrollApi", { enumerable: true, get: function () { return handler_1.payrollApi; } });
 exports.sendTestNotification = functions.https.onCall(async (data, context) => {
