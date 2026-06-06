@@ -253,9 +253,22 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         // Paso 2b: anclar todos los openings a un conjunto canónico exactamente 6 apart.
         // La deduplicación por zona previene mismo-zona, pero dos empleados en zonas
         // distintas pueden coincidir en franco si sus openings difieren en ≠6 (ej. 7 apart).
+        // Si hay empleado con banda fija, el anchor arranca en el INICIO de su zona (ZONE_SLOT)
+        // para que su bloque de 6 días sea completo desde el comienzo del mes.
         let anchor = COLD_START_OPENINGS[0];
-        for (const empId of withTrail) {
-            if (out[empId] !== undefined) { anchor = out[empId]; break; }
+        let fixedBandFound = false;
+        for (const empId of [...withTrail, ...withoutTrail]) {
+            const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+            if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) {
+                anchor = ZONE_SLOT[fb];
+                fixedBandFound = true;
+                break;
+            }
+        }
+        if (!fixedBandFound) {
+            for (const empId of withTrail) {
+                if (out[empId] !== undefined) { anchor = out[empId]; break; }
+            }
         }
         const canonicalForZone: Partial<Record<string, number>> = {};
         for (let k = 0; k < 4; k++) {
