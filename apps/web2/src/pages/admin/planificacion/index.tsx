@@ -558,7 +558,7 @@ export default function PlanificacionPage() {
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
 
-    const [authModal, setAuthModal] = useState<{ pendingFn: (() => Promise<void>) | null; employees: string[]; operatorName?: string; isSaveFlow?: boolean; description?: string }>({ pendingFn: null, employees: [] });
+    const [authModal, setAuthModal] = useState<{ pendingFn: (() => Promise<void>) | null; employees: { name: string; hours: number }[]; operatorName?: string; isSaveFlow?: boolean; description?: string }>({ pendingFn: null, employees: [] });
     const [authPin, setAuthPin] = useState('');
     const [authError, setAuthError] = useState('');
     const [authLoading, setAuthLoading] = useState(false);
@@ -2664,13 +2664,13 @@ export default function PlanificacionPage() {
         if (!confirm(`¿Confirmar y guardar ${count} cambios?`)) return;
 
         // Verificar si algún empleado superaría las 200h
-        const over200: string[] = [];
+        const over200: { name: string; hours: number }[] = [];
         Object.keys(pendingChanges).forEach(key => {
             const empId = key.split('_')[0];
             const hours = empMonthlyHours[empId] || 0;
             if (hours > 200) {
                 const empName = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
-                if (!over200.includes(empName)) over200.push(empName);
+                if (!over200.some(e => e.name === empName)) over200.push({ name: empName, hours: Math.round(hours) });
             }
         });
 
@@ -7299,9 +7299,11 @@ export default function PlanificacionPage() {
                                 </div>
                                 <h3 className="font-black text-xl text-slate-900 dark:text-white">Autorización Requerida</h3>
                                 <p className="text-sm text-slate-500 mt-1">{authModal.description || <>El siguiente empleado superará las <strong>200 hs</strong> mensuales:</>}</p>
-                                <div className="mt-3 flex flex-wrap gap-1 justify-center">
-                                    {authModal.employees.map(name => (
-                                        <span key={name} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">{name}</span>
+                                <div className="mt-3 flex flex-col gap-1 items-center">
+                                    {authModal.employees.map(e => (
+                                        <span key={e.name} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
+                                            {e.name} — <span className="text-amber-900">{e.hours}h</span>
+                                        </span>
                                     ))}
                                 </div>
                             </div>
@@ -7346,7 +7348,7 @@ export default function PlanificacionPage() {
                                                 action: 'OVERRIDE_200H',
                                                 module: 'PLANIFICADOR',
                                                 actorName: result.name,
-                                                details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.join(', ')} superando 200hs — autorizó: ${result.name}`,
+                                                details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
                                             });
                                         }
                                         setAuthModal({ pendingFn: null, employees: [] });
