@@ -1565,7 +1565,8 @@ export default function OperacionesPage() {
 
                         {/* ── Sección PRIORIDAD ── */}
                         {logic.stats.prioridad > 0 && (() => {
-                            const priorityShifts = logic.processedData.filter((s: any) => (s.isImminent || s.isRetention) && !s.isFranco);
+                            // Mismo filtro que stats.prioridad en useOperacionesMonitor para evitar badge fantasma
+                            const priorityShifts = logic.processedData.filter((s: any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                             return (
                                 <div className="border-b border-slate-200">
                                     <div className="px-3 py-1 bg-rose-50 flex items-center gap-1.5">
@@ -1581,8 +1582,8 @@ export default function OperacionesPage() {
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
                                                     {s.employeeName || 'Desconocido'}
-                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                        {s.isRetention ? 'RECARGO' : 'INMINENTE'}
+                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
                                                 </p>
                                                 <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
