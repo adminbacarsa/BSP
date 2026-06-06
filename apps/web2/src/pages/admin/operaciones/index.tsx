@@ -8,7 +8,7 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -525,6 +525,8 @@ export default function OperacionesPage() {
         processedData: logic.processedData,
     });
     const [isExternalMap, setIsExternalMap] = useState(false);
+    const [mapCollapsed, setMapCollapsed] = useState(false);
+    const [showCoverageGrid, setShowCoverageGrid] = useState(false);
     const [confirmEndSession, setConfirmEndSession] = useState(false);
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1112,6 +1114,27 @@ export default function OperacionesPage() {
         }
     }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
+    // ── COBERTURA POR OBJETIVO ─────────────────────────────────────────────────
+    const coverageByObjective = useMemo(() => {
+        const now = new Date();
+        const map: Record<string, {name:string; client:string; total:number; active:number; absent:number; vacant:number; objectiveId:string}> = {};
+        const hoy = logic.processedData.filter((s:any) =>
+            isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)
+        );
+        hoy.forEach((s:any) => {
+            if (s.isFranco) return;
+            const key = s.objectiveId || 'unknown';
+            if (!map[key]) map[key] = { name: s.objectiveName || '—', client: s.clientName || '', total: 0, active: 0, absent: 0, vacant: 0, objectiveId: key };
+            map[key].total++;
+            if (s.isPresent || s.isRetention) map[key].active++;
+            if (s.isAbsent || s.isPotentialAbsence) map[key].absent++;
+            if (s.isUnassigned) map[key].vacant++;
+        });
+        return Object.values(map)
+            .filter(o => o.total > 0)
+            .sort((a, b) => (b.absent + b.vacant) - (a.absent + a.vacant));
+    }, [logic.processedData]);
+
     const groupedList = useMemo(() => {
         if (!isGrouped) return [];
         const groups: Record<string, any> = {};
@@ -1209,25 +1232,76 @@ export default function OperacionesPage() {
                 );
             })()}
 
-            <div className="h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative">
-                {!isExternalMap && (
+            {/* ── GRID COBERTURA POR OBJETIVO (colapsable) ── */}
+            {coverageByObjective.length > 0 && (
+                <div className="mx-2 mb-2">
+                    <button onClick={() => setShowCoverageGrid(v => !v)}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-left">
+                        <Layers size={13} className="text-indigo-500 shrink-0"/>
+                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex-1">Cobertura por objetivo</span>
+                        <span className="text-[9px] text-slate-400">{coverageByObjective.length} objetivos</span>
+                        <ChevronDown size={12} className={`text-slate-400 transition-transform ${showCoverageGrid ? 'rotate-180' : ''}`}/>
+                    </button>
+                    {showCoverageGrid && (
+                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
+                            {coverageByObjective.map(obj => {
+                                const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
+                                const hasIssue = obj.absent > 0 || obj.vacant > 0;
+                                const isCrit = pct < 50;
+                                return (
+                                    <div key={obj.objectiveId} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] font-black truncate" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#1e293b' }}>{obj.name}</p>
+                                            <p className="text-[9px] truncate" style={{ color: 'var(--txt3)' }}>{obj.client}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <p className="text-[11px] font-black" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#10b981' }}>{pct}%</p>
+                                            <p className="text-[9px]" style={{ color: 'var(--txt3)' }}>{obj.active}/{obj.total}</p>
+                                        </div>
+                                        {hasIssue && (
+                                            <div className="text-[9px] shrink-0 text-right leading-tight">
+                                                {obj.absent > 0 && <div className="text-rose-600 font-bold">{obj.absent}aus</div>}
+                                                {obj.vacant > 0 && <div className="text-amber-600 font-bold">{obj.vacant}vac</div>}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className={`${mapCollapsed || isExternalMap ? 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]' : 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]'} flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative`}>
+                {!isExternalMap && !mapCollapsed && (
                     <div className="flex-1 max-h-[38%] lg:max-h-none lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
                         <OperacionesMap
-                            center={[-31.4201, -64.1888]} 
-                            allObjectives={logic.filteredObjectives} 
-                            filteredShifts={logic.listData} 
+                            center={[-31.4201, -64.1888]}
+                            allObjectives={logic.filteredObjectives}
+                            filteredShifts={logic.listData}
                             onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }}
-                            onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
-                            onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 
-                            onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} 
-                            onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} 
-                            onReportPlanning={handleReportPlanning} 
+                            onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                            onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                            onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                            onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                            onReportPlanning={handleReportPlanning}
                         />
-                        <button onClick={handleUndockMap} className="absolute top-4 right-4 z-[1000] bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={20} className="text-indigo-600"/></button>
+                        <div className="absolute top-4 right-4 z-[1000] flex gap-2">
+                            <button onClick={() => setMapCollapsed(true)} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100" title="Colapsar mapa"><ChevronLeft size={18} className="text-slate-600"/></button>
+                            <button onClick={handleUndockMap} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
+                        </div>
                     </div>
                 )}
+                {!isExternalMap && mapCollapsed && (
+                    <button onClick={() => setMapCollapsed(false)}
+                        className="hidden lg:flex items-center gap-2 w-10 bg-slate-100 rounded-xl border border-slate-200 shadow-inner hover:bg-slate-200 transition-colors writing-mode-vertical justify-center"
+                        title="Expandir mapa">
+                        <MapPin size={16} className="text-slate-400"/>
+                        <span className="text-[9px] font-black text-slate-400 uppercase" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>Ver mapa</span>
+                    </button>
+                )}
 
-                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
+                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
                     <div className="px-3 pt-2 pb-2 border-b">
                         {/* Fila 1: título + controles */}
                         <div className="flex justify-between items-center mb-1.5">

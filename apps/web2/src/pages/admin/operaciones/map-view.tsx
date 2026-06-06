@@ -369,6 +369,7 @@ export default function TacticalMapView() {
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [showHelp, setShowHelp] = useState(false);
+    const [showProtAlerts, setShowProtAlerts] = useState(false);
 
     const handleMarkAbsent = async (shift: any) => {
         try {
@@ -441,9 +442,44 @@ export default function TacticalMapView() {
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><Search size={14} className="text-slate-400 ml-1"/><input className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
                 </div>
                 <div className="flex items-center gap-2 pointer-events-auto">
+                    {/* Mini chip cobertura */}
+                    {(() => {
+                        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                        const cubiertos = logic.stats.activos + logic.stats.retenidos;
+                        const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                        const pct = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : null;
+                        if (pct === null) return null;
+                        const isCrisis = pct < 50;
+                        const isWarn = pct >= 50 && pct < 80;
+                        const chipBg = isCrisis ? 'bg-rose-600' : isWarn ? 'bg-amber-500' : 'bg-emerald-600';
+                        return (
+                            <div className={`${chipBg} text-white rounded-2xl px-3 py-2 flex items-center gap-2 shadow-2xl backdrop-blur`}>
+                                <span className="text-sm font-black">{pct}%</span>
+                                <div className="text-[10px] font-bold leading-tight">
+                                    <div>{cubiertos} activos</div>
+                                    {(logic.stats.vacantes + logic.stats.ausentes) > 0 && <div className="opacity-80">{logic.stats.vacantes}vac · {logic.stats.ausentes}aus</div>}
+                                </div>
+                                {logic.stats.plan > 0 && <div className="text-[9px] opacity-70">+{logic.stats.plan} plan</div>}
+                            </div>
+                        );
+                    })()}
                     <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 border border-slate-200">
                         <button onClick={() => logic.setViewTab('TODOS')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
-                        {tabs.map(t => (<button key={t.id} onClick={() => logic.setViewTab(t.id as any)} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === t.id ? 'bg-white shadow-md ring-1 ring-slate-200 ' + t.color : 'hover:bg-slate-100 text-slate-400'}`}>{t.label} <span className="bg-slate-100 px-1.5 rounded-md ml-1 text-slate-600">{t.count}</span></button>))}
+                        {tabs.map(t => {
+                            const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES' || t.id === 'PRIORIDAD' || t.id === 'NO_LLEGO') && t.count > 0;
+                            const isActive = logic.viewTab === t.id;
+                            return (
+                                <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
+                                    className={`relative px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all
+                                        ${isActive
+                                            ? (isUrgent ? 'bg-rose-600 text-white shadow-md' : 'bg-white shadow-md ring-1 ring-slate-200 ' + t.color)
+                                            : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'hover:bg-slate-100 text-slate-400')}`}>
+                                    {isUrgent && !isActive && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"/>}
+                                    {t.label}
+                                    <span className={`px-1.5 rounded-md ml-1 text-[9px] ${isActive && isUrgent ? 'bg-white/20 text-white' : isUrgent ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-600'}`}>{t.count}</span>
+                                </button>
+                            );
+                        })}
                         <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
                     </div>
                 </div>
@@ -495,101 +531,152 @@ export default function TacticalMapView() {
                 </div>
             )}
             
-            {/* ── PANEL FLOTANTE DE ALERTAS ── */}
+            {/* ── PANEL FLOTANTE DE ALERTAS — con fix ghost badge + triage urgente/PROT ── */}
             <div className="absolute bottom-8 left-8 z-[1000]">
-                {!notifPanelOpen ? (
+            {(() => {
+                // Ghost badge fix: mismo filtro que stats.prioridad
+                const _now = new Date();
+                const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
+
+                // Triage: urgentes vs PROT (automatizados, menos urgentes)
+                const urgentNovedades = pendingNovedades.filter(n =>
+                    n.type === 'AUSENCIA_CORTO_PLAZO' || n.type === 'AVISO_AUSENCIA_ANTICIPADA' ||
+                    n.type === 'POSICION_SIN_RELEVO' || n.type === 'RETENCION_LARGA' ||
+                    n.type === 'AUSENCIA_AUTO' || n.type === 'RELEVO_NO_PRESENTADO'
+                );
+                const protNovedades = pendingNovedades.filter(n => n.type === 'VACANTE_PROTOCOLO_COBERTURA');
+                const otherNovedades = pendingNovedades.filter(n =>
+                    !urgentNovedades.includes(n) && !protNovedades.includes(n)
+                );
+                const totalAlerts = priorityShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
+
+                const renderNovedad = (n: any) => {
+                    const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                    const isAbsence = n.type === 'AUSENCIA_AUTO';
+                    const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
+                    const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
+                    const isRetencion = n.type === 'RETENCION_LARGA';
+                    const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
+                    const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
+                    const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-400' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
+                    const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
+                    const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
+                    const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isProto ? 'bg-orange-500 hover:bg-orange-600' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
+                    const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
+                    return (
+                        <div key={n.id} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors`}>
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                    {n.employeeName && n.objectiveName ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</> : n.objectiveName || n.employeeName || n.type}
+                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                </p>
+                                <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-mono w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
+                            <div className="flex gap-1 shrink-0 w-14 justify-end">
+                                {n.employeePhone && <button onClick={() => openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||''))} className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100"><MessageCircle size={11}/></button>}
+                                <button onClick={() => handleAtenderNovedad(n)} className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title="Atender"><ActionIcon size={11}/></button>
+                            </div>
+                        </div>
+                    );
+                };
+
+                return !notifPanelOpen ? (
                     <button onClick={() => setNotifPanelOpen(true)}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-white'}`}>
-                        <Siren size={15} className={(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'animate-pulse' : ''}/>
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${totalAlerts > 0 ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-800 text-white'}`}>
+                        <Siren size={15} className={totalAlerts > 0 ? 'animate-pulse' : ''}/>
                         Alertas
-                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${(pendingNovedades.length + logic.stats.prioridad) > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>
-                            {pendingNovedades.length + logic.stats.prioridad}
-                        </span>
+                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${totalAlerts > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>{totalAlerts}</span>
                     </button>
                 ) : (
-                    <div className="w-[480px] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[70vh]">
+                    <div className="w-[480px] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[75vh]">
                         <div className="px-3 py-2.5 bg-slate-900 rounded-t-2xl flex items-center gap-2">
                             <Siren size={14} className="text-rose-400 shrink-0"/>
                             <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
-                            {(pendingNovedades.length + logic.stats.prioridad) > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{pendingNovedades.length + logic.stats.prioridad}</span>}
+                            {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
                             <button onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
                         </div>
-                        {logic.stats.prioridad > 0 && (() => {
-                            const priorityShifts = logic.processedData.filter((s: any) => (s.isImminent || s.isRetention) && !s.isFranco);
-                            return (
+
+                        <div className="flex-1 overflow-y-auto">
+                            {/* Sección PRIORIDAD (turnos inminentes/retención) */}
+                            {priorityShiftsPanel.length > 0 && (
                                 <div className="border-b border-slate-200">
-                                    <div className="px-3 py-1 bg-rose-50 flex items-center gap-1.5">
+                                    <div className="px-3 py-1.5 bg-rose-50 flex items-center gap-1.5">
                                         <AlertTriangle size={10} className="text-rose-600 shrink-0"/>
-                                        <span className="text-[9px] font-black text-rose-700 uppercase flex-1">Prioridad</span>
-                                        <span className="text-[9px] font-bold text-rose-500">{priorityShifts.length} turnos</span>
+                                        <span className="text-[9px] font-black text-rose-700 uppercase flex-1">Acción inmediata</span>
+                                        <span className="text-[9px] font-bold text-rose-500">{priorityShiftsPanel.length} turno{priorityShiftsPanel.length > 1 ? 's' : ''}</span>
                                     </div>
-                                    {priorityShifts.map((s: any) => (
+                                    {priorityShiftsPanel.map((s: any) => (
                                         <div key={s.id} className="px-3 py-1.5 flex items-center gap-2 border-l-4 border-l-rose-500 border-b border-slate-50 bg-white hover:bg-rose-50/30 transition-colors">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>{(s.employeeName || '?')[0]}</div>
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart || s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>{(s.employeeName || '?')[0]}</div>
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">{s.employeeName || 'Desconocido'}<span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>{s.isRetention ? 'RECARGO' : 'INMINENTE'}</span></p>
-                                                <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)} - {formatTimeSimple(s.endDateObj)}</span></p>
+                                                <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                                    {s.employeeName || 'Desconocido'}
+                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                    </span>
+                                                </p>
+                                                <p className="text-[9px] text-slate-400 truncate">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
                                                 {s.isRetention ? (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700" title="Salida"><LogOut size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100" title="Baja"><Siren size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><LogOut size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100"><Siren size={11}/></button>
                                                 </>) : (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700" title="Dar presente"><PlayCircle size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100" title="Marcar ausente"><AlertTriangle size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><PlayCircle size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100"><AlertTriangle size={11}/></button>
                                                 </>)}
                                             </div>
                                         </div>
                                     ))}
                                 </div>
-                            );
-                        })()}
-                        <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase">
-                            <span className="w-14 shrink-0">Tipo</span>
-                            <span className="flex-1">Objetivo / Posición</span>
-                            <span className="w-10 text-right">Hora</span>
-                            <span className="w-16 text-center">Acción</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            {pendingNovedades.length === 0 ? (
-                                <div className="p-4 text-center"><CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/><p className="text-xs font-bold text-slate-400">Sin alertas pendientes</p></div>
-                            ) : pendingNovedades.map((n: any) => {
-                                const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
-                                const isAbsence = n.type === 'AUSENCIA_AUTO';
-                                const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
-                                const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
-                                const isRetencion = n.type === 'RETENCION_LARGA';
-                                const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
-                                const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
-                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
-                                const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                return (
-                                    <div key={n.id} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors`}>
-                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                {n.employeeName && n.objectiveName ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</> : n.objectiveName || n.employeeName || (n.description?.replace(/\s*\(detectado[^)]*\)/,'').replace(/\s*\(\d+\s*min\)/,'').trim()) || 'Sin info'}
-                                                {n.positionName && <span className="text-slate-400 font-normal"> · {n.positionName}</span>}
-                                            </p>
-                                            <p className="text-[9px] text-slate-400 truncate leading-tight">
-                                                {(isCortoplazo || isAnticipada) && n.minutesBeforeShift > 0 ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⏱ {n.minutesBeforeShift}min al turno</span> : null}
-                                                {n.description || '-'}
-                                            </p>
-                                        </div>
-                                        <span className="text-[9px] text-slate-400 font-mono w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
-                                        <div className="flex gap-1 shrink-0 w-16 justify-end">
-                                            {n.employeePhone && <button onClick={() => openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||''))} className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100" title="WhatsApp"><MessageCircle size={11}/></button>}
-                                            <button onClick={() => handleAtenderNovedad(n)} className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title="Atender"><ActionIcon size={11}/></button>
-                                        </div>
+                            )}
+
+                            {/* Novedades urgentes (siempre visibles) */}
+                            {urgentNovedades.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    <div className="px-3 py-1 bg-amber-50 flex items-center gap-1.5">
+                                        <AlertTriangle size={10} className="text-amber-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-amber-700 uppercase flex-1">Novedades urgentes</span>
+                                        <span className="text-[9px] font-bold text-amber-500">{urgentNovedades.length}</span>
                                     </div>
-                                );
-                            })}
+                                    {urgentNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {/* Otras novedades */}
+                            {otherNovedades.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    {otherNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {/* PROT alerts — colapsados por defecto */}
+                            {protNovedades.length > 0 && (
+                                <div>
+                                    <button onClick={() => setShowProtAlerts(v => !v)}
+                                        className="w-full px-3 py-2 flex items-center gap-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">
+                                            Protocolos de cobertura automáticos ({protNovedades.length})
+                                        </span>
+                                        <span className="text-[9px] text-slate-400">{showProtAlerts ? '▲ ocultar' : '▼ ver'}</span>
+                                    </button>
+                                    {showProtAlerts && protNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {totalAlerts === 0 && (
+                                <div className="p-6 text-center">
+                                    <CheckCircle size={28} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
+                                    <p className="text-sm font-bold text-slate-400">Sin alertas pendientes</p>
+                                </div>
+                            )}
                         </div>
                     </div>
-                )}
+                );
+            })()}
             </div>
 
             <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
