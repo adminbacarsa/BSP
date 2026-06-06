@@ -8495,7 +8495,7 @@ export default function PlanificacionPage() {
                                     }
 
                                     const coverLabel = (type: string) =>
-                                        type === 'ret' ? 'RET' : type === 'esc' ? 'ESC' : type === 'sin_turno' ? 'ST' : 'FT';
+                                        type === 'ret' ? 'RET' : type === 'esc' ? 'ESC' : type === 'sin_turno' ? 'ST' : type === 'manual' ? 'MANUAL' : type === 'ft_required' ? 'FT' : type.toUpperCase();
 
                                     return (
                                         <div className="rounded-xl border-2 border-amber-200 bg-amber-50/80 px-3 py-2.5 space-y-2.5">

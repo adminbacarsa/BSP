@@ -13,11 +13,11 @@
  *
  * Días franco del ausente (F/FF en su ciclo 6+2): el período de licencia puede
  * abarcarlos pero NO requieren cobertura — se saltan silenciosamente.
- * Puestos sin operación ese día: si el conteo actual ≥ qty no se genera brecha.
+ * Cada día laboral del ausente genera un gap; el supervisor decide si cubrirlo.
  */
 
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
-import type { V2Assignment, V2EngineContext, V2PositionDef } from './autoScheduleEngineV2';
+import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 
@@ -47,11 +47,6 @@ export type AbsenceCoverageResult = {
     ftRequiredCount: number;
     uncoveredCount: number;
 };
-
-function is24hs(pos: V2PositionDef): boolean {
-    const cov = String(pos.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
-}
 
 /**
  * Aplica cobertura automática de ausencias pre-declaradas sobre el crono generado.
@@ -92,8 +87,6 @@ export function applyAbsenceCoverage(
         if (opening === undefined) continue;
 
         const posName = empToPosition[absentEmpId] ?? '';
-        const pos = ctx.positions.find(p => p.positionName === posName && is24hs(p));
-        const qty = pos ? Math.max(1, Number(pos.qty) || 1) : 1;
 
         for (const dateStr of absentDates.keys()) {
             const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === dateStr);
@@ -103,17 +96,6 @@ export function applyAbsenceCoverage(
 
             // Día franco del ausente dentro del período de licencia → sin brecha (comportamiento normal CCT)
             if (!WORK_BANDS.has(neededBand)) continue;
-
-            // Contar trabajadores activos en esa banda ese día
-            let actualBandCount = 0;
-            for (const id of objectiveEmpIds) {
-                if (id === absentEmpId) continue;
-                if (ctx.absences[id]?.has(dateStr)) continue;
-                const ai = aIdx.get(`${id}__${dateStr}`);
-                if (ai !== undefined && result[ai].code === neededBand) actualBandCount++;
-            }
-
-            if (actualBandCount >= qty) continue; // cobertura suficiente
 
             // Intentar asignación automática: ST → RET → ESC (FT NO se asigna automáticamente)
             const assigned = tryAutoAssign(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, neededBand, posName, ctx);
