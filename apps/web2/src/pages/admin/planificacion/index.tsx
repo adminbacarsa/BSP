@@ -6378,8 +6378,14 @@ export default function PlanificacionPage() {
                                     ACTIVE: 'Activa', CLOSED: 'Cerrada', REGISTERED: 'Registrada',
                                     VERIFIED: 'Verificada', JUSTIFIED: 'Justificada',
                                 };
+                                // Ausencias injustificadas/sin aviso: el estado APPROVED significa "registrada por RRHH",
+                                // no que la ausencia fue aprobada — se muestra "Registrada" para no confundir.
+                                const UNEXCUSED_CODES = new Set(['AA']);
                                 const rawStatus = absence?.status || (isRRHHCode ? 'APPROVED' : '');
-                                const absenceStatusLabel = ABSENCE_STATUS_ES[rawStatus?.toUpperCase?.()] || rawStatus || '';
+                                const isUnexcused = UNEXCUSED_CODES.has(code) || absence?.type?.toLowerCase().includes('injustificada');
+                                const absenceStatusLabel = (isUnexcused && rawStatus?.toUpperCase() === 'APPROVED')
+                                    ? 'Registrada'
+                                    : (ABSENCE_STATUS_ES[rawStatus?.toUpperCase?.()] || rawStatus || '');
                                 const coveringEmployee = coverageInfo
                                     ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
                                     : (shift?.coveredBy || pending?.coveredBy || null);
