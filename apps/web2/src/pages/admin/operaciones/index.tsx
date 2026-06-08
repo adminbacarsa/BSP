@@ -1614,7 +1614,9 @@ export default function OperacionesPage() {
                 const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
                 const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
                 return scoreB - scoreA;
-            });
+            })
+            // Excluir objetivos sin actividad real (evita mostrar cronogramas no publicados)
+            .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
