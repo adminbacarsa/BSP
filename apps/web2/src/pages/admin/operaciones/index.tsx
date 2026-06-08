@@ -762,11 +762,16 @@ export default function OperacionesPage() {
 
     const autoAbsentTriggeredRef = useRef(new Set<string>());
     useEffect(() => {
-        const newlyAbsent = logic.processedData.filter((s: any) =>
-            s.isAbsent && s.absenceType === 'AA' &&
-            isSameDay(s.shiftDateObj, new Date()) &&
-            !autoAbsentTriggeredRef.current.has(s.id)
-        );
+        const now = Date.now();
+        const newlyAbsent = logic.processedData.filter((s: any) => {
+            if (!s.isAbsent || s.absenceType !== 'AA') return false;
+            if (!isSameDay(s.shiftDateObj, new Date())) return false;
+            if (autoAbsentTriggeredRef.current.has(s.id)) return false;
+            // No auto-abrir si ya pasó el tiempo de gracia — el operador puede abrir manualmente
+            const startMs = s.shiftDateObj?.getTime?.() ?? 0;
+            if (startMs > 0 && now > startMs + COVERAGE_GRACE_MINUTES * 60 * 1000) return false;
+            return true;
+        });
         if (!newlyAbsent.length) return;
         newlyAbsent.forEach((s: any) => autoAbsentTriggeredRef.current.add(s.id));
         logic.setViewTab('AUSENTES');
