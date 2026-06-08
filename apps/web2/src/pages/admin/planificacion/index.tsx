@@ -6330,6 +6330,8 @@ export default function PlanificacionPage() {
                                     return null;
                                 };
                                 const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
+                                const ABSENCE_FRANCO_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA']);
+                                const isWorkCode = (c: string) => !!c && !ABSENCE_FRANCO_CODES.has(c.toUpperCase());
                                 const resolveOriginalWorkShift = () => {
                                     if (coverageInfo?.shift && coverageInfo.code && NON_ABSENCE_CODES.has(coverageInfo.code)) {
                                         const h = Number(coverageInfo.shift.hours) || SHIFT_HOURS_LOOKUP[coverageInfo.code] || 8;
@@ -6352,6 +6354,19 @@ export default function PlanificacionPage() {
                                             hours: h,
                                             service: serviceName,
                                             position: coveredPosition,
+                                        };
+                                    }
+                                    // Fallback: el turno planificado del empleado ese día (ya disponible en `shift`)
+                                    const shiftCode = String(shift?.code || '').toUpperCase();
+                                    if (shift && isWorkCode(shiftCode)) {
+                                        const h = Number(shift.hours) || SHIFT_HOURS_LOOKUP[shiftCode] || 8;
+                                        return {
+                                            code: shiftCode,
+                                            label: LEGEND_DESCRIPTIONS[shiftCode] || shiftCode,
+                                            schedule: formatShiftScheduleLabel(shift, shiftCode),
+                                            hours: h,
+                                            service: serviceName,
+                                            position: shift.positionName || coveredPosition,
                                         };
                                     }
                                     return null;
