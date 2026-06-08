@@ -505,7 +505,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 )}
                 {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
-                    ? <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>
+                    ? (() => {
+                        const endMs = shift.endDateObj?.getTime?.() ?? 0;
+                        const shiftEnded = endMs > 0 && Date.now() > endMs;
+                        return shiftEnded
+                            ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>
+                            : <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>;
+                      })()
                     : <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Confirmar ausencia"><AlertTriangle size={12}/></button>
                 )}
             </div>
@@ -564,7 +570,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <button onClick={() => onOpenInterrupt(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] font-bold hover:bg-red-100 transition-colors"><Siren size={11}/>BAJA</button>
                     </>)}
                     {viewTab === 'AUSENTES' && (shift.isAbsent
-                        ? <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>COBERTURA</button>
+                        ? (() => {
+                            const endMs = shift.endDateObj?.getTime?.() ?? 0;
+                            const shiftEnded = endMs > 0 && Date.now() > endMs;
+                            return shiftEnded
+                                ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
+                                : <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>COBERTURA</button>;
+                          })()
                         : <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>CONFIRMAR AUSENCIA</button>
                     )}
                 </div>
