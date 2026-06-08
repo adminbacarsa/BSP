@@ -233,10 +233,22 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
     const name = item.employeeName || item.fullName || '';
     const ph = item.phone || item.celular || '';
     const busy = loading === lKey;
+    // Badge de experiencia
+    const expLv: number = item.experienceLv ?? 0;
+    const expBadge = expLv === 3
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">★ Conoce el puesto</span>
+        : expLv === 2
+            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">Obj. asignado</span>
+            : expLv === 1
+                ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">Mismo cliente</span>
+                : null;
     return (
-        <div className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg gap-2 shadow-sm">
+        <div className={`flex items-center justify-between p-2 bg-white border rounded-lg gap-2 shadow-sm ${expLv >= 2 ? 'border-emerald-200' : 'border-slate-100'}`}>
             <div className="min-w-0 flex-1">
-                <span className="text-xs font-bold text-slate-800 block truncate">{name}</span>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-xs font-bold text-slate-800 truncate">{name}</span>
+                    {expBadge}
+                </div>
                 <div className="flex items-center gap-2 flex-wrap">
                     {Number.isFinite(item.distance) && item.distance > 0.05
                         ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km · ~{item.eta}min</span>
@@ -294,27 +306,52 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         toDate(s.shiftDateObj) > now
     ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
 
-    // 3. RETENES: empleados sin turno hoy, por cercanía
+    // Helper de experiencia: nivel según datos del empleado
+    const experienceLevel = (e: any): number => {
+        if (e.preferredObjectiveId === absenceShift.objectiveId) return 3; // objetivo preferido = experiencia directa
+        if (e.objectiveId          === absenceShift.objectiveId) return 2; // objetivo asignado actual
+        if (e.clientId             === absenceShift.clientId)    return 1; // mismo cliente
+        return 0;
+    };
+
+    // 3. RETENES: empleados sin turno hoy — ordenados por experiencia, luego cercanía
     const busyIds = new Set(
         logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
     );
     const retenes = (logic.employees || [])
         .filter((e: any) => !busyIds.has(e.id))
         .map((e: any) => {
-            const dist = calculateDistance(objLat, objLng, e.lat, e.lng);
-            return { ...e, fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '', phone: e.phone || e.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null };
+            const dist  = calculateDistance(objLat, objLng, e.lat, e.lng);
+            const expLv = experienceLevel(e);
+            return {
+                ...e,
+                fullName:    e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '',
+                phone:       e.phone || e.celular || '',
+                distance:    dist,
+                eta:         Number.isFinite(dist) ? estimateEta(dist) : null,
+                experienceLv: expLv,    // 3=mismo obj, 2=obj asignado, 1=mismo cliente, 0=sin exp
+            };
         })
-        .sort((a: any, b: any) => a.distance - b.distance).slice(0, 8);
+        .sort((a: any, b: any) => {
+            if (b.experienceLv !== a.experienceLv) return b.experienceLv - a.experienceLv; // exp desc
+            return (a.distance ?? Infinity) - (b.distance ?? Infinity);                    // dist asc
+        })
+        .slice(0, 12);
 
-    // 4. FRANCOS: turnos franco hoy, no trabajados, por cercanía
+    // 4. FRANCOS: turnos franco hoy, no trabajados — mismo orden experiencia + cercanía
     const francos = logic.processedData
         .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado)
         .map((s: any) => {
-            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
-            const dist = calculateDistance(objLat, objLng, emp?.lat, emp?.lng);
-            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null };
+            const emp   = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            const dist  = calculateDistance(objLat, objLng, emp?.lat, emp?.lng);
+            const expLv = emp ? experienceLevel(emp) : 0;
+            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null, experienceLv: expLv };
         })
-        .sort((a: any, b: any) => a.distance - b.distance).slice(0, 8);
+        .sort((a: any, b: any) => {
+            if (b.experienceLv !== a.experienceLv) return b.experienceLv - a.experienceLv;
+            return (a.distance ?? Infinity) - (b.distance ?? Infinity);
+        })
+        .slice(0, 12);
 
     const openLocalWA = (item: any) => {
         const nombre = item.employeeName || item.fullName || '';
@@ -1237,6 +1274,8 @@ export default function OperacionesPage() {
                 });
             }
             await batch.commit();
+            // Abrir inmediatamente el protocolo de cobertura — no esperar T+30
+            setCoverageData({ isOpen: true, shift });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'AVISO_AUSENCIA_ANTICIPADA',
                 title: 'Aviso anticipado de ausencia',
