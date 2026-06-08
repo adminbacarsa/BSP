@@ -811,10 +811,6 @@ export default function OperacionesPage() {
 
     const prevPendingCount = useRef(0);
     useEffect(() => {
-        if (pendingNovedades.length > prevPendingCount.current && !bitacoraOpen) {
-            setBitacoraOpen(true);
-            setBitacoraTab('alertas');
-        }
         if (pendingNovedades.length > prevPendingCount.current) {
             setNotifPanelOpen(true);
         }
