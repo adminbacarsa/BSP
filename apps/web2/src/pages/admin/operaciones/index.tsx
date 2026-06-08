@@ -45,7 +45,7 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 };
 
 // --- MODALES (LÓGICA OPERATIVA) ---
-const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
+const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !incomingShift) return null;
@@ -55,6 +55,13 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
     const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME';
     if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
+
+    // Límite de 60 min para guardias ya marcados ausentes
+    const LATE_LIMIT_MIN = 60;
+    const wasAbsent = incomingShift.isAbsent === true;
+    const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN;
+    // Detectar si el turno ya fue cubierto por otro guardia
+    const isCovered = incomingShift.status === 'COVERED' || !!incomingShift.coveredByEmployeeId;
 
     const samePost = (s: any) =>
         s.objectiveId === incomingShift.objectiveId &&
@@ -113,7 +120,18 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
                         : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
                     : serverTimestamp())
                 : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
-            batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: incomingRealStart, isLate: status === 'LATE' });
+            batch.update(doc(db, 'turnos', incomingShift.id), {
+                isPresent:           true,
+                status:              'PRESENT',
+                realStartTime:       incomingRealStart,
+                isLate:              status === 'LATE',
+                // Limpiar flags de ausencia — el guardia llegó tarde pero llegó
+                isAbsent:            false,
+                absenceType:         null,
+                absenceDetectedAt:   null,
+                absenceReversedAt:   serverTimestamp(),
+                absenceReversedBy:   'OPERACIONES',
+            });
             if (prevShiftId) {
                 // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
                 const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);

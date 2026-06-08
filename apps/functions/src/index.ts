@@ -2082,6 +2082,10 @@ export const detectarAusencias = functions
         if (shift.lateArrivalAt) continue;
         // Caso 2: operador registró aviso anticipado → no marcar AA
         if (shift.notifiedAbsent === true) continue;
+        // Fix timezone: no marcar AA si el turno termina en el futuro LEJANO
+        // (evita marcar turnos nocturnos 11 PM - 7 AM a las pocas horas de iniciados)
+        const endMs = shift.endTime?.toMillis?.() ?? 0;
+        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h → saltear
 
         // 1. Marcar ABSENT AA
         await docSnap.ref.update({
