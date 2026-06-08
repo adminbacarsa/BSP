@@ -937,14 +937,32 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
 
     const nowTs = admin.firestore.Timestamp.now();
     const now   = admin.firestore.FieldValue.serverTimestamp();
+    const nowMs = nowTs.toMillis();
+
+    // Regla de liquidación: realStartTime = hora planificada
+    // El guardia puede llegar antes o después pero el inicio para pago es siempre el planificado.
+    // Excepción: si fue adelantado para cubrir una ausencia (isEarlyStart = true),
+    // en ese caso realStartTime ya viene seteado desde la asignación del operador.
+    const scheduledStartTs = shiftData.startTime ?? null;
+    const isEarlyStart = shiftData.isEarlyStart === true;
+    const realStartTime = isEarlyStart
+        ? (shiftData.adjustedStartTime || scheduledStartTs || now)  // hora del adelanto asignado
+        : (scheduledStartTs || now);                                 // hora planificada normal
+
+    // Detectar llegada tarde (para flag de asistencia, no afecta pago)
+    const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
+    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000; // > 5 min después
+
     await shiftRef.update({
         isPresent: true,
         status: 'PRESENT',
-        checkInTime: now,
+        checkInTime: now,           // hora real de llegada (para asistencia/tracking)
+        realStartTime,              // hora planificada (para liquidación)
         checkInRequestedAt: now,
         checkInMethod: 'PORTAL_GPS',
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
+        isLate,
     });
 
     // Crear novedad para notificar al operador

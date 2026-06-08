@@ -88,7 +88,17 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
             if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
             const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
+            // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
+            // El guardia siempre cobra desde su hora planificada, llegue antes o después.
+            // Excepción: adelanto por cobertura (isEarlyStart) → usa adjustedStartTime del operador.
+            const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
+                ? incomingShift.shiftDateObj
+                : toDate(incomingShift.shiftDateObj);
+            const isEarlyStartShift = !!incomingShift.isEarlyStart;
+            const incomingRealStart = isEarlyStartShift
+                ? serverTimestamp()          // adelanto: hora real (operador lo asignó anticipado)
+                : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
+            batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: incomingRealStart, isLate: status === 'LATE' });
             if (prevShiftId) {
                 // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
                 const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
