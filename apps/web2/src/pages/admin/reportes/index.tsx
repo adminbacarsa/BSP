@@ -315,11 +315,19 @@ export default function ReportsPage() {
                                                                             const dur = resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true });
                                                                             const night = start && end ? getNightDuration(start, end) : 0;
                                                                             const isVacant = isReportVacancyShift(s, empMap);
-                                                                            const rStart = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
-                                                                            const rEndRaw = s.realEndTime?.seconds   ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null;
-                                                                            const rEnd   = rEndRaw && end && rEndRaw < end ? end : rEndRaw;
+                                                                            const rStartRaw = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
+                                                                            const rEndRaw   = s.realEndTime?.seconds   ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null;
+                                                                            // Regla liquidación: inicio = hora planificada (salvo adelanto); fin = planificado (salvo retención)
+                                                                            const isEarlyStartShift = s.isEarlyStart === true;
+                                                                            const isRetentionShift  = s.isRetention === true || (s.retentionMinutes ?? 0) > 0;
+                                                                            const rStart = rStartRaw && start && !isEarlyStartShift ? start : rStartRaw;
+                                                                            const rEnd   = rEndRaw && end
+                                                                                ? (rEndRaw < end ? end                          // relevo anticipado → horas completas
+                                                                                : isRetentionShift ? rEndRaw                    // retención formal → hora real
+                                                                                : end)                                          // salida mínimamente tardía sin retención → hora planificada
+                                                                                : rEndRaw;
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;
-                                                                            const hasOvertime = rDur != null && rDur > dur + 0.1;
+                                                                            const hasOvertime = isRetentionShift && rDur != null && rDur > dur + 0.1;
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
                                                                             const isLeaveRow = isLeaveReportShift(s);
                                                                             return (

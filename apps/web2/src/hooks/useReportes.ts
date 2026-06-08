@@ -450,11 +450,20 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
             if (isAbsent || end > new Date()) return;
 
-            const clampS = (real: Date, plan: Date, tol = 5): Date =>
-                (real.getTime() - plan.getTime()) / 60000 <= tol ? plan : real;
-            // Relevo anticipado: si salió antes del fin planificado → crédito completo hasta fin planificado
-            const clampE = (real: Date, plan: Date): Date =>
-                real < plan ? plan : real;
+            // Regla de liquidación:
+            // - Inicio: siempre hora planificada (salvo adelanto explícito)
+            // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retención formal
+            const isEarlyStartShift = d.isEarlyStart === true;
+            const isRetentionShift  = d.isRetention === true || (d.retentionMinutes ?? 0) > 0;
+
+            const clampS = (real: Date, plan: Date): Date =>
+                isEarlyStartShift ? real : plan;  // adelanto → hora real; normal → hora planificada
+
+            const clampE = (real: Date, plan: Date): Date => {
+                if (real < plan)        return plan;         // relevo anticipado → horas completas
+                if (isRetentionShift)   return real;         // retención formal → hora real (se paga extra)
+                return plan;                                  // salida tardía sin retención → clampear
+            };
 
             const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
                             : d.checkInTime?.seconds   ? new Date(d.checkInTime.seconds * 1000)
@@ -463,8 +472,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                             : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds * 1000)
                             : null;
 
-            const rStart = rStartRaw ? clampS(rStartRaw, start, 5) : null;
-            const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)      : null;
+            const rStart = rStartRaw ? clampS(rStartRaw, start) : null;
+            const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)   : null;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
                 if (rDur >= 0 && rDur <= 36) {
