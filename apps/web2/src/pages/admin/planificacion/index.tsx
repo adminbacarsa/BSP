@@ -6373,7 +6373,13 @@ export default function PlanificacionPage() {
                                 };
                                 const originalWorkShift = (absence || isRRHHCode) ? resolveOriginalWorkShift() : null;
                                 const absenceTypeLabel = absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
-                                const absenceStatusLabel = absence?.status || (isRRHHCode ? 'Registrada' : '');
+                                const ABSENCE_STATUS_ES: Record<string, string> = {
+                                    APPROVED: 'Aprobada', PENDING: 'Pendiente', REJECTED: 'Rechazada',
+                                    ACTIVE: 'Activa', CLOSED: 'Cerrada', REGISTERED: 'Registrada',
+                                    VERIFIED: 'Verificada', JUSTIFIED: 'Justificada',
+                                };
+                                const rawStatus = absence?.status || (isRRHHCode ? 'APPROVED' : '');
+                                const absenceStatusLabel = ABSENCE_STATUS_ES[rawStatus?.toUpperCase?.()] || rawStatus || '';
                                 const coveringEmployee = coverageInfo
                                     ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
                                     : (shift?.coveredBy || pending?.coveredBy || null);
