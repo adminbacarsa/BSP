@@ -926,7 +926,17 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const empId = empSnap.docs[0].id;
     if (shiftData.employeeId !== empId) throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
 
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    // Bug fix: si el turno ya fue marcado ausente, rechazar el check-in
+    // (el operador debe gestionar el ingreso manualmente para evitar estado inconsistente)
+    if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
+        throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.'
+        );
+    }
+
+    const nowTs = admin.firestore.Timestamp.now();
+    const now   = admin.firestore.FieldValue.serverTimestamp();
     await shiftRef.update({
         isPresent: true,
         status: 'PRESENT',
@@ -974,11 +984,22 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 .where('isCompleted', '==', false)
                 .get();
 
+            const nowMs = nowTs.toMillis();
+            const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
+            const RELEVO_TOLERANCE_MS = 90 * 60 * 1000; // 90 min de tolerancia
+
             const toRelieve = activeSnap.docs.filter(d => {
                 const dat = d.data();
-                return (dat.positionName || '').trim().toLowerCase() === positionName
-                    && d.id !== shiftId
-                    && dat.employeeId !== empId;
+                if ((dat.positionName || '').trim().toLowerCase() !== positionName) return false;
+                if (d.id === shiftId || dat.employeeId === empId) return false;
+
+                // Bug fix: solo relevar al guardia cuyo turno está terminando cerca
+                // del inicio del turno entrante (±90 min). Evita relevar compañeros
+                // con turno vigente en puestos con capacidad > 1.
+                const outEndMs = dat.endTime?.toMillis?.() ?? 0;
+                if (outEndMs > 0 && Math.abs(outEndMs - incomingStartMs) > RELEVO_TOLERANCE_MS) return false;
+
+                return true;
             });
 
             for (const outDoc of toRelieve) {
@@ -987,16 +1008,25 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 const outName      = outData.employeeName || 'Guardia';
                 const outPosName   = outData.positionName || '';
 
+                // Horas completas: si el relevo es anticipado, usar la hora programada de fin
+                // para que el saliente cobre su turno completo sin culpa por llegada temprana
+                const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
+                const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
+                const outgoingRealEnd = isEarlyRelevo
+                    ? outData.endTime                                  // hora programada → horas completas
+                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasó → hora real
+
                 // 1. Completar el turno del guardia saliente
                 await outDoc.ref.update({
                     isCompleted:      true,
                     isPresent:        false,
                     status:           'COMPLETED',
-                    realEndTime:      admin.firestore.FieldValue.serverTimestamp(),
+                    realEndTime:      outgoingRealEnd,
                     relievedBy:       empId,
                     relievedByName:   incomingName,
                     relievedAt:       admin.firestore.FieldValue.serverTimestamp(),
                     autoRelevo:       true,
+                    relievedEarly:    isEarlyRelevo,
                 });
 
                 // 2. Novedad de relevo para el operador

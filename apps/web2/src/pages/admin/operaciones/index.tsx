@@ -90,7 +90,21 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
             if (prevShiftId) {
-                batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED', isPresent: false });
+                // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
+                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+                const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
+                const nowDate = new Date();
+                const isEarlyRelevo = prevEnd && prevEnd > nowDate;
+                const outgoingRealEnd = isEarlyRelevo
+                    ? Timestamp.fromDate(prevEnd!)   // hora programada → horas completas
+                    : serverTimestamp();              // ya pasó el horario → hora real
+                batch.update(doc(db, 'turnos', prevShiftId), {
+                    realEndTime: outgoingRealEnd,
+                    isCompleted: true,
+                    status: 'COMPLETED',
+                    isPresent: false,
+                    relievedEarly: isEarlyRelevo,    // flag para trazabilidad
+                });
             }
             await batch.commit();
             toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
