@@ -452,8 +452,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const clampS = (real: Date, plan: Date, tol = 5): Date =>
                 (real.getTime() - plan.getTime()) / 60000 <= tol ? plan : real;
-            const clampE = (real: Date, plan: Date, tol = 5): Date =>
-                Math.abs((real.getTime() - plan.getTime()) / 60000) <= tol ? plan : real;
+            // Relevo anticipado: si salió antes del fin planificado → crédito completo hasta fin planificado
+            const clampE = (real: Date, plan: Date): Date =>
+                real < plan ? plan : real;
 
             const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
                             : d.checkInTime?.seconds   ? new Date(d.checkInTime.seconds * 1000)
@@ -463,7 +464,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                             : null;
 
             const rStart = rStartRaw ? clampS(rStartRaw, start, 5) : null;
-            const rEnd   = rEndRaw   ? clampE(rEndRaw,   end,   5) : null;
+            const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)      : null;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
                 if (rDur >= 0 && rDur <= 36) {
