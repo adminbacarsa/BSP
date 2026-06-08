@@ -95,8 +95,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
                 ? incomingShift.shiftDateObj
                 : toDate(incomingShift.shiftDateObj);
             const isEarlyStartShift = !!incomingShift.isEarlyStart;
+            // Adelanto: usa adjustedStartTime (= inicio de la vacante a cubrir, no la hora de llegada)
+            // Así el guardia cobra desde las 7 AM aunque haya llegado a las 8 AM
             const incomingRealStart = isEarlyStartShift
-                ? serverTimestamp()          // adelanto: hora real (operador lo asignó anticipado)
+                ? (incomingShift.adjustedStartTime
+                    ? (incomingShift.adjustedStartTime.toDate
+                        ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
+                        : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
+                    : serverTimestamp())
                 : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
             batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: incomingRealStart, isLate: status === 'LATE' });
             if (prevShiftId) {
@@ -314,12 +320,19 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         return 0;
     };
 
-    // 3. RETENES: empleados sin turno hoy — ordenados por experiencia, luego cercanía
+    // Helper de restricciones: igual que Planificación — no mostrar guardias vetados
+    const isRestricted = (e: any): boolean => {
+        if ((e.restriccionesObjetivo || []).some((r: any) => r.objectiveId === absenceShift.objectiveId)) return true;
+        if ((e.restriccionesCliente  || []).some((r: any) => r.clientId    === absenceShift.clientId))   return true;
+        return false;
+    };
+
+    // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por experiencia, luego cercanía
     const busyIds = new Set(
         logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
     );
     const retenes = (logic.employees || [])
-        .filter((e: any) => !busyIds.has(e.id))
+        .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // ← excluir restringidos
         .map((e: any) => {
             const dist  = calculateDistance(objLat, objLng, e.lat, e.lng);
             const expLv = experienceLevel(e);
@@ -338,9 +351,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         })
         .slice(0, 12);
 
-    // 4. FRANCOS: turnos franco hoy, no trabajados — mismo orden experiencia + cercanía
+    // 4. FRANCOS: turnos franco hoy, no trabajados — sin restricciones, mismo orden
     const francos = logic.processedData
-        .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado)
+        .filter((s: any) => {
+            if (!s.isFranco || !isSameDay(s.shiftDateObj, now) || s.isFrancoTrabajado) return false;
+            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            if (emp && isRestricted(emp)) return false; // ← excluir restringidos
+            return true;
+        })
         .map((s: any) => {
             const emp   = (logic.employees || []).find((e: any) => e.id === s.employeeId);
             const dist  = calculateDistance(objLat, objLng, emp?.lat, emp?.lng);
@@ -396,7 +414,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         setLoading('adel_' + s.id);
         try {
             const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
+            // adjustedStartTime = inicio del turno a cubrir (no la hora actual)
+            // El guardia cobra desde el inicio de la vacante aunque llegue tarde
+            const vacancyStart = absenceShift.shiftDateObj instanceof Date
+                ? Timestamp.fromDate(absenceShift.shiftDateObj)
+                : Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+            batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: vacancyStart, isEarlyStart: true });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
