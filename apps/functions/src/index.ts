@@ -2001,6 +2001,8 @@ export const detectarAusencias = functions
         if (shift.absenceDetectedAt) continue;
         // Guardia con aviso de llegada tarde: no marcar ausente automáticamente
         if (shift.lateArrivalAt) continue;
+        // Caso 2: operador registró aviso anticipado → no marcar AA
+        if (shift.notifiedAbsent === true) continue;
 
         // 1. Marcar ABSENT AA
         await docSnap.ref.update({
@@ -2011,7 +2013,71 @@ export const detectarAusencias = functions
           absenceDetectedBy: 'SYSTEM_SCHEDULER',
         });
 
-        // 2. Push al empleado (si tiene token)
+        // 2. Retención automática: si hay un guardia presente en el mismo puesto, retenerlo
+        const objectiveId   = shift.objectiveId   || '';
+        const positionName  = (shift.positionName || '').trim().toLowerCase();
+        const empId         = shiftEmpresaId(shift);
+        if (objectiveId && positionName && empId) {
+          try {
+            const presentSnap = await db.collection('turnos')
+              .where('empresaId', '==', empId)
+              .where('objectiveId', '==', objectiveId)
+              .where('isPresent', '==', true)
+              .where('isCompleted', '==', false)
+              .get();
+            const toRetain = presentSnap.docs.filter(d => {
+              const dat = d.data();
+              return (dat.positionName || '').trim().toLowerCase() === positionName
+                && dat.employeeId !== shift.employeeId;
+            });
+            for (const retDoc of toRetain) {
+              const retData = retDoc.data();
+              // Marcar como en retención si no lo está ya
+              if (!retData.isRetention) {
+                await retDoc.ref.update({
+                  isRetention:     true,
+                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
+                  autoRetentionAt: now,
+                });
+                // Push al guardia retenido
+                const retTokens = await getEmployeeTokens(db, retData.employeeId);
+                if (retTokens.length > 0) {
+                  await admin.messaging().sendEachForMulticast({
+                    tokens: retTokens,
+                    notification: {
+                      title: '⏰ Quedaste en retención',
+                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
+                    },
+                    webpush: {
+                      notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                      fcmOptions: { link: '/empleado/dashboard' },
+                    },
+                  }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
+                }
+                // Novedad para operaciones
+                await db.collection('novedades').add({
+                  type: 'RETENCION_POR_AUSENCIA',
+                  status: 'PENDIENTE',
+                  empresaId: empId,
+                  objectiveId,
+                  objectiveName:        shift.objectiveName || '',
+                  positionName:         shift.positionName  || '',
+                  employeeId:           retData.employeeId,
+                  employeeName:         retData.employeeName || '',
+                  absentEmployeeId:     shift.employeeId,
+                  absentEmployeeName:   shift.employeeName  || '',
+                  description: `${retData.employeeName || 'Guardia'} retenido automáticamente — ${shift.objectiveName} · ${shift.positionName} — por ausencia de ${shift.employeeName}`,
+                  createdAt: now,
+                  source: 'SYSTEM_SCHEDULER',
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('[detectarAusencias] Error en retención automática:', e);
+          }
+        }
+
+        // 3. Push al empleado ausente (si tiene token)
         const tokens = await getEmployeeTokens(db, shift.employeeId);
         if (tokens.length > 0) {
           const startStr = shift.startTime?.toDate

@@ -324,14 +324,18 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
 
-    const markCoverageResolved = (batch: ReturnType<typeof writeBatch>, coverageType: string) => {
+    const markCoverageResolved = (batch: ReturnType<typeof writeBatch>, coverageType: string, coveringEmployee?: any) => {
         if (!absenceShift?.id || absenceShift.isVirtual || String(absenceShift.id).startsWith('V124_') || String(absenceShift.id).startsWith('SLA_GAP')) return;
         if (absenceShift.isUnassigned || absenceShift.isAbsent || absenceShift.isPotentialAbsence) {
+            const covEmpId   = coveringEmployee?.id || coveringEmployee?.employeeId || null;
+            const covEmpName = coveringEmployee?.fullName || coveringEmployee?.employeeName || coveringEmployee?.name || null;
             batch.update(doc(db, 'turnos', absenceShift.id), {
-                status: 'COVERED',
-                resolvedBy: 'OPERACIONES',
-                coverageType,
-                coveredAt: serverTimestamp(),
+                status:                'COVERED',
+                resolvedBy:            'OPERACIONES',
+                coverageType,                           // RETENTION | EARLY_START | RETEN | FRANCO
+                coveredAt:             serverTimestamp(),
+                coveredByEmployeeId:   covEmpId,        // quién cubrió
+                coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificación
             });
         }
     };
@@ -342,7 +346,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'RETENTION');
+            markCoverageResolved(batch, 'RETENTION', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
@@ -357,7 +361,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'EARLY_START');
+            markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`Turno de ${s.employeeName} adelantado`);
@@ -377,7 +381,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
-            markCoverageResolved(batch, 'RETEN');
+            markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             toast.success(`${empName} convocado como retén`);
@@ -392,7 +396,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { isFrancoTrabajado: true, francoTrabajadoAt: serverTimestamp(), francoObjectiveId: absenceShift.objectiveId, francoObjectiveName: absenceShift.objectiveName });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'FRANCO');
+            markCoverageResolved(batch, 'FRANCO', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
@@ -520,7 +524,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         const shiftEnded = endMs > 0 && Date.now() > endMs;
                         return shiftEnded
                             ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>
-                            : <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>;
+                            : <div className="flex gap-1">
+                                <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde — dar presente"><UserCheck size={12}/></button>
+                                <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>
+                              </div>;
                       })()
                     : <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Confirmar ausencia"><AlertTriangle size={12}/></button>
                 )}
@@ -585,7 +592,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
                             return shiftEnded
                                 ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
-                                : <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>COBERTURA</button>;
+                                : <div className="flex gap-1.5">
+                                    <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde"><UserCheck size={11}/>LLEGÓ TARDE</button>
+                                    <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>
+                                  </div>;
                           })()
                         : <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>CONFIRMAR AUSENCIA</button>
                     )}
@@ -1220,7 +1230,11 @@ export default function OperacionesPage() {
             const batch = writeBatch(db);
             // Marca el turno con aviso → el planificador muestra barra ámbar
             if (shift.id && !shift.isVirtual) {
-                batch.update(doc(db, 'turnos', shift.id), { plannedNovedad: 'AVISO' });
+                batch.update(doc(db, 'turnos', shift.id), {
+                    plannedNovedad:     'AVISO',
+                    notifiedAbsent:     true,         // protege al turno del AA automático a T+30
+                    notifiedAbsentAt:   serverTimestamp(),
+                });
             }
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
