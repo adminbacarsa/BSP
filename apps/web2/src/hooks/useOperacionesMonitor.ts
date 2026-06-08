@@ -442,7 +442,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             case 'PLAN':       return hoy.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
             case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
             case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention);
-            case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned);
+            case 'VACANTES':   return hoy.filter((s:any) => s.isOperationalVacancy); // Fix 3: sync con stats.vacantes (excluye devueltas)
             case 'AUSENTES':   return hoy.filter((s:any) => s.isAbsent || s.isPotentialAbsence);
             case 'FRANCOS':    return hoy.filter((s:any) => s.isFranco);
             default:           return hoy;

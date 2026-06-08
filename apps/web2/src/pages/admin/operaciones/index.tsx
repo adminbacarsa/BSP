@@ -1269,8 +1269,10 @@ export default function OperacionesPage() {
                     objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
                     positionName: shift.positionName,
                     employeeId: 'VACANTE', employeeName: 'VACANTE',
+                    // Fix 4: asegurar que el Date sea correcto antes de convertir a Timestamp
+                    // shiftDateObj es un Date local de Argentina — Timestamp.fromDate lo convierte a UTC correctamente
                     startTime: Timestamp.fromDate(shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj)),
-                    endTime: Timestamp.fromDate(shift.endDateObj instanceof Date ? shift.endDateObj : new Date(shift.endDateObj)),
+                    endTime:   Timestamp.fromDate(shift.endDateObj   instanceof Date ? shift.endDateObj   : new Date(shift.endDateObj)),
                     status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
                     comments: 'Vacante de Contrato Reportada',
                     createdAt: serverTimestamp(), origin: 'SLA_VIRTUAL',

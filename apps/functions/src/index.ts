@@ -2434,15 +2434,38 @@ export const gestionarVacantes = functions
     for (const nDoc of staleProtos.docs) {
       const n = nDoc.data();
 
-      // Verificar que el turno referenciado no fue cubierto mientras tanto
+      // Verificar que el turno original no fue cubierto
       if (n.shiftId) {
         const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
         if (turnoSnap.exists) {
           const t = turnoSnap.data()!;
-          const covered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
-            || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES';
-          if (covered) {
-            // Turno cubierto: cerrar la novedad como atendida
+          // Fix 2: verificar también cobertura vía turno nuevo (RETEN/FRANCO/EARLY_START)
+          const directlyCovered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
+            || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES' || t.status === 'COVERED';
+
+          // Buscar si se creó un turno de retén/operativo para el mismo slot
+          let coveredByNewShift = false;
+          if (!directlyCovered && t.objectiveId && t.positionName) {
+            const slotStartMs = t.startTime?.toMillis?.() ?? 0;
+            const slotEndMs   = t.endTime?.toMillis?.()   ?? 0;
+            if (slotStartMs > 0) {
+              const coverSnap = await db.collection('turnos')
+                .where('objectiveId', '==', t.objectiveId)
+                .where('isPresent', '==', true)
+                .limit(10).get();
+              coveredByNewShift = coverSnap.docs.some(d => {
+                const r = d.data();
+                const rStart = r.startTime?.toMillis?.() ?? 0;
+                const rEnd   = r.endTime?.toMillis?.()   ?? slotEndMs;
+                const samePos = (r.positionName || '').toLowerCase() === (t.positionName || '').toLowerCase();
+                const overlaps = rStart <= slotEndMs && rEnd >= slotStartMs;
+                const isOps = ['RETEN','OPERATIONS_COVERAGE','EARLY_START'].includes(r.origin || '');
+                return samePos && overlaps && (isOps || r.absenceShiftId === n.shiftId);
+              });
+            }
+          }
+
+          if (directlyCovered || coveredByNewShift) {
             await nDoc.ref.update({ status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'SISTEMA_AUTO', autoResolved: true });
             autoClosed++;
             continue;
