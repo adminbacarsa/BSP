@@ -14,7 +14,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2
+    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2, BarChart3, PanelLeft, LayoutList
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -575,7 +575,9 @@ export default function PlanificacionPage() {
     const [historyVersions, setHistoryVersions] = useState<any[]>([]);
     const [comparingSnapshot, setComparingSnapshot] = useState<any | null>(null);
     const [compareShowOnlyDiffs, setCompareShowOnlyDiffs] = useState(false);
-    const [compareShowDiffList, setCompareShowDiffList] = useState(true);
+    const [compareLayout, setCompareLayout] = useState<'side' | 'stack'>('side');
+    const [showCompareDiffModal, setShowCompareDiffModal] = useState(false);
+    const [showCompareSummaryModal, setShowCompareSummaryModal] = useState(false);
 
     const [francoMode, setFrancoMode] = useState<'NONE' | 'FT_SELECTION' | 'FF_WIZARD'>('NONE');
     const [showSwapModal, setShowSwapModal] = useState(false);
@@ -2513,6 +2515,8 @@ export default function PlanificacionPage() {
     const exitSnapshotMode = () => {
         setComparingSnapshot(null);
         setCompareShowOnlyDiffs(false);
+        setShowCompareDiffModal(false);
+        setShowCompareSummaryModal(false);
     };
 
     const handleRowDragStart = (e: React.DragEvent, idx: number) => {
@@ -4915,11 +4919,36 @@ export default function PlanificacionPage() {
         snapshotData?: any,
         compareChangedKeys?: Set<string> | null,
         employeesForRows?: typeof displayedEmployees,
+        gridOpts?: { hideFooter?: boolean; compactRows?: boolean; minimalHeader?: boolean },
     ) => {
         const gridEmployees = employeesForRows ?? displayedEmployees;
+        const compareMinimal = !!gridOpts?.minimalHeader;
+        const compareCompact = !!gridOpts?.compactRows;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
             <thead className="sticky top-0 z-10 bg-slate-100 shadow-md">
+                {compareMinimal ? (
+                <tr className="h-7">
+                    <th className="planning-sticky-corner bg-slate-100 p-1.5 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                        <span className="text-[9px] font-black uppercase text-slate-500 flex items-center gap-1">
+                            {isSnapshotView ? <History size={10} className="text-amber-600"/> : <Activity size={10} className="text-indigo-600"/>}
+                            {isSnapshotView ? 'Histórico' : 'Actual'}
+                        </span>
+                    </th>
+                    {daysInMonth.map((d) => {
+                        const dateStr = getDateKey(d);
+                        const letter = getDayLetter(dateStr);
+                        const isWeekend = [0, 6].includes(d.getDay());
+                        return (
+                            <th key={`cmp_${d.toISOString()}`} className={`min-w-[22px] border-b border-r p-0 text-center ${isWeekend ? 'bg-rose-50 dark:bg-rose-900/30' : ''}`}>
+                                <div className={`text-[7px] font-black leading-none ${isWeekend ? 'text-rose-500' : 'text-slate-400'}`}>{letter}</div>
+                                <div className={`text-[10px] font-bold leading-none ${isWeekend ? 'text-rose-600' : 'text-slate-700'}`}>{d.getDate()}</div>
+                            </th>
+                        );
+                    })}
+                </tr>
+                ) : (
+                <>
                 <tr className="h-6">
                     <th rowSpan={2} className="planning-sticky-corner bg-slate-100 p-2 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <span className="text-[10px] font-black uppercase"><Users size={12}/> Dotación</span>
@@ -5014,6 +5043,8 @@ export default function PlanificacionPage() {
                         );
                     })}
                 </tr>
+                </>
+                )}
             </thead>
             <tbody>
                 {gridEmployees.map((emp, idx) => {
@@ -5039,6 +5070,11 @@ export default function PlanificacionPage() {
                                         className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${forceShowAll ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
+                                            if (compareCompact) {
+                                                return (
+                                                    <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
+                                                );
+                                            }
                                             const empLat = Number(emp.lat ?? emp.latitude ?? 0);
                                             const empLng = Number(emp.lng ?? emp.longitude ?? 0);
                                             const objLat = Number(selectedObjectiveData?.lat ?? 0);
@@ -5199,7 +5235,7 @@ export default function PlanificacionPage() {
                             {isSnapshotView && snapshotData && (
                                 <tr className="bg-amber-50 border-b-2 border-amber-200">
                                     <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                                        <span className="text-[9px] font-black uppercase text-amber-700 flex items-center gap-1"><History size={10}/> {emp.name} (Hist)</span>
+                                        <span className="text-[9px] font-bold truncate text-amber-900" title={emp.name}>{emp.name}</span>
                                     </td>
                                     {daysInMonth.map((day) => {
                                         const key = `${emp.id}_${getDateKey(day)}`;
@@ -5222,6 +5258,7 @@ export default function PlanificacionPage() {
                     );
                 })}
             </tbody>
+            {!gridOpts?.hideFooter && (
             <tfoot className="sticky bottom-0 z-10 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
                 <tr>
                     <td className="sticky left-0 z-20 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
@@ -5299,11 +5336,20 @@ export default function PlanificacionPage() {
                     })}
                 </tr>
             </tfoot>
+            )}
         </table>
         );
     };
 
     const compareDiffKeys = planningCompareDiff?.changedKeys ?? null;
+    const compareGridOpts = { hideFooter: true, minimalHeader: true, compactRows: true } as const;
+    const compareSnapshotLabel = comparingSnapshot
+        ? new Date(comparingSnapshot.date).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+    const selectedClientLabel = clients.find(c => c.id === selectedClient)?.name || '';
+    const selectedObjectiveLabel = selectedClient && selectedObjective
+        ? ((clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || selectedObjective)
+        : '';
 
     return (
         <DashboardLayout>
@@ -5466,7 +5512,7 @@ export default function PlanificacionPage() {
                 </>,
                 document.body,
             )}
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out no-print ${selectedClient ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-40 opacity-100'}`}>
+            <div className={`overflow-hidden transition-all duration-300 ease-in-out no-print ${selectedClient || comparingSnapshot ? 'max-h-0 opacity-0 pointer-events-none' : 'max-h-40 opacity-100'}`}>
                 <PageHeader
                     title="Planificador"
                     subtitle="Gestión de turnos y asignaciones"
@@ -5474,16 +5520,50 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 relative z-40 ${selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
-                         <div className="flex-1 bg-amber-50 border-amber-200 border px-4 py-2 rounded-xl flex justify-between items-center animate-in slide-in-from-top no-print shadow-sm">
-                            <div className="flex items-center gap-4">
-                                <div className="p-2 bg-amber-100 rounded-lg text-amber-700"><Split size={20}/></div>
-                                <div><p className="text-xs font-black text-amber-800 uppercase">Modo Comparación Activado</p><p className="text-[10px] text-amber-600">Histórico ({new Date(comparingSnapshot.date).toLocaleString()}) vs actual — {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s)</p></div>
+                        <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-0">
+                            <span className="text-[10px] font-black text-slate-700 truncate max-w-[220px]" title={`${selectedClientLabel} · ${selectedObjectiveLabel}`}>
+                                {selectedClientLabel}<span className="text-slate-400 mx-1">›</span>{selectedObjectiveLabel}
+                            </span>
+                            <div className="h-4 w-px bg-amber-200 shrink-0"/>
+                            <div className="flex items-center bg-white rounded-lg p-0.5 border border-amber-200 shrink-0">
+                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-0.5 hover:bg-amber-50 rounded"><ChevronLeft size={14}/></button>
+                                <span className="px-2 font-black text-[10px] w-20 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'short', year:'2-digit'})}</span>
+                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-0.5 hover:bg-amber-50 rounded"><ChevronRight size={14}/></button>
                             </div>
-                            <button onClick={exitSnapshotMode} className="bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black hover:bg-amber-700 shadow-sm flex items-center gap-2"><X size={14}/> CERRAR COMPARACIÓN</button>
+                            <div className="h-4 w-px bg-amber-200 shrink-0"/>
+                            <Split size={13} className="text-amber-600 shrink-0"/>
+                            <span className="text-[10px] font-bold text-amber-900 truncate max-w-[140px]" title={compareSnapshotLabel}>{compareSnapshotLabel}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${planningCompareDiff?.changedCount ? 'bg-amber-200 text-amber-900' : 'bg-emerald-100 text-emerald-800'}`}>
+                                {planningCompareDiff?.changedCount ?? 0} dif.
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setCompareShowOnlyDiffs((v) => !v)}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border shrink-0 ${compareShowOnlyDiffs ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200'}`}
+                            >
+                                Solo cambios
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCompareLayout((l) => (l === 'side' ? 'stack' : 'side'))}
+                                className="p-1.5 rounded-lg border bg-white text-slate-600 border-slate-200 shrink-0"
+                                title={compareLayout === 'side' ? 'Apilar verticalmente' : 'Ver lado a lado'}
+                            >
+                                {compareLayout === 'side' ? <PanelLeft size={14}/> : <LayoutList size={14}/>}
+                            </button>
+                            <button type="button" onClick={() => setShowCompareDiffModal(true)} className="px-2 py-1 rounded-lg text-[10px] font-bold border bg-white text-slate-600 border-slate-200 shrink-0 flex items-center gap-1" title="Listado de celdas distintas">
+                                <ArrowLeftRight size={12}/> Detalle
+                            </button>
+                            <button type="button" onClick={() => setShowCompareSummaryModal(true)} className="p-1.5 rounded-lg border bg-white text-slate-600 border-slate-200 shrink-0" title="Resumen de horas y dotación"><BarChart3 size={14}/></button>
+                            <button type="button" onClick={() => setShowActivityModal(true)} className="p-1.5 rounded-lg border bg-white text-slate-600 border-slate-200 shrink-0 relative" title="Actividad reciente">
+                                <Clock size={14}/>
+                                {unifiedLogs.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-600 text-white text-[8px] font-black flex items-center justify-center">{unifiedLogs.length > 9 ? '9+' : unifiedLogs.length}</span>}
+                            </button>
+                            <button onClick={exitSnapshotMode} className="ml-auto bg-amber-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black hover:bg-amber-700 shrink-0 flex items-center gap-1"><X size={12}/> Salir</button>
                         </div>
                     ) : (
                         <>
@@ -5925,69 +6005,24 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                         {comparingSnapshot ? (
-                            // 🛑 VISTA DE COMPARACIÓN DUAL (V8.20) - SPLIT SCREEN
-                            <div className="flex flex-col h-full gap-4 p-2 bg-slate-100/50">
-                                <div className="flex-1 overflow-auto border-2 border-amber-300 bg-amber-50/30 rounded-xl shadow-sm relative">
-                                    <div className="sticky top-0 z-50 bg-amber-100/90 backdrop-blur-sm px-4 py-1 text-[10px] font-black text-amber-800 uppercase mb-2 border-b border-amber-200 flex items-center justify-center gap-2">
-                                        <History size={12}/> VERSIÓN HISTÓRICA ({new Date(comparingSnapshot.date).toLocaleString()}) — borde ámbar = cambió vs actual
+                            <div className={`flex h-full min-h-0 gap-1 p-0.5 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
+                                <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-amber-400 bg-amber-50/20">
+                                    <div className="shrink-0 px-2 py-0.5 bg-amber-100 border-b border-amber-200 flex items-center justify-between gap-2">
+                                        <span className="text-[9px] font-black text-amber-900 uppercase flex items-center gap-1"><History size={10}/> Histórico</span>
+                                        <span className="text-[8px] font-bold text-amber-700">Borde ámbar = cambió</span>
                                     </div>
-                                    {renderGrid(true, comparingSnapshot.data, compareDiffKeys, compareGridEmployees)}
+                                    <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                        {renderGrid(true, comparingSnapshot.data, compareDiffKeys, compareGridEmployees, compareGridOpts)}
+                                    </div>
                                 </div>
-
-                                <div className="shrink-0 mx-2 rounded-xl border border-slate-300 bg-white shadow-sm overflow-hidden z-10">
-                                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                                        <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-700">
-                                            <ArrowLeftRight size={14} className="text-indigo-600"/>
-                                            Diferencias histórico → actual
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${planningCompareDiff?.changedCount ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                                                {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s)
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => setCompareShowOnlyDiffs((v) => !v)}
-                                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${compareShowOnlyDiffs ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200'}`}
-                                            >
-                                                Solo filas con cambios
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setCompareShowDiffList((v) => !v)}
-                                                className="px-2 py-1 rounded-lg text-[10px] font-bold border bg-white text-slate-600 border-slate-200"
-                                            >
-                                                {compareShowDiffList ? 'Ocultar detalle' : 'Ver detalle'}
-                                            </button>
-                                        </div>
+                                <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-indigo-500 bg-white">
+                                    <div className="shrink-0 px-2 py-0.5 bg-indigo-600 border-b border-indigo-700 flex items-center justify-between gap-2">
+                                        <span className="text-[9px] font-black text-white uppercase flex items-center gap-1"><Activity size={10}/> Actual (en vivo)</span>
+                                        <span className="text-[8px] font-bold text-indigo-100">Borde violeta = cambió</span>
                                     </div>
-                                    {compareShowDiffList && planningCompareDiff && planningCompareDiff.changedCount > 0 && (
-                                        <div className="max-h-28 overflow-y-auto custom-scrollbar px-3 py-2 text-[10px] space-y-1">
-                                            {planningCompareDiff.cells.slice(0, 40).map((c) => {
-                                                const emp = displayedEmployees.find((e: { id: string }) => e.id === c.empId);
-                                                const label = emp?.name || c.empId.slice(0, 8);
-                                                const arrow = c.histLabel && c.currentLabel ? `${c.histLabel} → ${c.currentLabel}` : c.currentLabel ? `∅ → ${c.currentLabel}` : `${c.histLabel} → ∅`;
-                                                return (
-                                                    <div key={c.key} className="flex justify-between gap-2 text-slate-700">
-                                                        <span className="truncate font-bold">{label} · {c.date.split('-').reverse().join('/')}</span>
-                                                        <span className="shrink-0 font-mono text-indigo-700">{arrow}</span>
-                                                    </div>
-                                                );
-                                            })}
-                                            {planningCompareDiff.cells.length > 40 && (
-                                                <p className="text-slate-400 italic">… y {planningCompareDiff.cells.length - 40} más en la grilla (borde ámbar/violeta).</p>
-                                            )}
-                                        </div>
-                                    )}
-                                    {compareShowDiffList && planningCompareDiff?.changedCount === 0 && (
-                                        <p className="px-3 py-2 text-[10px] text-emerald-700 font-bold">Sin diferencias: la versión actual coincide con el snapshot histórico.</p>
-                                    )}
-                                </div>
-
-                                <div className="flex-1 overflow-auto border-2 border-indigo-500 bg-white rounded-xl shadow-lg relative">
-                                    <div className="sticky top-0 z-50 bg-indigo-600 px-4 py-1 text-[10px] font-black text-white uppercase mb-2 flex items-center justify-center gap-2 shadow-sm">
-                                        <Activity size={12}/> VERSIÓN ACTUAL (EN VIVO) — borde violeta = cambió vs histórico
+                                    <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                        {renderGrid(false, undefined, compareDiffKeys, compareGridEmployees, compareGridOpts)}
                                     </div>
-                                    {renderGrid(false, undefined, compareDiffKeys, compareGridEmployees)}
                                 </div>
                             </div>
                         ) : (
@@ -6057,7 +6092,7 @@ export default function PlanificacionPage() {
                 )}
 
                 {/* RESUMEN DE HORAS PLANIFICADAS */}
-                {selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
+                {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const nativeAssignedHours = displayedEmployees
@@ -6143,6 +6178,7 @@ export default function PlanificacionPage() {
                     );
                 })()}
 
+                {!comparingSnapshot && (
                 <div className="hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
@@ -6176,6 +6212,67 @@ export default function PlanificacionPage() {
                         </div>
                     )}
                 </div>
+                )}
+
+                {showCompareDiffModal && comparingSnapshot && (
+                    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowCompareDiffModal(false)}>
+                        <div className="bg-white w-full max-w-2xl max-h-[75vh] rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-3 border-b bg-slate-50 flex justify-between items-center gap-2">
+                                <h3 className="font-black text-sm flex items-center gap-2"><ArrowLeftRight className="text-indigo-600" size={16}/> Diferencias · histórico → actual</h3>
+                                <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${planningCompareDiff?.changedCount ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                                        {planningCompareDiff?.changedCount ?? 0} celda(s)
+                                    </span>
+                                    <button onClick={() => setShowCompareDiffModal(false)} className="p-1.5 hover:bg-slate-200 rounded-lg"><X size={16}/></button>
+                                </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 text-[11px] space-y-1">
+                                {!planningCompareDiff?.changedCount ? (
+                                    <p className="text-emerald-700 font-bold py-4 text-center">Sin diferencias: la versión actual coincide con el snapshot.</p>
+                                ) : planningCompareDiff.cells.map((c) => {
+                                    const emp = displayedEmployees.find((e: { id: string }) => e.id === c.empId);
+                                    const label = emp?.name || c.empId.slice(0, 8);
+                                    const arrow = c.histLabel && c.currentLabel ? `${c.histLabel} → ${c.currentLabel}` : c.currentLabel ? `∅ → ${c.currentLabel}` : `${c.histLabel} → ∅`;
+                                    return (
+                                        <div key={c.key} className="flex justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0">
+                                            <span className="truncate font-bold text-slate-800">{label} · {c.date.split('-').reverse().join('/')}</span>
+                                            <span className="shrink-0 font-mono text-indigo-700">{arrow}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showCompareSummaryModal && selectedObjective && Object.keys(empMonthlyHours).length > 0 && (() => {
+                    const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
+                    const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
+                    const nativeAssignedHours = displayedEmployees
+                        .filter((emp: any) => isEmployeeNativeToObjective(emp))
+                        .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
+                    const empCount = planningDotacionEmployees.length;
+                    const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
+                    const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
+                    const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
+                    return (
+                    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowCompareSummaryModal(false)}>
+                        <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-3 border-b bg-slate-50 flex justify-between items-center">
+                                <h3 className="font-black text-sm flex items-center gap-2"><BarChart3 className="text-indigo-600" size={16}/> Resumen del mes</h3>
+                                <button onClick={() => setShowCompareSummaryModal(false)} className="p-1.5 hover:bg-slate-200 rounded-lg"><X size={16}/></button>
+                            </div>
+                            <div className="p-4 grid grid-cols-2 gap-3 text-center">
+                                <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Empleados</p><p className="text-xl font-black text-slate-800">{empCount}</p></div>
+                                <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">{hsLabel}</p><p className={`text-xl font-black ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p></div>
+                                {empCountBillable > 0 && <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Prom./Emp.</p><p className="text-xl font-black text-slate-600">{Math.round(nativeAssignedHours / empCountBillable)}h</p></div>}
+                                {slaVendidas > 0 && <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Vendidas SLA</p><p className="text-xl font-black text-teal-600">{slaVendidas}</p></div>}
+                            </div>
+                            <p className="px-4 pb-4 text-[10px] text-slate-500">Snapshot: {compareSnapshotLabel} · {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s) vs actual.</p>
+                        </div>
+                    </div>
+                    );
+                })()}
 
                 {showActivityModal && (
                     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowActivityModal(false)}>
