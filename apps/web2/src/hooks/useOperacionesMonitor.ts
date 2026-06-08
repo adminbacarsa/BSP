@@ -242,7 +242,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             
             if (isUnassigned && !isReportedToPlanning) return null; 
 
-            const isEarlyStart = !!shift.isEarlyStart;
+            const isEarlyStartScheduled = !!shift.isEarlyStart;
+            const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
             const isAwaitingCoverageCheckIn = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
                 (isEarlyStart || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
 
