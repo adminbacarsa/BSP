@@ -95,6 +95,84 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
     const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
     const mustRelevar = activeGuards.length >= positionCapacity;
 
+    // ── INTERCAMBIO DE TURNOS ────────────────────────────────────────────────
+    // Cuando Guard A llega tarde (>60 min) y su turno fue cubierto por Guard B,
+    // Guard A puede tomar el próximo turno de Guard B como compensación.
+    const handleIntercambio = async () => {
+        try {
+            const coveringEmpId = incomingShift.coveredByEmployeeId;
+            if (!coveringEmpId) {
+                toast.error('No hay guardia cubridor registrado. Verificá el turno.');
+                return;
+            }
+            // Buscar el turno planificado de Guard B que aún no inició
+            const today = new Date();
+            const guardBNextShift = logic.processedData.find((s: any) =>
+                s.employeeId === coveringEmpId &&
+                !s.isPresent && !s.isCompleted && !s.isAbsent &&
+                isSameDay(s.shiftDateObj, today) &&
+                s.id !== incomingShift.id
+            );
+            if (!guardBNextShift) {
+                toast.error('No se encontró turno disponible para el intercambio. Guard B no tiene turno pendiente hoy.');
+                return;
+            }
+            // Obtener nombre del cubridor
+            const coveringEmp = (logic.employees || []).find((e: any) => e.id === coveringEmpId);
+            const coveringName = coveringEmp?.fullName || coveringEmp?.name || coveringEmpId;
+
+            const batch = writeBatch(db);
+            const nowTs = serverTimestamp();
+
+            // 1. Reasignar el turno de Guard B a Guard A
+            batch.update(doc(db, 'turnos', guardBNextShift.id), {
+                employeeId:          incomingShift.employeeId,
+                employeeName:        incomingShift.employeeName,
+                origin:              'INTERCAMBIO',
+                intercambiadoPor:    coveringEmpId,
+                intercambiadoPorNombre: coveringName,
+                intercambioAt:       nowTs,
+                originalEmployeeId:  coveringEmpId,
+            });
+            // 2. Marcar turno original de Guard A como resuelto por intercambio
+            batch.update(doc(db, 'turnos', incomingShift.id), {
+                coverageType:         'INTERCAMBIO',
+                intercambioWith:      guardBNextShift.id,
+                intercambioAt:        nowTs,
+            });
+            await batch.commit();
+
+            // 3. Notificaciones a ambos guardias
+            const shiftEmpresaId = String(incomingShift.empresaId || empresaId || '').trim();
+            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                userId: incomingShift.employeeId,
+                type: 'INTERCAMBIO',
+                title: '🔄 Intercambio de turno',
+                body: `Cubrís el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
+                read: false, createdAt: nowTs,
+            }, shiftEmpresaId));
+            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                userId: coveringEmpId,
+                type: 'INTERCAMBIO',
+                title: '🔄 Intercambio de turno',
+                body: `${incomingShift.employeeName} tomó tu turno de ${guardBNextShift.objectiveName}. Tu turno de la mañana queda registrado.`,
+                read: false, createdAt: nowTs,
+            }, shiftEmpresaId));
+
+            // 4. Audit log
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'INTERCAMBIO_TURNO',
+                module: 'OPERACIONES',
+                actorName: 'Operador',
+                timestamp: nowTs,
+                details: `Intercambio: ${incomingShift.employeeName} toma turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)}-${formatTimeSimple(guardBNextShift.endDateObj)})`,
+            }, shiftEmpresaId));
+
+            toast.success(`Intercambio realizado. ${incomingShift.employeeName} cubre el turno de ${coveringName}.`);
+            onClose();
+        } catch (e: any) { toast.error('Error en intercambio: ' + (e?.message || String(e))); }
+    };
+
     const handleConfirm = async (prevShiftId: string | null) => {
         if (mustRelevar && !prevShiftId) {
             toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
@@ -166,6 +244,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                     <button onClick={onClose}><X size={20}/></button>
                 </div>
                 <div className="p-6">
+                    {/* Info del turno */}
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-1">
                         <div className="flex items-center gap-2">
                             <MapPin size={13} className="text-indigo-500 shrink-0"/>
@@ -179,6 +258,40 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                             <span className="text-[9px] text-slate-400">· {positionCapacity} pax</span>
                         </div>
                     </div>
+
+                    {/* CASO: turno cubierto o >60 min → ofrecer intercambio */}
+                    {(tooLate || isCovered) ? (
+                        <div className="space-y-3">
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                                <p className="text-sm font-bold text-amber-800">
+                                    <b>{incomingShift.employeeName}</b> llegó con {Math.round(diffMin)} min de retraso.
+                                </p>
+                                {isCovered && (
+                                    <p className="text-xs text-amber-700 mt-1">
+                                        Su turno ya fue cubierto por{' '}
+                                        <b>{incomingShift.coveredByEmployeeName || 'otro guardia'}</b>.
+                                    </p>
+                                )}
+                                {tooLate && !isCovered && (
+                                    <p className="text-xs text-amber-700 mt-1">
+                                        Pasaron más de {LATE_LIMIT_MIN} minutos desde el inicio del turno.
+                                    </p>
+                                )}
+                            </div>
+                            <p className="text-xs text-slate-500 text-center">¿Qué hacemos con {incomingShift.employeeName}?</p>
+                            <button onClick={handleIntercambio}
+                                className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                                <ArrowLeftRight size={16}/> INTERCAMBIO DE TURNO
+                            </button>
+                            <p className="text-[10px] text-slate-400 text-center">
+                                Toma el turno de quien lo cubrió · Ambos quedan con un turno trabajado
+                            </p>
+                            <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                                Cancelar — gestionar manualmente
+                            </button>
+                        </div>
+                    ) : (
+                    <>
                     <p className="text-sm text-slate-600 mb-4">
                         El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar.
                         {status === 'LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>}
@@ -218,6 +331,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                         <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors">
                             {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'}
                         </button>
+                    )}
+                    </>
                     )}
                 </div>
             </div>
