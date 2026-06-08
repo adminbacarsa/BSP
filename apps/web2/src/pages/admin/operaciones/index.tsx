@@ -770,7 +770,12 @@ export default function OperacionesPage() {
         return () => unsub();
     }, [empresaId, empresa]);
 
-    const autoAbsentTriggeredRef = useRef(new Set<string>());
+    // Persiste en localStorage para no re-abrir el modal tras recargar la página
+    const ABSENT_ACK_KEY = `ops_absent_ack_${new Date().toLocaleDateString('en-CA')}`;
+    const autoAbsentTriggeredRef = useRef<Set<string>>(() => {
+        try { return new Set(JSON.parse(localStorage.getItem(ABSENT_ACK_KEY) || '[]')); } catch { return new Set(); }
+    }() as any);
+
     useEffect(() => {
         const now = Date.now();
         const newlyAbsent = logic.processedData.filter((s: any) => {
@@ -783,7 +788,11 @@ export default function OperacionesPage() {
             return true;
         });
         if (!newlyAbsent.length) return;
-        newlyAbsent.forEach((s: any) => autoAbsentTriggeredRef.current.add(s.id));
+        newlyAbsent.forEach((s: any) => {
+            autoAbsentTriggeredRef.current.add(s.id);
+        });
+        // Persistir en localStorage para no re-abrir tras recarga
+        try { localStorage.setItem(ABSENT_ACK_KEY, JSON.stringify([...autoAbsentTriggeredRef.current])); } catch {}
         logic.setViewTab('AUSENTES');
         setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
     }, [logic.processedData]);
