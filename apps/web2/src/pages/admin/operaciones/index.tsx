@@ -648,12 +648,45 @@ export default function OperacionesPage() {
         empNovedades.filter(n => n.status === 'ATENDIDA' || n.status === 'atendida').slice(0, 8),
     [empNovedades]);
 
-    const pendingNovedades = useMemo(() =>
-        empNovedades.filter(n =>
-            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
-            n.type !== 'VACANTE_A_PLANIFICACION'  // siempre auto-procesada, no requiere acción del operador
-        ),
-    [empNovedades]);
+    const COVERAGE_GRACE_MINUTES = 60; // tiempo de gracia para gestionar cobertura
+
+    const pendingNovedades = useMemo(() => {
+        const now = Date.now();
+        return empNovedades.filter(n => {
+            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
+
+            // Protocolo de cobertura: no mostrar si el turno ya terminó o venció el tiempo de gracia
+            if (n.type === 'VACANTE_PROTOCOLO_COBERTURA') {
+                // Buscar el turno en processedData por shiftId o virtualVacancyId
+                const refId = n.shiftId || n.virtualVacancyId;
+                const shift = refId
+                    ? logic.processedData.find((s: any) => s.id === refId)
+                    : logic.processedData.find((s: any) =>
+                        s.objectiveId === n.objectiveId &&
+                        (s.positionName || '').toLowerCase() === (n.positionName || '').toLowerCase() &&
+                        !s.isCompleted
+                    );
+
+                if (shift) {
+                    const endMs = shift.endDateObj?.getTime?.() ?? 0;
+                    const startMs = shift.shiftDateObj?.getTime?.() ?? 0;
+                    const graceMs = COVERAGE_GRACE_MINUTES * 60 * 1000;
+
+                    // Ocultar si el turno ya terminó
+                    if (endMs > 0 && now > endMs) return false;
+                    // Ocultar si superó el tiempo de gracia desde el inicio
+                    if (startMs > 0 && now > startMs + graceMs) return false;
+                } else {
+                    // Sin turno encontrado: ocultar si la novedad tiene más de 2 horas
+                    const createdMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
+                    if (createdMs && now - createdMs > 2 * 3600 * 1000) return false;
+                }
+            }
+
+            return true;
+        });
+    }, [empNovedades, logic.processedData]);
 
     useEffect(() => {
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));

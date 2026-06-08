@@ -2235,6 +2235,68 @@ export const gestionarVacantes = functions
     }
 
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
+
+    // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
+    // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
+    // se cierra automáticamente como "sin cobertura confirmada".
+    const GRACE_MINUTES = 60;
+    const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
+
+    const staleProtos = await db.collection('novedades')
+      .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
+      .where('status', '==', 'PENDIENTE')
+      .where('createdAt', '<=', graceCutoff)
+      .limit(50)
+      .get();
+
+    let autoClosed = 0;
+    for (const nDoc of staleProtos.docs) {
+      const n = nDoc.data();
+
+      // Verificar que el turno referenciado no fue cubierto mientras tanto
+      if (n.shiftId) {
+        const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
+        if (turnoSnap.exists) {
+          const t = turnoSnap.data()!;
+          const covered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
+            || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES';
+          if (covered) {
+            // Turno cubierto: cerrar la novedad como atendida
+            await nDoc.ref.update({ status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'SISTEMA_AUTO', autoResolved: true });
+            autoClosed++;
+            continue;
+          }
+        }
+      }
+
+      // Turno no cubierto y venció el tiempo de gracia → confirmar sin cobertura
+      await nDoc.ref.update({
+        status: 'ATENDIDA',
+        atendidaAt: now,
+        atendidaPor: 'SISTEMA_AUTO',
+        autoResolved: true,
+        sinCobertura: true,
+      });
+
+      // Registro en audit_logs
+      await db.collection('audit_logs').add({
+        action: 'COBERTURA_VENCIDA_AUTO',
+        actorName: 'Sistema (Auto)',
+        actorUid: 'SYSTEM',
+        module: 'OPERACIONES',
+        shiftId: n.shiftId || null,
+        details: `Protocolo de cobertura cerrado automáticamente (${GRACE_MINUTES} min sin gestión): ${n.objectiveName || ''} — ${n.positionName || ''}`,
+        objectiveId: n.objectiveId || null,
+        timestamp: now,
+      });
+
+      autoClosed++;
+    }
+
+    if (autoClosed > 0) {
+      console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+    }
+
     return null;
   });
 
