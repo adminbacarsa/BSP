@@ -772,9 +772,10 @@ export default function OperacionesPage() {
 
     // Persiste en localStorage para no re-abrir el modal tras recargar la página
     const ABSENT_ACK_KEY = `ops_absent_ack_${new Date().toLocaleDateString('en-CA')}`;
-    const autoAbsentTriggeredRef = useRef<Set<string>>(() => {
+    const _loadAcked = (): Set<string> => {
         try { return new Set(JSON.parse(localStorage.getItem(ABSENT_ACK_KEY) || '[]')); } catch { return new Set(); }
-    }() as any);
+    };
+    const autoAbsentTriggeredRef = useRef<Set<string>>(_loadAcked());
 
     useEffect(() => {
         const now = Date.now();
