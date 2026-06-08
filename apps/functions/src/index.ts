@@ -1952,7 +1952,74 @@ export const detectarAusencias = functions
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
-    // Ventana: turnos que empezaron entre hace 8h y hace 30min (T+30 = ausencia automática)
+    // ── BLOQUE 1: alerta temprana de retención a T+0 ────────────────────────────
+    // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
+    // Los guardias marcan a T-15, así que T+0 sin check-in = ya está retrasado
+    const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
+    const earlyTo   = admin.firestore.Timestamp.fromMillis(nowMs);
+
+    const earlySnap = await db.collection('turnos')
+      .where('startTime', '>=', earlyFrom)
+      .where('startTime', '<=', earlyTo)
+      .get();
+
+    for (const earlyDoc of earlySnap.docs) {
+      const s = earlyDoc.data();
+      if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
+      if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
+      if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
+      if (SKIP_STATUSES.has(s.status || '')) continue;
+      if (s.earlyRetentionAlertAt) continue;  // ya se procesó
+      if (s.lateArrivalAt || s.notifiedAbsent) continue; // tiene aviso previo
+
+      const empId = shiftEmpresaId(s);
+      const posName = (s.positionName || '').trim().toLowerCase();
+
+      if (!s.objectiveId || !posName || !empId) continue;
+
+      // Marcar que ya se envió la alerta temprana
+      await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
+
+      // Buscar guardia saliente presente en el mismo puesto
+      try {
+        const presentSnap = await db.collection('turnos')
+          .where('empresaId', '==', empId)
+          .where('objectiveId', '==', s.objectiveId)
+          .where('isPresent', '==', true)
+          .where('isCompleted', '==', false)
+          .get();
+
+        const toAlert = presentSnap.docs.filter(d => {
+          const dat = d.data();
+          return (dat.positionName || '').trim().toLowerCase() === posName
+            && dat.employeeId !== s.employeeId;
+        });
+
+        for (const retDoc of toAlert) {
+          const retData = retDoc.data();
+          const retTokens = await getEmployeeTokens(db, retData.employeeId);
+          if (retTokens.length > 0) {
+            await admin.messaging().sendEachForMulticast({
+              tokens: retTokens,
+              notification: {
+                title: '⏳ El entrante aún no llegó',
+                body: `${s.employeeName || 'El guardia siguiente'} no marcó presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
+              },
+              webpush: {
+                notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                fcmOptions: { link: '/empleado/dashboard' },
+              },
+            }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
+          }
+          console.log(`[detectarAusencias] Alerta temprana enviada a ${retData.employeeName} (saliente en ${s.objectiveName})`);
+        }
+      } catch (e) {
+        console.warn('[detectarAusencias] Error en alerta temprana retención:', e);
+      }
+    }
+
+    // ── BLOQUE 2: ausencia automática AA a T+30 ──────────────────────────────
+    // Ventana: turnos que empezaron entre hace 8h y hace 30min
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo   = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
 
