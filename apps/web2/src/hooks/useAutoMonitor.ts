@@ -231,6 +231,27 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       }
     };
 
+    // ── Alerta guardia trabajando más de 12 horas ─────────────────────────────
+    const over12h = processedData.filter(s => {
+      if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
+      if (processedIds.current.has(`over12h_${s.id}`)) return false;
+      return (s.totalMinutesWorked ?? 0) >= 12 * 60;
+    });
+    for (const s of over12h) {
+      processedIds.current.add(`over12h_${s.id}`);
+      const hrs = ((s.totalMinutesWorked ?? 0) / 60).toFixed(1);
+      const msg = `${s.employeeName} lleva ${hrs}h en ${s.objectiveName} — ${s.positionName}`;
+      if (isAutoMode) {
+        await createNovedad('RECARGO_12H', 'Guardia más de 12h en servicio', msg, s, empresaId);
+      }
+      toast.error(`🚨 +12h: ${msg}`, {
+        duration: 30000,
+        description: 'Relevar urgente. Riesgo laboral y de seguridad.',
+      });
+      sendBrowserNotif('🚨 Guardia más de 12h', msg);
+    }
+  };
+
     check();
     const interval = setInterval(check, 60 * 1000); // cada 1 minuto para auto-finalización precisa
     return () => clearInterval(interval);

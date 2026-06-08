@@ -1006,19 +1006,31 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
             const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
             const RELEVO_TOLERANCE_MS = 90 * 60 * 1000; // 90 min de tolerancia
 
-            const toRelieve = activeSnap.docs.filter(d => {
-                const dat = d.data();
-                if ((dat.positionName || '').trim().toLowerCase() !== positionName) return false;
-                if (d.id === shiftId || dat.employeeId === empId) return false;
+            const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
-                // Bug fix: solo relevar al guardia cuyo turno está terminando cerca
-                // del inicio del turno entrante (±90 min). Evita relevar compañeros
-                // con turno vigente en puestos con capacidad > 1.
-                const outEndMs = dat.endTime?.toMillis?.() ?? 0;
-                if (outEndMs > 0 && Math.abs(outEndMs - incomingStartMs) > RELEVO_TOLERANCE_MS) return false;
+            const toRelieve = activeSnap.docs
+                .filter(d => {
+                    const dat = d.data();
+                    if ((dat.positionName || '').trim().toLowerCase() !== positionName) return false;
+                    if (d.id === shiftId || dat.employeeId === empId) return false;
 
-                return true;
-            });
+                    // Incluir: retenidos (esperando relevo) O a ≤15 min de terminar
+                    if (dat.isRetention === true) return true;
+                    const outEndMs = dat.endTime?.toMillis?.() ?? 0;
+                    if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS) return true; // ≤15 min para terminar
+
+                    return false;
+                })
+                .sort((a, b) => {
+                    const da = a.data(), db2 = b.data();
+                    // 1. Retenidos primero (llevan tiempo extra)
+                    if (da.isRetention && !db2.isRetention) return -1;
+                    if (!da.isRetention && db2.isRetention) return 1;
+                    // 2. FIFO: quien tiene más tiempo trabajado se va primero
+                    const aStart = da.realStartTime?.toMillis?.() ?? da.checkInTime?.toMillis?.() ?? da.startTime?.toMillis?.() ?? 0;
+                    const bStart = db2.realStartTime?.toMillis?.() ?? db2.checkInTime?.toMillis?.() ?? db2.startTime?.toMillis?.() ?? 0;
+                    return aStart - bStart; // más antiguo primero
+                });
 
             for (const outDoc of toRelieve) {
                 const outData      = outDoc.data();

@@ -70,9 +70,18 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
         return sStart < iEnd && iStart < sEnd;
     };
 
-    const activeGuards = logic.processedData.filter((s: any) =>
-        s.id !== incomingShift.id && samePost(s) && s.isPresent && !s.isCompleted && overlapsSlot(s),
-    );
+    // Candidatos a relevar:
+    // 1. Guardias en retención (siempre — llevan tiempo extra esperando)
+    // 2. Guardias a ≤15 min de terminar su turno (están por salir)
+    // Ordenados por FIFO: quien lleva más minutos trabajados se va primero
+    const activeGuards = logic.processedData
+        .filter((s: any) => {
+            if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted) return false;
+            if (s.isRetention) return true;                                    // retenido → siempre candidato
+            const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
+            return minutesUntilEnd <= 15;                                      // ≤15 min para terminar
+        })
+        .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: más tiempo → primero
 
     const sla = (logic.servicesSLA || []).find((s: any) => s.objectiveId === incomingShift.objectiveId);
     const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(incomingShift.positionName));
@@ -159,16 +168,28 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
                     </p>
                     {activeGuards.length > 0 ? (
                         <div className="space-y-2 mb-4">
-                            <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
-                            {activeGuards.map((s: any) => (
-                                <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
-                                    <div className="text-left">
-                                        <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
-                                        <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
-                                    </div>
-                                    <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span>
-                                </button>
-                            ))}
+                            <p className="text-xs font-bold text-slate-400 uppercase">Seleccioná a quién relevar — ordenado por tiempo trabajado:</p>
+                            {activeGuards.map((s: any) => {
+                                const minutesWorked = s.totalMinutesWorked ?? 0;
+                                const hoursWorked = (minutesWorked / 60).toFixed(1);
+                                const isOver12h = minutesWorked >= 12 * 60;
+                                return (
+                                    <button key={s.id} onClick={() => handleConfirm(s.id)}
+                                        className={`w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group ${s.isRetention ? 'border-orange-300 bg-orange-50/40' : isOver12h ? 'border-red-200 bg-red-50/30' : ''}`}>
+                                        <div className="text-left">
+                                            <div className="flex items-center gap-2">
+                                                <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
+                                                {s.isRetention && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-500 text-white animate-pulse">EN RETENCIÓN {s.retentionMinutes > 0 ? `+${s.retentionMinutes}min` : ''}</span>}
+                                                {isOver12h && !s.isRetention && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">+12h</span>}
+                                            </div>
+                                            <span className="block text-[10px] text-slate-400">
+                                                Salida: {formatTimeSimple(s.endDateObj)} · {hoursWorked}h trabajadas
+                                            </span>
+                                        </div>
+                                        <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     ) : (
                         <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4">

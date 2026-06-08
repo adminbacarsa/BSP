@@ -250,8 +250,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
-            const isRetention = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
-            if (isRetention) retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
+            // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
+            const isRetentionByTime  = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
+            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true;
+            const isRetention = isRetentionByTime || isRetentionByField;
+            if (isRetentionByTime) {
+                retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
+            } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
+                retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
+            }
+            // totalMinutesWorked: para ordenar por FIFO quién lleva más tiempo en el puesto
+            const checkInMs = shift.realStartTime?.seconds
+                ? shift.realStartTime.seconds * 1000
+                : shift.checkInTime?.seconds
+                    ? shift.checkInTime.seconds * 1000
+                    : (shift.shiftDateObj?.getTime?.() ?? 0);
+            const totalMinutesWorked = checkInMs > 0 ? Math.floor((currentTime.getTime() - checkInMs) / 60000) : 0;
             const activeStartTime: Date | null = isPresent
                 ? (shift.realStartTime?.seconds ? new Date(shift.realStartTime.seconds * 1000) : shift.shiftDateObj)
                 : null;
@@ -275,7 +289,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn,
-                minutesUntilStart, minutesPastStart, retentionMinutes, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
             };
         }).filter(Boolean);
 
