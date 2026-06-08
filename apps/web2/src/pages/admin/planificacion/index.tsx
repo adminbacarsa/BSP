@@ -6381,11 +6381,11 @@ export default function PlanificacionPage() {
                                 // Ausencias injustificadas/sin aviso: el estado APPROVED significa "registrada por RRHH",
                                 // no que la ausencia fue aprobada — se muestra "Registrada" para no confundir.
                                 const UNEXCUSED_CODES = new Set(['AA']);
-                                const rawStatus = absence?.status || (isRRHHCode ? 'APPROVED' : '');
+                                const absenceRawStatus = absence?.status || (isRRHHCode ? 'APPROVED' : '');
                                 const isUnexcused = UNEXCUSED_CODES.has(code) || absence?.type?.toLowerCase().includes('injustificada');
-                                const absenceStatusLabel = (isUnexcused && rawStatus?.toUpperCase() === 'APPROVED')
+                                const absenceStatusLabel = (isUnexcused && absenceRawStatus?.toUpperCase() === 'APPROVED')
                                     ? 'Registrada'
-                                    : (ABSENCE_STATUS_ES[rawStatus?.toUpperCase?.()] || rawStatus || '');
+                                    : (ABSENCE_STATUS_ES[absenceRawStatus?.toUpperCase?.()] || absenceRawStatus || '');
                                 const coveringEmployee = coverageInfo
                                     ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
                                     : (shift?.coveredBy || pending?.coveredBy || null);
