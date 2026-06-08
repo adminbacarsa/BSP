@@ -897,6 +897,8 @@ export default function OperacionesPage() {
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     const [isGrouped, setIsGrouped] = useState(true);
+    const [viewMode, setViewMode] = useState<'objetivos' | 'lista'>('objetivos'); // default: vista por objetivo
+    const [expandedObjectiveId, setExpandedObjectiveId] = useState<string | null>(null);
     const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
@@ -1572,6 +1574,49 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
+    // ── VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad ──
+    const objectivesWithAlerts = useMemo(() => {
+        const now = new Date();
+        const map = new Map<string, any>();
+        const hoy = logic.processedData.filter((s: any) =>
+            isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)
+        );
+        hoy.forEach((s: any) => {
+            if (s.isFranco) return;
+            const key = s.objectiveId || 'unknown';
+            if (!map.has(key)) {
+                map.set(key, {
+                    objectiveId: key,
+                    name:    s.objectiveName  || '—',
+                    client:  s.clientName     || '',
+                    clientId: s.clientId      || '',
+                    lat: s.lat, lng: s.lng,
+                    active: 0, absent: 0, vacant: 0, retention: 0, plan: 0, total: 0,
+                    criticalShift: null as any,  // el más urgente para abrir cobertura directo
+                    shifts: [] as any[],
+                });
+            }
+            const obj = map.get(key)!;
+            obj.total++;
+            obj.shifts.push(s);
+            if (s.isRetention)                               obj.retention++;
+            else if (s.isPresent && !s.isCompleted)          obj.active++;
+            else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
+            else if (s.isOperationalVacancy)               { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
+            else if (s.isFuture || s.isImminent)             obj.plan++;
+        });
+        // Aplicar filtro de cliente si está activo
+        const clientFilter = logic.selectedClientId;
+        return Array.from(map.values())
+            .filter(o => !clientFilter || o.clientId === clientFilter)
+            .sort((a, b) => {
+                // Criticidad: ausentes > vacantes > retención > ok
+                const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
+                const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
+                return scoreB - scoreA;
+            });
+    }, [logic.processedData, logic.selectedClientId]);
+
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
     const tabs = [
         { id: 'PLAN', label: 'PLAN', count: logic.stats.plan, color: 'text-indigo-600' },
@@ -1734,7 +1779,18 @@ export default function OperacionesPage() {
                         <div className="flex justify-between items-center mb-1.5">
                             <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5"><Radio className="text-rose-600 animate-pulse" size={13}/> Estado de Operaciones</h2>
                             <div className="flex items-center gap-1">
-                                <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'LISTA'}</button>
+                                {/* Toggle OBJETIVOS / LISTA */}
+                                <div className="flex p-0.5 bg-slate-100 rounded-lg gap-0.5">
+                                    <button onClick={() => setViewMode('objetivos')}
+                                        className={`px-2 py-1 text-[9px] font-black rounded-md transition-all flex items-center gap-0.5 ${viewMode === 'objetivos' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:bg-slate-200'}`}>
+                                        <Building2 size={9}/> OBJ
+                                    </button>
+                                    <button onClick={() => setViewMode('lista')}
+                                        className={`px-2 py-1 text-[9px] font-black rounded-md transition-all flex items-center gap-0.5 ${viewMode === 'lista' ? 'bg-white text-slate-700 shadow' : 'text-slate-400 hover:bg-slate-200'}`}>
+                                        <Users size={9}/> LISTA
+                                    </button>
+                                </div>
+                                {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
                                 {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
@@ -1896,11 +1952,128 @@ export default function OperacionesPage() {
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto p-3 bg-slate-50 space-y-2">
-                        {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> : 
+                    <div className="flex-1 overflow-y-auto bg-slate-50">
+
+                        {/* ══ MODO OBJETIVOS (default) ════════════════════════════════ */}
+                        {viewMode === 'objetivos' && (
+                        <div className="p-2 space-y-1.5">
+                            {objectivesWithAlerts.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400 text-xs">Sin datos de objetivos</div>
+                            ) : objectivesWithAlerts.map(obj => {
+                                const pct = (obj.active + obj.retention) > 0 && obj.total > 0
+                                    ? Math.round(((obj.active + obj.retention) / Math.max(obj.total - obj.plan, 1)) * 100)
+                                    : obj.total > 0 ? 0 : 100;
+                                const isCrit = obj.absent > 0 || obj.vacant > 0;
+                                const isWarn = obj.retention > 0;
+                                const isExpanded = expandedObjectiveId === obj.objectiveId;
+                                const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
+                                const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
+
+                                // Guardias de este objetivo filtrados por tab actual
+                                const objShifts = logic.processedData.filter((s: any) => {
+                                    if (s.objectiveId !== obj.objectiveId) return false;
+                                    const hoy = isSameDay(s.shiftDateObj, new Date()) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+                                    if (!hoy) return false;
+                                    switch(logic.viewTab) {
+                                        case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
+                                        case 'RETENIDOS':  return s.isRetention;
+                                        case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
+                                        case 'VACANTES':   return s.isOperationalVacancy;
+                                        case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
+                                        case 'FRANCOS':    return s.isFranco;
+                                        default:           return !s.isFranco;
+                                    }
+                                });
+
+                                return (
+                                    <div key={obj.objectiveId} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all`}>
+                                        {/* Header del objetivo */}
+                                        <div className="px-3 py-2.5 flex items-center gap-2">
+                                            {/* Indicador color */}
+                                            <div className={`w-2 h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
+
+                                            {/* Info principal */}
+                                            <div className="flex-1 min-w-0" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)} style={{cursor:'pointer'}}>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-black text-slate-800 truncate">{obj.name}</span>
+                                                    <span className="text-[9px] text-slate-400 shrink-0">{obj.client}</span>
+                                                </div>
+                                                <div className="flex items-center gap-3 mt-0.5">
+                                                    {/* Barra de cobertura */}
+                                                    <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden max-w-[80px]">
+                                                        <div className="h-full rounded-full transition-all duration-500"
+                                                            style={{
+                                                                width: `${Math.min(100, pct)}%`,
+                                                                backgroundColor: isCrit ? '#ef4444' : isWarn ? '#f59e0b' : '#10b981'
+                                                            }}/>
+                                                    </div>
+                                                    <span className="text-[9px] font-black shrink-0" style={{color: isCrit ? '#dc2626' : isWarn ? '#d97706' : '#10b981'}}>
+                                                        {pct}%
+                                                    </span>
+                                                    {/* Badges de estado */}
+                                                    <div className="flex items-center gap-1">
+                                                        {obj.active > 0 && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 rounded">{obj.active} act</span>}
+                                                        {obj.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{obj.retention} ret</span>}
+                                                        {obj.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{obj.absent} aus</span>}
+                                                        {obj.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{obj.vacant} vac</span>}
+                                                        {obj.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{obj.plan} plan</span>}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Acciones rápidas */}
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
+                                                    <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
+                                                        className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors"
+                                                        title="Protocolo cobertura">
+                                                        <Siren size={12}/>
+                                                    </button>
+                                                )}
+                                                <button onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}
+                                                    className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                                                    {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Guardias expandidos */}
+                                        {isExpanded && (
+                                            <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
+                                                {objShifts.length === 0 ? (
+                                                    <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                                ) : objShifts.map((s: any) => (
+                                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                        isAutoMode={session.isAutoMode}
+                                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                        onReportPlanning={handleReportPlanning}
+                                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                        onNovedadAbsence={handleNovedadAbsence}
+                                                        onOpenWA={handleOpenWA}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        )}
+
+                        {/* ══ MODO LISTA (existente) ══════════════════════════════════ */}
+                        {viewMode === 'lista' && (
+                        <div className="p-3 space-y-2">
+                        {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
                             isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} isPublished={isPublished}/>; })) :
                             (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA}/>))
                         }
+                        </div>
+                        )}
+
                     </div>
 
                     {/* ── BITÁCORA collapsible ─────────────────────────── */}
