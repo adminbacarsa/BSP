@@ -73,6 +73,27 @@ const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
     return (covered / duration) > 0.90;
 };
 
+const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
+
+const getPositionCapacity = (servicesSLA: any[], objectiveId: string, positionName: string): number => {
+    const sla = servicesSLA.find((s: any) => s.objectiveId === objectiveId);
+    const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(positionName));
+    return Math.max(1, Number(pos?.quantity) || 1);
+};
+
+const countPresentOnSlot = (
+    shifts: any[],
+    objectiveId: string,
+    positionName: string,
+    slotStart: Date,
+    slotEnd: Date,
+) => shifts.filter(s =>
+    s.isPresent && !s.isCompleted &&
+    s.objectiveId === objectiveId &&
+    normPosName(s.positionName) === normPosName(positionName) &&
+    checkSlotCoverage(slotStart, slotEnd, [s]),
+).length;
+
 export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [now, setNow] = useState(new Date());
     const [rawShifts, setRawShifts] = useState<any[]>([]);
@@ -216,6 +237,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const countsForCoverage = isValidEmployee || isReportedToPlanning; 
 
             const isUnassigned = !isValidEmployee;
+            const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
             const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
             
             if (isUnassigned && !isReportedToPlanning) return null; 
@@ -250,7 +272,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 phone,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
-                isReportedToPlanning, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
+                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn,
                 minutesUntilStart, minutesPastStart, retentionMinutes, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
             };
@@ -388,11 +410,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const absentSlots = dedupedRealShifts.filter(s => s.isAbsent && s.objectiveId && s.positionName);
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
-            return !absentSlots.some(a =>
-                a.objectiveId === v.objectiveId &&
-                (a.positionName || '').trim().toLowerCase() === (v.positionName || '').trim().toLowerCase() &&
-                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [a])
-            );
+            const sameSlot = (s: any) =>
+                s.objectiveId === v.objectiveId &&
+                normPosName(s.positionName) === normPosName(v.positionName) &&
+                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
+            if (absentSlots.some(a => sameSlot(a))) return false;
+            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
+            if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
+            const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
+            if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
+                return false;
+            }
+            return true;
         });
 
         return [...dedupedRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
@@ -418,7 +447,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             default:           return hoy;
         }
     }, [processedData, viewTab, filterText, selectedClientId, now]);
-    const stats = useMemo(() => { const hoy = processedData.filter(s => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+    const stats = useMemo(() => { const hoy = processedData.filter(s => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isOperationalVacancy).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
@@ -464,7 +493,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             employeeId: 'VACANTE', employeeName: 'VACANTE',
                             startTime: Timestamp.fromDate(v.shiftDateObj),
                             endTime: Timestamp.fromDate(v.endDateObj),
-                            status: 'UNCOVERED_REPORTED', isReported: true,
+                            status: 'REPORTED_TO_PLANNING', isReported: true,
                             isReportedToPlanning: true, reportedBy: 'SYSTEM_AUTO',
                             reportedAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
                             createdAt: serverTimestamp(),

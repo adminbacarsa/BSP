@@ -49,25 +49,114 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !incomingShift) return null;
-    const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
-    let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
-    const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
+    const now = new Date();
+    const start = toDate(incomingShift.shiftDateObj);
+    const end = toDate(incomingShift.endDateObj);
+    const diffMin = (now.getTime() - start.getTime()) / 60000;
+    let status = 'ON_TIME';
+    if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
+
+    const samePost = (s: any) =>
+        s.objectiveId === incomingShift.objectiveId &&
+        normPosName(s.positionName) === normPosName(incomingShift.positionName);
+
+    const overlapsSlot = (s: any) => {
+        let sStart = toDate(s.shiftDateObj).getTime();
+        let sEnd = toDate(s.endDateObj).getTime();
+        let iStart = start.getTime();
+        let iEnd = end.getTime();
+        if (sEnd <= sStart) sEnd += 86400000;
+        if (iEnd <= iStart) iEnd += 86400000;
+        return sStart < iEnd && iStart < sEnd;
+    };
+
+    const activeGuards = logic.processedData.filter((s: any) =>
+        s.id !== incomingShift.id && samePost(s) && s.isPresent && !s.isCompleted && overlapsSlot(s),
+    );
+
+    const sla = (logic.servicesSLA || []).find((s: any) => s.objectiveId === incomingShift.objectiveId);
+    const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(incomingShift.positionName));
+    const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
+    const mustRelevar = activeGuards.length >= positionCapacity;
+
     const handleConfirm = async (prevShiftId: string | null) => {
+        if (mustRelevar && !prevShiftId) {
+            toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
+            return;
+        }
         try {
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
             if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
             if (prevShiftId) {
-                batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' });
+                batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED', isPresent: false });
             }
             await batch.commit();
             toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
             onClose();
         } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
     };
-    return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95"> <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> {/* Bloque de contexto: objetivo, puesto y turno */} <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-1"> <div className="flex items-center gap-2"> <MapPin size={13} className="text-indigo-500 shrink-0"/> <span className="text-xs font-black text-slate-800 truncate">{incomingShift.objectiveName || '—'}</span> {incomingShift.clientName && <span className="text-[10px] text-slate-400 truncate">· {incomingShift.clientName}</span>} </div> <div className="flex items-center gap-2 pl-5"> <span className="text-[10px] font-bold text-indigo-600">{incomingShift.positionName || '—'}</span> <span className="text-slate-300">·</span> <span className="text-[10px] font-mono text-slate-600">{formatTimeRange(incomingShift.shiftDateObj, incomingShift.endDateObj)}</span> </div> </div> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
+
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in zoom-in-95">
+            <div className="bg-white w-full max-w-md rounded-xl shadow-2xl overflow-hidden">
+                <div className={`p-4 text-white flex justify-between items-center ${status === 'LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}>
+                    <h3 className="font-black uppercase flex items-center gap-2">
+                        {status === 'LATE' ? <Clock size={20}/> : <UserCheck size={20}/>}
+                        {status === 'LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'}
+                    </h3>
+                    <button onClick={onClose}><X size={20}/></button>
+                </div>
+                <div className="p-6">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-1">
+                        <div className="flex items-center gap-2">
+                            <MapPin size={13} className="text-indigo-500 shrink-0"/>
+                            <span className="text-xs font-black text-slate-800 truncate">{incomingShift.objectiveName || '—'}</span>
+                            {incomingShift.clientName && <span className="text-[10px] text-slate-400 truncate">· {incomingShift.clientName}</span>}
+                        </div>
+                        <div className="flex items-center gap-2 pl-5">
+                            <span className="text-[10px] font-bold text-indigo-600">{incomingShift.positionName || '—'}</span>
+                            <span className="text-slate-300">·</span>
+                            <span className="text-[10px] font-mono text-slate-600">{formatTimeRange(incomingShift.shiftDateObj, incomingShift.endDateObj)}</span>
+                            <span className="text-[9px] text-slate-400">· {positionCapacity} pax</span>
+                        </div>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-4">
+                        El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar.
+                        {status === 'LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>}
+                        {mustRelevar && <span className="block mt-1 text-rose-600 font-bold text-xs">Puesto al tope ({activeGuards.length}/{positionCapacity}). Relevá a un guardia activo.</span>}
+                    </p>
+                    {activeGuards.length > 0 ? (
+                        <div className="space-y-2 mb-4">
+                            <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
+                            {activeGuards.map((s: any) => (
+                                <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
+                                    <div className="text-left">
+                                        <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
+                                        <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
+                                    </div>
+                                    <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span>
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4">
+                            <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
+                        </div>
+                    )}
+                    {!mustRelevar && (
+                        <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors">
+                            {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'}
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 };
+
+const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
 
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
     const { empresaId, empresa } = useEmpresa();
@@ -152,6 +241,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [localWa, setLocalWa] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
 
     if (!isOpen || !absenceShift) return null;
+    if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
+        toast.info('Vacante devuelta a planificación — no se puede cubrir desde operaciones.');
+        onClose();
+        return null;
+    }
 
     const now = new Date();
     const absenceEnd = toDate(absenceShift.endDateObj);
@@ -206,9 +300,15 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
 
-    const markOriginalCovered = (batch: ReturnType<typeof writeBatch>, coverageType: string) => {
-        if (isRealVacantShift) {
-            batch.update(doc(db, 'turnos', absenceShift.id), { status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType, coveredAt: serverTimestamp() });
+    const markCoverageResolved = (batch: ReturnType<typeof writeBatch>, coverageType: string) => {
+        if (!absenceShift?.id || absenceShift.isVirtual || String(absenceShift.id).startsWith('V124_') || String(absenceShift.id).startsWith('SLA_GAP')) return;
+        if (absenceShift.isUnassigned || absenceShift.isAbsent || absenceShift.isPotentialAbsence) {
+            batch.update(doc(db, 'turnos', absenceShift.id), {
+                status: 'COVERED',
+                resolvedBy: 'OPERACIONES',
+                coverageType,
+                coveredAt: serverTimestamp(),
+            });
         }
     };
 
@@ -218,7 +318,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markOriginalCovered(batch, 'RETENTION');
+            markCoverageResolved(batch, 'RETENTION');
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
@@ -233,7 +333,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markOriginalCovered(batch, 'EARLY_START');
+            markCoverageResolved(batch, 'EARLY_START');
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`Turno de ${s.employeeName} adelantado`);
@@ -253,7 +353,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
-            markOriginalCovered(batch, 'RETEN');
+            markCoverageResolved(batch, 'RETEN');
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             toast.success(`${empName} convocado como retén`);
@@ -268,7 +368,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { isFrancoTrabajado: true, francoTrabajadoAt: serverTimestamp(), francoObjectiveId: absenceShift.objectiveId, francoObjectiveName: absenceShift.objectiveName });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markOriginalCovered(batch, 'FRANCO');
+            markCoverageResolved(batch, 'FRANCO');
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
@@ -346,6 +446,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
+    const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
 
     let name = shift.isUnassigned ? (shift.employeeName || 'VACANTE') : (shift.employeeName || 'Desconocido');
     if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '');
@@ -382,8 +483,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             </div>
             <div className="flex gap-1 shrink-0">
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
-                {shift.isUnassigned && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>{!shift.isReportedToPlanning && <button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>}</>)}
-                {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] text-indigo-400 italic px-1 shrink-0">↑ planif.</span>)}
+                {canCover && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button><button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button></>)}
+                {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                     <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
@@ -429,11 +530,11 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {/* Fila 3: botones con texto */}
                 <div className="flex gap-1.5 flex-wrap pl-10">
                     {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}><MessageCircle size={11}/>WA</button>)}
-                    {shift.isUnassigned && viewTab === 'VACANTES' && (<>
+                    {canCover && viewTab === 'VACANTES' && (<>
                         <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>
-                        {!shift.isReportedToPlanning && <button onClick={handleReport} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 text-white rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"><CornerUpLeft size={11}/>DEVOLVER</button>}
+                        <button onClick={handleReport} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 text-white rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"><CornerUpLeft size={11}/>DEVOLVER</button>
                     </>)}
-                    {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] text-indigo-400 italic flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>↑ En planif.</span>)}
+                    {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
                     {viewTab === 'PLAN' && (<>
                         <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><PlayCircle size={11}/>DAR PRESENTE</button>
                         {diff >= 5
@@ -666,7 +767,7 @@ export default function OperacionesPage() {
                             employeeId: 'VACANTE', employeeName: 'VACANTE',
                             startTime: Timestamp.fromDate(vacShift.shiftDateObj),
                             endTime: Timestamp.fromDate(vacShift.endDateObj),
-                            status: 'UNCOVERED_REPORTED', isReported: true,
+                            status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
                             origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
                         }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
@@ -1062,13 +1163,13 @@ export default function OperacionesPage() {
                     employeeId: 'VACANTE', employeeName: 'VACANTE',
                     startTime: Timestamp.fromDate(shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj)),
                     endTime: Timestamp.fromDate(shift.endDateObj instanceof Date ? shift.endDateObj : new Date(shift.endDateObj)),
-                    status: 'UNCOVERED_REPORTED', isReported: true,
+                    status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
                     comments: 'Vacante de Contrato Reportada',
                     createdAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
                 }, String(shift.empresaId || empresaId || '').trim());
                 await setDoc(newRef, newShiftData);
             } else {
-                await updateDoc(doc(db, 'turnos', targetId), { status: 'UNCOVERED_REPORTED', isReported: true });
+                await updateDoc(doc(db, 'turnos', targetId), { status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true });
             }
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'VACANTE_NO_CUBIERTA', title: 'Vacante Sin Cubrir',
@@ -1693,7 +1794,11 @@ export default function OperacionesPage() {
                             {pendingNovedades.length === 0 ? (
                                 <div className="p-4 text-center">
                                     <CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/>
-                                    <p className="text-xs font-bold text-slate-400">Sin alertas pendientes</p>
+                                    <p className="text-xs font-bold text-slate-400">
+                                        {priorityShiftsPanel.length > 0
+                                            ? 'Sin novedades pendientes — revisá la sección Prioridad arriba'
+                                            : 'Sin alertas pendientes'}
+                                    </p>
                                 </div>
                             ) : pendingNovedades.map((n: any) => {
                                 const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
