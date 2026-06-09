@@ -254,10 +254,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
-            const isAwaitingCoverageCheckIn = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
+            const isConvocado = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
                 (isEarlyStart || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
 
             let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
+            // CONVOCADO: solo es accionable (PRIORIDAD) cuando está a ≤15 min o ya inició.
+            // Si falta más tiempo, va a PLAN como cualquier turno futuro.
+            const isAwaitingCoverageCheckIn = isConvocado && minutesUntilStart <= 15;
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
             // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
@@ -298,7 +301,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
-                isEarlyStart, isAwaitingCoverageCheckIn,
+                isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
             };
         }).filter(Boolean);
