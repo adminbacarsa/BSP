@@ -627,7 +627,7 @@ export function buildPayrollExportPayload(
     rows: any[],
     opts: { start: string; end: string; empresaId?: string; publishFilter: ReportPublishFilter },
 ) {
-    const bolsa = (r: any) => Math.max(0, (r.horasReales ?? r.total ?? 0) - (r.extra100 ?? 0));
+    const bolsa = (r: any) => Math.max(0, (r.horasReales ?? 0) - (r.extra100 ?? 0));
     return {
         exportVersion: '1',
         source: 'COSP_REPORTES_UI',

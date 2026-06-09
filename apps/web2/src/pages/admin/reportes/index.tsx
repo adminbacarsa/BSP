@@ -354,7 +354,7 @@ export default function ReportsPage() {
                                                                                         {isLeaveRow && s._objectiveBillable === false ? '—' : dur.toFixed(1)}
                                                                                     </td>
                                                                                     <td className={`py-1.5 pr-3 text-right font-bold text-[10px] ${isVacant ? 'text-amber-500' : hasOvertime ? 'text-orange-600' : 'text-indigo-600'}`}>
-                                                                                        {rDur != null ? rDur.toFixed(1) : dur.toFixed(1)}
+                                                                                        {rDur != null ? rDur.toFixed(1) : '—'}
                                                                                         {hasOvertime && <span className="text-[9px] ml-1 text-orange-400">+{(rDur!-dur).toFixed(1)}</span>}
                                                                                     </td>
                                                                                     <td className="py-1.5 text-right text-slate-500 text-[10px]">{night.toFixed(1)}</td>
@@ -398,7 +398,7 @@ export default function ReportsPage() {
         const grandTotal = employeeReport.reduce((acc, curr) => ({
             shifts: acc.shifts + curr.shifts,
             total: acc.total + curr.total,
-            horasReales: acc.horasReales + (curr.horasReales || curr.total),
+            horasReales: acc.horasReales + (curr.horasReales ?? 0),
             horasExtra: acc.horasExtra + (curr.horasExtra || 0),
             diurnas: acc.diurnas + curr.diurnas,
             nocturnas: acc.nocturnas + curr.nocturnas,
@@ -464,7 +464,7 @@ export default function ReportsPage() {
                         </thead>
                         <tbody className="divide-y">
                             {rows.map(row => {
-                                const horasReales = row.horasReales ?? row.total;
+                                const horasReales = row.horasReales ?? 0;
                                 return (
                                 <tr key={row.id} className="hover:bg-indigo-50/30 cursor-pointer group" onClick={() => { setDetailItem(row); setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterEmployee(''); setDetailFilterObjective(''); setDetailFilterStatus(''); }}>
                                     <td className="p-4 font-mono text-xs text-slate-500">{row.legajo || '—'}</td>
@@ -1355,7 +1355,7 @@ export default function ReportsPage() {
                             },
                             {
                                 label: 'Hs. Reales',
-                                value: employeeReport.reduce((a,c)=>a+(c.horasReales||c.total||0),0).toFixed(1),
+                                value: employeeReport.reduce((a,c)=>a+(c.horasReales ?? 0),0).toFixed(1),
                                 sub: 'horas trabajadas',
                                 icon: '✅',
                                 color: 'from-emerald-500 to-emerald-600',
