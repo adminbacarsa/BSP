@@ -914,9 +914,35 @@ export const useReportes = (forcedClientId?: string | null) => {
                 }
             });
 
+            // Mapa shiftId → nombre del empleado, para resolver absenceShiftId → nombre titular
+            const shiftIdToEmpName: Record<string, string> = {};
+            rawShifts.forEach((s: any) => {
+                if (s.id && s.employeeName) shiftIdToEmpName[s.id] = s.employeeName;
+            });
+
             const enrichShift = (s: any) => {
                 const dk = shiftCalendarDateKey(s);
                 const abs = s.absenceId ? absenceById[s.absenceId] : (dk ? absenceByEmpDate[`${s.employeeId}_${dk}`] : null);
+
+                // Quién cubrió al guardia ausente: campo Firestore directo > legacy coveredBy > mapa por fecha
+                const coveredByName = s.coveredByEmployeeName
+                    || s.coveredBy
+                    || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null)
+                    || null;
+
+                // A quién cubrió el retén/adelanto:
+                // 1. absenceShiftId → nombre del titular ausente
+                // 2. relievedEmployeeName (si fue un relevo)
+                // 3. fallback: mapa por fecha (legacy)
+                let coveringForName: string | null = null;
+                if (s.absenceShiftId && shiftIdToEmpName[s.absenceShiftId]) {
+                    coveringForName = shiftIdToEmpName[s.absenceShiftId];
+                } else if (s.relievedEmployeeName) {
+                    coveringForName = s.relievedEmployeeName;
+                } else if (dk) {
+                    coveringForName = coveringForByEmpDate[`${s.employeeId}_${dk}`] || null;
+                }
+
                 return {
                     ...s,
                     _dateKey: dk,
@@ -924,8 +950,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                     _absenceType: abs?.type || null,
                     _absenceStatus: abs?.status || null,
                     _absenceReason: abs?.reason || null,
-                    _coveredBy: s.coveredBy || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null) || null,
-                    _coveringFor: dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] || null : null,
+                    _coveredBy: coveredByName,
+                    _coveringFor: coveringForName,
                 };
             };
 
