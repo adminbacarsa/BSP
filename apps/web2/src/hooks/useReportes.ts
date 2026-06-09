@@ -72,6 +72,70 @@ const shiftHasRealCheckIn = (shift: any): boolean => {
     );
 };
 
+/** Convocado desde operaciones/planificación: franco que cubre vacante/ausencia → pago al 100% (FT). */
+export function isFrancoTrabajadoShift(shift: any): boolean {
+    if (shift?.isFrancoTrabajado === true) return true;
+    const code = String(shift?.code || '').trim().toUpperCase();
+    if (code === 'FT') return true;
+    if (shift?.type === 'EXTRA_FRANCO') return true;
+    if (String(shift?.coverageType || '').toUpperCase() === 'FRANCO') return true;
+    return false;
+}
+
+/**
+ * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo día.
+ * Propaga el flag al turno con check-in para liquidar FT + al 100%.
+ */
+export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
+    const byDay = new Map<string, any[]>();
+    for (const s of shifts) {
+        const dk = shiftCalendarDateKey(s);
+        if (!dk) continue;
+        (byDay.get(dk) ?? (byDay.set(dk, []), byDay.get(dk)!)).push(s);
+    }
+
+    const propagateIds = new Set<string>();
+    for (const dayShifts of byDay.values()) {
+        const hasFtAnchor = dayShifts.some(isFrancoTrabajadoShift);
+        if (!hasFtAnchor) continue;
+
+        const ftPlaceholder = dayShifts.some((s) => {
+            const code = String(s.code || '').toUpperCase();
+            return isFrancoTrabajadoShift(s) && code === 'F' && !shiftHasRealCheckIn(s);
+        });
+        if (!ftPlaceholder) continue;
+
+        for (const s of dayShifts) {
+            if (isFrancoTrabajadoShift(s)) continue;
+            const code = String(s.code || '').toUpperCase();
+            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP'].includes(code)) continue;
+            if (shiftHasRealCheckIn(s)) propagateIds.add(s.id);
+        }
+    }
+
+    if (propagateIds.size === 0) return shifts;
+    return shifts.map((s) => (
+        propagateIds.has(s.id)
+            ? { ...s, isFrancoTrabajado: true, code: s.code || 'FT' }
+            : s
+    ));
+}
+
+function resolveFtLiquidationHours(shift: any, fallback = 8): number {
+    const startSec = shift.startTime?.seconds ?? shift.startTime?._seconds ?? 0;
+    const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
+    if (startSec && endSec) {
+        const span = Math.max(0, (endSec - startSec) / 3600);
+        if (span > 0 && span < 23.5) return span;
+    }
+    const code = String(shift.code || '').trim().toUpperCase();
+    if (code && code !== 'F' && code !== 'FT') {
+        const fromLookup = SHIFT_HOURS_LOOKUP[code];
+        if (fromLookup && fromLookup > 0) return fromLookup;
+    }
+    return fallback > 0 && fallback < 23.5 ? fallback : 8;
+}
+
 /** Misma regla que operaciones: planificado sin publicar no entra a liquidación salvo fichada real u origen ops. */
 export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
@@ -343,7 +407,8 @@ export function resolveShiftDurationHours(
         }
     }
 
-    if (ZERO_HOUR_CODES.has(rawCode) || PERIOD_ONLY_CODES.has(rawCode) || isUnjustAbsent) return 0;
+    const isFT = (shift as { isFrancoTrabajado?: boolean }).isFrancoTrabajado === true || rawCode === 'FT';
+    if ((ZERO_HOUR_CODES.has(rawCode) || PERIOD_ONLY_CODES.has(rawCode) || isUnjustAbsent) && !isFT) return 0;
 
     if (PAID_DAY_LEAVE_CODES.has(rawCode)) {
         if (typeof shift.hours === 'number' && shift.hours > 0) return shift.hours;
@@ -359,6 +424,7 @@ export function resolveShiftDurationHours(
     if (duration === 0 || duration >= 23.5 || duration > 24 || isNaN(duration)) {
         duration = lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
     }
+    if (isFT && duration >= 23.5) duration = resolveFtLiquidationHours(shift, PAID_DAY_DEFAULT_HOURS);
     return duration;
 }
 
@@ -415,7 +481,11 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (d.type === 'NOVEDAD') return;
 
             const rawCode = (d.code || '').trim().toUpperCase();
-            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode)) return;
+            const isFT = isFrancoTrabajadoShift(d);
+            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
+            if (rawCode === 'F' && !isFT) return;
+            // Doc F convocado sin fichada: las horas van en el turno de cobertura (propagateFrancoTrabajadoFlags)
+            if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d)) return;
 
             const start = d.startTime.toDate();
             const end = d.endTime.toDate();
@@ -440,7 +510,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const day = Math.max(0, duration - night);
             const dateKey = getArgentinaDate(d.startTime);
             const isFeriado = holidaysMap[dateKey];
-            const isFT = d.isFrancoTrabajado || rawCode === 'FT';
+            if (isFT && (duration <= 0 || duration >= 23.5)) {
+                duration = resolveFtLiquidationHours(d, duration > 0 && duration < 23.5 ? duration : 8);
+            }
 
             if (isFeriado) hoursFeriado += duration;
             if (isFT) { hoursFT += duration; totalNocturnas += night; totalDiurnas += day; }
@@ -920,15 +992,30 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (s.id) shiftIdToShift[s.id] = s;
             });
 
+            // Mapa inverso: coveredByEmployeeId+fecha → nombre del ausente/vacante cubierto
+            // Para ADELANTO/RETEN que no tienen absenceShiftId pero el turno ausente los referencia
+            const coveringForByEmpIdDate: Record<string, string> = {};
+            rawShifts.forEach((s: any) => {
+                if (!s.coveredByEmployeeId) return;
+                const dk = shiftCalendarDateKey(s);
+                if (!dk) return;
+                const key = `${s.coveredByEmployeeId}_${dk}`;
+                const isVacancy = !s.employeeId || s.isUnassigned;
+                const desc = isVacancy
+                    ? `Vacante${s.positionName ? ' ' + s.positionName : ''}${s.code ? ' (' + s.code + ')' : ''}`
+                    : (s.employeeName || 'Guardia');
+                if (!coveringForByEmpIdDate[key]) coveringForByEmpIdDate[key] = desc;
+            });
+
             // Resolver qué cubría un retén/adelanto a partir del shift referenciado
-            const resolveCoveringFor = (s: any): string | null => {
+            const resolveCoveringFor = (s: any, dk: string | null): string | null => {
                 const refId = s.absenceShiftId;
                 if (refId && shiftIdToShift[refId]) {
                     const ref = shiftIdToShift[refId];
                     const isVacancy = !ref.employeeId || ref.employeeId === 'VACANTE' || ref.isUnassigned;
                     if (isVacancy) {
                         // Vacante: mostrar puesto y código
-                        const pos = ref.positionName || ref.positionCode || '';
+                        const pos = ref.positionName || '';
                         const code = (ref.code || '').toUpperCase();
                         return `Vacante${pos ? ' ' + pos : ''}${code ? ' (' + code + ')' : ''}`;
                     } else {
@@ -936,6 +1023,11 @@ export const useReportes = (forcedClientId?: string | null) => {
                         return ref.employeeName || null;
                     }
                 }
+                // 2. Mapa inverso: ausente apunta al cubridore
+                if (dk && coveringForByEmpIdDate[`${s.employeeId}_${dk}`]) {
+                    return coveringForByEmpIdDate[`${s.employeeId}_${dk}`];
+                }
+                // 3. Relevo directo
                 if (s.relievedEmployeeName) return s.relievedEmployeeName;
                 return null;
             };
@@ -951,7 +1043,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     || null;
 
                 // A quién / qué cubrió este turno operativo
-                const coveringFor = resolveCoveringFor(s)
+                const coveringFor = resolveCoveringFor(s, dk)
                     || (dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
                     || null;
 
@@ -981,11 +1073,13 @@ export const useReportes = (forcedClientId?: string | null) => {
 
             const empRows = Object.keys(empGroups).map(empId => {
                 const shifts = prepareShiftsForEmployeeLiquidation(
-                    dedupeShiftsByAbsencePriority(empGroups[empId]),
+                    dedupeShiftsByAbsencePriority(
+                        propagateFrancoTrabajadoFlags(empGroups[empId]),
+                    ),
                 );
                 const stats = calculateStatsExact(shifts, holidaysData);
 
-                const ftCount = shifts.filter((s:any) => s.isFrancoTrabajado || s.code === 'FT').length;
+                const ftCount = shifts.filter((s: any) => isFrancoTrabajadoShift(s)).length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
                 const novedadesRRHH = countNovedadesRRHHFromShifts(shifts);
 

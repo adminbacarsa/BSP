@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -756,12 +756,12 @@ export default function ReportsPage() {
                 const PAID_LEAVE_DETAIL = new Set(['V','L','PG','E','A']);
                 const isUnjustAbsentDetail = !PAID_LEAVE_DETAIL.has(rawCode) && isAbsent;
                 const objectiveBillable = s._objectiveBillable !== false && shouldBillShiftToObjective(s);
-                const duration = objectiveBillable
+                const isFT = isFrancoTrabajadoShift(s);
+                const duration = (objectiveBillable || isFT)
                     ? resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { unjustifiedAbsent: isUnjustAbsentDetail })
                     : 0;
-                const zeroHours = duration === 0;
+                const zeroHours = duration === 0 && !isFT;
 
-                const isFT = s.isFrancoTrabajado || rawCode === 'FT';
                 const isFF = s.isFrancoCompensatorio || rawCode === 'FF';
 
                 const rStart = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
@@ -771,34 +771,35 @@ export default function ReportsPage() {
                 let rDur: number | null = null;
                 if (rStart && rEnd) { const rd = (rEnd.getTime()-rStart.getTime())/3600000; rDur = rd >= 0 && rd <= 36 ? rd : null; }
 
+                const isRetentionShift = s.isRetention === true;
                 // Diurnas/nocturnas calculadas sobre horas REALES cuando existen, 0 si no hay presencia
                 const activeStart = rStart ?? start;
                 const activeEnd = rEnd ?? end;
                 const night = zeroHours || (!rStart && !rEnd) ? 0 : getNightDuration(activeStart, activeEnd);
-                const effectiveDur = rDur ?? 0;
+                const effectiveDur = rDur ?? (isFT && duration > 0 ? duration : 0);
                 const day = Math.max(0, effectiveDur - night);
 
                 const dateKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
-                const hFeriado = holidaysData[dateKey] ? (rDur ?? 0) : 0;
+                const hFeriado = holidaysData[dateKey] ? (rDur ?? (isFT ? duration : 0)) : 0;
 
                 return {
                     id: s.id,
                     date: start,
                     endDate: end,
-                    code: rawCode,
+                    code: isFT && rawCode !== 'FT' ? 'FT' : rawCode,
                     swapWith: s.swapWith,
                     isOp: !isNonWork,
                     total: duration,
                     day,
                     night,
-                    h100: isFT ? (rDur ?? 0) : 0,
+                    h100: isFT ? (rDur ?? (duration > 0 ? duration : 0)) : 0,
                     hFeriado,
                     isFT,
                     isFF,
                     rStart,
                     rEnd,
                     rDur,
-                    hasOvertime: rDur != null && rDur > duration + 0.1,
+                    hasOvertime: isRetentionShift && rDur != null && rDur > duration + 0.1,
                     isCompleted,
                     isPresent,
                     isAbsent,
@@ -964,10 +965,10 @@ export default function ReportsPage() {
                                                         : 'bg-violet-100 text-violet-700';
                                                     return <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${cls}`}>{label}</span>;
                                                 }
-                                                const NON_WORK_LABELS: Record<string,string> = { F:'Franco', FF:'Franco Comp.', FP:'Franco Esp.', RET:'Retén' };
-                                                const labelStyle = row.code === 'RET' ? 'text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black border border-amber-300' : 'text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold';
+                                                const NON_WORK_LABELS: Record<string,string> = { F:'Franco', FF:'Franco Comp.', FP:'Franco Esp.', RET:'Retén', FT:'Franco Trab.' };
+                                                const labelStyle = row.code === 'RET' ? 'text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black border border-amber-300' : row.code === 'FT' ? 'text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-black border border-violet-200' : 'text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold';
                                                 if (NON_WORK_LABELS[row.code]) return <span className={labelStyle}>{NON_WORK_LABELS[row.code]}</span>;
-                                                if (row.hasOvertime) return <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">Extendido +{(row.rDur - row.total).toFixed(1)}h</span>;
+                                                if (row.hasOvertime) return <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">Retención +{(row.rDur - row.total).toFixed(1)}h</span>;
                                                 if (row.isCompleted) return <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">Completado</span>;
                                                 if (row.isPresent) return <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold animate-pulse">En servicio</span>;
                                                 if (row.rDur != null) return <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">Completado</span>;
