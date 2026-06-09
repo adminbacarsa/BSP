@@ -667,21 +667,21 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         .then(async snap => {
                             if (!snap.empty) return;
                             const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                            await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                                type: 'RECARGO_MAXIMO', status: 'PENDIENTE',
-                                shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
-                                clientId: s.clientId || null, positionName: s.positionName || '',
-                                employeeId: s.employeeId, employeeName: s.employeeName || '',
-                                description: `🚨 RECARGO MÁXIMO: ${s.employeeName || 'Guardia'} lleva 16hs activo en ${s.objectiveName} (${s.positionName}). Reemplazo inmediato requerido.`,
-                                horasActivas: Math.round(horasActivas * 10) / 10,
-                                createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                            }, shiftEmpresaId));
-                            toast.error(`🚨 Recargo máximo (16hs): ${s.employeeName || 'Guardia'} — ${s.objectiveName}`);
-                        }).catch(e => console.warn('[autoAlertRecargo16]', e));
+                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                        type: 'RECARGO_MAXIMO', title: 'Recargo máximo (16h+)', status: 'PENDIENTE',
+                        source: 'SYSTEM_SCHEDULER',
+                        employeeId: s.employeeId, employeeName: s.employeeName,
+                        clientId: s.clientId || null,
+                        objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
+                        positionName: s.positionName || '', shiftId: s.id,
+                        description: `🚨 RECARGO MÁXIMO: ${s.employeeName} lleva ${Math.round(horasActivas)}h en ${s.objectiveName}. Relevar URGENTE.`,
+                        createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
+                    }, shiftEmpresaId));
+                        }).catch(e => console.warn('[recargo16h]', e));
                 }
             }
         }
-    }, [processedData]);
+    }, [processedData, now, empresaId]);
 
     // ── AUTO-AUSENCIA T+30 ──────────────────────────────────────────────
     useEffect(() => {
@@ -690,7 +690,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Retenes NO se auto-ausentan — son convocados urgentes, el CF ya los saltea igual
             const isFullyOp = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || !!s.isReten || s.resolvedBy === 'OPERACIONES';
             if (isFullyOp) return false;
-            // SLA_VIRTUAL y planificación: solo auto-ausentar si la planificación está publicada
             if (!(s.shiftDateObj instanceof Date)) return false;
             const pubKey = planificacionPublishLookupKey(
                 s.objectiveId,
@@ -719,10 +718,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     }, empresaId, migracionCompleta);
                     await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                         employeeId: s.employeeId, employeeName: s.employeeName,
-                        clientId: s.clientId || null, type: 'Injustificada', absenceType: 'AA',
+                        clientId: s.clientId || null, type: 'No Presentación', absenceType: 'AA',
                         startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
-                        status: 'Pendiente',
-                        reason: `Ausencia automática — No presentación en turno — ${s.objectiveName} (${s.positionName})`,
+                        status: 'Confirmada',
+                        reason: `No presentación en turno — ${s.objectiveName} (${s.positionName})`,
                         hasCertificate: false, createdAt: serverTimestamp(), origin: 'AUTO_T30', shiftId: s.id,
                     }, shiftEmpresaId));
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
@@ -742,6 +741,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [processedData]);
 
     const isClientLocked = !!forcedClientId;
-    const handleSetSelectedClientId = (id: string) => { if (!isClientLocked) setSelectedClientId(id); };
-    return { employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA, viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo, selectedClientId, setSelectedClientId: handleSetSelectedClientId, uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap };
+
+    return {
+        processedData, listData, stats, viewTab, setViewTab, filterText, setFilterText,
+        selectedClientId, setSelectedClientId,
+        handleAction, isClientLocked, recentLogs,
+        operatorInfo, objectives,
+    };
 };

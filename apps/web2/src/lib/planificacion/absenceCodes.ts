@@ -30,7 +30,11 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'permiso gremial': 'PG',
     'gremial': 'PG',
     'pg': 'PG',
-    // Injustificada (default seguro)
+    // No Presentación (ausencia automática AA — hecho operativo, sin autorización)
+    'no presentación': 'AA',
+    'no presentacion': 'AA',
+    'np': 'AA',
+    // Injustificada (resultado de revisión RRHH)
     'injustificada': 'AA',
     'falta injustificada': 'AA',
     'aa': 'AA',
@@ -44,10 +48,50 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Vacaciones': 'V',
     'Enfermedad': 'E',
     'ART': 'A',
+    'No Presentación': 'AA',
     'Injustificada': 'AA',
+    'Justificada': 'AA',
     'Licencia Esp.': 'L',
     'PG Permiso Gremial': 'PG',
 };
+
+/** Tipos disponibles para cargar manualmente en RRHH */
+export const RRHH_ABSENCE_TYPES = [
+    'No Presentación',
+    'Injustificada',
+    'Justificada',
+    'Enfermedad',
+    'ART',
+    'Vacaciones',
+    'Licencia Esp.',
+    'PG Permiso Gremial',
+] as const;
+
+/**
+ * Estados del ciclo de vida de una ausencia:
+ *  - Confirmada:  hecho operativo automático (AA). No requiere autorización.
+ *  - Pendiente:   ausencia solicitada (vacaciones, licencia) esperando aprobación.
+ *  - Justificada: RRHH la clasificó como justificada (con certificado u otro).
+ *  - Injustificada: RRHH la clasificó como injustificada.
+ *  - Autorizada:  vacaciones/licencias aprobadas.
+ *  - Rechazada:   solicitud denegada.
+ *  - En verificación: médica pendiente de verificación.
+ */
+export const ABSENCE_STATUSES = [
+    'Confirmada',
+    'Pendiente',
+    'Justificada',
+    'Injustificada',
+    'Autorizada',
+    'Rechazada',
+    'En verificación',
+] as const;
+
+/** Tipos que se originan automáticamente en operaciones (sin autorización) */
+export const AUTO_ABSENCE_TYPES = new Set(['No Presentación']);
+
+/** Tipos que requieren autorización gerencial antes de impactar planificación */
+export const REQUIRES_AUTHORIZATION_TYPES = new Set(['Vacaciones', 'Licencia Esp.', 'PG Permiso Gremial']);
 
 /** Códigos válidos de ausencia/licencia para grilla. */
 export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA']);
@@ -103,6 +147,8 @@ export function isActiveAbsence(doc: any): boolean {
     const st = String(doc?.status || '').toLowerCase().trim();
     if (!st) return true; // legacy: sin status → la respetamos
     if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') return false;
+    // Confirmada: hecho operativo automático (No Presentación AA) — siempre activo
+    if (st === 'confirmada') return true;
     if (st === 'en verificación' || st === 'en verificacion') return true;
     // Pendiente: licencias/vacaciones esperan autorización; enfermedad/ART ya impactan planificación
     if (st === 'pendiente' || st === 'pending') return absenceNeedsMedicalVerification(doc);
@@ -112,6 +158,8 @@ export function isActiveAbsence(doc: any): boolean {
 export function absenceReplicatesToPlanning(doc: { status?: unknown; type?: unknown } | null | undefined): boolean {
     const st = String(doc?.status ?? '').trim();
     if (st === 'Rechazada') return false;
+    // Confirmada (No Presentación automática) siempre replica — es un hecho
+    if (st === 'Confirmada') return true;
     if (st === 'Autorizada' || st === 'Justificada' || st === 'Injustificada') return true;
     if (st === 'En verificación') return true;
     if (st === 'Pendiente' && absenceNeedsMedicalVerification(doc)) return true;
@@ -226,48 +274,4 @@ export type GridShiftLike = {
     name?: string;
 };
 
-/** Banda/puesto que cubriría el titular si no estuviera de vacación/licencia. */
-export function inferWorkShiftForAbsenceDay(
-    empId: string,
-    dateStr: string,
-    shiftsMap: Record<string, GridShiftLike>,
-    pendingChanges: Record<string, GridShiftLike & { isDeleted?: boolean }>,
-    nonWorkCodes: Set<string> = PLANNING_ABSENCE_GRID_CODES,
-): GridShiftLike | null {
-    const readKey = (ds: string) => {
-        const k = `${empId}_${ds}`;
-        const p = pendingChanges[k];
-        if (p?.isDeleted) return null;
-        return (p ?? shiftsMap[k]) || null;
-    };
-
-    const direct = readKey(dateStr);
-    const directCode = String(direct?.code || '').toUpperCase();
-    if (direct && directCode && !nonWorkCodes.has(directCode)) return direct;
-
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const dim = new Date(y, m - 1, 0).getDate();
-    const targetDow = new Date(y, m - 1, d, 12, 0, 0, 0).getDay();
-
-    for (let dd = 1; dd <= dim; dd++) {
-        const probe = new Date(y, m - 1, dd, 12, 0, 0, 0);
-        if (probe.getDay() !== targetDow) continue;
-        const ds = `${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-        if (ds === dateStr) continue;
-        const s = readKey(ds);
-        const c = String(s?.code || '').toUpperCase();
-        if (s && c && !nonWorkCodes.has(c)) return s;
-    }
-
-    for (let delta = 1; delta <= dim; delta++) {
-        for (const sign of [-1, 1]) {
-            const dd = d + sign * delta;
-            if (dd < 1 || dd > dim) continue;
-            const ds = `${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-            const s = readKey(ds);
-            const c = String(s?.code || '').toUpperCase();
-            if (s && c && !nonWorkCodes.has(c)) return s;
-        }
-    }
-    return null;
-}
+/** Banda/puesto que cubriría el titular si no estuviera de vacación/licencia. */

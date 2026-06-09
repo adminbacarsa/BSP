@@ -189,47 +189,35 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       // ── Auto-finalización: turnos PRESENT cuyo endTime ya pasó ──
       const toComplete = processedData.filter(s => {
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
-        if (!(s.isPresent || s.status === 'PRESENT')) return false;
-        if (s.isFranco || s.isUnassigned) return false;
+        if (!(s.isPresent || s.status === 'PRESENT')) return false;        if (s.isFranco || s.isUnassigned) return false;
         // NUNCA auto-completar guardias en retención — su turno no termina hasta que llegue el relevo
         if (s.isRetention) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
-        // Solo completar si pasaron al menos 2 minutos desde el fin de turno
         return endMs > 0 && (now.getTime() - endMs) > 2 * 60 * 1000;
       });
 
       for (const s of toComplete) {
         processedIds.current.add(`autocomplete_${s.id}`);
         const msg = `${s.employeeName} — ${s.objectiveName}`;
-
         if (isAutoMode) {
           try {
-            // Verificar en Firestore que no fue ya completado por otra tab/instancia
             const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
             if (turnoSnap.exists() && (turnoSnap.data()?.isCompleted || turnoSnap.data()?.isRetention)) {
-              // Ya fue completado o marcado como retención por otra instancia — no duplicar
               continue;
             }
             await updateDoc(doc(db, 'turnos', s.id), {
-              status: 'COMPLETED',
-              isCompleted: true,
-              realEndTime: serverTimestamp(),
-              autoCompletedAt: serverTimestamp(),
+              status: 'COMPLETED', isCompleted: true,
+              realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
             });
-            await createNovedad(
-              'TURNO_COMPLETADO_AUTO',
-              'Turno Completado (Auto)',
-              `Finalización automática al vencimiento del horario: ${msg}`,
-              s, empresaId
-            );
+            await createNovedad('TURNO_COMPLETADO_AUTO', 'Turno Completado (Auto)',
+              `Finalización automática al vencimiento del horario: ${msg}`, s, empresaId);
             toast.success(`🤖 Turno finalizado: ${msg}`, { duration: 6000 });
             sendBrowserNotif('Turno Completado', msg);
           } catch (e) {
             console.error('[autoComplete] Error al finalizar turno:', s.id, e);
           }
         } else {
-          // Modo manual: solo avisa al operador
           toast.info(`⏱️ Finalizar turno: ${msg}`, {
             duration: 20000,
             description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
@@ -238,7 +226,6 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
-      // ── Alerta guardia trabajando más de 12 horas ─────────────────────────────
       const over12h = processedData.filter(s => {
         if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
         if (processedIds.current.has(`over12h_${s.id}`)) return false;
@@ -255,12 +242,12 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
           duration: 30000,
           description: 'Relevar urgente. Riesgo laboral y de seguridad.',
         });
-        sendBrowserNotif('🚨 Guardia más de 12h', msg);
+        sendBrowserNotif('🚨 Guardia +12h en servicio', msg);
       }
     };
 
     check();
-    const interval = setInterval(check, 60 * 1000); // cada 1 minuto para auto-finalización precisa
+    const interval = setInterval(check, 3 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [isActive, isAutoMode, processedData, empresaId]);
+  }, [processedData, isAutoMode, isActive, empresaId]);
 };
