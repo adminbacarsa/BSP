@@ -592,6 +592,8 @@ export default function ReportsPage() {
                                 <th className="p-4 text-center">Código</th>
                                 <th className="p-4 text-center">Horario</th>
                                 <th className="p-4">Objetivo</th>
+                                <th className="p-4 text-center text-violet-600">Origen</th>
+                                <th className="p-4 text-emerald-600">Cobertura</th>
                                 <th className="p-4 text-center">Hs Calc.</th>
                                 <th className="p-4 text-center">Estado</th>
                             </tr>
@@ -631,7 +633,23 @@ export default function ReportsPage() {
                                         <td className="p-4 text-center font-mono text-xs text-slate-500">
                                             {isLeaveReportShift(s) ? '—' : `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`}
                                         </td>
-                                        <td className="p-4 text-xs font-bold text-slate-600 truncate max-w-[180px]">{s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '-'}</td>
+                                        <td className="p-4 text-xs font-bold text-slate-600 truncate max-w-[160px]">{s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '-'}</td>
+                                        <td className="p-4 text-center">
+                                            {(() => {
+                                                const orig = (s.origin || '').toUpperCase();
+                                                if (s.isRetention) return <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-orange-100 text-orange-700 border border-orange-200">RETENCIÓN</span>;
+                                                if (orig === 'RETEN' || s.isReten) return <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-indigo-100 text-indigo-700 border border-indigo-200">RETÉN</span>;
+                                                if (s.isEarlyStart || orig === 'EARLY_START') return <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-emerald-100 text-emerald-700 border border-emerald-200">ADELANTO</span>;
+                                                if (orig === 'OPERATIONS_COVERAGE') return <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-violet-100 text-violet-700 border border-violet-200">COBERTURA</span>;
+                                                return <span className="text-slate-300 text-[9px]">—</span>;
+                                            })()}
+                                        </td>
+                                        <td className="p-4 text-xs max-w-[160px]">
+                                            {s._coveringFor && <p className="text-emerald-700 font-bold"><span className="text-slate-400 font-normal">→ Cubrió a:</span> {s._coveringFor}</p>}
+                                            {s.retentionReason && <p className="text-orange-600 font-bold text-[10px]"><span className="text-slate-400 font-normal">Motivo:</span> {s.retentionReason.replace('AUSENCIA_AA: ','').replace('SIN_RELEVO_24H: ','').replace('RELEVO_AUSENTE: ','').replace('RELEVO_NO_PRESENTADO: ','')}</p>}
+                                            {s.coveredByEmployeeName && !s._coveringFor && <p className="text-slate-500 text-[10px]"><span className="text-slate-400">← Cubierto por:</span> {s.coveredByEmployeeName}</p>}
+                                            {!s._coveringFor && !s.retentionReason && !s.coveredByEmployeeName && <span className="text-slate-300 text-[9px]">—</span>}
+                                        </td>
                                         <td className="p-4 text-center font-bold text-indigo-600">{duration > 0 ? duration.toFixed(1) : '-'}</td>
                                         <td className="p-4 text-center">
                                             {rawCode === 'V'  ? <span className="text-[9px] bg-emerald-50 text-emerald-700 px-2 py-1 rounded font-bold border border-emerald-200">VACACIONES</span>
