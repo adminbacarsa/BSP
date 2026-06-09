@@ -381,14 +381,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             
                             if (!isCovered) {
                                 virtualVacancies.push({
-                                    id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}`, 
-                                    isUnassigned: true, isVirtual: true,
-                                    clientName: objInfo.clientName, clientId: objInfo.clientId, 
-                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId, 
+                                    id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}`,
+                                    isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    clientName: objInfo.clientName, clientId: objInfo.clientId,
+                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId,
                                     positionName: pos.name,
-                                    employeeName: `VACANTE: ${(slot.name || slot.code).toUpperCase()}`, 
+                                    employeeName: `VACANTE: ${(slot.name || slot.code).toUpperCase()}`,
                                     code: slot.code,
-                                    shiftDateObj: start, endDateObj: end, 
+                                    shiftDateObj: start, endDateObj: end,
                                     minutesUntilStart: 0, isValidEmployee: false
                                 });
                             }
@@ -408,12 +408,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
                             
                             virtualVacancies.push({
-                                id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`, 
-                                isUnassigned: true, isVirtual: true,
-                                clientName: objInfo.clientName, clientId: objInfo.clientId, 
+                                id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
+                                isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                clientName: objInfo.clientName, clientId: objInfo.clientId,
                                 objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                employeeName: `VACANTE: ${bestName}`, 
-                                shiftDateObj: gap.start, endDateObj: gap.end, 
+                                employeeName: `VACANTE: ${bestName}`,
+                                shiftDateObj: gap.start, endDateObj: gap.end,
                                 minutesUntilStart: 0, isValidEmployee: false
                             });
                         });
@@ -687,9 +687,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     useEffect(() => {
         const toAbsent = processedData.filter((s: any) => {
             if (!s.isPotentialAbsence || s.lateArrivalAt || !s.id || s.id.startsWith('SLA_GAP') || s.id.startsWith('V124_') || s.isVirtual) return false;
-            // Retén y cobertura de operaciones: siempre auto-ausentar (turnos 100% operativos)
+            // Retenes NO se auto-ausentan — son convocados urgentes, el CF ya los saltea igual
             const isFullyOp = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || !!s.isReten || s.resolvedBy === 'OPERACIONES';
-            if (isFullyOp) return true;
+            if (isFullyOp) return false;
             // SLA_VIRTUAL y planificación: solo auto-ausentar si la planificación está publicada
             if (!(s.shiftDateObj instanceof Date)) return false;
             const pubKey = planificacionPublishLookupKey(
