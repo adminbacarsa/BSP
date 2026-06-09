@@ -750,15 +750,29 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     const empId = empSnap.docs[0].id;
     if (shiftData.employeeId !== empId)
         throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
+    if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
+        throw new functions.https.HttpsError('failed-precondition', 'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.');
+    }
+    const nowTs = admin.firestore.Timestamp.now();
     const now = admin.firestore.FieldValue.serverTimestamp();
+    const nowMs = nowTs.toMillis();
+    const scheduledStartTs = shiftData.startTime ?? null;
+    const isEarlyStart = shiftData.isEarlyStart === true;
+    const realStartTime = isEarlyStart
+        ? (shiftData.adjustedStartTime || scheduledStartTs || now)
+        : (scheduledStartTs || now);
+    const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
+    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000;
     await shiftRef.update({
         isPresent: true,
         status: 'PRESENT',
         checkInTime: now,
+        realStartTime,
         checkInRequestedAt: now,
         checkInMethod: 'PORTAL_GPS',
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
+        isLate,
     });
     try {
         await db.collection('novedades').add({
@@ -793,26 +807,54 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                 .where('isPresent', '==', true)
                 .where('isCompleted', '==', false)
                 .get();
-            const toRelieve = activeSnap.docs.filter(d => {
+            const nowMs = nowTs.toMillis();
+            const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
+            const RELEVO_TOLERANCE_MS = 90 * 60 * 1000;
+            const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+            const toRelieve = activeSnap.docs
+                .filter(d => {
                 const dat = d.data();
-                return (dat.positionName || '').trim().toLowerCase() === positionName
-                    && d.id !== shiftId
-                    && dat.employeeId !== empId;
+                if ((dat.positionName || '').trim().toLowerCase() !== positionName)
+                    return false;
+                if (d.id === shiftId || dat.employeeId === empId)
+                    return false;
+                if (dat.isRetention === true)
+                    return true;
+                const outEndMs = dat.endTime?.toMillis?.() ?? 0;
+                if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS)
+                    return true;
+                return false;
+            })
+                .sort((a, b) => {
+                const da = a.data(), db2 = b.data();
+                if (da.isRetention && !db2.isRetention)
+                    return -1;
+                if (!da.isRetention && db2.isRetention)
+                    return 1;
+                const aStart = da.realStartTime?.toMillis?.() ?? da.checkInTime?.toMillis?.() ?? da.startTime?.toMillis?.() ?? 0;
+                const bStart = db2.realStartTime?.toMillis?.() ?? db2.checkInTime?.toMillis?.() ?? db2.startTime?.toMillis?.() ?? 0;
+                return aStart - bStart;
             });
             for (const outDoc of toRelieve) {
                 const outData = outDoc.data();
                 const outEmpId = outData.employeeId;
                 const outName = outData.employeeName || 'Guardia';
                 const outPosName = outData.positionName || '';
+                const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
+                const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
+                const outgoingRealEnd = isEarlyRelevo
+                    ? outData.endTime
+                    : admin.firestore.FieldValue.serverTimestamp();
                 await outDoc.ref.update({
                     isCompleted: true,
                     isPresent: false,
                     status: 'COMPLETED',
-                    realEndTime: admin.firestore.FieldValue.serverTimestamp(),
+                    realEndTime: outgoingRealEnd,
                     relievedBy: empId,
                     relievedByName: incomingName,
                     relievedAt: admin.firestore.FieldValue.serverTimestamp(),
                     autoRelevo: true,
+                    relievedEarly: isEarlyRelevo,
                 });
                 await db.collection('novedades').add({
                     type: 'RELEVO_AUTOMATICO',
@@ -1554,6 +1596,66 @@ exports.detectarAusencias = functions
     const db = admin.firestore();
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
+    const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
+    const earlyTo = admin.firestore.Timestamp.fromMillis(nowMs);
+    const earlySnap = await db.collection('turnos')
+        .where('startTime', '>=', earlyFrom)
+        .where('startTime', '<=', earlyTo)
+        .get();
+    for (const earlyDoc of earlySnap.docs) {
+        const s = earlyDoc.data();
+        if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent)
+            continue;
+        if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE')
+            continue;
+        if (SKIP_CODES.has((s.code || '').toUpperCase()))
+            continue;
+        if (SKIP_STATUSES.has(s.status || ''))
+            continue;
+        if (s.earlyRetentionAlertAt)
+            continue;
+        if (s.lateArrivalAt || s.notifiedAbsent)
+            continue;
+        const empId = shiftEmpresaId(s);
+        const posName = (s.positionName || '').trim().toLowerCase();
+        if (!s.objectiveId || !posName || !empId)
+            continue;
+        await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
+        try {
+            const presentSnap = await db.collection('turnos')
+                .where('empresaId', '==', empId)
+                .where('objectiveId', '==', s.objectiveId)
+                .where('isPresent', '==', true)
+                .where('isCompleted', '==', false)
+                .get();
+            const toAlert = presentSnap.docs.filter(d => {
+                const dat = d.data();
+                return (dat.positionName || '').trim().toLowerCase() === posName
+                    && dat.employeeId !== s.employeeId;
+            });
+            for (const retDoc of toAlert) {
+                const retData = retDoc.data();
+                const retTokens = await getEmployeeTokens(db, retData.employeeId);
+                if (retTokens.length > 0) {
+                    await admin.messaging().sendEachForMulticast({
+                        tokens: retTokens,
+                        notification: {
+                            title: '⏳ El entrante aún no llegó',
+                            body: `${s.employeeName || 'El guardia siguiente'} no marcó presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
+                        },
+                        webpush: {
+                            notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                            fcmOptions: { link: '/empleado/dashboard' },
+                        },
+                    }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
+                }
+                console.log(`[detectarAusencias] Alerta temprana enviada a ${retData.employeeName} (saliente en ${s.objectiveName})`);
+            }
+        }
+        catch (e) {
+            console.warn('[detectarAusencias] Error en alerta temprana retención:', e);
+        }
+    }
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
     const snap = await db.collection('turnos')
@@ -1598,6 +1700,13 @@ exports.detectarAusencias = functions
                 continue;
             if (shift.lateArrivalAt)
                 continue;
+            if (shift.notifiedAbsent === true)
+                continue;
+            if (shift.isReten === true || shift.origin === 'RETEN')
+                continue;
+            const endMs = shift.endTime?.toMillis?.() ?? 0;
+            if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000)
+                continue;
             await docSnap.ref.update({
                 status: 'ABSENT',
                 isAbsent: true,
@@ -1605,6 +1714,66 @@ exports.detectarAusencias = functions
                 absenceDetectedAt: now,
                 absenceDetectedBy: 'SYSTEM_SCHEDULER',
             });
+            const objectiveId = shift.objectiveId || '';
+            const positionName = (shift.positionName || '').trim().toLowerCase();
+            const empId = shiftEmpresaId(shift);
+            if (objectiveId && positionName && empId) {
+                try {
+                    const presentSnap = await db.collection('turnos')
+                        .where('empresaId', '==', empId)
+                        .where('objectiveId', '==', objectiveId)
+                        .where('isPresent', '==', true)
+                        .where('isCompleted', '==', false)
+                        .get();
+                    const toRetain = presentSnap.docs.filter(d => {
+                        const dat = d.data();
+                        return (dat.positionName || '').trim().toLowerCase() === positionName
+                            && dat.employeeId !== shift.employeeId;
+                    });
+                    for (const retDoc of toRetain) {
+                        const retData = retDoc.data();
+                        if (!retData.isRetention) {
+                            await retDoc.ref.update({
+                                isRetention: true,
+                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
+                                autoRetentionAt: now,
+                            });
+                            const retTokens = await getEmployeeTokens(db, retData.employeeId);
+                            if (retTokens.length > 0) {
+                                await admin.messaging().sendEachForMulticast({
+                                    tokens: retTokens,
+                                    notification: {
+                                        title: '⏰ Quedaste en retención',
+                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
+                                    },
+                                    webpush: {
+                                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                                        fcmOptions: { link: '/empleado/dashboard' },
+                                    },
+                                }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
+                            }
+                            await db.collection('novedades').add({
+                                type: 'RETENCION_POR_AUSENCIA',
+                                status: 'PENDIENTE',
+                                empresaId: empId,
+                                objectiveId,
+                                objectiveName: shift.objectiveName || '',
+                                positionName: shift.positionName || '',
+                                employeeId: retData.employeeId,
+                                employeeName: retData.employeeName || '',
+                                absentEmployeeId: shift.employeeId,
+                                absentEmployeeName: shift.employeeName || '',
+                                description: `${retData.employeeName || 'Guardia'} retenido automáticamente — ${shift.objectiveName} · ${shift.positionName} — por ausencia de ${shift.employeeName}`,
+                                createdAt: now,
+                                source: 'SYSTEM_SCHEDULER',
+                            });
+                        }
+                    }
+                }
+                catch (e) {
+                    console.warn('[detectarAusencias] Error en retención automática:', e);
+                }
+            }
             const tokens = await getEmployeeTokens(db, shift.employeeId);
             if (tokens.length > 0) {
                 const startStr = shift.startTime?.toDate
@@ -1834,6 +2003,72 @@ exports.gestionarVacantes = functions
         }
     }
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
+    const GRACE_MINUTES = 60;
+    const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
+    const staleProtos = await db.collection('novedades')
+        .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
+        .where('status', '==', 'PENDIENTE')
+        .where('createdAt', '<=', graceCutoff)
+        .limit(50)
+        .get();
+    let autoClosed = 0;
+    for (const nDoc of staleProtos.docs) {
+        const n = nDoc.data();
+        if (n.shiftId) {
+            const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
+            if (turnoSnap.exists) {
+                const t = turnoSnap.data();
+                const directlyCovered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
+                    || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES' || t.status === 'COVERED';
+                let coveredByNewShift = false;
+                if (!directlyCovered && t.objectiveId && t.positionName) {
+                    const slotStartMs = t.startTime?.toMillis?.() ?? 0;
+                    const slotEndMs = t.endTime?.toMillis?.() ?? 0;
+                    if (slotStartMs > 0) {
+                        const coverSnap = await db.collection('turnos')
+                            .where('objectiveId', '==', t.objectiveId)
+                            .where('isPresent', '==', true)
+                            .limit(10).get();
+                        coveredByNewShift = coverSnap.docs.some(d => {
+                            const r = d.data();
+                            const rStart = r.startTime?.toMillis?.() ?? 0;
+                            const rEnd = r.endTime?.toMillis?.() ?? slotEndMs;
+                            const samePos = (r.positionName || '').toLowerCase() === (t.positionName || '').toLowerCase();
+                            const overlaps = rStart <= slotEndMs && rEnd >= slotStartMs;
+                            const isOps = ['RETEN', 'OPERATIONS_COVERAGE', 'EARLY_START'].includes(r.origin || '');
+                            return samePos && overlaps && (isOps || r.absenceShiftId === n.shiftId);
+                        });
+                    }
+                }
+                if (directlyCovered || coveredByNewShift) {
+                    await nDoc.ref.update({ status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'SISTEMA_AUTO', autoResolved: true });
+                    autoClosed++;
+                    continue;
+                }
+            }
+        }
+        await nDoc.ref.update({
+            status: 'ATENDIDA',
+            atendidaAt: now,
+            atendidaPor: 'SISTEMA_AUTO',
+            autoResolved: true,
+            sinCobertura: true,
+        });
+        await db.collection('audit_logs').add({
+            action: 'COBERTURA_VENCIDA_AUTO',
+            actorName: 'Sistema (Auto)',
+            actorUid: 'SYSTEM',
+            module: 'OPERACIONES',
+            shiftId: n.shiftId || null,
+            details: `Protocolo de cobertura cerrado automáticamente (${GRACE_MINUTES} min sin gestión): ${n.objectiveName || ''} — ${n.positionName || ''}`,
+            objectiveId: n.objectiveId || null,
+            timestamp: now,
+        });
+        autoClosed++;
+    }
+    if (autoClosed > 0) {
+        console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+    }
     return null;
 });
 exports.triggerBackup = functions
