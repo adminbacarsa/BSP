@@ -1904,24 +1904,7 @@ export default function OperacionesPage() {
                             </div>
                         )}
 
-                        {/* KPIs compactos */}
-                        <div className="grid grid-cols-6 gap-0.5 mb-1.5">
-                            {[
-                                { label: 'PRES.', title: 'Presentes', value: logic.stats.activos,   text: 'text-emerald-700', bg: 'bg-emerald-50' },
-                                { label: 'PLAN',  title: 'Planificados', value: logic.stats.plan,       text: 'text-indigo-700',  bg: 'bg-indigo-50'  },
-                                { label: 'RET.',  title: 'Retenidos', value: logic.stats.retenidos,  text: 'text-amber-700',   bg: 'bg-amber-50'   },
-                                { label: 'VAC.',  title: 'Vacantes', value: logic.stats.vacantes,   text: 'text-rose-700',    bg: 'bg-rose-50'    },
-                                { label: 'AUS.',  title: 'Ausentes', value: logic.stats.ausentes,   text: 'text-rose-900',    bg: 'bg-rose-50'    },
-                                { label: 'TOTAL', title: 'Total de turnos', value: logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes, text: 'text-slate-800', bg: 'bg-slate-100' },
-                            ].map(m => (
-                                <div key={m.label} title={m.title} className={`${m.bg} rounded px-1 py-1 text-center cursor-default`}>
-                                    <div className={`text-sm font-black leading-none ${m.text}`}>{m.value}</div>
-                                    <div className="text-[7px] font-black uppercase text-slate-400 mt-0.5 leading-none">{m.label}</div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Cliente + Búsqueda en misma fila */}
+                        {/* Búsqueda + cliente en una fila */}
                         <div className="flex gap-1.5 mb-1.5">
                             <select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="flex-1 py-1 px-2 text-[10px] font-bold border border-slate-300 rounded-lg bg-slate-50 outline-none text-slate-700">
                                 <option value="">TODOS LOS CLIENTES</option>
@@ -1933,26 +1916,37 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* Tabs compactos */}
-                        <div className="flex p-0.5 bg-slate-100 rounded-lg gap-0.5 overflow-x-auto">
+                        {/* UNA SOLA FILA: número grande + label abajo, clickable para filtrar */}
+                        <div className="flex gap-0.5 overflow-x-auto">
                             {tabs.map(t => {
                                 const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                        className={`relative flex-1 py-1 text-[9px] font-black uppercase rounded-md transition-all whitespace-nowrap
+                                        className={`relative flex-1 px-1 py-1.5 rounded-lg transition-all whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
-                                                ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-white shadow ' + t.color)
-                                                : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'text-slate-400 hover:bg-slate-200')
+                                                ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
+                                                : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-50 text-slate-400 hover:bg-slate-100')
                                             }`}>
                                         {isUrgent && !isActive && (
                                             <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"/>
                                         )}
-                                        {t.label}<br/>
-                                        <span className={`text-[9px] ${isUrgent && isActive ? 'text-rose-100' : ''}`}>({t.count || 0})</span>
+                                        <span className={`text-sm font-black leading-none ${isActive ? 'text-white' : isUrgent ? 'text-rose-600' : t.color}`}>
+                                            {t.count || 0}
+                                        </span>
+                                        <span className={`text-[8px] font-black uppercase leading-none mt-0.5 ${isActive ? 'text-white/80' : 'text-slate-400'}`}>
+                                            {t.label}
+                                        </span>
                                     </button>
                                 );
                             })}
+                            {/* TOTAL — no clickable, solo info */}
+                            <div className="flex-1 px-1 py-1.5 rounded-lg bg-slate-100 flex flex-col items-center gap-0">
+                                <span className="text-sm font-black leading-none text-slate-600">
+                                    {logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes}
+                                </span>
+                                <span className="text-[8px] font-black uppercase leading-none mt-0.5 text-slate-400">TOT</span>
+                            </div>
                         </div>
                     </div>
 
