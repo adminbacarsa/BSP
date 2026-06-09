@@ -1873,15 +1873,39 @@ export const autoCompletarTurnos = functions
         completed++;
 
       } else if (relievePending) {
-        // CASO B: Hay relevo programado pero no llegó — crear novedad de alerta
-        const existing = await db.collection('novedades')
+        // CASO B: Relevo programado pero no llegó → retener al guardia + push + novedad
+        // Poner en retención formal si no lo está ya
+        if (!shift.isRetention) {
+          completeBatch.update(docSnap.ref, {
+            isRetention: true,
+            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
+            autoRetentionAt: now,
+          });
+        }
+        // Push al guardia retenido
+        const retTokensB = await getEmployeeTokens(db, shift.employeeId as string);
+        if (retTokensB.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            tokens: retTokensB,
+            notification: {
+              title: '⏰ Quedaste en retención',
+              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+            },
+            webpush: {
+              notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+              fcmOptions: { link: '/empleado/dashboard' },
+            },
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
+        }
+        // Novedad para operaciones (una sola vez)
+        const existingB = await db.collection('novedades')
           .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'RELEVO_NO_PRESENTADO')
+          .where('type', '==', 'RETENCION_SIN_RELEVO')
           .limit(1).get();
-        if (existing.empty) {
+        if (existingB.empty) {
           const novRef = db.collection('novedades').doc();
           auditBatch.set(novRef, {
-            type: 'RELEVO_NO_PRESENTADO',
+            type: 'RETENCION_SIN_RELEVO',
             status: 'PENDIENTE',
             shiftId: docSnap.id,
             reliefShiftId: relievePending.id,
@@ -1892,7 +1916,7 @@ export const autoCompletarTurnos = functions
             employeeName: shift.employeeName || '',
             reliefEmployeeName: relievePending.data().employeeName || '',
             positionName: shift.positionName || '',
-            description: `El relevo de ${shift.employeeName || ''} en ${shift.objectiveName || ''} no se presentó. Puesto en riesgo.`,
+            description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -1901,13 +1925,28 @@ export const autoCompletarTurnos = functions
 
       } else if (relieveAbsent) {
         // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
-        // → NO cerrar el turno: poner al guardia saliente en retención forzada
+        // → Retención forzada + push + novedad
         if (!shift.isRetention) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
             retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
             autoRetentionAt: now,
           });
+        }
+        // Push al guardia retenido
+        const retTokensB2 = await getEmployeeTokens(db, shift.employeeId as string);
+        if (retTokensB2.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            tokens: retTokensB2,
+            notification: {
+              title: '⏰ Quedaste en retención',
+              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+            },
+            webpush: {
+              notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+              fcmOptions: { link: '/empleado/dashboard' },
+            },
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
         }
         const existing = await db.collection('novedades')
           .where('shiftId', '==', docSnap.id)
