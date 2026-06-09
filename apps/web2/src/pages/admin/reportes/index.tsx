@@ -645,10 +645,34 @@ export default function ReportsPage() {
                                             })()}
                                         </td>
                                         <td className="p-4 text-xs max-w-[160px]">
-                                            {s._coveringFor && <p className="text-emerald-700 font-bold"><span className="text-slate-400 font-normal">→ Cubrió a:</span> {s._coveringFor}</p>}
-                                            {s.retentionReason && <p className="text-orange-600 font-bold text-[10px]"><span className="text-slate-400 font-normal">Motivo:</span> {s.retentionReason.replace('AUSENCIA_AA: ','').replace('SIN_RELEVO_24H: ','').replace('RELEVO_AUSENTE: ','').replace('RELEVO_NO_PRESENTADO: ','')}</p>}
-                                            {s.coveredByEmployeeName && !s._coveringFor && <p className="text-slate-500 text-[10px]"><span className="text-slate-400">← Cubierto por:</span> {s.coveredByEmployeeName}</p>}
-                                            {!s._coveringFor && !s.retentionReason && !s.coveredByEmployeeName && <span className="text-slate-300 text-[9px]">—</span>}
+                                            {(() => {
+                                                const isVacancyCover = s._coveringFor && s._coveringFor.startsWith('Vacante');
+                                                const lines = [];
+                                                if (s._coveringFor) {
+                                                    lines.push(
+                                                        <p key="cf" className={`font-bold ${isVacancyCover ? 'text-violet-700' : 'text-emerald-700'}`}>
+                                                            <span className="text-slate-400 font-normal">{isVacancyCover ? '→' : '→ Cubrió a:'}</span> {s._coveringFor}
+                                                        </p>
+                                                    );
+                                                }
+                                                if (s._coveredBy && !s._coveringFor) {
+                                                    lines.push(
+                                                        <p key="cb" className="text-slate-500">
+                                                            <span className="text-slate-400">← Cubierto por:</span> {s._coveredBy}
+                                                        </p>
+                                                    );
+                                                }
+                                                if (s.retentionReason) {
+                                                    const reason = String(s.retentionReason)
+                                                        .replace('AUSENCIA_AA: ','')
+                                                        .replace('SIN_RELEVO_24H: ','')
+                                                        .replace('RELEVO_AUSENTE: ','')
+                                                        .replace('RELEVO_NO_PRESENTADO: ','')
+                                                        .replace('FIN_TURNO_SIN_RELEVO','Sin relevo');
+                                                    lines.push(<p key="rr" className="text-orange-600"><span className="text-slate-400 font-normal">Motivo:</span> {reason}</p>);
+                                                }
+                                                return lines.length ? <>{lines}</> : <span className="text-slate-300">—</span>;
+                                            })()}
                                         </td>
                                         <td className="p-4 text-center font-bold text-indigo-600">{duration > 0 ? duration.toFixed(1) : '-'}</td>
                                         <td className="p-4 text-center">

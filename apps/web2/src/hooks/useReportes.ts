@@ -914,34 +914,46 @@ export const useReportes = (forcedClientId?: string | null) => {
                 }
             });
 
-            // Mapa shiftId → nombre del empleado, para resolver absenceShiftId → nombre titular
-            const shiftIdToEmpName: Record<string, string> = {};
+            // Mapa shiftId → shift completo, para resolver absenceShiftId → descripción de lo cubierto
+            const shiftIdToShift: Record<string, any> = {};
             rawShifts.forEach((s: any) => {
-                if (s.id && s.employeeName) shiftIdToEmpName[s.id] = s.employeeName;
+                if (s.id) shiftIdToShift[s.id] = s;
             });
+
+            // Resolver qué cubría un retén/adelanto a partir del shift referenciado
+            const resolveCoveringFor = (s: any): string | null => {
+                const refId = s.absenceShiftId;
+                if (refId && shiftIdToShift[refId]) {
+                    const ref = shiftIdToShift[refId];
+                    const isVacancy = !ref.employeeId || ref.employeeId === 'VACANTE' || ref.isUnassigned;
+                    if (isVacancy) {
+                        // Vacante: mostrar puesto y código
+                        const pos = ref.positionName || ref.positionCode || '';
+                        const code = (ref.code || '').toUpperCase();
+                        return `Vacante${pos ? ' ' + pos : ''}${code ? ' (' + code + ')' : ''}`;
+                    } else {
+                        // Ausente: mostrar nombre del titular
+                        return ref.employeeName || null;
+                    }
+                }
+                if (s.relievedEmployeeName) return s.relievedEmployeeName;
+                return null;
+            };
 
             const enrichShift = (s: any) => {
                 const dk = shiftCalendarDateKey(s);
                 const abs = s.absenceId ? absenceById[s.absenceId] : (dk ? absenceByEmpDate[`${s.employeeId}_${dk}`] : null);
 
-                // Quién cubrió al guardia ausente: campo Firestore directo > legacy coveredBy > mapa por fecha
+                // Quién cubrió al guardia ausente / vacante
                 const coveredByName = s.coveredByEmployeeName
                     || s.coveredBy
                     || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null)
                     || null;
 
-                // A quién cubrió el retén/adelanto:
-                // 1. absenceShiftId → nombre del titular ausente
-                // 2. relievedEmployeeName (si fue un relevo)
-                // 3. fallback: mapa por fecha (legacy)
-                let coveringForName: string | null = null;
-                if (s.absenceShiftId && shiftIdToEmpName[s.absenceShiftId]) {
-                    coveringForName = shiftIdToEmpName[s.absenceShiftId];
-                } else if (s.relievedEmployeeName) {
-                    coveringForName = s.relievedEmployeeName;
-                } else if (dk) {
-                    coveringForName = coveringForByEmpDate[`${s.employeeId}_${dk}`] || null;
-                }
+                // A quién / qué cubrió este turno operativo
+                const coveringFor = resolveCoveringFor(s)
+                    || (dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
+                    || null;
 
                 return {
                     ...s,
@@ -951,7 +963,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     _absenceStatus: abs?.status || null,
                     _absenceReason: abs?.reason || null,
                     _coveredBy: coveredByName,
-                    _coveringFor: coveringForName,
+                    _coveringFor: coveringFor,
                 };
             };
 
