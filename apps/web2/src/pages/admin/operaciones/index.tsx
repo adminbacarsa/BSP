@@ -8,7 +8,7 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
