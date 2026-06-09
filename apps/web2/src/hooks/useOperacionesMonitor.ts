@@ -62,8 +62,8 @@ const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
         let sStart = s.shiftDateObj.getTime(); let sEnd = s.endDateObj.getTime();
         if (sEnd <= sStart) sEnd += 86400000;
         
-        // AlineaciÃ³n inteligente: Si el turno cubre el rango, suma.
-        // No forzamos dias, solo superposiciÃ³n de timestamps.
+        // Alineación inteligente: Si el turno cubre el rango, suma.
+        // No forzamos dias, solo superposición de timestamps.
         const overlapStart = Math.max(tStart, sStart); 
         const overlapEnd = Math.min(tEnd, sEnd);
         
@@ -151,7 +151,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     registerPublishedState(map, parsed.objectiveId, parsed.year, parsed.month);
                 }
                 const objId = String(data.objectiveId ?? data.objetivoId ?? parsed?.objectiveId ?? '').trim();
-                const y = Number(data.year ?? data.aÃ±o ?? parsed?.year);
+                const y = Number(data.year ?? data.año ?? parsed?.year);
                 const m = Number(data.month ?? data.mes ?? parsed?.month);
                 if (objId) registerPublishedState(map, objId, y, m);
             });
@@ -167,8 +167,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [empresaId, migracionCompleta, scopeEmpresa]);
 
     useEffect(() => {
-        const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodÃ­a â€” cubre turnos nocturnos que arrancan a las 22-23hs
-        const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // maÃ±ana al final â€” cubre planificaciÃ³n del dÃ­a siguiente
+        const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
+        const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
         const turnosBase = query(
             empresaCollectionQuery('turnos', empresaId, scopeEmpresa),
             where('startTime', '>=', Timestamp.fromDate(start)),
@@ -202,9 +202,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const rawPos = (shift.positionName || '').trim();
             if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') return null;
 
-            // Solo mostrar turnos de planificaciÃ³n publicada. Los turnos operativos
-            // (retÃ©n, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
-            // siempre se muestran sin importar el estado de publicaciÃ³n.
+            // Solo mostrar turnos de planificación publicada. Los turnos operativos
+            // (retén, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
+            // siempre se muestran sin importar el estado de publicación.
             const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
             const isAlreadyProcessed = !!shift.isPresent || shift.status === 'PRESENT' || shift.status === 'COMPLETED' || !!shift.isReportedToPlanning || !!shift.isReported;
             if (!isOperationalOrigin && !isAlreadyProcessed) {
@@ -231,19 +231,19 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const hasActiveSLA = activeSlaMap.has(shift.objectiveId);
             const isAbsent = !!shift.isAbsent;
-            // isPresent solo si el turno arranca dentro de los prÃ³ximos 60 min O ya iniciÃ³
+            // isPresent solo si el turno arranca dentro de los próximos 60 min O ya inició
             // Evita el bug de turnos con isPresent=true que en realidad no empiezan en horas
             const isEarlyStartShift = shift.isEarlyStart === true || shift.isReten === true
                 || shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE';
             const shiftStartMs = shift.shiftDateObj ? shift.shiftDateObj.getTime() : 0;
             const withinWindow = !shiftStartMs || isEarlyStartShift
-                || (currentTime.getTime() + 60 * 60 * 1000) >= shiftStartMs; // dentro de 60 min o ya iniciÃ³
+                || (currentTime.getTime() + 60 * 60 * 1000) >= shiftStartMs; // dentro de 60 min o ya inició
             const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && withinWindow;
             const isCompleted = !!shift.isCompleted;
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
             const isResolvedByOps = shift.origin === 'OPERATIONS_COVERAGE' || shift.resolvedBy === 'OPERACIONES';
-            // Un ausente NO cubre el puesto â€” el slot queda descubierto y genera vacante
+            // Un ausente NO cubre el puesto — el slot queda descubierto y genera vacante
             const countsForCoverage = (isValidEmployee && !isAbsent) || isReportedToPlanning;
 
             const isUnassigned = !isValidEmployee;
@@ -260,7 +260,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
-            // isRetention: por tiempo (pasÃ³ el horario) O por campo Firestore (retenido manualmente/automÃ¡ticamente)
+            // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
             const isRetentionByTime  = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
             const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true;
             const isRetention = isRetentionByTime || isRetentionByField;
@@ -269,7 +269,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
             }
-            // totalMinutesWorked: para ordenar por FIFO quiÃ©n lleva mÃ¡s tiempo en el puesto
+            // totalMinutesWorked: para ordenar por FIFO quién lleva más tiempo en el puesto
             const checkInMs = shift.realStartTime?.seconds
                 ? shift.realStartTime.seconds * 1000
                 : shift.checkInTime?.seconds
@@ -283,7 +283,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart <= 15 && minutesUntilStart > -5;
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
-            // Guardia tardanza: ventana T+5 â†’ T+30
+            // Guardia tardanza: ventana T+5 → T+30
             const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
             const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
             const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
@@ -306,23 +306,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const virtualVacancies: any[] = [];
         const dayCode = getDayCode(now);
 
-        // Dedup SLAs por objectiveId: si hay dos registros activos para el mismo objetivo
-        // (ej. solapamiento de contratos), usar solo el mÃ¡s reciente
-        const dedupedSLAs = servicesSLA.reduce((acc: any[], sla: any) => {
-            const existing = acc.find((s: any) => s.objectiveId === sla.objectiveId);
-            if (!existing) { acc.push(sla); }
-            // Si ya existe, usar el que tiene startDate mÃ¡s reciente (contrato vigente)
-            else if (sla.startDate && existing.startDate && sla.startDate > existing.startDate) {
-                const idx = acc.indexOf(existing); acc[idx] = sla;
-            }
-            return acc;
-        }, []);
-
-        dedupedSLAs.forEach(sla => {
+        servicesSLA.forEach(sla => {
             const objInfo = objMap.get(sla.objectiveId);
             if (!objInfo || !sla.positions) return;
 
-            // Respetar rango de fechas del servicio: no generar vacantes antes de startDate ni despuÃ©s de endDate
+            // Respetar rango de fechas del servicio: no generar vacantes antes de startDate ni después de endDate
             if (sla.startDate) {
                 const serviceStart = new Date(sla.startDate + 'T00:00:00');
                 if (now < serviceStart) return;
@@ -332,8 +320,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 if (now > serviceEnd) return;
             }
 
-            // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningÃºn documento
-            // en `turnos` para este objetivo hoy (p. ej. base vaciada o aÃºn sin planificar),
+            // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningún documento
+            // en `turnos` para este objetivo hoy (p. ej. base vaciada o aún sin planificar),
             // no generar tarjetas fantasma: el contador de vacantes reflejaba solo SLA activo.
             const hasRawShiftTodayForObjective = rawShifts.some((s: any) => {
                 if (!s.objectiveId || s.objectiveId !== sla.objectiveId) return false;
@@ -370,17 +358,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 
                 if (has12hShifts && allowedShifts.length > 0) {
                     relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) > 10);
-                    // Fallback: si el filtro excluyÃ³ todo (ej. turno justo en 10h), usar todos
-                    if (relevantDefinitions.length === 0) relevantDefinitions = allowedShifts;
                 } else if (allowedShifts.length > 0) {
-                    // Si no hay 12hs activas, usar slots <12h (incluye 10h como RondÃ­n)
-                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) <= 10);
-                    // Fallback: si el filtro excluyÃ³ todo, usar todos los slots definidos
-                    if (relevantDefinitions.length === 0) relevantDefinitions = allowedShifts;
+                    // Si no hay 12hs activas, asumimos 8hs
+                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) < 10);
                 }
 
-                // ðŸ›‘ UNIFICACIÃ“N V124:
-                // Si 'relevantDefinitions' TIENE DATOS, usamos lÃ³gica de SLOT (Checklist) incluso para 24HS.
+                // 🛑 UNIFICACIÓN V124:
+                // Si 'relevantDefinitions' TIENE DATOS, usamos lógica de SLOT (Checklist) incluso para 24HS.
                 // Esto evita el problema de los huecos partidos.
                 
                 if (relevantDefinitions.length > 0) {
@@ -391,7 +375,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         if (start && end) {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
                             
-                            // CHECKEO: Â¿EstÃ¡ cubierto ESTE turno especÃ­fico?
+                            // CHECKEO: ¿Está cubierto ESTE turno específico?
                             // Esto unifica "Noche" en una sola tarjeta porque checkea el rango completo 19:00 -> 07:00
                             const isCovered = checkSlotCoverage(start, end, posShifts);
                             
@@ -421,7 +405,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         gaps.forEach(gap => {
                             const h = gap.start.getHours();
                             let bestName = "COBERTURA";
-                            if (h>=6 && h<14) bestName = "MAÃ‘ANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
+                            if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
                             
                             virtualVacancies.push({
                                 id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
@@ -438,7 +422,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             });
         });
 
-        // â”€â”€ Deduplicar realShifts por id (evita que un doc duplicado en Firestore se muestre dos veces)
+        // ── Deduplicar realShifts por id (evita que un doc duplicado en Firestore se muestre dos veces)
         const seenIds = new Set<string>();
         const dedupedRealShifts = realShifts.filter(s => {
             if (seenIds.has(s.id)) return false;
@@ -446,15 +430,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return true;
         });
 
-        // â”€â”€ Suprimir vacantes virtuales solo si estÃ¡n CUBIERTAS (no suprimir por ausencias)
-        // Un ausente sigue generando una vacante â€” la posiciÃ³n necesita cobertura
+        // ── Suprimir vacantes virtuales solo si están CUBIERTAS (no suprimir por ausencias)
+        // Un ausente sigue generando una vacante — la posición necesita cobertura
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
-            // NO suprimir si hay ausente â€” mostrar como vacante para que el operador la cubra
+            // NO suprimir si hay ausente — mostrar como vacante para que el operador la cubra
             // (quitado: if absentSlots.some(a => sameSlot(a)) return false)
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
@@ -473,7 +457,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         let list = processedData;
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
         if (filterText) { const lower = filterText.toLowerCase(); list = list.filter((s: any) => (s.employeeName||'').toLowerCase().includes(lower) || (s.clientName||'').toLowerCase().includes(lower)); }
-        // Base: solo turnos de hoy â€” OR turno activo/retenido que arrancÃ³ en el nocturno de ayer
+        // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
         const hoy = list.filter((s:any) => {
             if (s.isCompleted && !s.isRetention) return false;
             if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
@@ -507,8 +491,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             }
         } catch (e: any) { toast.error('Error: ' + e.message); }
     };
-    // Auto-gestiÃ³n de vacantes virtuales:
-    //   > 4h:  auto-devolver a planificaciÃ³n (crear turno real + novedad)
+    // Auto-gestión de vacantes virtuales:
+    //   > 4h:  auto-devolver a planificación (crear turno real + novedad)
     //   < 4h y > 0: alerta PROTOCOLO para que el operador use CUBRIR
     //   ya iniciada: alerta PROTOCOLO escalada
     const alertedVacancyIds = useRef<Set<string>>(new Set());
@@ -522,10 +506,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (!startMs) continue;
             const minutesUntil = (startMs - nowMs) / 60000;
 
-            // â”€â”€ PASO 1: auto-envÃ­o a planificaciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            // Se dispara para TODAS las vacantes del dÃ­a apenas son detectadas,
-            // sin importar si el turno ya empezÃ³. El dedup de Firestore evita duplicados.
-            // Esto garantiza que planificaciÃ³n sea notificada aunque el operador abra
+            // ── PASO 1: auto-envío a planificación ──────────────────────────
+            // Se dispara para TODAS las vacantes del día apenas son detectadas,
+            // sin importar si el turno ya empezó. El dedup de Firestore evita duplicados.
+            // Esto garantiza que planificación sea notificada aunque el operador abra
             // la app tarde o no haya estado abierta durante la ventana 1-4h.
             const autoKey = `${v.id}_VACANTE_A_PLANIFICACION`;
             if (!alertedVacancyIds.current.has(autoKey)) {
@@ -549,14 +533,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         }, shiftEmpresaId));
                         const cuando = minutesUntil > 0
                             ? `Faltan ${Math.round(minutesUntil)} min.`
-                            : `Turno iniciÃ³ hace ${Math.round(Math.abs(minutesUntil))} min (sin cobertura).`;
+                            : `Turno inició hace ${Math.round(Math.abs(minutesUntil))} min (sin cobertura).`;
                         await addDoc(collection(db, 'novedades'), stampEmpresaId({
                             type: 'VACANTE_A_PLANIFICACION', status: 'ATENDIDA',
                             autoProcessed: true,
                             virtualVacancyId: v.id, shiftId: newRef.id,
                             objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
                             clientId: v.clientId || null, positionName: v.positionName || '',
-                            description: `[AUTO] Vacante sin cubrir devuelta a PlanificaciÃ³n: ${v.positionName} en ${v.objectiveName}. ${cuando}`,
+                            description: `[AUTO] Vacante sin cubrir devuelta a Planificación: ${v.positionName} en ${v.objectiveName}. ${cuando}`,
                             minutesUntilStart: Math.round(minutesUntil),
                             createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                         }, shiftEmpresaId));
@@ -564,9 +548,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     .catch(e => console.warn('[autoAlertVacante:plan]', e));
             }
 
-            // â”€â”€ PASO 2: alerta PROTOCOLO para el operador (solo â‰¤60 min) â”€â”€â”€â”€
-            // Una vez que el turno estÃ¡ prÃ³ximo a iniciarse (o ya iniciÃ³), se crea
-            // una alerta visible para que el operador tome acciÃ³n de CUBRIR.
+            // ── PASO 2: alerta PROTOCOLO para el operador (solo ≤60 min) ────
+            // Una vez que el turno está próximo a iniciarse (o ya inició), se crea
+            // una alerta visible para que el operador tome acción de CUBRIR.
             if (minutesUntil > 60) continue;
             const protKey = `${v.id}_VACANTE_PROTOCOLO_COBERTURA`;
             if (alertedVacancyIds.current.has(protKey)) continue;
@@ -575,8 +559,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 .then(async snap => {
                     if (!snap.empty) return;
                     const desc = minutesUntil <= 0
-                        ? `âš ï¸ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno iniciÃ³ hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
-                        : `âš ï¸ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
+                        ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
+                        : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
                     const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
                         type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
@@ -591,7 +575,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 .catch(e => console.warn('[autoAlertVacante:prot]', e));
         }
 
-        // â”€â”€ RETENCIÃ“N LARGA (>2h retenido) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── RETENCIÓN LARGA (>2h retenido) ──────────────────────────────
         const retainedShifts = processedData.filter((s: any) => s.isRetention && !s.isCompleted);
         for (const s of retainedShifts) {
             const endMs = s.endDateObj?.getTime?.() ?? 0;
@@ -610,14 +594,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
                         clientId: s.clientId || null, positionName: s.positionName || '',
                         employeeId: s.employeeId, employeeName: s.employeeName || '',
-                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min de retenciÃ³n en ${s.objectiveName}. Requiere autorizaciÃ³n o reemplazo.`,
+                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min de retención en ${s.objectiveName}. Requiere autorización o reemplazo.`,
                         minutesOvertime: Math.round(minutesOvertime),
                         createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                     }, shiftEmpresaId));
                 }).catch(e => console.warn('[autoAlertRetencion]', e));
         }
 
-        // â”€â”€ POSICIÃ“N SIN RELEVO (<30 min para fin, sin entrante) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── POSICIÓN SIN RELEVO (<30 min para fin, sin entrante) ─────────
         const expiringShifts = processedData.filter((s: any) => s.isPresent && !s.isCompleted && !s.isRetention);
         for (const s of expiringShifts) {
             const endMs = s.endDateObj?.getTime?.() ?? 0;
@@ -644,16 +628,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
                         clientId: s.clientId || null, positionName: s.positionName || '',
                         employeeId: s.employeeId, employeeName: s.employeeName || '',
-                        description: `${s.employeeName || 'Guardia'} termina en ${Math.round(minutesUntilEnd)} min sin relevo planificado en ${s.objectiveName} â€” ${s.positionName}.`,
+                        description: `${s.employeeName || 'Guardia'} termina en ${Math.round(minutesUntilEnd)} min sin relevo planificado en ${s.objectiveName} — ${s.positionName}.`,
                         minutesUntilEnd: Math.round(minutesUntilEnd),
                         createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                     }, shiftEmpresaId));
                 }).catch(e => console.warn('[autoAlertRelevo]', e));
         }
 
-        // â”€â”€ RECARGO 12H / 16H â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── RECARGO 12H / 16H ──────────────────────────────────────────────
         // Cualquier guardia presente con 12+ horas activas: alerta para decidir.
-        // Con 16+ horas (dos turnos completos): recargo mÃ¡ximo, reemplazo requerido.
+        // Con 16+ horas (dos turnos completos): recargo máximo, reemplazo requerido.
         const recargoShifts = processedData.filter((s: any) =>
             s.isPresent && !s.isCompleted && s.activeStartTime
         );
@@ -674,11 +658,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                 shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
                                 clientId: s.clientId || null, positionName: s.positionName || '',
                                 employeeId: s.employeeId, employeeName: s.employeeName || '',
-                                description: `${s.employeeName || 'Guardia'} lleva 12hs de recargo activo en ${s.objectiveName} (${s.positionName}). Â¿ContinÃºa el recargo?`,
+                                description: `${s.employeeName || 'Guardia'} lleva 12hs de recargo activo en ${s.objectiveName} (${s.positionName}). ¿Continúa el recargo?`,
                                 horasActivas: Math.round(horasActivas * 10) / 10,
                                 createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                             }, shiftEmpresaId));
-                            toast.warning(`â± 12hs recargo: ${s.employeeName || 'Guardia'} â€” ${s.objectiveName}`);
+                            toast.warning(`⏱ 12hs recargo: ${s.employeeName || 'Guardia'} — ${s.objectiveName}`);
                         }).catch(e => console.warn('[autoAlertRecargo12]', e));
                 }
             }
@@ -692,13 +676,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             if (!snap.empty) return;
                             const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'RECARGO_MAXIMO', title: 'Recargo mÃ¡ximo (16h+)', status: 'PENDIENTE',
+                        type: 'RECARGO_MAXIMO', title: 'Recargo máximo (16h+)', status: 'PENDIENTE',
                         source: 'SYSTEM_SCHEDULER',
                         employeeId: s.employeeId, employeeName: s.employeeName,
                         clientId: s.clientId || null,
                         objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
                         positionName: s.positionName || '', shiftId: s.id,
-                        description: `ðŸš¨ RECARGO MÃXIMO: ${s.employeeName} lleva ${Math.round(horasActivas)}h en ${s.objectiveName}. Relevar URGENTE.`,
+                        description: `🚨 RECARGO MÁXIMO: ${s.employeeName} lleva ${Math.round(horasActivas)}h en ${s.objectiveName}. Relevar URGENTE.`,
                         createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
                     }, shiftEmpresaId));
                         }).catch(e => console.warn('[recargo16h]', e));
@@ -707,11 +691,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         }
     }, [processedData, now, empresaId]);
 
-    // â”€â”€ AUTO-AUSENCIA T+30 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── AUTO-AUSENCIA T+30 ──────────────────────────────────────────────
     useEffect(() => {
         const toAbsent = processedData.filter((s: any) => {
             if (!s.isPotentialAbsence || s.lateArrivalAt || !s.id || s.id.startsWith('SLA_GAP') || s.id.startsWith('V124_') || s.isVirtual) return false;
-            // Retenes NO se auto-ausentan â€” son convocados urgentes, el CF ya los saltea igual
+            // Retenes NO se auto-ausentan — son convocados urgentes, el CF ya los saltea igual
             const isFullyOp = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || !!s.isReten || s.resolvedBy === 'OPERACIONES';
             if (isFullyOp) return false;
             if (!(s.shiftDateObj instanceof Date)) return false;
@@ -742,23 +726,23 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     }, empresaId, migracionCompleta);
                     await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                         employeeId: s.employeeId, employeeName: s.employeeName,
-                        clientId: s.clientId || null, type: 'No PresentaciÃ³n', absenceType: 'AA',
+                        clientId: s.clientId || null, type: 'No Presentación', absenceType: 'AA',
                         startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
                         status: 'Confirmada',
-                        reason: `No presentaciÃ³n en turno â€” ${s.objectiveName} (${s.positionName})`,
+                        reason: `No presentación en turno — ${s.objectiveName} (${s.positionName})`,
                         hasCertificate: false, createdAt: serverTimestamp(), origin: 'AUTO_T30', shiftId: s.id,
                     }, shiftEmpresaId));
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'AUSENCIA_AUTO', title: 'Ausencia AutomÃ¡tica (AA)', status: 'PENDIENTE',
+                        type: 'AUSENCIA_AUTO', title: 'Ausencia Automática (AA)', status: 'PENDIENTE',
                         source: 'SYSTEM_SCHEDULER',
                         employeeId: s.employeeId, employeeName: s.employeeName,
                         clientId: s.clientId || null,
                         objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
                         positionName: s.positionName || '', shiftId: s.id,
-                        description: `[AA] ${s.employeeName} no se presentÃ³ al turno en ${s.objectiveName} (${s.positionName}) â€” ${shiftDate.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}`,
+                        description: `[AA] ${s.employeeName} no se presentó al turno en ${s.objectiveName} (${s.positionName}) — ${shiftDate.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}`,
                         createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
                     }, shiftEmpresaId));
-                    toast.warning(`[AA] Ausencia automÃ¡tica: ${s.employeeName} â€” ${s.objectiveName}`);
+                    toast.warning(`[AA] Ausencia automática: ${s.employeeName} — ${s.objectiveName}`);
                 })
                 .catch(e => console.warn('[autoAbsent]', e));
         }
