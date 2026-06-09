@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -706,7 +706,9 @@ export default function ReportsPage() {
         const LEAVE_DETAIL_CODES = new Set(['V', 'L', 'PG', 'E', 'A', 'AA']);
 
         // — Opciones para dropdowns —
-        const baseShifts = dedupeShiftsByAbsencePriority(detailItem.rawShifts || []);
+        const baseShifts = dedupeShiftsByAbsencePriority(
+            propagateFrancoTrabajadoFlags(detailItem.rawShifts || []),
+        );
         const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
         const allEmployeesDetail = [...new Set(baseShifts.map((s:any) => s.employeeName).filter(Boolean))].sort();

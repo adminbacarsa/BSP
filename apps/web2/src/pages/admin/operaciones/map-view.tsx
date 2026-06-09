@@ -241,8 +241,25 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
     const handleFranco = async (s: any) => {
         setLoading('franco_' + s.id);
         try {
+            const vacancyStart = absenceShift.shiftDateObj instanceof Date
+                ? Timestamp.fromDate(absenceShift.shiftDateObj)
+                : Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+            const vacancyEnd = absenceEnd instanceof Date
+                ? Timestamp.fromDate(absenceEnd)
+                : Timestamp.fromDate(toDate(absenceEnd));
             const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', s.id), { isFrancoTrabajado: true, francoTrabajadoAt: serverTimestamp(), francoObjectiveId: absenceShift.objectiveId, francoObjectiveName: absenceShift.objectiveName });
+            batch.update(doc(db, 'turnos', s.id), {
+                isFranco: false,
+                isFrancoTrabajado: true,
+                code: 'FT',
+                type: 'EXTRA_FRANCO',
+                startTime: vacancyStart,
+                endTime: vacancyEnd,
+                francoTrabajadoAt: serverTimestamp(),
+                francoObjectiveId: absenceShift.objectiveId,
+                francoObjectiveName: absenceShift.objectiveName,
+                comments: `Franco Trabajado (Convocado) — cubre ${absenceShift.objectiveName || 'vacante'}`,
+            });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'FRANCO');
             await batch.commit();

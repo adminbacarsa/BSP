@@ -72,19 +72,46 @@ const shiftHasRealCheckIn = (shift: any): boolean => {
     );
 };
 
+/** Franco planificado (día libre), aún sin marcar FT en Firestore. */
+function isPlainFrancoDayOff(s: any): boolean {
+    const code = String(s?.code || '').trim().toUpperCase();
+    if (code === 'F' || code === 'FP') return true;
+    return s?.isFranco === true && code !== 'FT' && !s?.isFrancoTrabajado;
+}
+
+function isLiquidationWorkCandidate(s: any): boolean {
+    const code = String(s?.code || '').trim().toUpperCase();
+    if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP'].includes(code)) return false;
+    if (isLeaveReportShift(s)) return false;
+    return true;
+}
+
+function isCoverageWorkShift(s: any): boolean {
+    return !!(
+        s?._coveringFor
+        || s?.absenceShiftId
+        || s?.francoObjectiveId
+        || s?.francoObjectiveName
+        || s?.type === 'EXTRA_FRANCO'
+        || isOperationalOriginShift(s)
+    );
+}
+
 /** Convocado desde operaciones/planificación: franco que cubre vacante/ausencia → pago al 100% (FT). */
 export function isFrancoTrabajadoShift(shift: any): boolean {
     if (shift?.isFrancoTrabajado === true) return true;
+    if (shift?._inferredFrancoTrabajado === true) return true;
     const code = String(shift?.code || '').trim().toUpperCase();
     if (code === 'FT') return true;
     if (shift?.type === 'EXTRA_FRANCO') return true;
     if (String(shift?.coverageType || '').toUpperCase() === 'FRANCO') return true;
+    if (shift?.francoObjectiveId) return true;
     return false;
 }
 
 /**
  * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo día.
- * Propaga el flag al turno con check-in para liquidar FT + al 100%.
+ * Si el flag no llegó a Firestore, infiere FT cuando hay F + turno con fichada el mismo día.
  */
 export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
     const byDay = new Map<string, any[]>();
@@ -96,27 +123,31 @@ export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
 
     const propagateIds = new Set<string>();
     for (const dayShifts of byDay.values()) {
-        const hasFtAnchor = dayShifts.some(isFrancoTrabajadoShift);
-        if (!hasFtAnchor) continue;
-
-        const ftPlaceholder = dayShifts.some((s) => {
+        const plainFrancoRest = dayShifts.some((s) => isPlainFrancoDayOff(s) && !shiftHasRealCheckIn(s));
+        const ftMarkedOnFrancoDoc = dayShifts.some((s) => {
             const code = String(s.code || '').toUpperCase();
             return isFrancoTrabajadoShift(s) && code === 'F' && !shiftHasRealCheckIn(s);
         });
-        if (!ftPlaceholder) continue;
 
-        for (const s of dayShifts) {
-            if (isFrancoTrabajadoShift(s)) continue;
-            const code = String(s.code || '').toUpperCase();
-            if (['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP'].includes(code)) continue;
-            if (shiftHasRealCheckIn(s)) propagateIds.add(s.id);
-        }
+        if (!plainFrancoRest && !ftMarkedOnFrancoDoc) continue;
+
+        const workCandidates = dayShifts.filter(
+            (s) => isLiquidationWorkCandidate(s) && shiftHasRealCheckIn(s) && !isFrancoTrabajadoShift(s),
+        );
+        if (workCandidates.length === 0) continue;
+
+        const coverageWork = workCandidates.filter(isCoverageWorkShift);
+        const toMark = coverageWork.length > 0
+            ? coverageWork
+            : (workCandidates.length === 1 ? workCandidates : []);
+
+        for (const s of toMark) propagateIds.add(s.id);
     }
 
     if (propagateIds.size === 0) return shifts;
     return shifts.map((s) => (
         propagateIds.has(s.id)
-            ? { ...s, isFrancoTrabajado: true, code: s.code || 'FT' }
+            ? { ...s, isFrancoTrabajado: true, _inferredFrancoTrabajado: true, code: s.code || 'FT' }
             : s
     ));
 }
