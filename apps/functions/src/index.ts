@@ -1844,6 +1844,12 @@ export const autoCompletarTurnos = functions
         return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
       });
 
+      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
+      const relieveAbsent = relieveDocs.find(d => {
+        const data = d.data();
+        return data.isAbsent === true || data.status === 'ABSENT';
+      });
+
       if (relievePresent) {
         // CASO A: El relevo ya está presente — safety net, cerrar el turno saliente
         completeBatch.update(docSnap.ref, {
@@ -1893,8 +1899,41 @@ export const autoCompletarTurnos = functions
           alertedNoRelief++;
         }
 
+      } else if (relieveAbsent) {
+        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
+        // → NO cerrar el turno: poner al guardia saliente en retención forzada
+        if (!shift.isRetention) {
+          completeBatch.update(docSnap.ref, {
+            isRetention: true,
+            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
+            autoRetentionAt: now,
+          });
+        }
+        const existing = await db.collection('novedades')
+          .where('shiftId', '==', docSnap.id)
+          .where('type', '==', 'RETENCION_SIN_RELEVO')
+          .limit(1).get();
+        if (existing.empty) {
+          const novRef = db.collection('novedades').doc();
+          auditBatch.set(novRef, {
+            type: 'RETENCION_SIN_RELEVO',
+            status: 'PENDIENTE',
+            shiftId: docSnap.id,
+            objectiveId: shift.objectiveId,
+            objectiveName: shift.objectiveName || '',
+            clientId: shift.clientId || null,
+            empresaId: shiftEmpresaId(shift) || null,
+            employeeName: shift.employeeName || '',
+            positionName: shift.positionName || '',
+            description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
+            createdAt: now,
+            source: 'SYSTEM_SCHEDULER',
+          });
+          alertedNoRelief++;
+        }
+
       } else {
-        // CASO C: Sin relevo — turno único, cerrar directamente
+        // CASO C: Sin relevo en absoluto (turno único sin cobertura continua requerida) — cerrar
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,

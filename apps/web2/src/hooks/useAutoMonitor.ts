@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { stampEmpresaId } from '@/lib/multiempresa';
@@ -191,6 +191,8 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
         if (s.isFranco || s.isUnassigned) return false;
+        // NUNCA auto-completar guardias en retención — su turno no termina hasta que llegue el relevo
+        if (s.isRetention) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
         // Solo completar si pasaron al menos 2 minutos desde el fin de turno
@@ -203,6 +205,12 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
 
         if (isAutoMode) {
           try {
+            // Verificar en Firestore que no fue ya completado por otra tab/instancia
+            const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
+            if (turnoSnap.exists() && (turnoSnap.data()?.isCompleted || turnoSnap.data()?.isRetention)) {
+              // Ya fue completado o marcado como retención por otra instancia — no duplicar
+              continue;
+            }
             await updateDoc(doc(db, 'turnos', s.id), {
               status: 'COMPLETED',
               isCompleted: true,
