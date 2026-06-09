@@ -1972,26 +1972,96 @@ export const autoCompletarTurnos = functions
         }
 
       } else {
-        // CASO C: Sin relevo en absoluto (turno Ãºnico sin cobertura continua requerida) â€” cerrar
-        completeBatch.update(docSnap.ref, {
-          status: 'COMPLETED',
-          isCompleted: true,
-          realEndTime: now,
-          autoCompletedAt: now,
-          autoCompletedBy: 'SYSTEM_SCHEDULER',
-          autoCloseReason: 'SIN_RELEVO',
-        });
-        const logRef = db.collection('audit_logs').doc();
-        auditBatch.set(logRef, {
-          action: 'AUTO_COMPLETE_SHIFT',
-          actorName: 'Sistema (Scheduler)',
-          actorUid: 'SYSTEM',
-          module: 'OPERACIONES',
-          shiftId: docSnap.id,
-          details: `Turno finalizado (sin relevo): ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
-          timestamp: now,
-        });
-        completed++;
+        // CASO C: Sin ningún relevo registrado.
+        // Verificar si el puesto requiere cobertura continua (24HS) consultando el SLA.
+        // Si es 24HS (tiene allowedShiftTypes con slots M/T/N) → retener al guardia.
+        // Si es CUSTOM/parcial (sin slots de rotación) → cerrar el turno.
+        const empId = shiftEmpresaId(shift);
+        let requiresContinuousCoverage = false;
+        try {
+          const slaSnap = await db.collection('servicios_sla')
+            .where('objectiveId', '==', shift.objectiveId)
+            .where('status', '==', 'active')
+            .limit(1).get();
+          if (!slaSnap.empty) {
+            const slaData = slaSnap.docs[0].data();
+            const positions: any[] = slaData.positions || [];
+            const posName = (shift.positionName || '').trim().toLowerCase();
+            const matchedPos = positions.find((p: any) => (p.name || '').trim().toLowerCase() === posName);
+            // Puesto con allowedShiftTypes definidos → rotación 24h → cobertura continua
+            requiresContinuousCoverage = Array.isArray(matchedPos?.allowedShiftTypes) && matchedPos.allowedShiftTypes.length > 0;
+          }
+        } catch (e) {
+          console.warn('[autoCompletarTurnos] Error checking SLA:', e);
+        }
+
+        if (requiresContinuousCoverage) {
+          // CASO C2: Puesto 24HS sin relevo → retener al guardia + push
+          if (!shift.isRetention) {
+            completeBatch.update(docSnap.ref, {
+              isRetention: true,
+              retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
+              autoRetentionAt: now,
+            });
+          }
+          const retTokensC = await getEmployeeTokens(db, shift.employeeId as string);
+          if (retTokensC.length > 0) {
+            await admin.messaging().sendEachForMulticast({
+              tokens: retTokensC,
+              notification: {
+                title: '⏰ Quedaste retenido',
+                body: `Permanecé en ${shift.objectiveName || 'el puesto'} hasta nuevo aviso. No hay relevo registrado.`,
+              },
+              webpush: {
+                notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                fcmOptions: { link: '/empleado/dashboard' },
+              },
+            }).catch(e => console.warn('[autoCompletarTurnos] Push retención C2 error:', e));
+          }
+          const existingC = await db.collection('novedades')
+            .where('shiftId', '==', docSnap.id)
+            .where('type', '==', 'RETENCION_SIN_RELEVO')
+            .limit(1).get();
+          if (existingC.empty) {
+            const novRef = db.collection('novedades').doc();
+            auditBatch.set(novRef, {
+              type: 'RETENCION_SIN_RELEVO',
+              status: 'PENDIENTE',
+              shiftId: docSnap.id,
+              objectiveId: shift.objectiveId,
+              objectiveName: shift.objectiveName || '',
+              clientId: shift.clientId || null,
+              empresaId: empId || null,
+              employeeName: shift.employeeName || '',
+              positionName: shift.positionName || '',
+              description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — puesto 24HS sin relevo registrado.`,
+              createdAt: now,
+              source: 'SYSTEM_SCHEDULER',
+            });
+            alertedNoRelief++;
+          }
+        } else {
+          // CASO C: Puesto CUSTOM/parcial sin continuidad → cerrar turno automáticamente
+          completeBatch.update(docSnap.ref, {
+            status: 'COMPLETED',
+            isCompleted: true,
+            realEndTime: now,
+            autoCompletedAt: now,
+            autoCompletedBy: 'SYSTEM_SCHEDULER',
+            autoCloseReason: 'SIN_RELEVO_CUSTOM',
+          });
+          const logRef = db.collection('audit_logs').doc();
+          auditBatch.set(logRef, {
+            action: 'AUTO_COMPLETE_SHIFT',
+            actorName: 'Sistema (Scheduler)',
+            actorUid: 'SYSTEM',
+            module: 'OPERACIONES',
+            shiftId: docSnap.id,
+            details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+            timestamp: now,
+          });
+          completed++;
+        }
       }
     }
 

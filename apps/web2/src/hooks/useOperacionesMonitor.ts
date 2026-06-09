@@ -458,7 +458,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
         if (filterText) { const lower = filterText.toLowerCase(); list = list.filter((s: any) => (s.employeeName||'').toLowerCase().includes(lower) || (s.clientName||'').toLowerCase().includes(lower)); }
         // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
-        const hoy = list.filter((s:any) => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+        const hoy = list.filter((s:any) => {
+            if (s.isCompleted && !s.isRetention) return false;
+            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+        });
         switch (viewTab) {
             case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
             case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
@@ -472,7 +476,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             default:           return hoy;
         }
     }, [processedData, viewTab, filterText, selectedClientId, now]);
-    const stats = useMemo(() => { const hoy = processedData.filter(s => isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isOperationalVacancy).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+    const stats = useMemo(() => { const hoy = processedData.filter(s => {
+            if (s.isCompleted && !s.isRetention) return false;
+            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isOperationalVacancy).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
