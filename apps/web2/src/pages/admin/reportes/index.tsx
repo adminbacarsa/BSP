@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
@@ -87,6 +87,8 @@ export default function ReportsPage() {
     const [shiftsFilterTimeTo, setShiftsFilterTimeTo] = useState('');
     const [shiftsFilterObjective, setShiftsFilterObjective] = useState('');
     const [shiftsFilterStatus, setShiftsFilterStatus] = useState('');
+    const [shiftsObjectiveSearch, setShiftsObjectiveSearch] = useState('');
+    const [shiftsEmployeeSearch, setShiftsEmployeeSearch] = useState('');
     const [detailItem, setDetailItem] = useState<any | null>(null);
     const [detailFilterTimeFrom, setDetailFilterTimeFrom] = useState('');
     const [detailFilterTimeTo, setDetailFilterTimeTo] = useState('');
@@ -126,6 +128,69 @@ export default function ReportsPage() {
         }
         return list;
     }, [employeeReport, empSortBy]);
+
+    const shiftObjectiveName = useCallback((s: any) =>
+        String(s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '').trim(),
+    [objMap]);
+
+    const shiftsDetailMeta = useMemo(() => {
+        if (!employeeReport.length) {
+            return { allShifts: [] as any[], objectiveOptions: [] as string[], employeeOptions: [] as { id: string; name: string; legajo: string }[] };
+        }
+        const allShifts = employeeReport.flatMap(emp =>
+            (emp.rawShifts || []).map((s: any) => ({
+                ...s,
+                _empName: emp.name,
+                _empId: emp.id,
+                _empLegajo: emp.legajo || '',
+            })),
+        );
+        const objectiveOptions = [...new Set(allShifts.map(shiftObjectiveName).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        const scopedByObjective = shiftsFilterObjective
+            ? allShifts.filter(s => shiftObjectiveName(s) === shiftsFilterObjective)
+            : allShifts;
+        const employeeMap = new Map<string, { id: string; name: string; legajo: string }>();
+        scopedByObjective.forEach(s => {
+            if (s._empId) {
+                employeeMap.set(s._empId, { id: s._empId, name: s._empName, legajo: s._empLegajo || '' });
+            }
+        });
+        const employeeOptions = [...employeeMap.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+        return { allShifts, objectiveOptions, employeeOptions };
+    }, [employeeReport, shiftsFilterObjective, shiftObjectiveName]);
+
+    useEffect(() => {
+        if (!selectedDetailEmployee) return;
+        if (!shiftsDetailMeta.employeeOptions.some(e => e.id === selectedDetailEmployee)) {
+            setSelectedDetailEmployee('');
+        }
+    }, [shiftsFilterObjective, shiftsDetailMeta.employeeOptions, selectedDetailEmployee]);
+
+    const clearShiftsFilters = () => {
+        setShiftsFilterObjective('');
+        setShiftsObjectiveSearch('');
+        setSelectedDetailEmployee('');
+        setShiftsEmployeeSearch('');
+        setShiftsFilterTimeFrom('');
+        setShiftsFilterTimeTo('');
+        setShiftsFilterStatus('');
+    };
+
+    const filteredObjectiveOptions = useMemo(() => {
+        const q = shiftsObjectiveSearch.trim().toLowerCase();
+        if (!q) return shiftsDetailMeta.objectiveOptions;
+        return shiftsDetailMeta.objectiveOptions.filter(o => o.toLowerCase().includes(q));
+    }, [shiftsDetailMeta.objectiveOptions, shiftsObjectiveSearch]);
+
+    const filteredEmployeeOptions = useMemo(() => {
+        const q = shiftsEmployeeSearch.trim().toLowerCase();
+        if (!q) return shiftsDetailMeta.employeeOptions;
+        return shiftsDetailMeta.employeeOptions.filter(e => {
+            const hay = `${e.name} ${e.legajo}`.toLowerCase();
+            return hay.includes(q);
+        });
+    }, [shiftsDetailMeta.employeeOptions, shiftsEmployeeSearch]);
 
     const downloadPayrollJson = () => {
         const rows = sortedEmployeeReport;
@@ -528,19 +593,23 @@ export default function ReportsPage() {
             );
         }
 
-        // Aplanar todos los turnos de todos los empleados con nombre
-        const allShiftsFlat: any[] = employeeReport.flatMap(emp =>
-            (emp.rawShifts || []).map((s: any) => ({ ...s, _empName: emp.name, _empId: emp.id }))
-        );
-
-        // Aplicar filtros
-        const filtered = allShiftsFlat
+        // Aplicar filtros (objetivo → empleado → hora/estado)
+        const objSearch = shiftsObjectiveSearch.trim().toLowerCase();
+        const empSearch = shiftsEmployeeSearch.trim().toLowerCase();
+        const filtered = shiftsDetailMeta.allShifts
             .sort((a, b) => (a.startTime?.seconds||0) - (b.startTime?.seconds||0))
             .filter(s => {
-                if (selectedDetailEmployee && s._empId !== selectedDetailEmployee) return false;
+                const on = shiftObjectiveName(s);
                 if (shiftsFilterObjective) {
-                    const on = s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '';
                     if (on !== shiftsFilterObjective) return false;
+                } else if (objSearch && !on.toLowerCase().includes(objSearch)) {
+                    return false;
+                }
+                if (selectedDetailEmployee) {
+                    if (s._empId !== selectedDetailEmployee) return false;
+                } else if (empSearch) {
+                    const hay = `${s._empName} ${s._empLegajo}`.toLowerCase();
+                    if (!hay.includes(empSearch)) return false;
                 }
                 if (shiftsFilterTimeFrom || shiftsFilterTimeTo) {
                     const d = new Date((s.startTime?.seconds || 0) * 1000);
@@ -567,10 +636,16 @@ export default function ReportsPage() {
                 return true;
             });
 
-        const showEmpCol = !selectedDetailEmployee;
-        const title = selectedDetailEmployee
-            ? employeeReport.find(e => e.id === selectedDetailEmployee)?.name || 'Empleado'
-            : 'Todos los empleados';
+        const showEmpCol = !selectedDetailEmployee && !empSearch;
+        const titleParts: string[] = [];
+        if (shiftsFilterObjective) titleParts.push(shiftsFilterObjective);
+        else if (objSearch) titleParts.push(`objetivo: "${shiftsObjectiveSearch.trim()}"`);
+        if (selectedDetailEmployee) {
+            titleParts.push(employeeReport.find(e => e.id === selectedDetailEmployee)?.name || 'Empleado');
+        } else if (empSearch) {
+            titleParts.push(`empleado: "${shiftsEmployeeSearch.trim()}"`);
+        }
+        const title = titleParts.length > 0 ? titleParts.join(' · ') : 'Todos los objetivos y empleados';
 
         return (
             <div className="bg-white rounded-xl shadow-sm border overflow-hidden print-container animate-in fade-in slide-in-from-bottom-4">
@@ -599,7 +674,13 @@ export default function ReportsPage() {
                             </tr>
                         </thead>
                         <tbody className="divide-y">
-                            {filtered.map((s: any) => {
+                            {filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={showEmpCol ? 10 : 9} className="p-10 text-center text-slate-400 text-sm">
+                                        No hay turnos con los filtros actuales. Probá ampliar objetivo/empleado o limpiar filtros.
+                                    </td>
+                                </tr>
+                            ) : filtered.map((s: any) => {
                                 const dateObj = new Date((s.startTime?.seconds||0) * 1000);
                                 const dayName = dateObj.toLocaleDateString('es-AR', { weekday: 'long' });
                                 const rawCode = (s.code || '').trim().toUpperCase();
@@ -1280,24 +1361,64 @@ export default function ReportsPage() {
                     </div>
 
                     {activeTab === 'SHIFTS' && (<>
-                        <div className="min-w-[180px]">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Empleado</label>
-                            <select value={selectedDetailEmployee} onChange={e => setSelectedDetailEmployee(e.target.value)}
-                                className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
-                                <option value="">Todos los empleados</option>
-                                {sortedEmployeeReport.map(emp => (
+                        <div className="min-w-[240px] flex flex-col gap-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">1. Objetivo</label>
+                            <input
+                                type="search"
+                                value={shiftsObjectiveSearch}
+                                onChange={e => setShiftsObjectiveSearch(e.target.value)}
+                                placeholder="Buscar objetivo..."
+                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            />
+                            <select
+                                value={shiftsFilterObjective}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    setShiftsFilterObjective(v);
+                                    if (v) setShiftsObjectiveSearch(v);
+                                    setSelectedDetailEmployee('');
+                                    setShiftsEmployeeSearch('');
+                                }}
+                                className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            >
+                                <option value="">Todos los objetivos ({shiftsDetailMeta.objectiveOptions.length})</option>
+                                {filteredObjectiveOptions.map(o => (
+                                    <option key={o} value={o}>{o}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="min-w-[240px] flex flex-col gap-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">
+                                2. Empleado
+                                {shiftsFilterObjective && (
+                                    <span className="font-normal text-indigo-500 normal-case ml-1">en {shiftsFilterObjective}</span>
+                                )}
+                            </label>
+                            <input
+                                type="search"
+                                value={shiftsEmployeeSearch}
+                                onChange={e => setShiftsEmployeeSearch(e.target.value)}
+                                placeholder="Buscar por nombre o legajo..."
+                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            />
+                            <select
+                                value={selectedDetailEmployee}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    setSelectedDetailEmployee(v);
+                                    if (v) {
+                                        const emp = shiftsDetailMeta.employeeOptions.find(x => x.id === v);
+                                        if (emp) setShiftsEmployeeSearch(emp.legajo ? `${emp.legajo} ${emp.name}` : emp.name);
+                                    }
+                                }}
+                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            >
+                                <option value="">Todos los empleados ({shiftsDetailMeta.employeeOptions.length})</option>
+                                {filteredEmployeeOptions.map(emp => (
                                     <option key={emp.id} value={emp.id}>
                                         {emp.legajo ? `[${emp.legajo}] ` : ''}{emp.name}
                                     </option>
                                 ))}
-                            </select>
-                        </div>
-                        <div className="min-w-[160px]">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Objetivo</label>
-                            <select value={shiftsFilterObjective} onChange={e => setShiftsFilterObjective(e.target.value)}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
-                                <option value="">Todos los objetivos</option>
-                                {[...new Set(employeeReport.flatMap(e => (e.rawShifts||[]).map((s: any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean)))].sort().map((o: any) => <option key={o} value={o}>{o}</option>)}
                             </select>
                         </div>
                         <div className="min-w-[200px]">
@@ -1328,6 +1449,15 @@ export default function ReportsPage() {
                                 <option value="PENDIENTE">Pendiente</option>
                             </select>
                         </div>
+                        {(shiftsFilterObjective || shiftsObjectiveSearch || selectedDetailEmployee || shiftsEmployeeSearch || shiftsFilterTimeFrom || shiftsFilterTimeTo || shiftsFilterStatus) && (
+                            <button
+                                type="button"
+                                onClick={clearShiftsFilters}
+                                className="self-end text-[10px] font-black text-rose-500 hover:text-rose-700 px-3 py-2.5 border border-rose-200 rounded-xl bg-rose-50 hover:bg-rose-100"
+                            >
+                                Limpiar filtros
+                            </button>
+                        )}
                     </>)}
 
                     {activeTab === 'AUDIT' && auditLogs.length > 0 && (
