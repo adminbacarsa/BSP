@@ -446,6 +446,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
                 return false;
             }
+            // Si el slot ya inició y hay un guardia PRESENTE ahora en esa posición
+            // (llegó tarde pero ya está cubriendo), suprimir la vacante.
+            // La ausencia del tramo inicial ya quedó capturada como AUSENCIA del guardia ausente.
+            const slotAlreadyStarted = v.shiftDateObj && v.shiftDateObj.getTime() <= now.getTime();
+            if (slotAlreadyStarted) {
+                const hasCurrentGuard = dedupedRealShifts.some((s: any) =>
+                    s.isPresent && !s.isCompleted &&
+                    s.objectiveId === v.objectiveId &&
+                    normPosName(s.positionName) === normPosName(v.positionName)
+                );
+                if (hasCurrentGuard) return false;
+            }
             return true;
         });
 
@@ -757,3 +769,4 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
     };
 };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
