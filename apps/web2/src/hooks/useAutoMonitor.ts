@@ -164,6 +164,24 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
+      // ── RETENCIÓN T+0: guardia presente cuyo turno acaba de terminar ──────────
+      // Escribe isRetention:true a Firestore inmediatamente → dispara onTurnoWrite → push al guardia
+      const newlyRetained = processedData.filter(s => {
+        if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
+        if (processedIds.current.has(`retention_set_${s.id}`)) return false;
+        // isRetention computado (por tiempo) pero aún no guardado en Firestore
+        const retentionByTime = s.endDateObj && (new Date()).getTime() > s.endDateObj.getTime();
+        return retentionByTime && !s.isRetention; // Firestore field not yet set
+      });
+      for (const s of newlyRetained) {
+        processedIds.current.add(`retention_set_${s.id}`);
+        updateDoc(doc(db, 'turnos', s.id), {
+          isRetention: true,
+          retentionReason: 'FIN_TURNO_SIN_RELEVO',
+          autoRetentionAt: serverTimestamp(),
+        }).catch(e => console.warn('[retention T+0]', e));
+      }
+
       // Guardias en retención > 30 min
       const retentions = processedData.filter(s => {
         if (!s.isRetention) return false;
