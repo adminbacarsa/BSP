@@ -59,7 +59,9 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
     // Límite de 60 min para guardias ya marcados ausentes
     const LATE_LIMIT_MIN = 60;
     const wasAbsent = incomingShift.isAbsent === true;
-    const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN;
+    // Solo bloquear DAR PRESENTE si el turno está cubierto (hay otro haciendo su trabajo)
+    // Si solo está tarde pero no cubierto, el operador DEBE poder darle presente igualmente
+    const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN && isCovered;
     // Detectar si el turno ya fue cubierto por otro guardia
     const isCovered = incomingShift.status === 'COVERED' || !!incomingShift.coveredByEmployeeId;
 
@@ -479,12 +481,13 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
     });
 
-    // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición
+    // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición — HOY únicamente
     const adelanto = logic.processedData.filter((s: any) =>
         !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
         s.objectiveId === absenceShift.objectiveId &&
         s.positionName === absenceShift.positionName &&
-        toDate(s.shiftDateObj) > now
+        toDate(s.shiftDateObj) > now &&
+        isSameDay(toDate(s.shiftDateObj), now)  // ← solo HOY, no mañana
     ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
 
     // Helper de experiencia: nivel según datos del empleado
@@ -608,7 +611,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const handleReten = async (emp: any) => {
         setLoading('reten_' + emp.id);
         try {
-            const slotStart = toDate(absenceShift.shiftDateObj);
+            // RETEN empieza AHORA (no en el pasado) — evita que detectarAusencias lo marque AA
+            const slotStart = new Date(); // ahora
             const eightHoursLater = new Date(now.getTime() + 8 * 3600000);
             const endTime = eightHoursLater > absenceEnd ? eightHoursLater : absenceEnd;
             const empName = emp.fullName || emp.name || '';

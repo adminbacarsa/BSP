@@ -2082,6 +2082,8 @@ export const detectarAusencias = functions
         if (shift.lateArrivalAt) continue;
         // Caso 2: operador registró aviso anticipado → no marcar AA
         if (shift.notifiedAbsent === true) continue;
+        // Retenes no se auto-detectan como ausentes — son convocados urgentes
+        if (shift.isReten === true || shift.origin === 'RETEN') continue;
         // Fix timezone: no marcar AA si el turno termina en el futuro LEJANO
         // (evita marcar turnos nocturnos 11 PM - 7 AM a las pocas horas de iniciados)
         const endMs = shift.endTime?.toMillis?.() ?? 0;
