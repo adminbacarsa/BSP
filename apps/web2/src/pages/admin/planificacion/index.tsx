@@ -5233,24 +5233,32 @@ export default function PlanificacionPage() {
                             
                             {/* FILA SNAPSHOT (HISTÓRICA) - Solo se muestra si hay snapshotData y estamos en modo snapshot */}
                             {isSnapshotView && snapshotData && (
-                                <tr className="bg-amber-50 border-b-2 border-amber-200">
-                                    <td className="sticky left-0 z-20 bg-amber-100 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
-                                        <span className="text-[9px] font-bold truncate text-amber-900" title={emp.name}>{emp.name}</span>
+                                <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                                    <td className="sticky left-0 z-20 bg-white dark:bg-slate-800 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                                        <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                     </td>
                                     {daysInMonth.map((day) => {
                                         const key = `${emp.id}_${getDateKey(day)}`;
                                         const snapShift = snapshotData[key];
-                                        let content = null; let style = "bg-amber-50 text-amber-300";
+                                        const isCellWeekend = [0, 6].includes(day.getDay());
+                                        let content = null;
+                                        let style = '';
                                         if (snapShift) {
-                                            content = snapShift.code;
-                                            style = `${SHIFT_STYLES[snapShift.code] || 'bg-slate-200'} opacity-70 grayscale`;
-                                            if (snapShift.isFrancoTrabajado) { content = "FT"; style = SHIFT_STYLES['FT']; }
-                                            else if (snapShift.isFrancoCompensatorio) { content = "FF"; style = SHIFT_STYLES['FF']; }
+                                            if (snapShift.isFrancoTrabajado) { content = 'FT'; style = SHIFT_STYLES['FT']; }
+                                            else if (snapShift.isFrancoCompensatorio) { content = 'FF'; style = SHIFT_STYLES['FF']; }
+                                            else {
+                                                content = snapShift.code;
+                                                style = getDefaultStyle(snapShift.code);
+                                            }
                                         }
                                         if (compareChangedKeys?.has(key)) {
-                                            style += ' ring-2 ring-amber-600 ring-offset-1 z-20 opacity-100';
+                                            style += ' ring-2 ring-amber-600 ring-offset-1 z-20';
                                         }
-                                        return <td key={`snap_${key}`} className="border-b border-r p-0.5 text-center bg-amber-50/50"><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-bold ${style}`}>{content}</div></td>;
+                                        return (
+                                            <td key={`snap_${key}`} className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`}>
+                                                <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style}`}>{content}</div>
+                                            </td>
+                                        );
                                     })}
                                 </tr>
                             )}
@@ -6006,7 +6014,7 @@ export default function PlanificacionPage() {
                         )}
                         {comparingSnapshot ? (
                             <div className={`flex h-full min-h-0 gap-1 p-0.5 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
-                                <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-amber-400 bg-amber-50/20">
+                                <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-amber-400 bg-white">
                                     <div className="shrink-0 px-2 py-0.5 bg-amber-100 border-b border-amber-200 flex items-center justify-between gap-2">
                                         <span className="text-[9px] font-black text-amber-900 uppercase flex items-center gap-1"><History size={10}/> Histórico</span>
                                         <span className="text-[8px] font-bold text-amber-700">Borde ámbar = cambió</span>
