@@ -86,12 +86,32 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setIsOnline(navigator.onLine);
-    const on  = () => setIsOnline(true);
+
+    // Verificación real: navigator.onLine solo detecta red, no internet
+    const checkRealConnectivity = async () => {
+      if (!navigator.onLine) { setIsOnline(false); return; }
+      try {
+        await fetch('https://www.google.com/favicon.ico', {
+          method: 'HEAD', mode: 'no-cors', cache: 'no-store',
+          signal: AbortSignal.timeout(4000),
+        });
+        setIsOnline(true);
+      } catch {
+        setIsOnline(false);
+      }
+    };
+
+    checkRealConnectivity();
+    const interval = setInterval(checkRealConnectivity, 30000);
+    const on  = () => checkRealConnectivity();
     const off = () => setIsOnline(false);
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
   }, []);
 
   useEffect(() => {
@@ -244,9 +264,10 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
               <span className="hidden sm:inline">ONLINE</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full border border-amber-300 animate-pulse shrink-0">
+            <span className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded-full border border-red-300 animate-pulse shrink-0"
+              title="Sin conexión a internet — los datos no se actualizan">
               <AlertCircle size={10} />
-              <span>OFF</span>
+              <span>SIN INTERNET</span>
             </span>
           )}
 
