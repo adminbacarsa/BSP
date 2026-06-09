@@ -749,11 +749,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [processedData]);
 
     const isClientLocked = !!forcedClientId;
-
+    const handleSetSelectedClientId = (id: string) => { if (!isClientLocked) setSelectedClientId(id); };
     return {
-        processedData, listData, stats, viewTab, setViewTab, filterText, setFilterText,
-        selectedClientId, setSelectedClientId,
-        handleAction, isClientLocked, recentLogs,
-        operatorInfo, objectives,
+        employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA,
+        viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo,
+        selectedClientId, setSelectedClientId: handleSetSelectedClientId,
+        uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
     };
 };
