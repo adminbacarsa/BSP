@@ -420,16 +420,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return true;
         });
 
-        // ── Suprimir vacantes virtuales cuando ya existe un turno AUSENTE para el mismo slot
-        //    (el ausente se muestra en AUSENTES, no hace falta duplicar en VACANTES)
-        const absentSlots = dedupedRealShifts.filter(s => s.isAbsent && s.objectiveId && s.positionName);
+        // ── Suprimir vacantes virtuales solo si están CUBIERTAS (no suprimir por ausencias)
+        // Un ausente sigue generando una vacante — la posición necesita cobertura
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
-            if (absentSlots.some(a => sameSlot(a))) return false;
+            // NO suprimir si hay ausente — mostrar como vacante para que el operador la cubra
+            // (quitado: if absentSlots.some(a => sameSlot(a)) return false)
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);

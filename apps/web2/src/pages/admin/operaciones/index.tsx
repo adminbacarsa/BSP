@@ -467,13 +467,17 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const objLat = absenceShift.lat || -31.4201;
     const objLng = absenceShift.lng || -64.1888;
 
-    // 1. RETENCIÓN: presentes en mismo objetivo y posición
-    const retencion = logic.processedData.filter((s: any) =>
-        s.isPresent && !s.isCompleted &&
-        s.objectiveId === absenceShift.objectiveId &&
-        s.positionName === absenceShift.positionName &&
-        s.id !== absenceShift.id
-    );
+    // 1. RETENCIÓN: presentes en mismo objetivo y posición CUYO TURNO YA INICIÓ
+    // Fix: excluir guardias con turno futuro — solo quien está físicamente en el puesto ahora
+    const retencion = logic.processedData.filter((s: any) => {
+        if (!s.isPresent || s.isCompleted) return false;
+        if (s.objectiveId !== absenceShift.objectiveId) return false;
+        if (s.positionName !== absenceShift.positionName) return false;
+        if (s.id === absenceShift.id) return false;
+        // Verificar que el turno ya empezó (no mostrar turnos futuros)
+        const shiftStartMs = s.shiftDateObj ? toDate(s.shiftDateObj).getTime() : 0;
+        return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
+    });
 
     // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición
     const adelanto = logic.processedData.filter((s: any) =>
@@ -2006,20 +2010,22 @@ export default function OperacionesPage() {
                                 const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
                                 const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
 
-                                // Guardias de este objetivo filtrados por tab actual
+                                // OBJ expandido: muestra TODOS los guardias relevantes del objetivo
+                                // (no filtra por tab — muestra el cuadro completo del objetivo)
+                                const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
-                                    const hoy = isSameDay(s.shiftDateObj, new Date()) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-                                    if (!hoy) return false;
-                                    switch(logic.viewTab) {
-                                        case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
-                                        case 'RETENIDOS':  return s.isRetention;
-                                        case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
-                                        case 'VACANTES':   return s.isOperationalVacancy;
-                                        case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
-                                        case 'FRANCOS':    return s.isFranco;
-                                        default:           return !s.isFranco;
-                                    }
+                                    if (s.isFranco) return false;
+                                    return isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+                                }).sort((a: any, b: any) => {
+                                    // Orden: ausentes primero, luego activos, luego plan
+                                    const statusOrder = (s: any) =>
+                                        s.isAbsent || s.isPotentialAbsence ? 0
+                                        : s.isPresent ? 1
+                                        : s.isRetention ? 2
+                                        : s.isOperationalVacancy ? 3
+                                        : 4; // plan/future
+                                    return statusOrder(a) - statusOrder(b);
                                 });
 
                                 return (
