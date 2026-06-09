@@ -2010,22 +2010,21 @@ export default function OperacionesPage() {
                                 const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
                                 const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
 
-                                // OBJ expandido: muestra TODOS los guardias relevantes del objetivo
-                                // (no filtra por tab — muestra el cuadro completo del objetivo)
+                                // OBJ expandido: filtra por tab activo (mismo comportamiento que lista)
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
-                                    if (s.isFranco) return false;
-                                    return isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-                                }).sort((a: any, b: any) => {
-                                    // Orden: ausentes primero, luego activos, luego plan
-                                    const statusOrder = (s: any) =>
-                                        s.isAbsent || s.isPotentialAbsence ? 0
-                                        : s.isPresent ? 1
-                                        : s.isRetention ? 2
-                                        : s.isOperationalVacancy ? 3
-                                        : 4; // plan/future
-                                    return statusOrder(a) - statusOrder(b);
+                                    const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+                                    if (!hoy2) return false;
+                                    switch(logic.viewTab) {
+                                        case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
+                                        case 'RETENIDOS':  return s.isRetention;
+                                        case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
+                                        case 'VACANTES':   return s.isOperationalVacancy;
+                                        case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
+                                        case 'FRANCOS':    return s.isFranco;
+                                        default:           return !s.isFranco;
+                                    }
                                 });
 
                                 return (

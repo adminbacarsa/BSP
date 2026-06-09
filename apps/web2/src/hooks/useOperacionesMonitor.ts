@@ -229,7 +229,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const hasActiveSLA = activeSlaMap.has(shift.objectiveId);
             const isAbsent = !!shift.isAbsent;
-            const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent;
+            // isPresent solo puede ser true si el turno ya inició (evita turnos futuros con flag incorrecto)
+            const shiftAlreadyStarted = shift.shiftDateObj ? currentTime >= shift.shiftDateObj : true;
+            const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && shiftAlreadyStarted;
             const isCompleted = !!shift.isCompleted;
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
