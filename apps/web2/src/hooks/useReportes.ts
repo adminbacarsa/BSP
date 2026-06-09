@@ -1029,6 +1029,20 @@ export const useReportes = (forcedClientId?: string | null) => {
                 }
                 // 3. Relevo directo
                 if (s.relievedEmployeeName) return s.relievedEmployeeName;
+                // 4. Fallback: buscar ausente en mismo objetivo+puesto+día
+                if (dk && s.objectiveId && s.positionName) {
+                    const sameSlotAbsent = rawShifts.find((r: any) =>
+                        r.id !== s.id &&
+                        (r.isAbsent || r.status === 'ABSENT') &&
+                        r.objectiveId === s.objectiveId &&
+                        (r.positionName || '').trim().toLowerCase() === (s.positionName || '').trim().toLowerCase() &&
+                        shiftCalendarDateKey(r) === dk
+                    );
+                    if (sameSlotAbsent?.employeeName) return sameSlotAbsent.employeeName;
+                    // Si no hay ausente, puede ser una vacante (turno no planificado)
+                    const isOpsShift = ['RETEN','EARLY_START','OPERATIONS_COVERAGE'].includes((s.origin||'').toUpperCase());
+                    if (isOpsShift) return `Vacante ${s.positionName || ''}`;
+                }
                 return null;
             };
 
@@ -1151,154 +1165,4 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (enriched.clientId) objGroups[objId].clientId = enriched.clientId;
             });
 
-            for (const objId of Object.keys(objGroups)) {
-                objGroups[objId].shifts = filterObjectiveReportShifts(
-                    objGroups[objId].shifts,
-                    empMap,
-                    slaSlotCapacity,
-                    objId,
-                );
-            }
-
-            const objLeaveShifts: Record<string, any[]> = {};
-            rawShifts.forEach((s: any) => {
-                const enriched = enrichShift(s);
-                if (shouldBillShiftToObjective(enriched)) return;
-                const objId = resolveCanonicalObjectiveId(enriched, aliasLookup);
-                if (!objId) return;
-                const leaveCode = resolveLeaveCode(enriched.code, enriched._absenceType);
-                if (!leaveCode && !isEmployeeOnLeave({ shiftCode: enriched.code, absenceType: enriched._absenceType })) return;
-                (objLeaveShifts[objId] ||= []).push({
-                    ...enriched,
-                    employeeName: empMap[enriched.employeeId] || null,
-                    code: leaveCode || enriched.code,
-                    _objectiveBillable: false,
-                });
-            });
-
-            const allObjectiveIds = new Set<string>([
-                ...slaObjectiveMetas.keys(),
-                ...Object.keys(objGroups),
-            ]);
-
-            const objRows = [...allObjectiveIds].map(objId => {
-                const meta = slaObjectiveMetas.get(objId)
-                    || aliasLookup[objId]
-                    || {
-                        canonicalId: objId,
-                        name: objMap[objId] || objId,
-                        clientId: String(objGroups[objId]?.clientId || ''),
-                        client: clientMap[String(objGroups[objId]?.clientId || '')] || 'Sin Cliente',
-                    };
-
-                if (!meta.clientId && objGroups[objId]?.clientId) {
-                    meta.clientId = String(objGroups[objId].clientId);
-                    meta.client = clientMap[meta.clientId] || meta.client;
-                }
-                if (!meta.clientId && meta.client && meta.client !== 'Sin Cliente') {
-                    meta.clientId = resolveClientIdFromName(meta.client, clientMap)
-                        || `nm:${meta.client.toLowerCase().replace(/\s+/g, '_').slice(0, 48)}`;
-                }
-                if (forcedClientId && meta.clientId && meta.clientId !== forcedClientId && !meta.clientId.startsWith('nm:')) return null;
-                if (!meta.client || meta.client === 'Sin Cliente') return null;
-
-                const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
-                const staffedShifts = data.shifts.filter((s: any) => !isReportVacancyShift(s, empMap));
-                const vacantRawShifts = data.shifts.filter((s: any) => isReportVacancyShift(s, empMap));
-                const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
-                    acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
-                const stats = calculateStatsExact(
-                    staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
-                    holidaysData,
-                );
-                const annotatedShifts = (() => {
-                    const merged = [
-                        ...data.shifts.map((s: any) => ({
-                            ...s,
-                            employeeName: empMap[s.employeeId] || null,
-                            _objectiveBillable: true,
-                        })),
-                        ...(objLeaveShifts[objId] || []),
-                    ];
-                    const byEmp: Record<string, any[]> = {};
-                    merged.forEach((s) => {
-                        const eid = s.employeeId || '_';
-                        (byEmp[eid] ||= []).push(s);
-                    });
-                    return Object.values(byEmp).flatMap((g) => dedupeShiftsByAbsencePriority(g));
-                })();
-                return {
-                    id: objId,
-                    type: 'OBJECTIVE',
-                    name: meta.name,
-                    clientId: meta.clientId,
-                    client: meta.client || clientMap[meta.clientId] || 'Sin Cliente',
-                    shifts: staffedShifts.length,
-                    vacantShifts: vacantRawShifts.length,
-                    vacantHours,
-                    vendidas: slaMap[objId] || 0,
-                    total: stats.totalReal,
-                    diurnas: stats.totalDiurnas,
-                    nocturnas: stats.totalNocturnas,
-                    extra50: stats.extra50,
-                    extra100: stats.extra100,
-                    plusFeriado: stats.plusFeriado,
-                    rawShifts: annotatedShifts
-                };
-            }).filter((row): row is NonNullable<typeof row> => row !== null);
-            setObjectiveReport(objRows.sort((a, b) => a.client.localeCompare(b.client) || a.name.localeCompare(b.name)));
-
-        } catch (error: any) {
-            console.error("Error generando reporte:", error);
-            if(error.message?.includes("index")) {
-                toast.error("Falta índice en Firebase. Revisa la consola.");
-            } else {
-                toast.error("Error al procesar datos.");
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const loadAudit = async () => {
-        setLoading(true);
-        try {
-            const startDate = new Date(`${dateRange.start}T00:00:00`);
-            const endDate = new Date(`${dateRange.end}T23:59:59.999`);
-
-            const q = query(
-                collection(db, 'audit_logs'), 
-                where('timestamp', '>=', Timestamp.fromDate(startDate)), 
-                where('timestamp', '<=', Timestamp.fromDate(endDate))
-            );
-            
-            const snap = await getDocs(q);
-            const logs = filterRowsByEmpresa(
-                snap.docs.map(d => ({ id: d.id, ...d.data() })),
-                empresaId,
-                scopeEmpresa,
-                migracionCompleta,
-            );
-            
-            setAuditLogs(logs.sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds));
-            
-        } catch(e) { console.error(e); } finally { setLoading(false); }
-    };
-
-    return {
-        loading,
-        dateRange, setDateRange,
-        publishFilter, setPublishFilter,
-        generateReports,
-        loadAudit,
-        employeeReport,
-        objectiveReport,
-        auditLogs,
-        objMap,
-        empMap,
-        empMetaMap,
-        holidaysData,
-        SHIFT_HOURS_LOOKUP,
-        OPERATIVE_CODES
-    };
-};
+            for (const obj
