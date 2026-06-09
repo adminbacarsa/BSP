@@ -7,7 +7,7 @@ import {
   PieChart as PieChartIcon, LayoutDashboard, UserX,
   Sun, RefreshCw, CheckCircle2, XCircle, Info,
   AlertCircle, ArrowRight, CalendarClock, UserMinus,
-  TrendingDown, Layers, Zap
+  TrendingDown, Layers, Zap, X
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
@@ -15,7 +15,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { calculateSlaHoursForMonth, serviceOverlapsMonth } from '@/lib/servicios/slaHoursCalculator';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend
@@ -24,6 +24,30 @@ import {
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4'];
 const fmt = (n: number, decimals = 0) => n.toLocaleString('es-AR', { maximumFractionDigits: decimals });
+
+const formatShiftStart = (startTime: { seconds?: number } | undefined): string => {
+  if (!startTime?.seconds) return '—';
+  return new Date(startTime.seconds * 1000).toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
+
+const NOVEDAD_TYPE_LABELS: Record<string, string> = {
+  RETENCION: 'Retención',
+  ADELANTO_TURNO: 'Adelanto de turno',
+  CONVOCATORIA_RETEN: 'Convocatoria retén',
+  FRANCO_TRABAJADO: 'Franco trabajado',
+  BAJA_CUBIERTA: 'Baja cubierta',
+  VACANTE_A_PLANIFICACION: 'Vacante a planificación',
+  VACANTE_PROTOCOLO_COBERTURA: 'Vacante protocolo',
+  RETENCION_LARGA: 'Retención prolongada',
+  POSICION_SIN_RELEVO: 'Sin relevo',
+  RECARGO_12H: 'Recargo 12h',
+  RECARGO_MAXIMO: 'Recargo máximo',
+  ERROR_PLANIFICACION: 'Error planificación',
+};
 
 const SectionLabel = ({ label }: { label: string }) => (
   <div className="flex items-center gap-3 mb-4">
@@ -48,12 +72,13 @@ const RadialProgress = ({ pct, color, size = 76 }: { pct: number; color: string;
 };
 
 // ─── KPI CARD ─────────────────────────────────────────────────────────────────
-const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, progress, href }: any) => {
+const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, progress, href, onClick }: any) => {
+  const clickable = !!(href || onClick);
   const inner = (
     <div
       role="group"
       aria-label={title}
-      className={`px-4 py-4 rounded-xl border transition-all flex flex-col gap-2.5 ${noData ? 'opacity-55' : ''} ${href ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+      className={`px-4 py-4 rounded-xl border transition-all flex flex-col gap-2.5 ${noData ? 'opacity-55' : ''} ${clickable ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
       style={{
         backgroundColor: 'var(--surf)',
         borderColor: alert ? 'rgba(239,68,68,0.4)' : 'var(--border)',
@@ -70,7 +95,7 @@ const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, prog
           </p>
           {subtext && <p className="text-[10px] font-medium leading-tight mt-0.5 truncate" style={{ color: 'var(--txt3)' }}>{subtext}</p>}
         </div>
-        {href && <ArrowRight size={12} style={{ color: 'var(--txt3)', marginTop: 4 }} className="shrink-0"/>}
+        {clickable && <ArrowRight size={12} style={{ color: 'var(--txt3)', marginTop: 4 }} className="shrink-0"/>}
       </div>
       {progress !== undefined && (
         <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
@@ -81,8 +106,185 @@ const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, prog
     </div>
   );
   if (href) return <a href={href} className="block no-underline">{inner}</a>;
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="block w-full text-left no-underline border-0 bg-transparent p-0">
+        {inner}
+      </button>
+    );
+  }
   return inner;
 };
+
+type DetailModalKind = 'vacantes' | 'novedades' | 'ausentes' | 'contratos_vencer' | 'servicios_riesgo' | 'empleados_sin_turno';
+
+interface TurnoDetalleRow {
+  client: string;
+  objective: string;
+  puesto: string;
+  hora: string;
+  codigo: string;
+  empleado?: string;
+}
+
+interface NovedadDetalleRow {
+  titulo: string;
+  descripcion: string;
+  objetivo: string;
+  empleado: string;
+  hora: string;
+}
+
+function DashboardDetailModal({
+  kind,
+  onClose,
+  vacantesDetalle,
+  novedadesDetalle,
+  ausentesDetalle,
+  serviciosPorVencer,
+  serviciosEnRiesgo,
+  empleadosSinTurnoDetalle,
+}: {
+  kind: DetailModalKind;
+  onClose: () => void;
+  vacantesDetalle: TurnoDetalleRow[];
+  novedadesDetalle: NovedadDetalleRow[];
+  ausentesDetalle: TurnoDetalleRow[];
+  serviciosPorVencer: { client: string; objective: string; dias: number }[];
+  serviciosEnRiesgo: RiesgoRow[];
+  empleadosSinTurnoDetalle: string[];
+}) {
+  const config: Record<DetailModalKind, { title: string; href: string; hrefLabel: string }> = {
+    vacantes: { title: 'Puestos vacantes hoy', href: '/admin/operaciones', hrefLabel: 'Ir a Operaciones' },
+    novedades: { title: 'Novedades registradas hoy', href: '/admin/operaciones', hrefLabel: 'Ir a Operaciones' },
+    ausentes: { title: 'Ausentes confirmados hoy', href: '/admin/operaciones', hrefLabel: 'Ir a Operaciones' },
+    contratos_vencer: { title: 'Contratos por vencer', href: '/admin/servicios', hrefLabel: 'Ir a Servicios y SLA' },
+    servicios_riesgo: { title: 'Servicios con cobertura baja', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
+    empleados_sin_turno: { title: 'Empleados sin turno este mes', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
+  };
+  const { title, href, hrefLabel } = config[kind];
+
+  const renderTurnoRows = (rows: TurnoDetalleRow[], emptyMsg: string) => {
+    if (rows.length === 0) {
+      return <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>{emptyMsg}</p>;
+    }
+    return (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {rows.map((r, i) => (
+          <li key={i} className="px-4 py-3" style={{ backgroundColor: 'var(--surf)' }}>
+            <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>
+              {r.client} — {r.objective}
+            </p>
+            <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>
+              {r.puesto} · {r.hora} · código {r.codigo}
+              {r.empleado ? ` · ${r.empleado}` : ''}
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  let body: React.ReactNode = null;
+  if (kind === 'vacantes') {
+    body = renderTurnoRows(vacantesDetalle, 'No hay puestos vacantes registrados para hoy.');
+  } else if (kind === 'ausentes') {
+    body = renderTurnoRows(ausentesDetalle, 'No hay ausencias confirmadas para hoy.');
+  } else if (kind === 'novedades') {
+    body = novedadesDetalle.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>No hay novedades registradas hoy.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {novedadesDetalle.map((n, i) => (
+          <li key={i} className="px-4 py-3" style={{ backgroundColor: 'var(--surf)' }}>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{n.titulo}</p>
+              {n.hora && <span className="text-[10px] font-bold shrink-0" style={{ color: 'var(--txt3)' }}>{n.hora}</span>}
+            </div>
+            {n.descripcion && (
+              <p className="text-xs font-medium mt-1" style={{ color: 'var(--txt)' }}>{n.descripcion}</p>
+            )}
+            <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--txt3)' }}>
+              {[n.objetivo, n.empleado].filter(Boolean).join(' · ')}
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+  } else if (kind === 'contratos_vencer') {
+    const list = serviciosPorVencer.filter(s => s.dias <= 30);
+    body = list.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>No hay contratos por vencer en los próximos 30 días.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {list.map((s, i) => (
+          <li key={i} className="px-4 py-3 flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--surf)' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{s.client} — {s.objective}</p>
+            </div>
+            <span className={`text-xs font-black shrink-0 ${s.dias <= 15 ? 'text-red-600' : 'text-amber-600'}`}>
+              {s.dias === 0 ? 'Vence hoy' : `${s.dias} días`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  } else if (kind === 'servicios_riesgo') {
+    body = serviciosEnRiesgo.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Todos los servicios con cobertura normal.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {serviciosEnRiesgo.map((s, i) => (
+          <li key={i} className="px-4 py-3" style={{ backgroundColor: 'var(--surf)' }}>
+            <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{s.client} — {s.name}</p>
+            <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>
+              {s.vacPct}% vacantes · {s.absPct}% ausencias (mes en curso)
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+  } else if (kind === 'empleados_sin_turno') {
+    body = empleadosSinTurnoDetalle.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Todos los empleados activos tienen turnos planificados este mes.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border max-h-72 overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+        {empleadosSinTurnoDetalle.map((name, i) => (
+          <li key={i} className="px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: 'var(--surf)', color: 'var(--txt)' }}>
+            {name}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
+      <button type="button" className="absolute inset-0 bg-black/45 border-0" aria-label="Cerrar" onClick={onClose} />
+      <div
+        className="relative w-full max-w-lg rounded-2xl border shadow-2xl flex flex-col max-h-[85vh]"
+        style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <h2 className="text-base font-black" style={{ color: 'var(--txt)' }}>{title}</h2>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg border-0 cursor-pointer hover:bg-black/5" aria-label="Cerrar">
+            <X size={18} style={{ color: 'var(--txt3)' }} />
+          </button>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto flex-1">{body}</div>
+        <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--border)' }}>
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-bold border cursor-pointer"
+            style={{ borderColor: 'var(--border)', color: 'var(--txt3)', backgroundColor: 'transparent' }}>
+            Cerrar
+          </button>
+          <a href={href} className="px-4 py-2 rounded-lg text-xs font-bold no-underline text-white"
+            style={{ backgroundColor: 'var(--company-primary, #6366f1)' }}>
+            {hrefLabel}
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 interface LicenciaRow { empName: string; reason: string; from: string; to: string; }
@@ -90,7 +292,7 @@ interface RiesgoRow { name: string; client: string; vacPct: number; absPct: numb
 interface ClientHrs { name: string; hrs: number; pct: number; }
 
 // ─── CACHE ────────────────────────────────────────────────────────────────────
-const CACHE_KEY_PREFIX = 'dashboard_cache_v4';
+const CACHE_KEY_PREFIX = 'dashboard_cache_v5';
 const CACHE_TTL = 5 * 60 * 1000;
 
 function cacheKeyForEmpresa(empresaId: string) {
@@ -138,6 +340,11 @@ function AdminDashboard() {
   const [vacantesHoy, setVacantesHoy]           = useState(0);
   const [ausentesHoy, setAusentesHoy]           = useState(0);
   const [novedadesHoy, setNovedadesHoy]         = useState(0);
+  const [vacantesDetalle, setVacantesDetalle]     = useState<TurnoDetalleRow[]>([]);
+  const [ausentesDetalle, setAusentesDetalle]     = useState<TurnoDetalleRow[]>([]);
+  const [novedadesDetalle, setNovedadesDetalle]   = useState<NovedadDetalleRow[]>([]);
+  const [empleadosSinTurnoDetalle, setEmpleadosSinTurnoDetalle] = useState<string[]>([]);
+  const [detailModal, setDetailModal]           = useState<DetailModalKind | null>(null);
 
   // ── Planificación
   const [hasPlanificacion, setHasPlanificacion] = useState(false);
@@ -187,22 +394,22 @@ function AdminDashboard() {
 
   // ── ALERTAS CRÍTICAS (derivado)
   const alertasCriticas = useMemo(() => {
-    const list: { type: 'error' | 'warning' | 'info'; msg: string; href?: string }[] = [];
+    const list: { type: 'error' | 'warning' | 'info'; msg: string; href?: string; modal?: DetailModalKind }[] = [];
     if (vacantesHoy > 0)
-      list.push({ type: 'error', msg: `${vacantesHoy} puesto${vacantesHoy > 1 ? 's' : ''} vacante${vacantesHoy > 1 ? 's' : ''} sin cubrir hoy`, href: '/admin/planificacion' });
+      list.push({ type: 'error', msg: `${vacantesHoy} puesto${vacantesHoy > 1 ? 's' : ''} vacante${vacantesHoy > 1 ? 's' : ''} sin cubrir hoy`, modal: 'vacantes' });
     if (novedadesHoy > 0)
-      list.push({ type: 'warning', msg: `${novedadesHoy} novedad${novedadesHoy > 1 ? 'es' : ''} registrada${novedadesHoy > 1 ? 's' : ''} hoy`, href: '/admin/operaciones' });
+      list.push({ type: 'warning', msg: `${novedadesHoy} novedad${novedadesHoy > 1 ? 'es' : ''} registrada${novedadesHoy > 1 ? 's' : ''} hoy`, modal: 'novedades' });
     if (serviciosPorVencer.filter(s => s.dias <= 15).length > 0) {
       const n = serviciosPorVencer.filter(s => s.dias <= 15).length;
-      list.push({ type: 'error', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 15 días`, href: '/admin/servicios' });
+      list.push({ type: 'error', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 15 días`, modal: 'contratos_vencer' });
     } else if (serviciosPorVencer.filter(s => s.dias <= 30).length > 0) {
       const n = serviciosPorVencer.filter(s => s.dias <= 30).length;
-      list.push({ type: 'warning', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 30 días`, href: '/admin/servicios' });
+      list.push({ type: 'warning', msg: `${n} contrato${n > 1 ? 's' : ''} vence${n > 1 ? 'n' : ''} en menos de 30 días`, modal: 'contratos_vencer' });
     }
     if (serviciosEnRiesgo.length > 0)
-      list.push({ type: 'warning', msg: `${serviciosEnRiesgo.length} servicio${serviciosEnRiesgo.length > 1 ? 's' : ''} con cobertura baja este mes`, href: '/admin/planificacion' });
+      list.push({ type: 'warning', msg: `${serviciosEnRiesgo.length} servicio${serviciosEnRiesgo.length > 1 ? 's' : ''} con cobertura baja este mes`, modal: 'servicios_riesgo' });
     if (empleadosSinTurno > 0)
-      list.push({ type: 'info', msg: `${empleadosSinTurno} empleado${empleadosSinTurno > 1 ? 's' : ''} sin turno asignado este mes`, href: '/admin/empleados' });
+      list.push({ type: 'info', msg: `${empleadosSinTurno} empleado${empleadosSinTurno > 1 ? 's' : ''} sin turno asignado este mes`, modal: 'empleados_sin_turno' });
     if (concentracionPct >= 70)
       list.push({ type: 'warning', msg: `Concentración de riesgo: top 3 clientes representan el ${concentracionPct}% de las horas`, href: '/admin/crm' });
     return list;
@@ -253,6 +460,10 @@ function AdminDashboard() {
     setVacantesHoy(d.vacantesHoy ?? 0);
     setAusentesHoy(d.ausentesHoy ?? 0);
     setNovedadesHoy(d.novedadesHoy ?? 0);
+    setVacantesDetalle(d.vacantesDetalle ?? []);
+    setAusentesDetalle(d.ausentesDetalle ?? []);
+    setNovedadesDetalle(d.novedadesDetalle ?? []);
+    setEmpleadosSinTurnoDetalle(d.empleadosSinTurnoDetalle ?? []);
     setHasPlanificacion(d.hasPlanificacion ?? false);
     setCoveragePct(d.coveragePct ?? 0);
     setAvgHrsVigilador(d.avgHrsVigilador ?? 0);
@@ -296,7 +507,22 @@ function AdminDashboard() {
         ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId))
         : collection(db, 'ausencias');
 
-      const [clientsSnap, svcSnap, empSnap, ausSnap, turnosSnap, monthTurnosSnap] = await Promise.all([
+      const novedadesQ = scopeEmpresa
+        ? query(
+            collection(db, 'novedades'),
+            where('empresaId', '==', empresaId),
+            where('createdAt', '>=', Timestamp.fromDate(todayStart)),
+            orderBy('createdAt', 'desc'),
+            limit(80),
+          )
+        : query(
+            collection(db, 'novedades'),
+            where('createdAt', '>=', Timestamp.fromDate(todayStart)),
+            orderBy('createdAt', 'desc'),
+            limit(80),
+          );
+
+      const [clientsSnap, svcSnap, empSnap, ausSnap, turnosSnap, monthTurnosSnap, novedadesSnap] = await Promise.all([
         getDocs(clientsQ),
         getDocs(svcQ),
         getDocs(empQ),
@@ -307,6 +533,7 @@ function AdminDashboard() {
         getDocs(query(collection(db, 'turnos'),
           where('startTime', '>=', Timestamp.fromDate(monthStart)),
           where('startTime', '<=', Timestamp.fromDate(monthEnd)))),
+        getDocs(novedadesQ),
       ]);
 
       // 1. CLIENTES
@@ -379,22 +606,83 @@ function AdminDashboard() {
       const NON_SERVICE_TODAY = new Set(['F','FF','V','L','A','E','AA','AUS']);
       const activeGuards = new Set<string>(), francoGuards = new Set<string>();
       const presentesSet = new Set<string>(), enServicioActivoSet = new Set<string>();
-      let vacantes = 0, absent = 0, novedades = 0, totalTurnos = 0;
+      const vacantesDetalleList: TurnoDetalleRow[] = [];
+      const ausentesDetalleList: TurnoDetalleRow[] = [];
+      let vacantes = 0, absent = 0, novedadesShiftFlag = 0, totalTurnos = 0;
+
       turnosSnap.forEach(doc => {
         const s = doc.data();
         if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
         if (s.status === 'Canceled' || s.status === 'CANCELED') return;
         if (s.employeeId && s.employeeId !== 'VACANTE' && !empMap[s.employeeId]) return;
         totalTurnos++;
-        if (!s.employeeId || s.employeeId === 'VACANTE') { vacantes++; return; }
+        if (!s.employeeId || s.employeeId === 'VACANTE') {
+          vacantes++;
+          vacantesDetalleList.push({
+            client: String(s.clientName || '—'),
+            objective: String(s.objectiveName || '—'),
+            puesto: String(s.positionName || '—'),
+            hora: formatShiftStart(s.startTime as { seconds?: number }),
+            codigo: String(s.code || s.type || '—').toUpperCase(),
+          });
+          return;
+        }
         const code = (s.code || s.type || '').toString().toUpperCase();
         if (code === 'F') francoGuards.add(s.employeeId);
         if (!NON_SERVICE_TODAY.has(code)) activeGuards.add(s.employeeId);
-        if (s.status === 'ABSENT') absent++;
-        if (s.hasNovedad) novedades++;
+        if (s.status === 'ABSENT' || s.isAbsent === true) {
+          absent++;
+          ausentesDetalleList.push({
+            client: String(s.clientName || '—'),
+            objective: String(s.objectiveName || '—'),
+            puesto: String(s.positionName || '—'),
+            hora: formatShiftStart(s.startTime as { seconds?: number }),
+            codigo: code || '—',
+            empleado: String(s.employeeName || empMap[s.employeeId] || '—'),
+          });
+        }
+        if (s.hasNovedad) novedadesShiftFlag++;
         if (s.isPresent || s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isCompleted) presentesSet.add(s.employeeId);
         if ((s.isPresent || s.status === 'PRESENT') && s.status !== 'COMPLETED' && !s.isCompleted) enServicioActivoSet.add(s.employeeId);
       });
+
+      const novedadesDetalleList: NovedadDetalleRow[] = [];
+      const novedadesShiftIdsCovered = new Set<string>();
+      novedadesSnap.forEach(doc => {
+        const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
+        const shiftId = String(d.shiftId || '');
+        if (shiftId) novedadesShiftIdsCovered.add(shiftId);
+        const typeKey = String(d.type || '').trim();
+        const titulo = String(d.title || NOVEDAD_TYPE_LABELS[typeKey] || typeKey || 'Novedad');
+        novedadesDetalleList.push({
+          titulo,
+          descripcion: String(d.description || d.details || '').trim(),
+          objetivo: String(d.objectiveName || '—'),
+          empleado: String(d.employeeName || '').trim(),
+          hora: d.createdAt?.seconds
+            ? new Date(d.createdAt.seconds * 1000).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+            : '',
+        });
+      });
+
+      turnosSnap.forEach(doc => {
+        const s = doc.data();
+        if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
+        if (!s.hasNovedad || novedadesShiftIdsCovered.has(doc.id)) return;
+        novedadesDetalleList.push({
+          titulo: 'Novedad en planificación',
+          descripcion: String(s.comments || 'Turno con novedad pendiente').trim(),
+          objetivo: String(s.objectiveName || '—'),
+          empleado: String(s.employeeName || empMap[s.employeeId] || '—'),
+          hora: formatShiftStart(s.startTime as { seconds?: number }),
+        });
+      });
+
+      const novedades = novedadesDetalleList.length > 0 ? novedadesDetalleList.length : novedadesShiftFlag;
+
+      vacantesDetalleList.sort((a, b) => `${a.client} ${a.objective}`.localeCompare(`${b.client} ${b.objective}`, 'es'));
+      ausentesDetalleList.sort((a, b) => `${a.client} ${a.empleado}`.localeCompare(`${b.client} ${b.empleado}`, 'es'));
 
       // 7. HORAS PLANIFICADAS Y REALES DEL MES
       const SHIFT_HRS: Record<string,number> = { M:8,T:8,N:8,D12:12,N12:12,FT:8 };
@@ -486,7 +774,15 @@ function AdminDashboard() {
       porVencerList.sort((a,b) => a.dias - b.dias);
 
       // 11. EMPLEADOS SIN TURNO ESTE MES
-      const sinTurnoCount = Math.max(0, totalEmp - Object.keys(empHrsMap).length);
+      const empleadosSinTurnoDetalleList: string[] = [];
+      empSnap.forEach(doc => {
+        const d = doc.data();
+        if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
+        if (!['active', 'activo', 'activa'].includes(String(d.status || '').toLowerCase())) return;
+        if (!empHrsMap[doc.id]) empleadosSinTurnoDetalleList.push(empMap[doc.id] || doc.id);
+      });
+      empleadosSinTurnoDetalleList.sort((a, b) => a.localeCompare(b, 'es'));
+      const sinTurnoCount = empleadosSinTurnoDetalleList.length;
 
       // 12. TASA AUSENTISMO 30 DÍAS
       const totalAbs30 = Object.values(absMap30).reduce((a,b) => a + b, 0);
@@ -504,6 +800,10 @@ function AdminDashboard() {
         enServicioHoy: activeGuards.size, francoHoy: francoGuards.size, vacantesHoy: vacantes,
         presentesHoy: presentesSet.size, enServicioActivo: enServicioActivoSet.size,
         ausentesHoy: absent, novedadesHoy: novedades,
+        vacantesDetalle: vacantesDetalleList,
+        ausentesDetalle: ausentesDetalleList,
+        novedadesDetalle: novedadesDetalleList,
+        empleadosSinTurnoDetalle: empleadosSinTurnoDetalleList.slice(0, 48),
         hasPlanificacion: hasPlan,
         coveragePct: hasPlan && totalTurnos > 0 ? ((totalTurnos - vacantes - absent) / totalTurnos) * 100 : 0,
         avgHrsVigilador: totalEmp > 0 ? Math.round(totalSlaH / totalEmp) : 0,
@@ -643,12 +943,20 @@ function AdminDashboard() {
                         {a.type === 'warning' && <AlertTriangle size={13} className="text-amber-500 shrink-0"/>}
                         {a.type === 'info'    && <Info size={13} className="text-blue-500 shrink-0"/>}
                         <span className="text-xs font-semibold" style={{ color: 'var(--txt)' }}>{a.msg}</span>
-                        {a.href && (
+                        {a.modal ? (
+                          <button
+                            type="button"
+                            onClick={() => setDetailModal(a.modal!)}
+                            className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline border-0 bg-transparent cursor-pointer p-0"
+                            style={{ color: 'var(--company-primary,#6366f1)' }}>
+                            Ver detalle <ArrowRight size={10}/>
+                          </button>
+                        ) : a.href ? (
                           <a href={a.href} className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline"
                             style={{ color: 'var(--company-primary,#6366f1)' }}>
                             Ver <ArrowRight size={10}/>
                           </a>
-                        )}
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -708,7 +1016,8 @@ function AdminDashboard() {
                 icon={UserMinus} color="#ef4444"
                 subtext="confirmados hoy"
                 alert={ausentesHoy > 0}
-                noData={!hasPlanificacion}/>
+                noData={!hasPlanificacion}
+                onClick={ausentesHoy > 0 ? () => setDetailModal('ausentes') : undefined}/>
               <KpiCard title="De Franco" value={francoHoy}
                 icon={Sun} color="#06b6d4"
                 subtext="según planificación"
@@ -717,12 +1026,14 @@ function AdminDashboard() {
                 icon={AlertTriangle} color="#f59e0b"
                 subtext="puestos sin cubrir"
                 alert={vacantesHoy > 0}
-                noData={!hasPlanificacion} href="/admin/planificacion"/>
+                noData={!hasPlanificacion}
+                onClick={vacantesHoy > 0 ? () => setDetailModal('vacantes') : undefined}/>
               <KpiCard title="Novedades" value={novedadesHoy}
                 icon={Zap} color="#8b5cf6"
                 subtext="registradas hoy"
                 alert={novedadesHoy > 0}
-                noData={!hasPlanificacion} href="/admin/operaciones"/>
+                noData={!hasPlanificacion}
+                onClick={novedadesHoy > 0 ? () => setDetailModal('novedades') : undefined}/>
             </div>
 
             {/* ══ BLOQUE 4: CUMPLIMIENTO OPERATIVO ══════════════════════════ */}
@@ -1196,6 +1507,19 @@ function AdminDashboard() {
           </>
         )}
       </div>
+
+      {detailModal && (
+        <DashboardDetailModal
+          kind={detailModal}
+          onClose={() => setDetailModal(null)}
+          vacantesDetalle={vacantesDetalle}
+          novedadesDetalle={novedadesDetalle}
+          ausentesDetalle={ausentesDetalle}
+          serviciosPorVencer={serviciosPorVencer}
+          serviciosEnRiesgo={serviciosEnRiesgo}
+          empleadosSinTurnoDetalle={empleadosSinTurnoDetalle}
+        />
+      )}
     </DashboardLayout>
   );
 }
