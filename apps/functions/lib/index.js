@@ -43,7 +43,7 @@ const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES = ['admin', 'employee'];
 exports.createUser = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+        throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida.');
     }
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
     if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
@@ -54,10 +54,10 @@ exports.createUser = functions.https.onCall(async (data, context) => {
         const { email, password, name, role: receivedRole, clientId, dni, fileNumber, address, empresaId: rawEmpresaId } = data;
         const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
         if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-            throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+            throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
         }
         if (!ALLOWED_ROLES.includes(receivedRole)) {
-            throw new functions.https.HttpsError('invalid-argument', 'Rol inválido.');
+            throw new functions.https.HttpsError('invalid-argument', 'Rol invÃ¡lido.');
         }
         const validRole = receivedRole;
         const newEmployee = await authService.createEmployeeProfile(email, password, validRole, name, { clientId: clientId || '', dni, fileNumber, address, empresaId: targetEmpresaId });
@@ -113,10 +113,10 @@ exports.manageShifts = functions.https.onCall(async (data, context) => {
                 return {
                     success: true,
                     data: result,
-                    message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} días)`
+                    message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} dÃ­as)`
                 };
             default:
-                throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+                throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -129,7 +129,7 @@ exports.manageShifts = functions.https.onCall(async (data, context) => {
 });
 exports.auditShift = functions.https.onCall(async (data, context) => {
     if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
     const { shiftId, action, coords, isManualOverride } = data;
     try {
         const auditService = await getService(audit_service_1.AuditService);
@@ -156,7 +156,7 @@ exports.manageData = functions.https.onCall(async (data, context) => {
             case 'CREATE_OBJECTIVE': return { success: true, data: await dmService.createObjective(payload) };
             case 'GET_ALL_OBJECTIVES': return { success: true, data: await dmService.findAllObjectives(payload?.clientId) };
             case 'GET_CLIENT_BY_ID': return { success: true, data: await dmService.getClientById(payload.clientId) };
-            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -204,7 +204,7 @@ exports.manageHierarchy = functions.https.onCall(async (data, context) => {
             case 'DELETE_SHIFT_TYPE':
                 await clientService.deleteShiftType(payload.id);
                 return { success: true, message: 'Modalidad eliminada' };
-            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -229,7 +229,7 @@ exports.manageEmployees = functions.https.onCall(async (data, context) => {
                 return { success: true, data: employees };
             case 'GET_WORKLOAD_REPORT':
                 if (!payload.uid || !payload.month || !payload.year) {
-                    throw new functions.https.HttpsError('invalid-argument', 'Faltan parámetros (uid, month, year) para el reporte.');
+                    throw new functions.https.HttpsError('invalid-argument', 'Faltan parÃ¡metros (uid, month, year) para el reporte.');
                 }
                 const report = await employeeService.getEmployeeWorkload(payload.uid, payload.month, payload.year);
                 return { success: true, data: report };
@@ -241,11 +241,11 @@ exports.manageEmployees = functions.https.onCall(async (data, context) => {
                 return { success: true, message: 'Empleado eliminado.' };
             case 'IMPORT_EMPLOYEES':
                 if (!payload.rows || !Array.isArray(payload.rows)) {
-                    throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo inválido. Se espera un array "rows".');
+                    throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
                 }
                 const importResult = await employeeService.importEmployees(payload.rows, callerAuth.uid);
                 return { success: true, data: importResult };
-            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -278,7 +278,7 @@ exports.manageSystemUsers = functions.https.onCall(async (data, context) => {
                 await sysUserService.deleteSystemUser(payload.uid);
                 return { success: true, message: 'Administrador eliminado.' };
             default:
-                throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+                throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -292,7 +292,7 @@ exports.manageSystemUsers = functions.https.onCall(async (data, context) => {
 exports.manageAbsences = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
     }
     const { action, payload } = data;
     const isAdmin = ADMIN_ROLES.includes(callerAuth.token.role);
@@ -306,7 +306,7 @@ exports.manageAbsences = functions.https.onCall(async (data, context) => {
             case 'CREATE_ABSENCE':
                 return { success: true, data: await absenceService.createAbsence(payload) };
             default:
-                throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+                throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -340,7 +340,7 @@ exports.managePatterns = functions.https.onCall(async (data, context) => {
                 return patternService.generateVacancies(payload.contractId, payload.month, payload.year, payload.objectiveId);
             case 'CLEAR_VACANCIES':
                 return patternService.clearVacancies(payload.objectiveId, payload.month, payload.year);
-            default: throw new functions.https.HttpsError('invalid-argument', 'Acción inválida');
+            default: throw new functions.https.HttpsError('invalid-argument', 'AcciÃ³n invÃ¡lida');
         }
     }
     catch (error) {
@@ -368,7 +368,7 @@ exports.manageAgreements = functions.https.onCall(async (data, context) => {
             case 'INITIALIZE_DEFAULTS':
                 const msg = await agreementService.initializeDefaults();
                 return { success: true, message: msg };
-            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     }
     catch (error) {
@@ -378,14 +378,14 @@ exports.manageAgreements = functions.https.onCall(async (data, context) => {
 });
 exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
     }
     const db = admin.firestore();
     const results = {};
     const t0 = Date.now();
     try {
         const snap = await db.collection('empresas').limit(1).get();
-        results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leída(s)` };
+        results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leÃ­da(s)` };
     }
     catch (e) {
         results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
@@ -434,10 +434,10 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
             if (!snap.empty) {
                 const last = snap.docs[0].data();
                 const ts = last.createdAt?.toDate?.()?.toISOString?.() ?? 'desconocido';
-                results.drive = { ok: true, detail: `Último backup: ${ts}` };
+                results.drive = { ok: true, detail: `Ãšltimo backup: ${ts}` };
             }
             else {
-                results.drive = { ok: true, detail: 'Sin backups registrados aún' };
+                results.drive = { ok: true, detail: 'Sin backups registrados aÃºn' };
             }
         }
         catch (e) {
@@ -446,7 +446,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     }
     try {
         const tokSnap = await db.collection('device_tokens').limit(1).get();
-        results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? '≥1' : '0'}` };
+        results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? 'â‰¥1' : '0'}` };
     }
     catch (e) {
         results.fcm = { ok: false, detail: e.message };
@@ -478,19 +478,19 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
         ]);
         results.data = {
             ok: true,
-            detail: `Empresas: ${empSnap.size} · Admins: ${sysSnap.size} · Empleados activos: ${empActivos.size}`,
+            detail: `Empresas: ${empSnap.size} Â· Admins: ${sysSnap.size} Â· Empleados activos: ${empActivos.size}`,
         };
     }
     catch (e) {
         results.data = { ok: false, detail: e.message };
     }
     const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-    results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'Producción (Firebase)' };
+    results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'ProducciÃ³n (Firebase)' };
     return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
 });
 exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+        throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
     }
     const start = Date.now();
     try {
@@ -520,7 +520,7 @@ exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
 });
 async function chatPlatformAssistantHandler(data, context) {
     if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+        throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
     }
     const t0 = Date.now();
     const uid = context.auth.uid;
@@ -573,7 +573,7 @@ async function chatPlatformAssistantHandler(data, context) {
 }
 function truncateMsg(s, max) {
     const t = String(s).trim();
-    return t.length <= max ? t : `${t.slice(0, max - 3)}…`;
+    return t.length <= max ? t : `${t.slice(0, max - 3)}â€¦`;
 }
 exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     ? functions.https.onCall(chatPlatformAssistantHandler)
@@ -583,12 +583,12 @@ exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 async function optimizePlanningGeminiHandler(data, context) {
     if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+        throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
     }
     const role = String(context.auth.token.role || '').trim();
     const { isSuperAdminRole } = await Promise.resolve().then(() => require('./common/role.util'));
     if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
-        throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
+        throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificaciÃ³n.');
     }
     const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
     const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
@@ -611,7 +611,7 @@ async function optimizePlanningGeminiHandler(data, context) {
         if (e instanceof functions.https.HttpsError)
             throw e;
         console.error('[optimizePlanningGemini]', e?.message, e?.stack);
-        const detail = e?.message || e?.toString?.() || 'Error Gemini planificación';
+        const detail = e?.message || e?.toString?.() || 'Error Gemini planificaciÃ³n';
         throw new functions.https.HttpsError('internal', detail);
     }
 }
@@ -651,7 +651,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     else {
         targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim() || 'bacarsa';
         if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-            throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+            throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
         }
     }
     try {
@@ -680,7 +680,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
 });
 exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+        throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida');
     }
     const targetUid = String(data?.uid ?? context.auth.uid).trim();
     const db = admin.firestore();
@@ -730,7 +730,7 @@ exports.limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).https.on
     else if (target === 'SHIFTS')
         path = 'turnos';
     else
-        throw new functions.https.HttpsError("invalid-argument", "Target inválido");
+        throw new functions.https.HttpsError("invalid-argument", "Target invÃ¡lido");
     await db.recursiveDelete(db.collection(path));
     return { success: true };
 });
@@ -751,7 +751,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     if (shiftData.employeeId !== empId)
         throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
     if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-        throw new functions.https.HttpsError('failed-precondition', 'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.');
+        throw new functions.https.HttpsError('failed-precondition', 'Tu turno fue registrado como ausencia. ContactÃ¡ al operador para gestionar tu ingreso.');
     }
     const nowTs = admin.firestore.Timestamp.now();
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -867,7 +867,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                     employeeName: incomingName,
                     relievedEmployeeId: outEmpId,
                     relievedEmployeeName: outName,
-                    description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
+                    description: `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' â€” ' + outPosName : ''}`,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     autoProcessed: true,
                     source: 'AUTO_RELEVO',
@@ -887,7 +887,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                         tokenSet.add(t);
                 });
                 const tokens = Array.from(tokenSet);
-                const notifTitle = '✅ Turno finalizado — relevado';
+                const notifTitle = 'âœ… Turno finalizado â€” relevado';
                 const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
                 let notifDocId = null;
                 try {
@@ -905,7 +905,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                     notifDocId = notifRef.id;
                 }
                 catch (e) {
-                    console.warn('[requestCheckIn] Error guardando notificación relevo:', e?.message);
+                    console.warn('[requestCheckIn] Error guardando notificaciÃ³n relevo:', e?.message);
                 }
                 if (tokens.length > 0) {
                     try {
@@ -1006,13 +1006,13 @@ function buildPortalEmailHtml(activationLink, empresaNombre) {
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">${nombreUpper}</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados · COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados Â· COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular</strong> y tocá el botón para crear tu contraseña y vincular tu dispositivo en un solo paso:</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">AbrÃ­ este email <strong>desde tu celular</strong> y tocÃ¡ el botÃ³n para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
               <tr>
                 <td style="background:#0f766e;border-radius:8px;">
@@ -1020,17 +1020,17 @@ function buildPortalEmailHtml(activationLink, empresaNombre) {
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrás ver tus turnos, marcar presencia y gestionar novedades.</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrÃ¡s ver tus turnos, marcar presencia y gestionar novedades.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podés ignorarlo.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podÃ©s ignorarlo.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
               <a href="${activationLink}" style="color:#3b82f6;word-break:break-all;">${activationLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · ${nombre}</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· ${nombre}</strong></p>
           </td>
         </tr>
       </table>
@@ -1043,7 +1043,7 @@ function buildPortalEmailText(activationLink, empresaNombre) {
     const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
     return `${nombre} te ha otorgado acceso al Portal de Empleados de COSP.
 
-Abrí este email desde tu celular y tocá el siguiente enlace para crear tu contraseña y vincular tu dispositivo en un solo paso:
+AbrÃ­ este email desde tu celular y tocÃ¡ el siguiente enlace para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:
 
 ${activationLink}
 
@@ -1188,7 +1188,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
 });
 exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
-        throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
+        throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesiÃ³n primero.');
     }
     const { token, deviceInfo, deviceId } = data;
     if (!token) {
@@ -1198,14 +1198,14 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     const tokenRef = db.collection('device_activations').doc(token);
     const tokenDoc = await tokenRef.get();
     if (!tokenDoc.exists) {
-        throw new functions.https.HttpsError('not-found', 'Token de activación inválido.');
+        throw new functions.https.HttpsError('not-found', 'Token de activaciÃ³n invÃ¡lido.');
     }
     const td = tokenDoc.data();
     if (td.used) {
         throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado.');
     }
     if (td.expiresAt.toDate() < new Date()) {
-        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activación expiró. Pedí uno nuevo al administrador.');
+        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activaciÃ³n expirÃ³. PedÃ­ uno nuevo al administrador.');
     }
     if (td.uid !== context.auth.uid) {
         throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
@@ -1228,20 +1228,20 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
     if (!token)
         throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
     if (!password || password.length < 6) {
-        throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+        throw new functions.https.HttpsError('invalid-argument', 'La contraseÃ±a debe tener al menos 6 caracteres.');
     }
     const db = admin.firestore();
     const tokenRef = db.collection('device_activations').doc(token);
     const tokenDoc = await tokenRef.get();
     if (!tokenDoc.exists) {
-        throw new functions.https.HttpsError('not-found', 'Enlace inválido o ya utilizado.');
+        throw new functions.https.HttpsError('not-found', 'Enlace invÃ¡lido o ya utilizado.');
     }
     const td = tokenDoc.data();
     if (td.used) {
         throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado. Tu dispositivo puede estar activo.');
     }
     if (td.expiresAt.toDate() < new Date()) {
-        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expiró. Pedile al administrador que te reenvíe el mail de acceso.');
+        throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expirÃ³. Pedile al administrador que te reenvÃ­e el mail de acceso.');
     }
     const { uid, employeeId } = td;
     const userRecord = await admin.auth().getUser(uid);
@@ -1272,31 +1272,31 @@ function buildClientPortalEmailHtml(resetLink, clientName) {
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes · COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes Â· COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Clientes de COSP</strong> para gestionar el personal autorizado de <strong>${clientName}</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Hacé clic en el botón de abajo para crear tu contraseña y acceder al portal:</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">HacÃ© clic en el botÃ³n de abajo para crear tu contraseÃ±a y acceder al portal:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
               <tr>
                 <td style="background:#4f46e5;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÑA</a>
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ‘A</a>
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
               <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· Bacar sa. Seguridad Privada</strong></p>
           </td>
         </tr>
       </table>
@@ -1308,13 +1308,13 @@ function buildClientPortalEmailHtml(resetLink, clientName) {
 function buildClientPortalEmailText(resetLink, clientName) {
     return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Clientes de COSP para gestionar el personal autorizado de ${clientName}.
 
-Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
+HacÃ© clic en el siguiente enlace para crear tu contraseÃ±a y acceder al portal:
 
 ${resetLink}
 
-Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.
+Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.
 
-Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
+Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.
 
 Saludos,
 Equipo Operativo - Bacar sa. Seguridad Privada`;
@@ -1429,7 +1429,7 @@ exports.sendTestNotification = functions.https.onCall(async (data, context) => {
     if (!tokens.length)
         throw new functions.https.HttpsError('not-found', 'No device tokens found');
     const title = data?.title || 'CronoApp';
-    const body = data?.body || 'Notificación de prueba';
+    const body = data?.body || 'NotificaciÃ³n de prueba';
     const message = {
         notification: { title, body },
         webpush: {
@@ -1491,6 +1491,10 @@ exports.autoCompletarTurnos = functions
             const s = data.status || '';
             return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
         });
+        const relieveAbsent = relieveDocs.find(d => {
+            const data = d.data();
+            return data.isAbsent === true || data.status === 'ABSENT';
+        });
         if (relievePresent) {
             completeBatch.update(docSnap.ref, {
                 status: 'COMPLETED',
@@ -1507,20 +1511,41 @@ exports.autoCompletarTurnos = functions
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+                details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
                 timestamp: now,
             });
             completed++;
         }
         else if (relievePending) {
-            const existing = await db.collection('novedades')
+            if (!shift.isRetention) {
+                completeBatch.update(docSnap.ref, {
+                    isRetention: true,
+                    retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentÃ³`,
+                    autoRetentionAt: now,
+                });
+            }
+            const retTokensB = await getEmployeeTokens(db, shift.employeeId);
+            if (retTokensB.length > 0) {
+                await admin.messaging().sendEachForMulticast({
+                    tokens: retTokensB,
+                    notification: {
+                        title: 'â° Quedaste en retenciÃ³n',
+                        body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+                    },
+                    webpush: {
+                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                        fcmOptions: { link: '/empleado/dashboard' },
+                    },
+                }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B error:', e));
+            }
+            const existingB = await db.collection('novedades')
                 .where('shiftId', '==', docSnap.id)
-                .where('type', '==', 'RELEVO_NO_PRESENTADO')
+                .where('type', '==', 'RETENCION_SIN_RELEVO')
                 .limit(1).get();
-            if (existing.empty) {
+            if (existingB.empty) {
                 const novRef = db.collection('novedades').doc();
                 auditBatch.set(novRef, {
-                    type: 'RELEVO_NO_PRESENTADO',
+                    type: 'RETENCION_SIN_RELEVO',
                     status: 'PENDIENTE',
                     shiftId: docSnap.id,
                     reliefShiftId: relievePending.id,
@@ -1531,7 +1556,52 @@ exports.autoCompletarTurnos = functions
                     employeeName: shift.employeeName || '',
                     reliefEmployeeName: relievePending.data().employeeName || '',
                     positionName: shift.positionName || '',
-                    description: `El relevo de ${shift.employeeName || ''} en ${shift.objectiveName || ''} no se presentó. Puesto en riesgo.`,
+                    description: `â° RETENCIÃ“N: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
+                    createdAt: now,
+                    source: 'SYSTEM_SCHEDULER',
+                });
+                alertedNoRelief++;
+            }
+        }
+        else if (relieveAbsent) {
+            if (!shift.isRetention) {
+                completeBatch.update(docSnap.ref, {
+                    isRetention: true,
+                    retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentÃ³`,
+                    autoRetentionAt: now,
+                });
+            }
+            const retTokensB2 = await getEmployeeTokens(db, shift.employeeId);
+            if (retTokensB2.length > 0) {
+                await admin.messaging().sendEachForMulticast({
+                    tokens: retTokensB2,
+                    notification: {
+                        title: 'â° Quedaste en retenciÃ³n',
+                        body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+                    },
+                    webpush: {
+                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                        fcmOptions: { link: '/empleado/dashboard' },
+                    },
+                }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B2 error:', e));
+            }
+            const existing = await db.collection('novedades')
+                .where('shiftId', '==', docSnap.id)
+                .where('type', '==', 'RETENCION_SIN_RELEVO')
+                .limit(1).get();
+            if (existing.empty) {
+                const novRef = db.collection('novedades').doc();
+                auditBatch.set(novRef, {
+                    type: 'RETENCION_SIN_RELEVO',
+                    status: 'PENDIENTE',
+                    shiftId: docSnap.id,
+                    objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName || '',
+                    clientId: shift.clientId || null,
+                    empresaId: shiftEmpresaId(shift) || null,
+                    employeeName: shift.employeeName || '',
+                    positionName: shift.positionName || '',
+                    description: `âš ï¸ RETENCIÃ“N FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -1539,25 +1609,90 @@ exports.autoCompletarTurnos = functions
             }
         }
         else {
-            completeBatch.update(docSnap.ref, {
-                status: 'COMPLETED',
-                isCompleted: true,
-                realEndTime: now,
-                autoCompletedAt: now,
-                autoCompletedBy: 'SYSTEM_SCHEDULER',
-                autoCloseReason: 'SIN_RELEVO',
-            });
-            const logRef = db.collection('audit_logs').doc();
-            auditBatch.set(logRef, {
-                action: 'AUTO_COMPLETE_SHIFT',
-                actorName: 'Sistema (Scheduler)',
-                actorUid: 'SYSTEM',
-                module: 'OPERACIONES',
-                shiftId: docSnap.id,
-                details: `Turno finalizado (sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-                timestamp: now,
-            });
-            completed++;
+            const empId = shiftEmpresaId(shift);
+            let requiresContinuousCoverage = false;
+            try {
+                const slaSnap = await db.collection('servicios_sla')
+                    .where('objectiveId', '==', shift.objectiveId)
+                    .where('status', '==', 'active')
+                    .limit(1).get();
+                if (!slaSnap.empty) {
+                    const slaData = slaSnap.docs[0].data();
+                    const positions = slaData.positions || [];
+                    const posName = (shift.positionName || '').trim().toLowerCase();
+                    const matchedPos = positions.find((p) => (p.name || '').trim().toLowerCase() === posName);
+                    requiresContinuousCoverage = Array.isArray(matchedPos?.allowedShiftTypes) && matchedPos.allowedShiftTypes.length > 0;
+                }
+            }
+            catch (e) {
+                console.warn('[autoCompletarTurnos] Error checking SLA:', e);
+            }
+            if (requiresContinuousCoverage) {
+                if (!shift.isRetention) {
+                    completeBatch.update(docSnap.ref, {
+                        isRetention: true,
+                        retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
+                        autoRetentionAt: now,
+                    });
+                }
+                const retTokensC = await getEmployeeTokens(db, shift.employeeId);
+                if (retTokensC.length > 0) {
+                    await admin.messaging().sendEachForMulticast({
+                        tokens: retTokensC,
+                        notification: {
+                            title: '⏰ Quedaste retenido',
+                            body: `Permanecé en ${shift.objectiveName || 'el puesto'} hasta nuevo aviso. No hay relevo registrado.`,
+                        },
+                        webpush: {
+                            notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
+                            fcmOptions: { link: '/empleado/dashboard' },
+                        },
+                    }).catch(e => console.warn('[autoCompletarTurnos] Push retención C2 error:', e));
+                }
+                const existingC = await db.collection('novedades')
+                    .where('shiftId', '==', docSnap.id)
+                    .where('type', '==', 'RETENCION_SIN_RELEVO')
+                    .limit(1).get();
+                if (existingC.empty) {
+                    const novRef = db.collection('novedades').doc();
+                    auditBatch.set(novRef, {
+                        type: 'RETENCION_SIN_RELEVO',
+                        status: 'PENDIENTE',
+                        shiftId: docSnap.id,
+                        objectiveId: shift.objectiveId,
+                        objectiveName: shift.objectiveName || '',
+                        clientId: shift.clientId || null,
+                        empresaId: empId || null,
+                        employeeName: shift.employeeName || '',
+                        positionName: shift.positionName || '',
+                        description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — puesto 24HS sin relevo registrado.`,
+                        createdAt: now,
+                        source: 'SYSTEM_SCHEDULER',
+                    });
+                    alertedNoRelief++;
+                }
+            }
+            else {
+                completeBatch.update(docSnap.ref, {
+                    status: 'COMPLETED',
+                    isCompleted: true,
+                    realEndTime: now,
+                    autoCompletedAt: now,
+                    autoCompletedBy: 'SYSTEM_SCHEDULER',
+                    autoCloseReason: 'SIN_RELEVO_CUSTOM',
+                });
+                const logRef = db.collection('audit_logs').doc();
+                auditBatch.set(logRef, {
+                    action: 'AUTO_COMPLETE_SHIFT',
+                    actorName: 'Sistema (Scheduler)',
+                    actorUid: 'SYSTEM',
+                    module: 'OPERACIONES',
+                    shiftId: docSnap.id,
+                    details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+                    timestamp: now,
+                });
+                completed++;
+            }
         }
     }
     await completeBatch.commit();
@@ -1640,8 +1775,8 @@ exports.detectarAusencias = functions
                     await admin.messaging().sendEachForMulticast({
                         tokens: retTokens,
                         notification: {
-                            title: '⏳ El entrante aún no llegó',
-                            body: `${s.employeeName || 'El guardia siguiente'} no marcó presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
+                            title: 'â³ El entrante aÃºn no llegÃ³',
+                            body: `${s.employeeName || 'El guardia siguiente'} no marcÃ³ presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
                         },
                         webpush: {
                             notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
@@ -1653,7 +1788,7 @@ exports.detectarAusencias = functions
             }
         }
         catch (e) {
-            console.warn('[detectarAusencias] Error en alerta temprana retención:', e);
+            console.warn('[detectarAusencias] Error en alerta temprana retenciÃ³n:', e);
         }
     }
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
@@ -1695,7 +1830,7 @@ exports.detectarAusencias = functions
                 continue;
         }
         const elapsedMin = (nowMs - startMs) / 60000;
-        if (elapsedMin >= 30) {
+        if (elapsedMin >= 60) {
             if (shift.absenceDetectedAt)
                 continue;
             if (shift.lateArrivalAt)
@@ -1735,7 +1870,7 @@ exports.detectarAusencias = functions
                         if (!retData.isRetention) {
                             await retDoc.ref.update({
                                 isRetention: true,
-                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
+                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentÃ³`,
                                 autoRetentionAt: now,
                             });
                             const retTokens = await getEmployeeTokens(db, retData.employeeId);
@@ -1743,14 +1878,14 @@ exports.detectarAusencias = functions
                                 await admin.messaging().sendEachForMulticast({
                                     tokens: retTokens,
                                     notification: {
-                                        title: '⏰ Quedaste en retención',
-                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
+                                        title: 'â° Quedaste en retenciÃ³n',
+                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© en el puesto hasta aviso de Operaciones.`,
                                     },
                                     webpush: {
                                         notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                                         fcmOptions: { link: '/empleado/dashboard' },
                                     },
-                                }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
+                                }).catch(e => console.warn('[detectarAusencias] Push retenciÃ³n error:', e));
                             }
                             await db.collection('novedades').add({
                                 type: 'RETENCION_POR_AUSENCIA',
@@ -1763,7 +1898,7 @@ exports.detectarAusencias = functions
                                 employeeName: retData.employeeName || '',
                                 absentEmployeeId: shift.employeeId,
                                 absentEmployeeName: shift.employeeName || '',
-                                description: `${retData.employeeName || 'Guardia'} retenido automáticamente — ${shift.objectiveName} · ${shift.positionName} — por ausencia de ${shift.employeeName}`,
+                                description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente â€” ${shift.objectiveName} Â· ${shift.positionName} â€” por ausencia de ${shift.employeeName}`,
                                 createdAt: now,
                                 source: 'SYSTEM_SCHEDULER',
                             });
@@ -1771,7 +1906,7 @@ exports.detectarAusencias = functions
                     }
                 }
                 catch (e) {
-                    console.warn('[detectarAusencias] Error en retención automática:', e);
+                    console.warn('[detectarAusencias] Error en retenciÃ³n automÃ¡tica:', e);
                 }
             }
             const tokens = await getEmployeeTokens(db, shift.employeeId);
@@ -1783,13 +1918,13 @@ exports.detectarAusencias = functions
                     await admin.messaging().sendEachForMulticast({
                         tokens,
                         notification: {
-                            title: '⚠️ Ausencia registrada',
-                            body: `No se registró tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
+                            title: 'âš ï¸ Ausencia registrada',
+                            body: `No se registrÃ³ tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
                         },
                         webpush: {
                             notification: {
-                                title: '⚠️ Ausencia registrada',
-                                body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). Ingresá al portal si estás presente.`,
+                                title: 'âš ï¸ Ausencia registrada',
+                                body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). IngresÃ¡ al portal si estÃ¡s presente.`,
                                 icon: '/icons/icon-192x192.png',
                                 requireInteraction: true,
                             },
@@ -1812,7 +1947,7 @@ exports.detectarAusencias = functions
                     employeeName: shift.employeeName || '',
                     startDate: dateStr,
                     endDate: dateStr,
-                    type: 'Injustificada',
+                    type: 'No PresentaciÃ³n',
                     absenceType: 'AA',
                     origin: 'AUTO_T30',
                     shiftId: docSnap.id,
@@ -1821,7 +1956,9 @@ exports.detectarAusencias = functions
                     clientId: shift.clientId || null,
                     empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
-                    status: 'APPROVED',
+                    reason: `No presentaciÃ³n en turno â€” ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+                    status: 'Confirmada',
+                    hasCertificate: false,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -1842,7 +1979,7 @@ exports.detectarAusencias = functions
                     clientId: shift.clientId || null,
                     empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
-                    description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
+                    description: `${shift.employeeName || 'Empleado'} no se presentÃ³ al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -1853,7 +1990,7 @@ exports.detectarAusencias = functions
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Ausencia automática: ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
+                details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
                 timestamp: now,
             });
             absents++;

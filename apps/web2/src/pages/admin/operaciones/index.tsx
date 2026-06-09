@@ -1632,9 +1632,11 @@ export default function OperacionesPage() {
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
-        const hoy = logic.processedData.filter((s: any) =>
-            isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)
-        );
+        const hoy = logic.processedData.filter((s: any) => {
+            if (s.isCompleted && !s.isRetention) return false;
+            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+        });
         hoy.forEach((s: any) => {
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';

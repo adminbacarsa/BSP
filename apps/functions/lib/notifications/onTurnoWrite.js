@@ -77,6 +77,30 @@ exports.onTurnoWrite = functions
                 return;
         }
     }
+    if (after && before && !before.isRetention && after.isRetention === true) {
+        const employeeId = after.employeeId;
+        if (!employeeId)
+            return;
+        const objective = after.objectiveName || after.clientName || 'el puesto';
+        const position = after.positionName || '';
+        const retMsg = { title: '⏰ Quedaste retenido', body: `Permanecé en ${objective}${position ? ' · ' + position : ''} hasta nuevo aviso de Operaciones.` };
+        const empDoc = await db.collection('empleados').doc(employeeId).get();
+        const empUid = empDoc.exists ? empDoc.data()?.uid : undefined;
+        const [byEmpId, byUid] = await Promise.all([
+            db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
+            empUid ? db.collection('device_tokens').where('uid', '==', empUid).get() : Promise.resolve({ docs: [] }),
+        ]);
+        const tokenSet = new Set();
+        [...byEmpId.docs, ...byUid.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10)
+            tokenSet.add(t); });
+        const tokens = Array.from(tokenSet);
+        const turnoId = change.after.id;
+        await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+        if (tokens.length) {
+            await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
+        }
+        return;
+    }
     let eventType;
     const employeeId = (after || before)?.employeeId;
     if (!employeeId)
