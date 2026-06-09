@@ -103,6 +103,11 @@ export default function ReportsPage() {
     const [planFilterObjective, setPlanFilterObjective] = useState<string>('');
     const [planFilterEmployee, setPlanFilterEmployee] = useState<string>('');
     const [planFilterDate, setPlanFilterDate] = useState<string>('');
+    const [planObjectiveSearch, setPlanObjectiveSearch] = useState('');
+    const [planEmployeeSearch, setPlanEmployeeSearch] = useState('');
+    const [detailObjectiveSearch, setDetailObjectiveSearch] = useState('');
+    const [auditActorSearch, setAuditActorSearch] = useState('');
+    const [objFilterClientSearch, setObjFilterClientSearch] = useState('');
     const [auditFilterActor, setAuditFilterActor] = useState<string>('');
 
     useEffect(() => {
@@ -192,6 +197,75 @@ export default function ReportsPage() {
         });
     }, [shiftsDetailMeta.employeeOptions, shiftsEmployeeSearch]);
 
+    const isPlannedReportShift = useCallback((s: any) => {
+        const origin = (s.origin || '').toUpperCase();
+        return origin !== 'RETEN'
+            && origin !== 'OPERATIONS_COVERAGE'
+            && origin !== 'SLA_VIRTUAL'
+            && !s.isReten
+            && s.resolvedBy !== 'OPERACIONES';
+    }, []);
+
+    const planDetailMeta = useMemo(() => {
+        if (!objectiveReport.length) {
+            return { assignedShifts: [] as any[], objectiveOptions: [] as string[], employeeOptions: [] as string[] };
+        }
+        const seen = new Set<string>();
+        const assignedShifts = objectiveReport.flatMap(row =>
+            (row.rawShifts || [])
+                .filter(isPlannedReportShift)
+                .filter(s => !!s.employeeName)
+                .map((s: any) => ({ ...s, _objName: row.name, _clientName: row.client }))
+                .filter(s => {
+                    if (seen.has(s.id)) return false;
+                    seen.add(s.id);
+                    return true;
+                }),
+        );
+        const objectiveOptions = [...new Set(assignedShifts.map(s => s._objName).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        const scoped = planFilterObjective
+            ? assignedShifts.filter(s => s._objName === planFilterObjective)
+            : assignedShifts;
+        const employeeOptions = [...new Set(scoped.map(s => s.employeeName).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        return { assignedShifts, objectiveOptions, employeeOptions };
+    }, [objectiveReport, planFilterObjective, isPlannedReportShift]);
+
+    const filteredPlanObjectiveOptions = useMemo(() => {
+        const q = planObjectiveSearch.trim().toLowerCase();
+        if (!q) return planDetailMeta.objectiveOptions;
+        return planDetailMeta.objectiveOptions.filter(o => o.toLowerCase().includes(q));
+    }, [planDetailMeta.objectiveOptions, planObjectiveSearch]);
+
+    const filteredPlanEmployeeOptions = useMemo(() => {
+        const q = planEmployeeSearch.trim().toLowerCase();
+        if (!q) return planDetailMeta.employeeOptions;
+        return planDetailMeta.employeeOptions.filter(n => n.toLowerCase().includes(q));
+    }, [planDetailMeta.employeeOptions, planEmployeeSearch]);
+
+    const filteredObjClients = useMemo(() => {
+        const allClients = [...new Set(objectiveReport.map(r => r.client))].sort();
+        const q = objFilterClientSearch.trim().toLowerCase();
+        if (!q) return allClients;
+        return allClients.filter(c => c.toLowerCase().includes(q));
+    }, [objectiveReport, objFilterClientSearch]);
+
+    const clearPlanFilters = () => {
+        setPlanFilterObjective('');
+        setPlanObjectiveSearch('');
+        setPlanFilterEmployee('');
+        setPlanEmployeeSearch('');
+        setPlanFilterDate('');
+    };
+
+    useEffect(() => {
+        if (!planFilterEmployee) return;
+        if (!planDetailMeta.employeeOptions.includes(planFilterEmployee)) {
+            setPlanFilterEmployee('');
+        }
+    }, [planFilterObjective, planDetailMeta.employeeOptions, planFilterEmployee]);
+
     const downloadPayrollJson = () => {
         const rows = sortedEmployeeReport;
         if (!rows.length) {
@@ -240,9 +314,11 @@ export default function ReportsPage() {
 
     // --- RENDERIZADO TABLA OBJETIVOS ---
     const renderObjectiveTable = () => {
-        const allClients = [...new Set(objectiveReport.map(r => r.client))].sort();
         const filtered = objectiveReport.filter(row => {
             if (objFilterClient && row.client !== objFilterClient) return false;
+            if (!objFilterClient && objFilterClientSearch.trim()) {
+                if (!row.client.toLowerCase().includes(objFilterClientSearch.trim().toLowerCase())) return false;
+            }
             if (objFilterName && !row.name.toLowerCase().includes(objFilterName.toLowerCase())) return false;
             return true;
         });
@@ -272,21 +348,40 @@ export default function ReportsPage() {
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 items-center bg-slate-50 dark:bg-slate-700/50 no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white flex-1 min-w-[150px]"><Building size={16}/> Costos por Objetivo</h3>
-                    <select
-                        value={objFilterClient}
-                        onChange={e => setObjFilterClient(e.target.value)}
-                        className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white min-w-[160px]"
-                    >
-                        <option value="">Todos los clientes</option>
-                        {allClients.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <input
-                        type="text"
-                        placeholder="Buscar objetivo..."
-                        value={objFilterName}
-                        onChange={e => setObjFilterName(e.target.value)}
-                        className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white min-w-[160px]"
-                    />
+                    <div className="flex flex-col gap-1 min-w-[160px]">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase">Cliente</span>
+                        <input
+                            type="search"
+                            placeholder="Buscar cliente..."
+                            value={objFilterClientSearch}
+                            onChange={e => setObjFilterClientSearch(e.target.value)}
+                            className="px-2 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
+                        />
+                        <select
+                            value={objFilterClient}
+                            onChange={e => setObjFilterClient(e.target.value)}
+                            className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
+                        >
+                            <option value="">Todos los clientes</option>
+                            {filteredObjClients.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-1 min-w-[160px]">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase">Objetivo</span>
+                        <input
+                            type="search"
+                            placeholder="Buscar objetivo..."
+                            value={objFilterName}
+                            onChange={e => setObjFilterName(e.target.value)}
+                            className="px-2 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
+                        />
+                    </div>
+                    {(objFilterClient || objFilterClientSearch || objFilterName) && (
+                        <button type="button" onClick={() => { setObjFilterClient(''); setObjFilterClientSearch(''); setObjFilterName(''); }}
+                            className="self-end text-[10px] font-black text-rose-500 px-2 py-1.5 border border-rose-200 rounded-lg bg-rose-50">
+                            Limpiar
+                        </button>
+                    )}
                     <div className="flex gap-2">
                         <button onClick={() => downloadCSV(filtered, 'reporte_objetivos')} aria-label="Descargar CSV de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
                         <button onClick={() => window.print()} aria-label="Imprimir reporte de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
@@ -792,7 +887,9 @@ export default function ReportsPage() {
         );
         const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
-        const allEmployeesDetail = [...new Set(baseShifts.map((s:any) => s.employeeName).filter(Boolean))].sort();
+        const objectivesForSelect = detailObjectiveSearch.trim()
+            ? allObjectivesDetail.filter(o => o.toLowerCase().includes(detailObjectiveSearch.trim().toLowerCase()))
+            : allObjectivesDetail;
 
         // — Aplicar filtros a los turnos crudos —
         const now = new Date();
@@ -815,6 +912,9 @@ export default function ReportsPage() {
             if (detailFilterObjective) {
                 const objName = s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '';
                 if (objName !== detailFilterObjective) return false;
+            } else if (detailObjectiveSearch.trim()) {
+                const objName = (s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '').toLowerCase();
+                if (!objName.includes(detailObjectiveSearch.trim().toLowerCase())) return false;
             }
             if (detailFilterEmployee && s.employeeName !== detailFilterEmployee) return false;
             return true;
@@ -923,7 +1023,31 @@ export default function ReportsPage() {
                             <button onClick={() => { setDetailItem(null); setLeavePopoverId(null); }} className="p-2 bg-white rounded-full border hover:bg-slate-100"><X size={20}/></button>
                         </div>
                         {/* Filtros */}
-                        <div className="flex flex-wrap gap-2 items-center">
+                        <div className="flex flex-wrap gap-2 items-end">
+                            {allObjectivesDetail.length > 1 && (
+                                <div className="flex flex-col gap-1 min-w-[180px]">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase">Objetivo</span>
+                                    <input
+                                        type="search"
+                                        placeholder="Buscar objetivo..."
+                                        value={detailObjectiveSearch}
+                                        onChange={e => setDetailObjectiveSearch(e.target.value)}
+                                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                    />
+                                    <select
+                                        value={detailFilterObjective}
+                                        onChange={e => {
+                                            const v = e.target.value;
+                                            setDetailFilterObjective(v);
+                                            if (v) setDetailObjectiveSearch(v);
+                                        }}
+                                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                    >
+                                        <option value="">Todos los objetivos</option>
+                                        {objectivesForSelect.map((o:string) => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                </div>
+                            )}
                             <div className="flex items-center gap-1">
                                 <span className="text-[10px] font-black text-slate-400 uppercase">Hora:</span>
                                 <input type="time" value={detailFilterTimeFrom} onChange={e => setDetailFilterTimeFrom(e.target.value)}
@@ -932,27 +1056,13 @@ export default function ReportsPage() {
                                 <input type="time" value={detailFilterTimeTo} onChange={e => setDetailFilterTimeTo(e.target.value)}
                                     className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
                             </div>
-                            {allObjectivesDetail.length > 1 && (
-                                <select value={detailFilterObjective} onChange={e => setDetailFilterObjective(e.target.value)}
-                                    className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                                    <option value="">Todos los objetivos</option>
-                                    {allObjectivesDetail.map((o:string) => <option key={o} value={o}>{o}</option>)}
-                                </select>
-                            )}
-                            {allEmployeesDetail.length > 1 && (
-                                <select value={detailFilterEmployee} onChange={e => setDetailFilterEmployee(e.target.value)}
-                                    className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                                    <option value="">Todos los empleados</option>
-                                    {allEmployeesDetail.map((e:string) => <option key={e} value={e}>{e}</option>)}
-                                </select>
-                            )}
                             <select value={detailFilterStatus} onChange={e => setDetailFilterStatus(e.target.value)}
                                 className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
                                 <option value="">Todos los estados</option>
                                 {allStatuses.map((st:string) => <option key={st} value={st}>{st}</option>)}
                             </select>
-                            {(detailFilterTimeFrom || detailFilterTimeTo || detailFilterObjective || detailFilterEmployee || detailFilterStatus) && (
-                                <button onClick={() => { setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterObjective(''); setDetailFilterEmployee(''); setDetailFilterStatus(''); }}
+                            {(detailFilterTimeFrom || detailFilterTimeTo || detailFilterObjective || detailObjectiveSearch || detailFilterStatus) && (
+                                <button onClick={() => { setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterObjective(''); setDetailObjectiveSearch(''); setDetailFilterStatus(''); }}
                                     className="text-[10px] font-black text-rose-500 hover:text-rose-700 px-2 py-1.5 border border-rose-200 rounded-lg bg-rose-50 hover:bg-rose-100">
                                     Limpiar filtros
                                 </button>
@@ -1104,54 +1214,23 @@ export default function ReportsPage() {
             );
         }
 
-        // Solo turnos de origen planificado (excluir retenes y cobertura operativa)
-        const isPlannedShift = (s: any) => {
-            const origin = (s.origin || '').toUpperCase();
-            return origin !== 'RETEN'
-                && origin !== 'OPERATIONS_COVERAGE'
-                && origin !== 'SLA_VIRTUAL'
-                && !s.isReten
-                && s.resolvedBy !== 'OPERACIONES';
-        };
-
-        const allPlannedShifts: any[] = objectiveReport.flatMap(row =>
-            (row.rawShifts || [])
-                .filter(isPlannedShift)
-                .map((s: any) => ({
-                    ...s,
-                    _objName: row.name,
-                    _clientName: row.client,
-                }))
-        );
-
-        // Deduplicar por id
-        const seen = new Set<string>();
-        const uniqueShifts = allPlannedShifts.filter(s => {
-            if (seen.has(s.id)) return false;
-            seen.add(s.id);
-            return true;
-        });
-
-        // Excluir vacantes — el reporte planificado solo muestra turnos asignados
-        const assignedShifts = uniqueShifts.filter(s => !!s.employeeName);
-
-        // Opciones para filtros
-        const planObjectiveOptions = [...new Set(assignedShifts.map(s => s._objName).filter(Boolean))].sort();
-        const shiftsForEmployeeFilter = planFilterObjective
-            ? assignedShifts.filter(s => s._objName === planFilterObjective)
-            : assignedShifts;
-        const planEmployeeOptions = [...new Set(shiftsForEmployeeFilter.map(s => s.employeeName).filter(Boolean))].sort();
+        // Solo turnos planificados asignados (meta precalculada)
+        const assignedShifts = planDetailMeta.assignedShifts;
+        const objSearch = planObjectiveSearch.trim().toLowerCase();
+        const empSearch = planEmployeeSearch.trim().toLowerCase();
 
         const filtered = assignedShifts
             .sort((a, b) => (a.startTime?.seconds || 0) - (b.startTime?.seconds || 0))
             .filter(s => {
-                if (planFilterObjective && s._objName !== planFilterObjective) return false;
+                if (planFilterObjective) {
+                    if (s._objName !== planFilterObjective) return false;
+                } else if (objSearch && !String(s._objName || '').toLowerCase().includes(objSearch)) {
+                    return false;
+                }
                 if (planFilterEmployee) {
-                    if (planFilterEmployee === '__VACANTE__') {
-                        if (s.employeeName) return false;
-                    } else {
-                        if (s.employeeName !== planFilterEmployee) return false;
-                    }
+                    if (s.employeeName !== planFilterEmployee) return false;
+                } else if (empSearch && !String(s.employeeName || '').toLowerCase().includes(empSearch)) {
+                    return false;
                 }
                 if (planFilterDate) {
                     const d = new Date((s.startTime?.seconds || 0) * 1000);
@@ -1174,26 +1253,6 @@ export default function ReportsPage() {
                         <CalendarDays size={16} className="text-indigo-600"/> Horas Planificadas
                         <span className="text-[10px] font-normal text-slate-400 normal-case">({filtered.length} turnos · {totalTeorico.toFixed(1)} hs)</span>
                     </h3>
-                    <select value={planFilterObjective} onChange={e => { setPlanFilterObjective(e.target.value); setPlanFilterEmployee(''); }}
-                        className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white min-w-[180px]">
-                        <option value="">Todos los objetivos</option>
-                        {planObjectiveOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                    <select value={planFilterEmployee} onChange={e => setPlanFilterEmployee(e.target.value)}
-                        className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white min-w-[180px]">
-                        <option value="">Todos los empleados</option>
-                        {planEmployeeOptions.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
-                    <div>
-                        <input type="date" value={planFilterDate} onChange={e => setPlanFilterDate(e.target.value)}
-                            className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"/>
-                    </div>
-                    {(planFilterObjective || planFilterEmployee || planFilterDate) && (
-                        <button onClick={() => { setPlanFilterObjective(''); setPlanFilterEmployee(''); setPlanFilterDate(''); }}
-                            className="text-[10px] font-black text-rose-500 hover:text-rose-700 px-2 py-1.5 border border-rose-200 rounded-lg bg-rose-50">
-                            Limpiar
-                        </button>
-                    )}
                     <button onClick={() => downloadCSV(filtered.map(s => ({
                         fecha: formatDate(s.startTime),
                         empleado: s.employeeName || 'VACANTE',
@@ -1460,13 +1519,85 @@ export default function ReportsPage() {
                         )}
                     </>)}
 
+                    {activeTab === 'PLANIFICADO' && (<>
+                        <div className="min-w-[240px] flex flex-col gap-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">1. Objetivo</label>
+                            <input
+                                type="search"
+                                value={planObjectiveSearch}
+                                onChange={e => setPlanObjectiveSearch(e.target.value)}
+                                placeholder="Buscar objetivo..."
+                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            />
+                            <select
+                                value={planFilterObjective}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    setPlanFilterObjective(v);
+                                    if (v) setPlanObjectiveSearch(v);
+                                    setPlanFilterEmployee('');
+                                    setPlanEmployeeSearch('');
+                                }}
+                                className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            >
+                                <option value="">Todos ({planDetailMeta.objectiveOptions.length})</option>
+                                {filteredPlanObjectiveOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                        </div>
+                        <div className="min-w-[240px] flex flex-col gap-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">
+                                2. Empleado
+                                {planFilterObjective && <span className="font-normal text-indigo-500 normal-case ml-1">en {planFilterObjective}</span>}
+                            </label>
+                            <input
+                                type="search"
+                                value={planEmployeeSearch}
+                                onChange={e => setPlanEmployeeSearch(e.target.value)}
+                                placeholder="Buscar empleado..."
+                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            />
+                            <select
+                                value={planFilterEmployee}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    setPlanFilterEmployee(v);
+                                    if (v) setPlanEmployeeSearch(v);
+                                }}
+                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                            >
+                                <option value="">Todos ({planDetailMeta.employeeOptions.length})</option>
+                                {filteredPlanEmployeeOptions.map(e => <option key={e} value={e}>{e}</option>)}
+                            </select>
+                        </div>
+                        <div className="min-w-[140px] flex flex-col gap-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase">Fecha</label>
+                            <input type="date" value={planFilterDate} onChange={e => setPlanFilterDate(e.target.value)}
+                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"/>
+                        </div>
+                        {(planFilterObjective || planObjectiveSearch || planFilterEmployee || planEmployeeSearch || planFilterDate) && (
+                            <button type="button" onClick={clearPlanFilters}
+                                className="self-end text-[10px] font-black text-rose-500 hover:text-rose-700 px-3 py-2.5 border border-rose-200 rounded-xl bg-rose-50 hover:bg-rose-100">
+                                Limpiar filtros
+                            </button>
+                        )}
+                    </>)}
+
                     {activeTab === 'AUDIT' && auditLogs.length > 0 && (
-                        <div className="min-w-[180px]">
+                        <div className="min-w-[200px] flex flex-col gap-1">
                             <label className="text-[10px] font-bold text-slate-400 uppercase">Actor</label>
-                            <select value={auditFilterActor} onChange={e => setAuditFilterActor(e.target.value)}
+                            <input type="search" placeholder="Buscar actor..." value={auditActorSearch}
+                                onChange={e => setAuditActorSearch(e.target.value)}
+                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm outline-none focus:border-indigo-500"/>
+                            <select value={auditFilterActor} onChange={e => {
+                                const v = e.target.value;
+                                setAuditFilterActor(v);
+                                if (v) setAuditActorSearch(v);
+                            }}
                                 className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
                                 <option value="">Todos los actores</option>
-                                {[...new Set(auditLogs.map((l: any) => l.actorName || 'Sistema').filter(Boolean))].sort().map(a => (
+                                {[...new Set(auditLogs.map((l: any) => l.actorName || 'Sistema').filter(Boolean))].sort()
+                                    .filter(a => !auditActorSearch.trim() || a.toLowerCase().includes(auditActorSearch.trim().toLowerCase()))
+                                    .map(a => (
                                     <option key={a} value={a}>{a}</option>
                                 ))}
                             </select>
@@ -1560,7 +1691,12 @@ export default function ReportsPage() {
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {auditLogs
-                                    .filter((log: any) => !auditFilterActor || (log.actorName || 'Sistema') === auditFilterActor)
+                                    .filter((log: any) => {
+                                        const actor = log.actorName || 'Sistema';
+                                        if (auditFilterActor && actor !== auditFilterActor) return false;
+                                        if (!auditFilterActor && auditActorSearch.trim() && !actor.toLowerCase().includes(auditActorSearch.trim().toLowerCase())) return false;
+                                        return true;
+                                    })
                                     .map((log: any) => (
                                     <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
                                         <td className="p-4"><p className="font-bold">{formatDate(log.timestamp)}</p><p className="text-xs text-slate-400">{formatTime(log.timestamp)}</p></td>
