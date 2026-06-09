@@ -22,12 +22,12 @@ import {
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 
 // --- CONSTANTES Y HELPERS ---
-// Francos/licencias/retén: no computan horas de liquidación del empleado.
+// Francos/licencias/retÃ©n: no computan horas de liquidaciÃ³n del empleado.
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET']);
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'PG', 'E', 'A']);
-/** Vacaciones: marca el día/período, no suma horas en reportes. */
+/** Vacaciones: marca el dÃ­a/perÃ­odo, no suma horas en reportes. */
 export const PERIOD_ONLY_CODES = new Set(['V']);
-/** Licencias/enfermedad justificadas: computan jornada estándar (8h). */
+/** Licencias/enfermedad justificadas: computan jornada estÃ¡ndar (8h). */
 export const PAID_DAY_LEAVE_CODES = new Set(['L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA']);
 // REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
@@ -72,7 +72,7 @@ const shiftHasRealCheckIn = (shift: any): boolean => {
     );
 };
 
-/** Franco planificado (día libre), aún sin marcar FT en Firestore. */
+/** Franco planificado (dÃ­a libre), aÃºn sin marcar FT en Firestore. */
 function isPlainFrancoDayOff(s: any): boolean {
     const code = String(s?.code || '').trim().toUpperCase();
     if (code === 'F' || code === 'FP') return true;
@@ -97,7 +97,7 @@ function isCoverageWorkShift(s: any): boolean {
     );
 }
 
-/** Convocado desde operaciones/planificación: franco que cubre vacante/ausencia → pago al 100% (FT). */
+/** Convocado desde operaciones/planificaciÃ³n: franco que cubre vacante/ausencia â†’ pago al 100% (FT). */
 export function isFrancoTrabajadoShift(shift: any): boolean {
     if (shift?.isFrancoTrabajado === true) return true;
     if (shift?._inferredFrancoTrabajado === true) return true;
@@ -110,8 +110,8 @@ export function isFrancoTrabajadoShift(shift: any): boolean {
 }
 
 /**
- * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo día.
- * Si el flag no llegó a Firestore, infiere FT cuando hay F + turno con fichada el mismo día.
+ * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo dÃ­a.
+ * Si el flag no llegÃ³ a Firestore, infiere FT cuando hay F + turno con fichada el mismo dÃ­a.
  */
 export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
     const byDay = new Map<string, any[]>();
@@ -167,7 +167,7 @@ function resolveFtLiquidationHours(shift: any, fallback = 8): number {
     return fallback > 0 && fallback < 23.5 ? fallback : 8;
 }
 
-/** Misma regla que operaciones: planificado sin publicar no entra a liquidación salvo fichada real u origen ops. */
+/** Misma regla que operaciones: planificado sin publicar no entra a liquidaciÃ³n salvo fichada real u origen ops. */
 export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
 export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
@@ -193,7 +193,7 @@ export function isShiftEligibleForReports(
     const isOps = isOperationalOriginShift(shift);
     const isNovedad = shift?.type === 'NOVEDAD';
 
-    // Todos: incluye borradores (draft) = crono planificado aún no publicado
+    // Todos: incluye borradores (draft) = crono planificado aÃºn no publicado
     if (publishFilter === 'all') return true;
 
     if (publishFilter === 'unpublished') {
@@ -203,7 +203,7 @@ export function isShiftEligibleForReports(
         return !isPublished;
     }
 
-    // published — liquidación oficial (sin borradores)
+    // published â€” liquidaciÃ³n oficial (sin borradores)
     if (isDraft) return false;
     if (isOps) return true;
     if (isNovedad) return true;
@@ -237,7 +237,7 @@ function leaveReportShiftScore(s: any): number {
     return score;
 }
 
-/** Si hay licencia/ausencia RRHH en el día, ocultar turno M/T/N sin fichada duplicado. */
+/** Si hay licencia/ausencia RRHH en el dÃ­a, ocultar turno M/T/N sin fichada duplicado. */
 export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
     const byEmpDate: Record<string, any[]> = {};
     for (const s of shifts) {
@@ -278,7 +278,7 @@ export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
 export function mapAbsenceStatusLabel(status?: string | null): string {
     const s = String(status || '').trim();
     if (!s) return 'A verificar';
-    if (s === 'En verificación' || s === 'Pendiente') return 'A verificar';
+    if (s === 'En verificaciÃ³n' || s === 'Pendiente') return 'A verificar';
     if (s === 'Justificada' || s === 'Autorizada') return 'Justificada';
     if (s === 'Injustificada' || s === 'Rechazada') return 'Injustificada';
     return s;
@@ -336,7 +336,7 @@ function registerSlaSlotCapacity(
     }
 }
 
-/** Quita placeholders virtuales y vacantes huérfanas cuando el slot ya está cubierto. */
+/** Quita placeholders virtuales y vacantes huÃ©rfanas cuando el slot ya estÃ¡ cubierto. */
 export function filterObjectiveReportShifts(
     shifts: any[],
     empMap: Record<string, string>,
@@ -375,7 +375,7 @@ export function filterObjectiveReportShifts(
     return withoutVirtual.filter(s => keepIds.has(s.id));
 }
 
-/** RET stand-by se omite si el mismo día hay turno operativo (M/T/N…) — liquida ese turno. */
+/** RET stand-by se omite si el mismo dÃ­a hay turno operativo (M/T/Nâ€¦) â€” liquida ese turno. */
 export function prepareShiftsForEmployeeLiquidation(shifts: any[]): any[] {
     const byDay = new Map<string, any[]>();
     for (const s of shifts) {
@@ -396,7 +396,7 @@ export function prepareShiftsForEmployeeLiquidation(shifts: any[]): any[] {
     });
 }
 
-/** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
+/** Horas a mostrar/liquidar: V = perÃ­odo (0h); E/L/PG/A = jornada estÃ¡ndar; ignora rango 00:00â€“23:59 de RRHH. */
 export function resolveShiftDurationHours(
     shift: {
         code?: string;
@@ -473,7 +473,7 @@ const getArgentinaDate = (dateInput: any): string => {
     }
 };
 
-// Cálculo de horas nocturnas (21:00 a 06:00)
+// CÃ¡lculo de horas nocturnas (21:00 a 06:00)
 const getNightDuration = (start: Date, end: Date) => {
     let durationMins = 0;
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
@@ -497,7 +497,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
     const sortedDocs = [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
 
-    let hoursTotalOperativas = 0; // teóricas
+    let hoursTotalOperativas = 0; // teÃ³ricas
     let totalDiurnas = 0;
     let totalNocturnas = 0;
     let hoursFT = 0;
@@ -549,23 +549,23 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (isFT) { hoursFT += duration; totalNocturnas += night; totalDiurnas += day; }
             else { hoursTotalOperativas += duration; totalNocturnas += night; totalDiurnas += day; }
 
-            // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teórico)
+            // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teÃ³rico)
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
             if (isAbsent || end > new Date()) return;
 
-            // Regla de liquidación:
-            // - Inicio: siempre hora planificada (salvo adelanto explícito)
-            // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retención formal
+            // Regla de liquidaciÃ³n:
+            // - Inicio: siempre hora planificada (salvo adelanto explÃ­cito)
+            // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retenciÃ³n formal
             const isEarlyStartShift = d.isEarlyStart === true;
             const isRetentionShift  = d.isRetention === true; // solo campo Firestore, no retentionMinutes (computado)
 
             const clampS = (real: Date, plan: Date): Date =>
-                isEarlyStartShift ? real : plan;  // adelanto → hora real; normal → hora planificada
+                isEarlyStartShift ? real : plan;  // adelanto â†’ hora real; normal â†’ hora planificada
 
             const clampE = (real: Date, plan: Date): Date => {
-                if (real < plan)        return plan;         // relevo anticipado → horas completas
-                if (isRetentionShift)   return real;         // retención formal → hora real (se paga extra)
-                return plan;                                  // salida tardía sin retención → clampear
+                if (real < plan)        return plan;         // relevo anticipado â†’ horas completas
+                if (isRetentionShift)   return real;         // retenciÃ³n formal â†’ hora real (se paga extra)
+                return plan;                                  // salida tardÃ­a sin retenciÃ³n â†’ clampear
             };
 
             const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
@@ -579,13 +579,13 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)   : null;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
-                if (rDur >= 0 && rDur <= 24) { // cap 24h — retención extrema no puede pasar de un día
+                if (rDur >= 0 && rDur <= 24) { // cap 24h â€” retenciÃ³n extrema no puede pasar de un dÃ­a
                     horasRealesTotal += rDur;
                     turnosConDatosReales++;
                 }
-                // rDur fuera de rango (dato corrupto) → no sumar
+                // rDur fuera de rango (dato corrupto) â†’ no sumar
             }
-            // sin fichada → 0 reales (no fallback a teórico)
+            // sin fichada â†’ 0 reales (no fallback a teÃ³rico)
         } catch (err) {
             console.warn("Saltando turno corrupto:", d.id);
         }
@@ -628,7 +628,7 @@ function registerObjectiveAlias(
     aliases[key] = meta;
 }
 
-/** Misma convención que Servicios: clientId + nombre cuando falta objectiveId. */
+/** Misma convenciÃ³n que Servicios: clientId + nombre cuando falta objectiveId. */
 function fallbackObjectiveKey(clientId: string, objectiveName: string): string {
     return `${clientId}_${objectiveName}`;
 }
@@ -861,7 +861,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 });
                 setHolidaysData(holidays);
 
-            } catch (e) { console.error("Error cargando catálogos:", e); }
+            } catch (e) { console.error("Error cargando catÃ¡logos:", e); }
         };
         loadCatalogs();
     }, [empresaId, scopeEmpresa]);
@@ -873,7 +873,7 @@ export const useReportes = (forcedClientId?: string | null) => {
         setObjectiveReport([]);
 
         try {
-            // FIX CRÍTICO DE FECHAS: Usar formato ISO Local
+            // FIX CRÃTICO DE FECHAS: Usar formato ISO Local
             const startDate = new Date(`${dateRange.start}T00:00:00`);
             const endDate = new Date(`${dateRange.end}T23:59:59.999`);
 
@@ -937,7 +937,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 registerObjectiveMetaAliases(aliasLookup, meta, [...matchKeys, d.id]);
             });
 
-            // Consulta SIN indices complejos (filtrado en memoria si es necesario, o básico por fecha)
+            // Consulta SIN indices complejos (filtrado en memoria si es necesario, o bÃ¡sico por fecha)
             const q = scopeEmpresa
                 ? query(
                     collection(db, 'turnos'),
@@ -1004,7 +1004,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     const titularName = m[1].trim();
                     const titularId = Object.keys(empMap).find(id => empMap[id] === titularName);
                     if (titularId) {
-                        const covName = s.employeeName || empMap[s.employeeId] || '—';
+                        const covName = s.employeeName || empMap[s.employeeId] || 'â€”';
                         coverageByEmpDate[`${titularId}_${dk}`] = covName;
                         const coverCode = String(s.code || '').trim().toUpperCase();
                         coveringForByEmpDate[`${s.employeeId}_${dk}`] = coverCode
@@ -1017,13 +1017,13 @@ export const useReportes = (forcedClientId?: string | null) => {
                 }
             });
 
-            // Mapa shiftId → shift completo, para resolver absenceShiftId → descripción de lo cubierto
+            // Mapa shiftId â†’ shift completo, para resolver absenceShiftId â†’ descripciÃ³n de lo cubierto
             const shiftIdToShift: Record<string, any> = {};
             rawShifts.forEach((s: any) => {
                 if (s.id) shiftIdToShift[s.id] = s;
             });
 
-            // Mapa inverso: coveredByEmployeeId+fecha → nombre del ausente/vacante cubierto
+            // Mapa inverso: coveredByEmployeeId+fecha â†’ nombre del ausente/vacante cubierto
             // Para ADELANTO/RETEN que no tienen absenceShiftId pero el turno ausente los referencia
             const coveringForByEmpIdDate: Record<string, string> = {};
             rawShifts.forEach((s: any) => {
@@ -1038,14 +1038,14 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (!coveringForByEmpIdDate[key]) coveringForByEmpIdDate[key] = desc;
             });
 
-            // Resolver qué cubría un retén/adelanto a partir del shift referenciado
+            // Resolver quÃ© cubrÃ­a un retÃ©n/adelanto a partir del shift referenciado
             const resolveCoveringFor = (s: any, dk: string | null): string | null => {
                 const refId = s.absenceShiftId;
                 if (refId && shiftIdToShift[refId]) {
                     const ref = shiftIdToShift[refId];
                     const isVacancy = !ref.employeeId || ref.employeeId === 'VACANTE' || ref.isUnassigned;
                     if (isVacancy) {
-                        // Vacante: mostrar puesto y código
+                        // Vacante: mostrar puesto y cÃ³digo
                         const pos = ref.positionName || '';
                         const code = (ref.code || '').toUpperCase();
                         return `Vacante${pos ? ' ' + pos : ''}${code ? ' (' + code + ')' : ''}`;
@@ -1060,7 +1060,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 }
                 // 3. Relevo directo
                 if (s.relievedEmployeeName) return s.relievedEmployeeName;
-                // 4. Fallback: buscar ausente en mismo objetivo+puesto+día
+                // 4. Fallback: buscar ausente en mismo objetivo+puesto+dÃ­a
                 if (dk && s.objectiveId && s.positionName) {
                     const sameSlotAbsent = rawShifts.find((r: any) =>
                         r.id !== s.id &&
@@ -1081,13 +1081,13 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const dk = shiftCalendarDateKey(s);
                 const abs = s.absenceId ? absenceById[s.absenceId] : (dk ? absenceByEmpDate[`${s.employeeId}_${dk}`] : null);
 
-                // Quién cubrió al guardia ausente / vacante
+                // QuiÃ©n cubriÃ³ al guardia ausente / vacante
                 const coveredByName = s.coveredByEmployeeName
                     || s.coveredBy
                     || (dk ? coverageByEmpDate[`${s.employeeId}_${dk}`] : null)
                     || null;
 
-                // A quién / qué cubrió este turno operativo
+                // A quiÃ©n / quÃ© cubriÃ³ este turno operativo
                 const coveringFor = resolveCoveringFor(s, dk)
                     || (dk ? coveringForByEmpDate[`${s.employeeId}_${dk}`] : null)
                     || null;
@@ -1105,7 +1105,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             };
 
             if (rawShifts.length === 0) {
-                toast.info("No se encontraron turnos válidos en este rango.");
+                toast.info("No se encontraron turnos vÃ¡lidos en este rango.");
             }
 
             // 3. Procesamiento por Empleado (excluir vacantes/desconocidos)
@@ -1153,7 +1153,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 };
             });
 
-            // Ajustes de horas manuales — sumar/restar del total teórico del empleado
+            // Ajustes de horas manuales â€” sumar/restar del total teÃ³rico del empleado
             const ajustesSnap = await getDocs(
                 query(collection(db, 'ajustes_horas'), where('empresaId', '==', empresaId))
             );
@@ -1179,7 +1179,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const filterLbl = publishFilter === 'all' ? 'todos (incl. borrador)'
                     : publishFilter === 'unpublished' ? 'solo borrador'
                     : 'solo publicados';
-                toast.success(`${empCount} empleado(s) · ${shiftCount} turnos · ${filterLbl}`);
+                toast.success(`${empCount} empleado(s) Â· ${shiftCount} turnos Â· ${filterLbl}`);
             }
 
             // 4. Procesamiento por Objetivo
@@ -1196,4 +1196,154 @@ export const useReportes = (forcedClientId?: string | null) => {
                 if (enriched.clientId) objGroups[objId].clientId = enriched.clientId;
             });
 
-            for (const obj
+            for (const objId of Object.keys(objGroups)) {
+                objGroups[objId].shifts = filterObjectiveReportShifts(
+                    objGroups[objId].shifts,
+                    empMap,
+                    slaSlotCapacity,
+                    objId,
+                );
+            }
+
+            const objLeaveShifts: Record<string, any[]> = {};
+            rawShifts.forEach((s: any) => {
+                const enriched = enrichShift(s);
+                if (shouldBillShiftToObjective(enriched)) return;
+                const objId = resolveCanonicalObjectiveId(enriched, aliasLookup);
+                if (!objId) return;
+                const leaveCode = resolveLeaveCode(enriched.code, enriched._absenceType);
+                if (!leaveCode && !isEmployeeOnLeave({ shiftCode: enriched.code, absenceType: enriched._absenceType })) return;
+                (objLeaveShifts[objId] ||= []).push({
+                    ...enriched,
+                    employeeName: empMap[enriched.employeeId] || null,
+                    code: leaveCode || enriched.code,
+                    _objectiveBillable: false,
+                });
+            });
+
+            const allObjectiveIds = new Set<string>([
+                ...slaObjectiveMetas.keys(),
+                ...Object.keys(objGroups),
+            ]);
+
+            const objRows = [...allObjectiveIds].map(objId => {
+                const meta = slaObjectiveMetas.get(objId)
+                    || aliasLookup[objId]
+                    || {
+                        canonicalId: objId,
+                        name: objMap[objId] || objId,
+                        clientId: String(objGroups[objId]?.clientId || ''),
+                        client: clientMap[String(objGroups[objId]?.clientId || '')] || 'Sin Cliente',
+                    };
+
+                if (!meta.clientId && objGroups[objId]?.clientId) {
+                    meta.clientId = String(objGroups[objId].clientId);
+                    meta.client = clientMap[meta.clientId] || meta.client;
+                }
+                if (!meta.clientId && meta.client && meta.client !== 'Sin Cliente') {
+                    meta.clientId = resolveClientIdFromName(meta.client, clientMap)
+                        || `nm:${meta.client.toLowerCase().replace(/\s+/g, '_').slice(0, 48)}`;
+                }
+                if (forcedClientId && meta.clientId && meta.clientId !== forcedClientId && !meta.clientId.startsWith('nm:')) return null;
+                if (!meta.client || meta.client === 'Sin Cliente') return null;
+
+                const data = objGroups[objId] || { shifts: [], clientId: meta.clientId };
+                const staffedShifts = data.shifts.filter((s: any) => !isReportVacancyShift(s, empMap));
+                const vacantRawShifts = data.shifts.filter((s: any) => isReportVacancyShift(s, empMap));
+                const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
+                    acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
+                const stats = calculateStatsExact(
+                    staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
+                    holidaysData,
+                );
+                const annotatedShifts = (() => {
+                    const merged = [
+                        ...data.shifts.map((s: any) => ({
+                            ...s,
+                            employeeName: empMap[s.employeeId] || null,
+                            _objectiveBillable: true,
+                        })),
+                        ...(objLeaveShifts[objId] || []),
+                    ];
+                    const byEmp: Record<string, any[]> = {};
+                    merged.forEach((s) => {
+                        const eid = s.employeeId || '_';
+                        (byEmp[eid] ||= []).push(s);
+                    });
+                    return Object.values(byEmp).flatMap((g) => dedupeShiftsByAbsencePriority(g));
+                })();
+                return {
+                    id: objId,
+                    type: 'OBJECTIVE',
+                    name: meta.name,
+                    clientId: meta.clientId,
+                    client: meta.client || clientMap[meta.clientId] || 'Sin Cliente',
+                    shifts: staffedShifts.length,
+                    vacantShifts: vacantRawShifts.length,
+                    vacantHours,
+                    vendidas: slaMap[objId] || 0,
+                    total: stats.totalReal,
+                    diurnas: stats.totalDiurnas,
+                    nocturnas: stats.totalNocturnas,
+                    extra50: stats.extra50,
+                    extra100: stats.extra100,
+                    plusFeriado: stats.plusFeriado,
+                    rawShifts: annotatedShifts
+                };
+            }).filter((row): row is NonNullable<typeof row> => row !== null);
+            setObjectiveReport(objRows.sort((a, b) => a.client.localeCompare(b.client) || a.name.localeCompare(b.name)));
+
+        } catch (error: any) {
+            console.error("Error generando reporte:", error);
+            if(error.message?.includes("index")) {
+                toast.error("Falta índice en Firebase. Revisa la consola.");
+            } else {
+                toast.error("Error al procesar datos.");
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const loadAudit = async () => {
+        setLoading(true);
+        try {
+            const startDate = new Date(`${dateRange.start}T00:00:00`);
+            const endDate = new Date(`${dateRange.end}T23:59:59.999`);
+
+            const q = query(
+                collection(db, 'audit_logs'), 
+                where('timestamp', '>=', Timestamp.fromDate(startDate)), 
+                where('timestamp', '<=', Timestamp.fromDate(endDate))
+            );
+            
+            const snap = await getDocs(q);
+            const logs = filterRowsByEmpresa(
+                snap.docs.map(d => ({ id: d.id, ...d.data() })),
+                empresaId,
+                scopeEmpresa,
+                migracionCompleta,
+            );
+            
+            setAuditLogs(logs.sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds));
+            
+        } catch(e) { console.error(e); } finally { setLoading(false); }
+    };
+
+    return {
+        loading,
+        dateRange, setDateRange,
+        publishFilter, setPublishFilter,
+        generateReports,
+        loadAudit,
+        employeeReport,
+        objectiveReport,
+        auditLogs,
+        objMap,
+        empMap,
+        empMetaMap,
+        holidaysData,
+        SHIFT_HOURS_LOOKUP,
+        OPERATIVE_CODES
+    };
+};
