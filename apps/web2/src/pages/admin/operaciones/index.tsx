@@ -420,9 +420,9 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
     // Badge de experiencia
     const expLv: number = item.experienceLv ?? 0;
     const expBadge = expLv === 3
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">★ Conoce el puesto</span>
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">★ Titular</span>
         : expLv === 2
-            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">Obj. asignado</span>
+            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">◆ Conoce el objetivo</span>
             : expLv === 1
                 ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">Mismo cliente</span>
                 : null;
@@ -495,11 +495,20 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         isSameDay(toDate(s.shiftDateObj), now)  // ← solo HOY, no mañana
     ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
 
-    // Helper de experiencia: nivel según datos del empleado
+    // Helper de experiencia: nivel usando experienciaObjetivos (mapa por objectiveId)
     const experienceLevel = (e: any): number => {
-        if (e.preferredObjectiveId === absenceShift.objectiveId) return 3; // objetivo preferido = experiencia directa
-        if (e.objectiveId          === absenceShift.objectiveId) return 2; // objetivo asignado actual
-        if (e.clientId             === absenceShift.clientId)    return 1; // mismo cliente
+        const objId = absenceShift.objectiveId;
+        // Nivel 3: objetivo preferido (titular del puesto)
+        if (e.preferredObjectiveId === objId) return 3;
+        // Nivel 2: tiene historial en este objetivo (CONOCIDO o ESCUELA)
+        const expMap: Record<string, any> = e.experienciaObjetivos || {};
+        const entry = expMap[objId];
+        if (entry) {
+            const turnosTotal = (entry.turnosRegulares ?? 0) + (entry.turnosRefuerzo ?? 0) + (entry.turnosConvocado ?? 0) + (entry.turnosEscuela ?? 0);
+            if (turnosTotal > 0) return 2;
+        }
+        // Nivel 1: mismo cliente
+        if (e.clientId === absenceShift.clientId) return 1;
         return 0;
     };
 
