@@ -562,13 +562,17 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         if (absenceShift.isUnassigned || absenceShift.isAbsent || absenceShift.isPotentialAbsence) {
             const covEmpId   = coveringEmployee?.id || coveringEmployee?.employeeId || null;
             const covEmpName = coveringEmployee?.fullName || coveringEmployee?.employeeName || coveringEmployee?.name || null;
+            const isAbsence  = absenceShift.isAbsent || absenceShift.isPotentialAbsence;
             batch.update(doc(db, 'turnos', absenceShift.id), {
-                status:                'COVERED',
+                // Para vacantes: status=COVERED (se oculta de operaciones)
+                // Para ausencias: mantener isAbsent=true, solo agregar info de cobertura (sigue en RRHH)
+                ...(isAbsence ? {} : { status: 'COVERED' }),
                 resolvedBy:            'OPERACIONES',
                 coverageType,                           // RETENTION | EARLY_START | RETEN | FRANCO
                 coveredAt:             serverTimestamp(),
                 coveredByEmployeeId:   covEmpId,        // quién cubrió
                 coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificación
+                operacionallyCovered:  true,            // slot operativo cubierto
             });
         }
     };
@@ -728,7 +732,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
     else if (shift.isPresent)        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
-    else if (shift.isAbsent)         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
+    else if (shift.isAbsent)         badge = shift.operacionallyCovered
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">✓ cubierto</span></span>
+        : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
     if (isCompact) return (

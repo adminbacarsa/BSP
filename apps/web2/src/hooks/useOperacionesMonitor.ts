@@ -196,7 +196,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const realShifts = rawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
             if (shift.draft === true) return null;
-            if (shift.status === 'COVERED') return null; // vacante cubierta por ops — no mostrar
+            // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
+            // Si es una ausencia, mantener en processedData para tracking RRHH
+            if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
             const rawPos = (shift.positionName || '').trim();
             if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') return null;
 
