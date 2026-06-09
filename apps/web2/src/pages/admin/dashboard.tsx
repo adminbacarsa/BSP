@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import {
   Shield, Users, Clock, AlertTriangle,
@@ -116,7 +117,14 @@ const KpiCard = ({ title, value, icon: Icon, color, subtext, alert, noData, prog
   return inner;
 };
 
-type DetailModalKind = 'vacantes' | 'novedades' | 'ausentes' | 'contratos_vencer' | 'servicios_riesgo' | 'empleados_sin_turno';
+type DetailModalKind =
+  | 'vacantes'
+  | 'novedades'
+  | 'ausentes'
+  | 'contratos_vencer'
+  | 'servicios_riesgo'
+  | 'empleados_sin_turno'
+  | 'concentracion_riesgo';
 
 interface TurnoDetalleRow {
   client: string;
@@ -144,6 +152,8 @@ function DashboardDetailModal({
   serviciosPorVencer,
   serviciosEnRiesgo,
   empleadosSinTurnoDetalle,
+  topClientes,
+  counts,
 }: {
   kind: DetailModalKind;
   onClose: () => void;
@@ -153,6 +163,8 @@ function DashboardDetailModal({
   serviciosPorVencer: { client: string; objective: string; dias: number }[];
   serviciosEnRiesgo: RiesgoRow[];
   empleadosSinTurnoDetalle: string[];
+  topClientes: ClientHrs[];
+  counts: { vacantes: number; novedades: number; ausentes: number; sinTurno: number };
 }) {
   const config: Record<DetailModalKind, { title: string; href: string; hrefLabel: string }> = {
     vacantes: { title: 'Puestos vacantes hoy', href: '/admin/operaciones', hrefLabel: 'Ir a Operaciones' },
@@ -161,11 +173,24 @@ function DashboardDetailModal({
     contratos_vencer: { title: 'Contratos por vencer', href: '/admin/servicios', hrefLabel: 'Ir a Servicios y SLA' },
     servicios_riesgo: { title: 'Servicios con cobertura baja', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
     empleados_sin_turno: { title: 'Empleados sin turno este mes', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
+    concentracion_riesgo: { title: 'Concentración de horas por cliente', href: '/admin/crm', hrefLabel: 'Ir a Clientes y Objetivos' },
   };
   const { title, href, hrefLabel } = config[kind];
 
-  const renderTurnoRows = (rows: TurnoDetalleRow[], emptyMsg: string) => {
+  const emptyWithCount = (count: number, label: string) => (
+    <div className="py-4 space-y-2">
+      <p className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>
+        El panel registra <strong>{count}</strong> {label}, pero el detalle aún no está cargado.
+      </p>
+      <p className="text-xs font-medium" style={{ color: 'var(--txt3)' }}>
+        Usá <strong>Actualizar</strong> arriba a la derecha o esperá unos segundos a que termine la sincronización.
+      </p>
+    </div>
+  );
+
+  const renderTurnoRows = (rows: TurnoDetalleRow[], emptyMsg: string, expectedCount = 0) => {
     if (rows.length === 0) {
+      if (expectedCount > 0) return emptyWithCount(expectedCount, emptyMsg.toLowerCase());
       return <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>{emptyMsg}</p>;
     }
     return (
@@ -187,12 +212,14 @@ function DashboardDetailModal({
 
   let body: React.ReactNode = null;
   if (kind === 'vacantes') {
-    body = renderTurnoRows(vacantesDetalle, 'No hay puestos vacantes registrados para hoy.');
+    body = renderTurnoRows(vacantesDetalle, 'puestos vacantes hoy', counts.vacantes);
   } else if (kind === 'ausentes') {
-    body = renderTurnoRows(ausentesDetalle, 'No hay ausencias confirmadas para hoy.');
+    body = renderTurnoRows(ausentesDetalle, 'ausencias confirmadas hoy', counts.ausentes);
   } else if (kind === 'novedades') {
     body = novedadesDetalle.length === 0 ? (
-      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>No hay novedades registradas hoy.</p>
+      counts.novedades > 0 ? emptyWithCount(counts.novedades, 'novedades hoy') : (
+        <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>No hay novedades registradas hoy.</p>
+      )
     ) : (
       <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
         {novedadesDetalle.map((n, i) => (
@@ -246,9 +273,11 @@ function DashboardDetailModal({
     );
   } else if (kind === 'empleados_sin_turno') {
     body = empleadosSinTurnoDetalle.length === 0 ? (
-      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Todos los empleados activos tienen turnos planificados este mes.</p>
+      counts.sinTurno > 0 ? emptyWithCount(counts.sinTurno, 'empleados sin turno este mes') : (
+        <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Todos los empleados activos tienen turnos planificados este mes.</p>
+      )
     ) : (
-      <ul className="divide-y rounded-xl overflow-hidden border max-h-72 overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+      <ul className="divide-y rounded-xl overflow-hidden border max-h-80 overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
         {empleadosSinTurnoDetalle.map((name, i) => (
           <li key={i} className="px-4 py-2.5 text-sm font-semibold" style={{ backgroundColor: 'var(--surf)', color: 'var(--txt)' }}>
             {name}
@@ -256,10 +285,26 @@ function DashboardDetailModal({
         ))}
       </ul>
     );
+  } else if (kind === 'concentracion_riesgo') {
+    body = topClientes.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Sin datos de distribución por cliente.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {topClientes.map((c, i) => (
+          <li key={i} className="px-4 py-3 flex items-center justify-between gap-3" style={{ backgroundColor: 'var(--surf)' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{c.name}</p>
+              <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{fmt(c.hrs)} hs SLA del mes</p>
+            </div>
+            <span className="text-sm font-black shrink-0" style={{ color: 'var(--company-primary,#6366f1)' }}>{c.pct}%</span>
+          </li>
+        ))}
+      </ul>
+    );
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
       <button type="button" className="absolute inset-0 bg-black/45 border-0" aria-label="Cerrar" onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-2xl border shadow-2xl flex flex-col max-h-[85vh]"
@@ -292,11 +337,19 @@ interface RiesgoRow { name: string; client: string; vacPct: number; absPct: numb
 interface ClientHrs { name: string; hrs: number; pct: number; }
 
 // ─── CACHE ────────────────────────────────────────────────────────────────────
-const CACHE_KEY_PREFIX = 'dashboard_cache_v5';
+const CACHE_KEY_PREFIX = 'dashboard_cache_v6';
 const CACHE_TTL = 5 * 60 * 1000;
 
 function cacheKeyForEmpresa(empresaId: string) {
   return `${CACHE_KEY_PREFIX}_${empresaId || 'legacy'}`;
+}
+function cacheHasDetailPayload(data: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(data.vacantesDetalle) &&
+    Array.isArray(data.novedadesDetalle) &&
+    Array.isArray(data.ausentesDetalle) &&
+    Array.isArray(data.empleadosSinTurnoDetalle)
+  );
 }
 function saveCache(empresaId: string, data: Record<string, any>) {
   try { localStorage.setItem(cacheKeyForEmpresa(empresaId), JSON.stringify({ ts: Date.now(), data })); } catch {}
@@ -306,7 +359,9 @@ function loadCache(empresaId: string): Record<string, any> | null {
     const raw = localStorage.getItem(cacheKeyForEmpresa(empresaId));
     if (!raw) return null;
     const { ts, data } = JSON.parse(raw);
-    return Date.now() - ts < CACHE_TTL ? data : null;
+    if (Date.now() - ts >= CACHE_TTL) return null;
+    if (!cacheHasDetailPayload(data)) return null;
+    return data;
   } catch { return null; }
 }
 
@@ -345,6 +400,7 @@ function AdminDashboard() {
   const [novedadesDetalle, setNovedadesDetalle]   = useState<NovedadDetalleRow[]>([]);
   const [empleadosSinTurnoDetalle, setEmpleadosSinTurnoDetalle] = useState<string[]>([]);
   const [detailModal, setDetailModal]           = useState<DetailModalKind | null>(null);
+  const [portalReady, setPortalReady]           = useState(false);
 
   // ── Planificación
   const [hasPlanificacion, setHasPlanificacion] = useState(false);
@@ -411,9 +467,24 @@ function AdminDashboard() {
     if (empleadosSinTurno > 0)
       list.push({ type: 'info', msg: `${empleadosSinTurno} empleado${empleadosSinTurno > 1 ? 's' : ''} sin turno asignado este mes`, modal: 'empleados_sin_turno' });
     if (concentracionPct >= 70)
-      list.push({ type: 'warning', msg: `Concentración de riesgo: top 3 clientes representan el ${concentracionPct}% de las horas`, href: '/admin/crm' });
+      list.push({ type: 'warning', msg: `Concentración de riesgo: top 3 clientes representan el ${concentracionPct}% de las horas`, modal: 'concentracion_riesgo' });
     return list;
   }, [vacantesHoy, novedadesHoy, serviciosPorVencer, serviciosEnRiesgo, empleadosSinTurno, concentracionPct]);
+
+  useEffect(() => { setPortalReady(true); }, []);
+
+  useEffect(() => {
+    if (!detailModal || !empresaId || isRefreshing) return;
+    const stale =
+      (detailModal === 'vacantes' && vacantesHoy > 0 && vacantesDetalle.length === 0) ||
+      (detailModal === 'novedades' && novedadesHoy > 0 && novedadesDetalle.length === 0) ||
+      (detailModal === 'ausentes' && ausentesHoy > 0 && ausentesDetalle.length === 0) ||
+      (detailModal === 'empleados_sin_turno' && empleadosSinTurno > 0 && empleadosSinTurnoDetalle.length === 0);
+    if (!stale) return;
+    try { localStorage.removeItem(cacheKeyForEmpresa(empresaId)); } catch {}
+    setIsRefreshing(true);
+    fetchAll(true);
+  }, [detailModal, empresaId, vacantesHoy, vacantesDetalle.length, novedadesHoy, novedadesDetalle.length, ausentesHoy, ausentesDetalle.length, empleadosSinTurno, empleadosSinTurnoDetalle.length, isRefreshing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── LIFECYCLE ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -803,7 +874,7 @@ function AdminDashboard() {
         vacantesDetalle: vacantesDetalleList,
         ausentesDetalle: ausentesDetalleList,
         novedadesDetalle: novedadesDetalleList,
-        empleadosSinTurnoDetalle: empleadosSinTurnoDetalleList.slice(0, 48),
+        empleadosSinTurnoDetalle: empleadosSinTurnoDetalleList,
         hasPlanificacion: hasPlan,
         coveragePct: hasPlan && totalTurnos > 0 ? ((totalTurnos - vacantes - absent) / totalTurnos) * 100 : 0,
         avgHrsVigilador: totalEmp > 0 ? Math.round(totalSlaH / totalEmp) : 0,
@@ -818,7 +889,7 @@ function AdminDashboard() {
         serviciosEnRiesgo: riesgoList,
         concentracionPct: concPct,
         topClientes: topClientsArr,
-        serviciosPorVencer: porVencerList.slice(0, 6),
+        serviciosPorVencer: porVencerList,
         empleadosSinTurno: sinTurnoCount,
         tasaAusentismo30: tasaAus30,
         lastUpdated: now.toISOString(),
@@ -938,21 +1009,29 @@ function AdminDashboard() {
                 ) : (
                   <div className="flex flex-col gap-1.5">
                     {alertasCriticas.map((a, i) => (
-                      <div key={i} className="flex items-center gap-2">
+                      <div
+                        key={i}
+                        className={`flex items-center gap-2 ${a.modal ? 'cursor-pointer rounded-lg py-0.5 pr-1 -mr-1 hover:bg-black/[0.04] transition-colors' : ''}`}
+                        onClick={a.modal ? () => setDetailModal(a.modal!) : undefined}
+                        onKeyDown={a.modal ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailModal(a.modal!); } } : undefined}
+                        role={a.modal ? 'button' : undefined}
+                        tabIndex={a.modal ? 0 : undefined}
+                      >
                         {a.type === 'error'   && <AlertCircle size={13} className="text-red-500 shrink-0"/>}
                         {a.type === 'warning' && <AlertTriangle size={13} className="text-amber-500 shrink-0"/>}
                         {a.type === 'info'    && <Info size={13} className="text-blue-500 shrink-0"/>}
-                        <span className="text-xs font-semibold" style={{ color: 'var(--txt)' }}>{a.msg}</span>
+                        <span className="text-xs font-semibold flex-1 min-w-0" style={{ color: 'var(--txt)' }}>{a.msg}</span>
                         {a.modal ? (
-                          <button
-                            type="button"
-                            onClick={() => setDetailModal(a.modal!)}
-                            className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline border-0 bg-transparent cursor-pointer p-0"
+                          <span
+                            className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap shrink-0"
                             style={{ color: 'var(--company-primary,#6366f1)' }}>
                             Ver detalle <ArrowRight size={10}/>
-                          </button>
+                          </span>
                         ) : a.href ? (
-                          <a href={a.href} className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline"
+                          <a
+                            href={a.href}
+                            onClick={(e) => e.stopPropagation()}
+                            className="ml-auto text-[10px] font-bold flex items-center gap-0.5 whitespace-nowrap hover:underline shrink-0"
                             style={{ color: 'var(--company-primary,#6366f1)' }}>
                             Ver <ArrowRight size={10}/>
                           </a>
@@ -1220,7 +1299,7 @@ function AdminDashboard() {
                   </div>
                 ) : (
                   <div className="rounded-xl overflow-hidden divide-y" style={{ border: '1px solid var(--border)' }}>
-                    {serviciosPorVencer.map((s, i) => (
+                    {serviciosPorVencer.slice(0, 6).map((s, i) => (
                       <div key={i} className="flex items-center justify-between px-4 py-3">
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-black truncate" style={{ color: 'var(--txt)' }}>{s.client}</p>
@@ -1508,7 +1587,7 @@ function AdminDashboard() {
         )}
       </div>
 
-      {detailModal && (
+      {portalReady && detailModal && createPortal(
         <DashboardDetailModal
           kind={detailModal}
           onClose={() => setDetailModal(null)}
@@ -1518,7 +1597,10 @@ function AdminDashboard() {
           serviciosPorVencer={serviciosPorVencer}
           serviciosEnRiesgo={serviciosEnRiesgo}
           empleadosSinTurnoDetalle={empleadosSinTurnoDetalle}
-        />
+          topClientes={topClientes}
+          counts={{ vacantes: vacantesHoy, novedades: novedadesHoy, ausentes: ausentesHoy, sinTurno: empleadosSinTurno }}
+        />,
+        document.body,
       )}
     </DashboardLayout>
   );
