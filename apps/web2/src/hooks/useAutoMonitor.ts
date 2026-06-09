@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { stampEmpresaId } from '@/lib/multiempresa';
@@ -106,20 +106,25 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
     const check = async () => {
       const now = new Date();
 
-      // Guardias que no se presentaron (> 15 min y < 3 hs)
+      // Guardias tarde: T+5 a T+60 (ventana donde puede marcar llegada tarde)
       const lateGuards = processedData.filter(s => {
         if (s.isPresent || s.isCompleted || s.isAbsent || s.isUnassigned || s.isFranco) return false;
         if (processedIds.current.has(`late_${s.id}`)) return false;
         const diff = (now.getTime() - (s.shiftDateObj?.getTime() || 0)) / 60000;
-        return diff > 15 && diff < 180;
+        return diff > 5 && diff < 60;
       });
 
       for (const s of lateGuards) {
         processedIds.current.add(`late_${s.id}`);
         if (isAutoMode) {
           const msg = `${s.employeeName} — ${s.objectiveName}`;
-          await createNovedad('AUSENCIA_DETECTADA', 'Ausencia Detectada (Auto)',
-            `No se presentó: ${msg}`, s, empresaId);
+          // Dedup: evitar duplicados entre tabs o re-renders
+          const existing = await getDocs(query(collection(db, 'novedades'),
+            where('shiftId', '==', s.id), where('type', '==', 'LLEGADA_TARDE'), limit(1)));
+          if (existing.empty) {
+            await createNovedad('LLEGADA_TARDE', 'Llegada Tarde',
+              `${msg} llegó tarde al turno`, s, empresaId);
+          }
         }
       }
 
@@ -129,9 +134,9 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
           const s = lateGuards[0];
           const msg = `${s.employeeName} — ${s.objectiveName}`;
           if (isAutoMode) {
-            toast.warning(`🤖 AUTO: Ausencia — ${msg}`, { duration: 8000 });
+            toast.warning(`⏰ Llegada tarde: ${msg}`, { duration: 8000 });
           } else {
-            toast.error(`⚠️ No se presentó: ${msg}`, {
+            toast.warning(`⏰ No llegó: ${msg}`, {
               duration: 15000,
               description: 'Ir al tab AUSENTES para gestionar cobertura',
             });

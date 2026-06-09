@@ -50,7 +50,7 @@ import {
   saveEmpresaAfipCredentialsHandler,
 } from './afip/empresaAfipCredentialsHandler';
 
-// Inicialización de Firebase Admin
+// InicializaciÃ³n de Firebase Admin
 if (!admin.apps.length) {
   admin.initializeApp();
 }
@@ -74,11 +74,11 @@ const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
 
 
 // =========================================================
-// 1. GESTIÓN DE USUARIOS (AUTH)
+// 1. GESTIÃ“N DE USUARIOS (AUTH)
 // =========================================================
 export const createUser = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida.');
   }
   const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
   if (!caller.isPanelUser || !isAdminBackupRole(caller.sysRole || context.auth.token?.role)) {
@@ -90,11 +90,11 @@ export const createUser = functions.https.onCall(async (data, context) => {
     const { email, password, name, role: receivedRole, clientId, dni, fileNumber, address, empresaId: rawEmpresaId } = data;
     const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
     if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-      throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+      throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
     }
     
     if (!ALLOWED_ROLES.includes(receivedRole as EmployeeRole)) {
-       throw new functions.https.HttpsError('invalid-argument', 'Rol inválido.');
+       throw new functions.https.HttpsError('invalid-argument', 'Rol invÃ¡lido.');
     }
 
     const validRole = receivedRole as EmployeeRole;
@@ -138,7 +138,7 @@ export const scheduleShift = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 3. GESTIÓN DE TURNOS (EDITAR / ELIMINAR / REPLICAR)
+// 3. GESTIÃ“N DE TURNOS (EDITAR / ELIMINAR / REPLICAR)
 // =========================================================
 export const manageShifts = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -176,10 +176,10 @@ export const manageShifts = functions.https.onCall(async (data, context) => {
         return { 
             success: true, 
             data: result, 
-            message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} días)` 
+            message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} dÃ­as)` 
         };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -190,10 +190,10 @@ export const manageShifts = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 4. AUDITORÍA (GEOFENCING & MANUAL OVERRIDE)
+// 4. AUDITORÃA (GEOFENCING & MANUAL OVERRIDE)
 // =========================================================
 export const auditShift = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
 
   const { shiftId, action, coords, isManualOverride } = data;
 
@@ -219,7 +219,7 @@ export const auditShift = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 5. GESTIÓN DE DATOS BÁSICOS
+// 5. GESTIÃ“N DE DATOS BÃSICOS
 // =========================================================
 export const manageData = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -234,7 +234,7 @@ export const manageData = functions.https.onCall(async (data, context) => {
       case 'CREATE_OBJECTIVE': return { success: true, data: await dmService.createObjective(payload) };
       case 'GET_ALL_OBJECTIVES': return { success: true, data: await dmService.findAllObjectives(payload?.clientId) };
       case 'GET_CLIENT_BY_ID': return { success: true, data: await dmService.getClientById(payload.clientId) };
-      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -245,7 +245,7 @@ export const manageData = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 6. GESTIÓN DE JERARQUÍA COMERCIAL
+// 6. GESTIÃ“N DE JERARQUÃA COMERCIAL
 // =========================================================
 export const manageHierarchy = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -277,7 +277,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
       case 'UPDATE_SHIFT_TYPE': await clientService.updateShiftType(payload.id, payload.data); return { success: true, message: 'Modalidad actualizada' };
       case 'DELETE_SHIFT_TYPE': await clientService.deleteShiftType(payload.id); return { success: true, message: 'Modalidad eliminada' };
       
-      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -288,7 +288,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 7. GESTIÓN DE EMPLEADOS (RRHH) - (INCLUYE REPORTE DE CARGA Y IMPORTACIÓN)
+// 7. GESTIÃ“N DE EMPLEADOS (RRHH) - (INCLUYE REPORTE DE CARGA Y IMPORTACIÃ“N)
 // =========================================================
 export const manageEmployees = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -306,7 +306,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         
       case 'GET_WORKLOAD_REPORT':
         if (!payload.uid || !payload.month || !payload.year) {
-            throw new functions.https.HttpsError('invalid-argument', 'Faltan parámetros (uid, month, year) para el reporte.');
+            throw new functions.https.HttpsError('invalid-argument', 'Faltan parÃ¡metros (uid, month, year) para el reporte.');
         }
         const report = await employeeService.getEmployeeWorkload(payload.uid, payload.month, payload.year);
         return { success: true, data: report };
@@ -319,15 +319,15 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         await employeeService.deleteEmployee(payload.uid);
         return { success: true, message: 'Empleado eliminado.' };
 
-      // 🛑 NUEVO: IMPORTACIÓN MASIVA
+      // ðŸ›‘ NUEVO: IMPORTACIÃ“N MASIVA
       case 'IMPORT_EMPLOYEES':
         if (!payload.rows || !Array.isArray(payload.rows)) {
-             throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo inválido. Se espera un array "rows".');
+             throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
         }
         const importResult = await employeeService.importEmployees(payload.rows, callerAuth.uid);
         return { success: true, data: importResult };
         
-      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -338,7 +338,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 8. GESTIÓN DE USUARIOS DEL SISTEMA (ADMINS)
+// 8. GESTIÃ“N DE USUARIOS DEL SISTEMA (ADMINS)
 // =========================================================
 export const manageSystemUsers = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -365,7 +365,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
         await sysUserService.deleteSystemUser(payload.uid);
         return { success: true, message: 'Administrador eliminado.' };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -376,12 +376,12 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
 });
 
 // =========================================================
-// 9. GESTIÓN DE NOVEDADES (AUSENCIAS)
+// 9. GESTIÃ“N DE NOVEDADES (AUSENCIAS)
 // =========================================================
 export const manageAbsences = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
   if (!callerAuth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
   }
 
   const { action, payload } = data as { action: string, payload: any };
@@ -400,7 +400,7 @@ export const manageAbsences = functions.https.onCall(async (data, context) => {
       case 'CREATE_ABSENCE':
         return { success: true, data: await absenceService.createAbsence(payload) };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -414,7 +414,7 @@ export const manageAbsences = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 10. GESTIÓN DE PATRONES DE SERVICIO (AUTOMATIZACIÓN)
+// 10. GESTIÃ“N DE PATRONES DE SERVICIO (AUTOMATIZACIÃ“N)
 // =========================================================
 export const managePatterns = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -450,7 +450,7 @@ export const managePatterns = functions.https.onCall(async (data, context) => {
                 payload.month,
                 payload.year
             );
-        default: throw new functions.https.HttpsError('invalid-argument', 'Acción inválida');
+        default: throw new functions.https.HttpsError('invalid-argument', 'AcciÃ³n invÃ¡lida');
     }
   } catch (error: any) {
       console.error(`[PATTERN_ERROR] Action ${action} failed:`, error.message);
@@ -459,7 +459,7 @@ export const managePatterns = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 11. GESTIÓN DE CONVENIOS (NUEVO)
+// 11. GESTIÃ“N DE CONVENIOS (NUEVO)
 // =========================================================
 export const manageAgreements = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
@@ -482,7 +482,7 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
                 const msg = await agreementService.initializeDefaults();
                 return { success: true, message: msg };
                 
-            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }
     } catch (error: any) {
         console.error(`[AGREEMENT_ERROR] Action ${action} failed:`, error.message);
@@ -491,27 +491,27 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
 });
 
 // =========================================================
-// 12. DIAGNÓSTICO DE SISTEMA (HEALTH CHECK)
+// 12. DIAGNÃ“STICO DE SISTEMA (HEALTH CHECK)
 // =========================================================
 
 export const platformHealthCheck = functions.https.onCall(async (_data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
   }
 
   const db = admin.firestore();
   const results: Record<string, { ok: boolean; latencyMs?: number; detail?: string }> = {};
 
-  // ── Firestore ────────────────────────────────────────────
+  // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const t0 = Date.now();
   try {
     const snap = await db.collection('empresas').limit(1).get();
-    results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leída(s)` };
+    results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leÃ­da(s)` };
   } catch (e: any) {
     results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
   }
 
-  // ── Gemini API ───────────────────────────────────────────
+  // â”€â”€ Gemini API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const geminiKey = process.env.GEMINI_API_KEY || '';
   if (!geminiKey) {
     results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
@@ -528,7 +528,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // ── Gmail SMTP ───────────────────────────────────────────
+  // â”€â”€ Gmail SMTP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const gmailUser = process.env.GMAIL_USER || '';
   const gmailPass = process.env.GMAIL_PASS || '';
   if (!gmailUser || !gmailPass) {
@@ -545,7 +545,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // ── Google Drive ─────────────────────────────────────────
+  // â”€â”€ Google Drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
   if (!driveFolderId) {
     results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
@@ -555,24 +555,24 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
       if (!snap.empty) {
         const last = snap.docs[0].data();
         const ts = last.createdAt?.toDate?.()?.toISOString?.() ?? 'desconocido';
-        results.drive = { ok: true, detail: `Último backup: ${ts}` };
+        results.drive = { ok: true, detail: `Ãšltimo backup: ${ts}` };
       } else {
-        results.drive = { ok: true, detail: 'Sin backups registrados aún' };
+        results.drive = { ok: true, detail: 'Sin backups registrados aÃºn' };
       }
     } catch (e: any) {
       results.drive = { ok: false, detail: e.message?.slice(0, 120) };
     }
   }
 
-  // ── FCM (Push Notifications) ─────────────────────────────
+  // â”€â”€ FCM (Push Notifications) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     const tokSnap = await db.collection('device_tokens').limit(1).get();
-    results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? '≥1' : '0'}` };
+    results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? 'â‰¥1' : '0'}` };
   } catch (e: any) {
     results.fcm = { ok: false, detail: e.message };
   }
 
-  // ── Scheduled jobs — última ejecución ───────────────────
+  // â”€â”€ Scheduled jobs â€” Ãºltima ejecuciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
   const jobStatus: Record<string, string> = {};
   for (const job of scheduledJobs) {
@@ -591,7 +591,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
   }
   results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
 
-  // ── Conteos de datos ─────────────────────────────────────
+  // â”€â”€ Conteos de datos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   try {
     const [empSnap, sysSnap, empActivos] = await Promise.all([
       db.collection('empresas').get(),
@@ -600,21 +600,21 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     ]);
     results.data = {
       ok: true,
-      detail: `Empresas: ${empSnap.size} · Admins: ${sysSnap.size} · Empleados activos: ${empActivos.size}`,
+      detail: `Empresas: ${empSnap.size} Â· Admins: ${sysSnap.size} Â· Empleados activos: ${empActivos.size}`,
     };
   } catch (e: any) {
     results.data = { ok: false, detail: e.message };
   }
 
-  // ── Entorno ──────────────────────────────────────────────
+  // â”€â”€ Entorno â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'Producción (Firebase)' };
+  results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'ProducciÃ³n (Firebase)' };
 
   return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
 });
 export const checkSystemHealth = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
+      throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
   }
 
   const start = Date.now();
@@ -645,8 +645,8 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
 });
 
 // =========================================================
-// 12b. ASISTENTE VIRTUAL (Gemini vía Functions)
-// Producción: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
+// 12b. ASISTENTE VIRTUAL (Gemini vÃ­a Functions)
+// ProducciÃ³n: Secret Manager â€” `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
 // misma llamable sin runWith para que cargue GEMINI desde apps/functions/.env (bootstrap-env.ts).
 // =========================================================
 async function chatPlatformAssistantHandler(
@@ -654,7 +654,7 @@ async function chatPlatformAssistantHandler(
   context: functions.https.CallableContext,
 ): Promise<{ reply: string }> {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
   }
 
   const t0 = Date.now();
@@ -710,7 +710,7 @@ async function chatPlatformAssistantHandler(
 
 function truncateMsg(s: string, max: number): string {
   const t = String(s).trim();
-  return t.length <= max ? t : `${t.slice(0, max - 3)}…`;
+  return t.length <= max ? t : `${t.slice(0, max - 3)}â€¦`;
 }
 
 export const chatPlatformAssistant =
@@ -727,12 +727,12 @@ async function optimizePlanningGeminiHandler(
   context: functions.https.CallableContext,
 ): Promise<GeminiRespuesta> {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
   }
   const role = String(context.auth.token.role || '').trim();
   const { isSuperAdminRole } = await import('./common/role.util');
   if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
-    throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
+    throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificaciÃ³n.');
   }
   const { resolveAssistantUser, empresaAllowed } = await import('./assistant/resolveAssistantUser');
   const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
@@ -753,7 +753,7 @@ async function optimizePlanningGeminiHandler(
   } catch (e: any) {
     if (e instanceof functions.https.HttpsError) throw e;
     console.error('[optimizePlanningGemini]', e?.message, e?.stack);
-    const detail = e?.message || e?.toString?.() || 'Error Gemini planificación';
+    const detail = e?.message || e?.toString?.() || 'Error Gemini planificaciÃ³n';
     throw new functions.https.HttpsError('internal', detail);
   }
 }
@@ -805,7 +805,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   } else {
     targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim() || 'bacarsa';
     if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-      throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
+      throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
     }
   }
 
@@ -839,7 +839,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
 /** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
 export const syncSystemUserClaims = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+    throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida');
   }
   const targetUid = String((data as { uid?: string })?.uid ?? context.auth.uid).trim();
   const db = admin.firestore();
@@ -899,7 +899,7 @@ export const limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).htt
 
     if (target === 'AUDIT') path = 'historial_operaciones';
     else if (target === 'SHIFTS') path = 'turnos';
-    else throw new functions.https.HttpsError("invalid-argument", "Target inválido");
+    else throw new functions.https.HttpsError("invalid-argument", "Target invÃ¡lido");
 
     await db.recursiveDelete(db.collection(path));
     return { success: true };
@@ -931,7 +931,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
         throw new functions.https.HttpsError(
             'failed-precondition',
-            'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.'
+            'Tu turno fue registrado como ausencia. ContactÃ¡ al operador para gestionar tu ingreso.'
         );
     }
 
@@ -939,10 +939,10 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const now   = admin.firestore.FieldValue.serverTimestamp();
     const nowMs = nowTs.toMillis();
 
-    // Regla de liquidación: realStartTime = hora planificada
-    // El guardia puede llegar antes o después pero el inicio para pago es siempre el planificado.
-    // Excepción: si fue adelantado para cubrir una ausencia (isEarlyStart = true),
-    // en ese caso realStartTime ya viene seteado desde la asignación del operador.
+    // Regla de liquidaciÃ³n: realStartTime = hora planificada
+    // El guardia puede llegar antes o despuÃ©s pero el inicio para pago es siempre el planificado.
+    // ExcepciÃ³n: si fue adelantado para cubrir una ausencia (isEarlyStart = true),
+    // en ese caso realStartTime ya viene seteado desde la asignaciÃ³n del operador.
     const scheduledStartTs = shiftData.startTime ?? null;
     const isEarlyStart = shiftData.isEarlyStart === true;
     const realStartTime = isEarlyStart
@@ -951,13 +951,13 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
 
     // Detectar llegada tarde (para flag de asistencia, no afecta pago)
     const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000; // > 5 min después
+    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000; // > 5 min despuÃ©s
 
     await shiftRef.update({
         isPresent: true,
         status: 'PRESENT',
         checkInTime: now,           // hora real de llegada (para asistencia/tracking)
-        realStartTime,              // hora planificada (para liquidación)
+        realStartTime,              // hora planificada (para liquidaciÃ³n)
         checkInRequestedAt: now,
         checkInMethod: 'PORTAL_GPS',
         checkInCoords: coords || null,
@@ -986,7 +986,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
         console.warn('[requestCheckIn] No se pudo crear novedad:', (e as Error)?.message);
     }
 
-    // ── AUTO-RELEVO: buscar y relevar al guardia presente en el mismo puesto ──
+    // â”€â”€ AUTO-RELEVO: buscar y relevar al guardia presente en el mismo puesto â”€â”€
     try {
         const objectiveId  = shiftData.objectiveId  || '';
         const positionName = (shiftData.positionName || '').trim().toLowerCase();
@@ -1014,10 +1014,10 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                     if ((dat.positionName || '').trim().toLowerCase() !== positionName) return false;
                     if (d.id === shiftId || dat.employeeId === empId) return false;
 
-                    // Incluir: retenidos (esperando relevo) O a ≤15 min de terminar
+                    // Incluir: retenidos (esperando relevo) O a â‰¤15 min de terminar
                     if (dat.isRetention === true) return true;
                     const outEndMs = dat.endTime?.toMillis?.() ?? 0;
-                    if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS) return true; // ≤15 min para terminar
+                    if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS) return true; // â‰¤15 min para terminar
 
                     return false;
                 })
@@ -1026,10 +1026,10 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                     // 1. Retenidos primero (llevan tiempo extra)
                     if (da.isRetention && !db2.isRetention) return -1;
                     if (!da.isRetention && db2.isRetention) return 1;
-                    // 2. FIFO: quien tiene más tiempo trabajado se va primero
+                    // 2. FIFO: quien tiene mÃ¡s tiempo trabajado se va primero
                     const aStart = da.realStartTime?.toMillis?.() ?? da.checkInTime?.toMillis?.() ?? da.startTime?.toMillis?.() ?? 0;
                     const bStart = db2.realStartTime?.toMillis?.() ?? db2.checkInTime?.toMillis?.() ?? db2.startTime?.toMillis?.() ?? 0;
-                    return aStart - bStart; // más antiguo primero
+                    return aStart - bStart; // mÃ¡s antiguo primero
                 });
 
             for (const outDoc of toRelieve) {
@@ -1043,8 +1043,8 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
                 const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
                 const outgoingRealEnd = isEarlyRelevo
-                    ? outData.endTime                                  // hora programada → horas completas
-                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasó → hora real
+                    ? outData.endTime                                  // hora programada â†’ horas completas
+                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasÃ³ â†’ hora real
 
                 // 1. Completar el turno del guardia saliente
                 await outDoc.ref.update({
@@ -1071,7 +1071,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                     employeeName:          incomingName,
                     relievedEmployeeId:    outEmpId,
                     relievedEmployeeName:  outName,
-                    description:           `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
+                    description:           `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' â€” ' + outPosName : ''}`,
                     createdAt:             admin.firestore.FieldValue.serverTimestamp(),
                     autoProcessed:         true,
                     source:                'AUTO_RELEVO',
@@ -1095,7 +1095,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 });
                 const tokens = Array.from(tokenSet);
 
-                const notifTitle = '✅ Turno finalizado — relevado';
+                const notifTitle = 'âœ… Turno finalizado â€” relevado';
                 const notifBody  = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
 
                 // Guardar en user_notifications (siempre, aunque no haya token)
@@ -1114,7 +1114,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                     });
                     notifDocId = notifRef.id;
                 } catch (e) {
-                    console.warn('[requestCheckIn] Error guardando notificación relevo:', (e as Error)?.message);
+                    console.warn('[requestCheckIn] Error guardando notificaciÃ³n relevo:', (e as Error)?.message);
                 }
 
                 if (tokens.length > 0) {
@@ -1172,11 +1172,11 @@ export const registrarFichadaManual = functions.https.onCall(async (data, contex
             status: 'PRESENT',
             checkInTime: admin.firestore.FieldValue.serverTimestamp(),
             checkInMethod: method || 'MANUAL', // 'RADIO', 'PHONE', 'WHATSAPP'
-            checkInOperator: context.auth.uid, // Quién validó la fichada
+            checkInOperator: context.auth.uid, // QuiÃ©n validÃ³ la fichada
             operatorNotes: notes || ''
         });
 
-        // Log de auditoría (opcional)
+        // Log de auditorÃ­a (opcional)
         await db.collection('audit_logs').add({
             action: 'MANUAL_CHECKIN',
             shiftId,
@@ -1216,7 +1216,7 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
 });
 
 // =========================================================
-// 13. ENVÍO DE ACCESO AL PORTAL DE EMPLEADOS
+// 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
 // =========================================================
 import * as nodemailer from 'nodemailer';
 
@@ -1233,13 +1233,13 @@ function buildPortalEmailHtml(activationLink: string, empresaNombre: string): st
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">${nombreUpper}</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados · COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados Â· COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular</strong> y tocá el botón para crear tu contraseña y vincular tu dispositivo en un solo paso:</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">AbrÃ­ este email <strong>desde tu celular</strong> y tocÃ¡ el botÃ³n para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
               <tr>
                 <td style="background:#0f766e;border-radius:8px;">
@@ -1247,17 +1247,17 @@ function buildPortalEmailHtml(activationLink: string, empresaNombre: string): st
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrás ver tus turnos, marcar presencia y gestionar novedades.</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrÃ¡s ver tus turnos, marcar presencia y gestionar novedades.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podés ignorarlo.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podÃ©s ignorarlo.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
               <a href="${activationLink}" style="color:#3b82f6;word-break:break-all;">${activationLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · ${nombre}</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· ${nombre}</strong></p>
           </td>
         </tr>
       </table>
@@ -1271,7 +1271,7 @@ function buildPortalEmailText(activationLink: string, empresaNombre: string): st
   const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
   return `${nombre} te ha otorgado acceso al Portal de Empleados de COSP.
 
-Abrí este email desde tu celular y tocá el siguiente enlace para crear tu contraseña y vincular tu dispositivo en un solo paso:
+AbrÃ­ este email desde tu celular y tocÃ¡ el siguiente enlace para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:
 
 ${activationLink}
 
@@ -1287,7 +1287,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
   }
 
-  // Check 1: token claim (rápido, sin Firestore)
+  // Check 1: token claim (rÃ¡pido, sin Firestore)
   const tokenRole = (callerAuth.token.role as string) || '';
   let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
 
@@ -1311,7 +1311,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('invalid-argument', 'Se requiere al menos un empleado.');
   }
 
-  // Credenciales SMTP — definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
+  // Credenciales SMTP â€” definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
   const gmailUser = process.env.GMAIL_USER || '';
   const gmailPass = process.env.GMAIL_PASS || '';
 
@@ -1383,7 +1383,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         }
       }
 
-      // Generar token de activación (UUID, expira 48h) — único link para crear contraseña + activar dispositivo
+      // Generar token de activaciÃ³n (UUID, expira 48h) â€” Ãºnico link para crear contraseÃ±a + activar dispositivo
       const crypto = await import('crypto');
       const activationToken = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
@@ -1397,7 +1397,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       });
       const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
 
-      // Enviar email — solo se marca como enviado si el envío fue exitoso
+      // Enviar email â€” solo se marca como enviado si el envÃ­o fue exitoso
       await transporter.sendMail({
         from: `"${empresaNombre}" <${gmailUser}>`,
         to: email,
@@ -1420,7 +1420,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       });
       if (needsCleanup) await cleanupBatch.commit();
 
-      // Marcar invitación SOLO después del envío exitoso
+      // Marcar invitaciÃ³n SOLO despuÃ©s del envÃ­o exitoso
       await db.collection('empleados').doc(empId).update({
         uid,
         portalInvite: {
@@ -1441,12 +1441,12 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 });
 
 // =========================================================
-// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vía email)
+// 14. ACTIVACIÃ“N DE DISPOSITIVO (device binding vÃ­a email)
 // =========================================================
 
 export const activateDevice = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
+    throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesiÃ³n primero.');
   }
   const { token, deviceInfo, deviceId } = data as { token: string; deviceInfo?: Record<string, string>; deviceId?: string };
   if (!token) {
@@ -1458,7 +1458,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   const tokenDoc = await tokenRef.get();
 
   if (!tokenDoc.exists) {
-    throw new functions.https.HttpsError('not-found', 'Token de activación inválido.');
+    throw new functions.https.HttpsError('not-found', 'Token de activaciÃ³n invÃ¡lido.');
   }
 
   const td = tokenDoc.data()!;
@@ -1468,7 +1468,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   }
 
   if (td.expiresAt.toDate() < new Date()) {
-    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activación expiró. Pedí uno nuevo al administrador.');
+    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activaciÃ³n expirÃ³. PedÃ­ uno nuevo al administrador.');
   }
 
   if (td.uid !== context.auth.uid) {
@@ -1478,7 +1478,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   // Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-  // Guardar dispositivo verificado — doc ID = uid (un dispositivo por usuario)
+  // Guardar dispositivo verificado â€” doc ID = uid (un dispositivo por usuario)
   const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
   await deviceRef.set({
     uid: context.auth.uid,
@@ -1494,7 +1494,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 15. ACTIVACIÓN COMPLETA: contraseña + dispositivo en un paso (sin auth previa)
+// 15. ACTIVACIÃ“N COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
 // =========================================================
 
 export const activateAndSetPassword = functions.https.onCall(async (data, _context) => {
@@ -1507,7 +1507,7 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
 
   if (!token) throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
   if (!password || password.length < 6) {
-    throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+    throw new functions.https.HttpsError('invalid-argument', 'La contraseÃ±a debe tener al menos 6 caracteres.');
   }
 
   const db = admin.firestore();
@@ -1515,7 +1515,7 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   const tokenDoc = await tokenRef.get();
 
   if (!tokenDoc.exists) {
-    throw new functions.https.HttpsError('not-found', 'Enlace inválido o ya utilizado.');
+    throw new functions.https.HttpsError('not-found', 'Enlace invÃ¡lido o ya utilizado.');
   }
 
   const td = tokenDoc.data()!;
@@ -1525,17 +1525,17 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   }
 
   if (td.expiresAt.toDate() < new Date()) {
-    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expiró. Pedile al administrador que te reenvíe el mail de acceso.');
+    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expirÃ³. Pedile al administrador que te reenvÃ­e el mail de acceso.');
   }
 
   const { uid, employeeId } = td;
 
-  // Obtener email del usuario para devolvérselo al front (necesario para signIn)
+  // Obtener email del usuario para devolvÃ©rselo al front (necesario para signIn)
   const userRecord = await admin.auth().getUser(uid);
   const email = userRecord.email;
   if (!email) throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
 
-  // 1. Establecer contraseña
+  // 1. Establecer contraseÃ±a
   await admin.auth().updateUser(uid, { password });
 
   // 2. Marcar token como usado
@@ -1570,31 +1570,31 @@ function buildClientPortalEmailHtml(resetLink: string, clientName: string): stri
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes · COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes Â· COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Clientes de COSP</strong> para gestionar el personal autorizado de <strong>${clientName}</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Hacé clic en el botón de abajo para crear tu contraseña y acceder al portal:</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">HacÃ© clic en el botÃ³n de abajo para crear tu contraseÃ±a y acceder al portal:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
               <tr>
                 <td style="background:#4f46e5;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÑA</a>
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ‘A</a>
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
               <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· Bacar sa. Seguridad Privada</strong></p>
           </td>
         </tr>
       </table>
@@ -1607,13 +1607,13 @@ function buildClientPortalEmailHtml(resetLink: string, clientName: string): stri
 function buildClientPortalEmailText(resetLink: string, clientName: string): string {
   return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Clientes de COSP para gestionar el personal autorizado de ${clientName}.
 
-Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
+HacÃ© clic en el siguiente enlace para crear tu contraseÃ±a y acceder al portal:
 
 ${resetLink}
 
-Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.
+Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.
 
-Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
+Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.
 
 Saludos,
 Equipo Operativo - Bacar sa. Seguridad Privada`;
@@ -1743,7 +1743,7 @@ export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 
 // =========================================================
-// Payroll API (HTTP) — para sistemas de liquidación externos
+// Payroll API (HTTP) â€” para sistemas de liquidaciÃ³n externos
 // =========================================================
 export { payrollApi } from './payroll-api/handler';
 
@@ -1757,7 +1757,7 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
     .filter((t): t is string => typeof t === 'string' && t.length > 10);
   if (!tokens.length) throw new functions.https.HttpsError('not-found', 'No device tokens found');
   const title: string = data?.title || 'CronoApp';
-  const body: string  = data?.body  || 'Notificación de prueba';
+  const body: string  = data?.body  || 'NotificaciÃ³n de prueba';
   const message: admin.messaging.MulticastMessage = {
     notification: { title, body },
     webpush: {
@@ -1773,10 +1773,10 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
 // =========================================================
 // 15. AUTO-COMPLETAR TURNOS (SCHEDULED - cada 5 minutos)
 // =========================================================
-// Lógica:
-//   A) Turno tiene relevo ya PRESENTE → cerrar (el handover no lo cerró, safety net)
-//   B) Turno tiene relevo pero NO llegó → NO cerrar, crear novedad de AUSENCIA_RELEVO
-//   C) Turno sin relevo programado → cerrar directamente al vencimiento
+// LÃ³gica:
+//   A) Turno tiene relevo ya PRESENTE â†’ cerrar (el handover no lo cerrÃ³, safety net)
+//   B) Turno tiene relevo pero NO llegÃ³ â†’ NO cerrar, crear novedad de AUSENCIA_RELEVO
+//   C) Turno sin relevo programado â†’ cerrar directamente al vencimiento
 export const autoCompletarTurnos = functions
   .region('us-central1')
   .pubsub.schedule('every 5 minutes')
@@ -1785,9 +1785,9 @@ export const autoCompletarTurnos = functions
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
-    // Turnos PRESENT cuyo endTime pasó hace al menos 5 minutos
+    // Turnos PRESENT cuyo endTime pasÃ³ hace al menos 5 minutos
     const cutoff = admin.firestore.Timestamp.fromMillis(nowMs - 5 * 60 * 1000);
-    // Ventana para buscar relevo: startTime dentro de ±2h del endTime del turno saliente
+    // Ventana para buscar relevo: startTime dentro de Â±2h del endTime del turno saliente
     const RELIEF_WINDOW_MS = 2 * 60 * 60 * 1000;
 
     const snap = await db.collection('turnos')
@@ -1812,8 +1812,8 @@ export const autoCompletarTurnos = functions
       const endTimeMs: number = shift.endTime?.toMillis?.() ?? 0;
       if (!endTimeMs) continue;
 
-      // Buscar turnos entrantes en el mismo objetivo + posición
-      // cuyo startTime esté dentro de ±2h del endTime del turno saliente
+      // Buscar turnos entrantes en el mismo objetivo + posiciÃ³n
+      // cuyo startTime estÃ© dentro de Â±2h del endTime del turno saliente
       const windowStart = admin.firestore.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
       const windowEnd   = admin.firestore.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
 
@@ -1824,7 +1824,7 @@ export const autoCompletarTurnos = functions
         .where('startTime', '<=', windowEnd)
         .get();
 
-      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente está etiquetado
+      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente estÃ¡ etiquetado
       const relieveDocs = relieveSnap.docs.filter(d =>
         d.id !== docSnap.id && sameTenantShift(shift, d.data()),
       );
@@ -1834,7 +1834,7 @@ export const autoCompletarTurnos = functions
         return s === 'PRESENT' || s === 'COMPLETED';
       });
       // Solo contar como relevo pendiente un turno con empleado REAL asignado.
-      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos válidos —
+      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos â€”
       // si se cuentan, el turno saliente nunca se cierra y queda como retenido indefinidamente.
       const relievePending = relieveDocs.find(d => {
         const data = d.data();
@@ -1844,14 +1844,14 @@ export const autoCompletarTurnos = functions
         return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
       });
 
-      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
+      // Relevo ausente: retÃ©n convocado que no se presentÃ³ (status ABSENT)
       const relieveAbsent = relieveDocs.find(d => {
         const data = d.data();
         return data.isAbsent === true || data.status === 'ABSENT';
       });
 
       if (relievePresent) {
-        // CASO A: El relevo ya está presente — safety net, cerrar el turno saliente
+        // CASO A: El relevo ya estÃ¡ presente â€” safety net, cerrar el turno saliente
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
@@ -1867,18 +1867,18 @@ export const autoCompletarTurnos = functions
           actorUid: 'SYSTEM',
           module: 'OPERACIONES',
           shiftId: docSnap.id,
-          details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+          details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
           timestamp: now,
         });
         completed++;
 
       } else if (relievePending) {
-        // CASO B: Relevo programado pero no llegó → retener al guardia + push + novedad
-        // Poner en retención formal si no lo está ya
+        // CASO B: Relevo programado pero no llegÃ³ â†’ retener al guardia + push + novedad
+        // Poner en retenciÃ³n formal si no lo estÃ¡ ya
         if (!shift.isRetention) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
+            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentÃ³`,
             autoRetentionAt: now,
           });
         }
@@ -1888,14 +1888,14 @@ export const autoCompletarTurnos = functions
           await admin.messaging().sendEachForMulticast({
             tokens: retTokensB,
             notification: {
-              title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+              title: 'â° Quedaste en retenciÃ³n',
+              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
               fcmOptions: { link: '/empleado/dashboard' },
             },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B error:', e));
         }
         // Novedad para operaciones (una sola vez)
         const existingB = await db.collection('novedades')
@@ -1916,7 +1916,7 @@ export const autoCompletarTurnos = functions
             employeeName: shift.employeeName || '',
             reliefEmployeeName: relievePending.data().employeeName || '',
             positionName: shift.positionName || '',
-            description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
+            description: `â° RETENCIÃ“N: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -1924,12 +1924,12 @@ export const autoCompletarTurnos = functions
         }
 
       } else if (relieveAbsent) {
-        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
-        // → Retención forzada + push + novedad
+        // CASO B2: El relevo fue convocado (retÃ©n) pero no se presentÃ³ y fue marcado ausente
+        // â†’ RetenciÃ³n forzada + push + novedad
         if (!shift.isRetention) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
+            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentÃ³`,
             autoRetentionAt: now,
           });
         }
@@ -1939,14 +1939,14 @@ export const autoCompletarTurnos = functions
           await admin.messaging().sendEachForMulticast({
             tokens: retTokensB2,
             notification: {
-              title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+              title: 'â° Quedaste en retenciÃ³n',
+              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
               fcmOptions: { link: '/empleado/dashboard' },
             },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B2 error:', e));
         }
         const existing = await db.collection('novedades')
           .where('shiftId', '==', docSnap.id)
@@ -1964,7 +1964,7 @@ export const autoCompletarTurnos = functions
             empresaId: shiftEmpresaId(shift) || null,
             employeeName: shift.employeeName || '',
             positionName: shift.positionName || '',
-            description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
+            description: `âš ï¸ RETENCIÃ“N FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -1972,7 +1972,7 @@ export const autoCompletarTurnos = functions
         }
 
       } else {
-        // CASO C: Sin relevo en absoluto (turno único sin cobertura continua requerida) — cerrar
+        // CASO C: Sin relevo en absoluto (turno Ãºnico sin cobertura continua requerida) â€” cerrar
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
@@ -1988,7 +1988,7 @@ export const autoCompletarTurnos = functions
           actorUid: 'SYSTEM',
           module: 'OPERACIONES',
           shiftId: docSnap.id,
-          details: `Turno finalizado (sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+          details: `Turno finalizado (sin relevo): ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
           timestamp: now,
         });
         completed++;
@@ -2005,7 +2005,7 @@ export const autoCompletarTurnos = functions
 // 16. DETECTAR AUSENCIAS (SCHEDULED - cada 5 minutos)
 // =========================================================
 // Fases:
-//   ALERTA  (startTime + 15min): push al empleado "¿Estás en tu puesto?"
+//   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
 //   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
 const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
@@ -2042,9 +2042,9 @@ export const detectarAusencias = functions
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
-    // ── BLOQUE 1: alerta temprana de retención a T+0 ────────────────────────────
-    // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
-    // Los guardias marcan a T-15, así que T+0 sin check-in = ya está retrasado
+    // â”€â”€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Turnos que acaban de iniciar (0-10 min) sin check-in â†’ avisar al guardia saliente
+    // Los guardias marcan a T-15, asÃ­ que T+0 sin check-in = ya estÃ¡ retrasado
     const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
     const earlyTo   = admin.firestore.Timestamp.fromMillis(nowMs);
 
@@ -2059,7 +2059,7 @@ export const detectarAusencias = functions
       if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
       if (SKIP_STATUSES.has(s.status || '')) continue;
-      if (s.earlyRetentionAlertAt) continue;  // ya se procesó
+      if (s.earlyRetentionAlertAt) continue;  // ya se procesÃ³
       if (s.lateArrivalAt || s.notifiedAbsent) continue; // tiene aviso previo
 
       const empId = shiftEmpresaId(s);
@@ -2067,7 +2067,7 @@ export const detectarAusencias = functions
 
       if (!s.objectiveId || !posName || !empId) continue;
 
-      // Marcar que ya se envió la alerta temprana
+      // Marcar que ya se enviÃ³ la alerta temprana
       await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
 
       // Buscar guardia saliente presente en el mismo puesto
@@ -2092,8 +2092,8 @@ export const detectarAusencias = functions
             await admin.messaging().sendEachForMulticast({
               tokens: retTokens,
               notification: {
-                title: '⏳ El entrante aún no llegó',
-                body: `${s.employeeName || 'El guardia siguiente'} no marcó presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
+                title: 'â³ El entrante aÃºn no llegÃ³',
+                body: `${s.employeeName || 'El guardia siguiente'} no marcÃ³ presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
               },
               webpush: {
                 notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
@@ -2104,11 +2104,11 @@ export const detectarAusencias = functions
           console.log(`[detectarAusencias] Alerta temprana enviada a ${retData.employeeName} (saliente en ${s.objectiveName})`);
         }
       } catch (e) {
-        console.warn('[detectarAusencias] Error en alerta temprana retención:', e);
+        console.warn('[detectarAusencias] Error en alerta temprana retenciÃ³n:', e);
       }
     }
 
-    // ── BLOQUE 2: ausencia automática AA a T+30 ──────────────────────────────
+    // â”€â”€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Ventana: turnos que empezaron entre hace 8h y hace 30min
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo   = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
@@ -2126,11 +2126,11 @@ export const detectarAusencias = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
-      // Saltar si ya está resuelto o si es una vacante (vacantes tienen su propio flujo)
+      // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
       if (SKIP_STATUSES.has(shift.status || '')) continue;
       if (shift.isPresent === true || shift.isCompleted === true) continue;
-      if (shift.isUnassigned === true) continue;         // vacante → no es ausencia
+      if (shift.isUnassigned === true) continue;         // vacante â†’ no es ausencia
       if (shift.isReportedToPlanning === true) continue; // ya gestionado
       if (SKIP_CODES.has((shift.code || '').toUpperCase())) continue;
       if (!shift.employeeId || shift.employeeId === 'VACANTE') continue;
@@ -2138,34 +2138,35 @@ export const detectarAusencias = functions
       const startMs: number = shift.startTime?.toMillis?.() ?? 0;
       if (!startMs) continue;
 
-      // Turnos de planificación (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
-      // si el cronograma del objetivo/mes está publicado; RETEN y OPERATIONS_COVERAGE son
-      // operativos explícitos y siempre se procesan.
+      // Turnos de planificaciÃ³n (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
+      // si el cronograma del objetivo/mes estÃ¡ publicado; RETEN y OPERATIONS_COVERAGE son
+      // operativos explÃ­citos y siempre se procesan.
       const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
       if (planningOrigins.has(shift.origin) && shift.objectiveId) {
         const { year: chkYear, month: chkMonth } = ymCordobaParts(new Date(startMs));
         const empId = shiftEmpresaId(shift);
         const docIds = planificacionEstadoLookupDocIds(empId, shift.objectiveId, chkYear, chkMonth);
         const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
-        if (!planDocs.some(s => s.exists)) continue; // cronograma no publicado → no generar ausencia
+        if (!planDocs.some(s => s.exists)) continue; // cronograma no publicado â†’ no generar ausencia
       }
 
       const elapsedMin = (nowMs - startMs) / 60000;
 
-      // ── AUSENTE: T+30 sin marcar presente → ausencia automática AA ──
-      if (elapsedMin >= 30) {
+      // â”€â”€ AUSENTE: T+30 sin marcar presente â†’ ausencia automÃ¡tica AA â”€â”€
+      // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
+      if (elapsedMin >= 60) {
         // Evitar procesar dos veces
         if (shift.absenceDetectedAt) continue;
-        // Guardia con aviso de llegada tarde: no marcar ausente automáticamente
+        // Guardia con aviso de llegada tarde: no marcar ausente automÃ¡ticamente
         if (shift.lateArrivalAt) continue;
-        // Caso 2: operador registró aviso anticipado → no marcar AA
+        // Caso 2: operador registrÃ³ aviso anticipado â†’ no marcar AA
         if (shift.notifiedAbsent === true) continue;
-        // Retenes no se auto-detectan como ausentes — son convocados urgentes
+        // Retenes no se auto-detectan como ausentes â€” son convocados urgentes
         if (shift.isReten === true || shift.origin === 'RETEN') continue;
         // Fix timezone: no marcar AA si el turno termina en el futuro LEJANO
         // (evita marcar turnos nocturnos 11 PM - 7 AM a las pocas horas de iniciados)
         const endMs = shift.endTime?.toMillis?.() ?? 0;
-        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h → saltear
+        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h â†’ saltear
 
         // 1. Marcar ABSENT AA
         await docSnap.ref.update({
@@ -2176,7 +2177,7 @@ export const detectarAusencias = functions
           absenceDetectedBy: 'SYSTEM_SCHEDULER',
         });
 
-        // 2. Retención automática: si hay un guardia presente en el mismo puesto, retenerlo
+        // 2. RetenciÃ³n automÃ¡tica: si hay un guardia presente en el mismo puesto, retenerlo
         const objectiveId   = shift.objectiveId   || '';
         const positionName  = (shift.positionName || '').trim().toLowerCase();
         const empId         = shiftEmpresaId(shift);
@@ -2195,11 +2196,11 @@ export const detectarAusencias = functions
             });
             for (const retDoc of toRetain) {
               const retData = retDoc.data();
-              // Marcar como en retención si no lo está ya
+              // Marcar como en retenciÃ³n si no lo estÃ¡ ya
               if (!retData.isRetention) {
                 await retDoc.ref.update({
                   isRetention:     true,
-                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
+                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentÃ³`,
                   autoRetentionAt: now,
                 });
                 // Push al guardia retenido
@@ -2208,14 +2209,14 @@ export const detectarAusencias = functions
                   await admin.messaging().sendEachForMulticast({
                     tokens: retTokens,
                     notification: {
-                      title: '⏰ Quedaste en retención',
-                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
+                      title: 'â° Quedaste en retenciÃ³n',
+                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© en el puesto hasta aviso de Operaciones.`,
                     },
                     webpush: {
                       notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                       fcmOptions: { link: '/empleado/dashboard' },
                     },
-                  }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
+                  }).catch(e => console.warn('[detectarAusencias] Push retenciÃ³n error:', e));
                 }
                 // Novedad para operaciones
                 await db.collection('novedades').add({
@@ -2229,14 +2230,14 @@ export const detectarAusencias = functions
                   employeeName:         retData.employeeName || '',
                   absentEmployeeId:     shift.employeeId,
                   absentEmployeeName:   shift.employeeName  || '',
-                  description: `${retData.employeeName || 'Guardia'} retenido automáticamente — ${shift.objectiveName} · ${shift.positionName} — por ausencia de ${shift.employeeName}`,
+                  description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente â€” ${shift.objectiveName} Â· ${shift.positionName} â€” por ausencia de ${shift.employeeName}`,
                   createdAt: now,
                   source: 'SYSTEM_SCHEDULER',
                 });
               }
             }
           } catch (e) {
-            console.warn('[detectarAusencias] Error en retención automática:', e);
+            console.warn('[detectarAusencias] Error en retenciÃ³n automÃ¡tica:', e);
           }
         }
 
@@ -2250,13 +2251,13 @@ export const detectarAusencias = functions
             await admin.messaging().sendEachForMulticast({
               tokens,
               notification: {
-                title: '⚠️ Ausencia registrada',
-                body: `No se registró tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
+                title: 'âš ï¸ Ausencia registrada',
+                body: `No se registrÃ³ tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
               },
               webpush: {
                 notification: {
-                  title: '⚠️ Ausencia registrada',
-                  body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). Ingresá al portal si estás presente.`,
+                  title: 'âš ï¸ Ausencia registrada',
+                  body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). IngresÃ¡ al portal si estÃ¡s presente.`,
                   icon: '/icons/icon-192x192.png',
                   requireInteraction: true,
                 },
@@ -2268,7 +2269,7 @@ export const detectarAusencias = functions
           }
         }
 
-        // 3. Registro en colección 'ausencias' (el planificador la usa para mostrar badge AA)
+        // 3. Registro en colecciÃ³n 'ausencias' (el planificador la usa para mostrar badge AA)
         const shiftDate = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
         const dateStr = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
         const ausenciaExistsSnap = await db.collection('ausencias')
@@ -2280,7 +2281,7 @@ export const detectarAusencias = functions
             employeeName: shift.employeeName || '',
             startDate: dateStr,
             endDate: dateStr,
-            type: 'No Presentación',
+            type: 'No PresentaciÃ³n',
             absenceType: 'AA',
             origin: 'AUTO_T30',
             shiftId: docSnap.id,
@@ -2289,8 +2290,8 @@ export const detectarAusencias = functions
             clientId: shift.clientId || null,
             empresaId: shiftEmpresaId(shift) || null,
             positionName: shift.positionName || '',
-            reason: `No presentación en turno — ${shift.objectiveName || ''} (${shift.positionName || ''})`,
-            status: 'Confirmada',  // hecho operativo, no requiere autorización
+            reason: `No presentaciÃ³n en turno â€” ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+            status: 'Confirmada',  // hecho operativo, no requiere autorizaciÃ³n
             hasCertificate: false,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
@@ -2314,7 +2315,7 @@ export const detectarAusencias = functions
             clientId: shift.clientId || null,
             empresaId: shiftEmpresaId(shift) || null,
             positionName: shift.positionName || '',
-            description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
+            description: `${shift.employeeName || 'Empleado'} no se presentÃ³ al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -2327,7 +2328,7 @@ export const detectarAusencias = functions
           actorUid: 'SYSTEM',
           module: 'OPERACIONES',
           shiftId: docSnap.id,
-          details: `Ausencia automática: ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
+          details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
           timestamp: now,
         });
 
@@ -2340,14 +2341,6 @@ export const detectarAusencias = functions
   });
 
 // =========================================================
-// 17. GESTIONAR VACANTES (SCHEDULED - cada 5 minutos)
-// =========================================================
-// Las vacantes son turnos SIN asignación (isUnassigned: true).
-// NO son ausencias.
-//
-// Flujo:
-//   T-3h: Devolver a Planificación (isReportedToPlanning + novedad VACANTE_A_PLANIFICACION)
-//   T-1h: Si sigue sin asignar → Protocolo de Cobertura (novedad VACANTE_PROTOCOLO_COBERTURA)
 export const gestionarVacantes = functions
   .region('us-central1')
   .pubsub.schedule('every 5 minutes')

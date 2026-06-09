@@ -284,11 +284,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
             // Guardia tardanza: ventana T+5 → T+30
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 30;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 30;
-            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
+            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
+            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
+            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
             // Potencial ausencia: T+30 sin confirmar presencia
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 30;
+            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 60;
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
