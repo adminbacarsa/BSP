@@ -176,9 +176,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
     };
 
     const handleConfirm = async (prevShiftId: string | null) => {
-        if (mustRelevar && !prevShiftId) {
+        // Un guardia tardío SIEMPRE puede dar presente — el relevo es secundario.
+        // Si el puesto está lleno y no seleccionó relevo, dar presente igual con aviso.
+        if (mustRelevar && !prevShiftId && status !== 'LATE') {
             toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
             return;
+        }
+        if (mustRelevar && !prevShiftId && status === 'LATE') {
+            toast.warning(`${incomingShift.employeeName} ingresó. Hay guardias en retención — relevalos manualmente.`);
         }
         try {
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
