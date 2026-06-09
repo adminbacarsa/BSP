@@ -11,6 +11,7 @@ import {
   ejecutarListadoEmpleadosHorasPlanificadasUmbral,
   ejecutarResumenPresenciasObjetivosDia,
   ejecutarListadoFrancoRetDia,
+  ejecutarListadoAusentesLicenciasDia,
   ejecutarBuscarObjetivosPorNombre,
   ejecutarContarClientesEmpresa,
   ejecutarListadoClientesEmpresa,
@@ -19,6 +20,7 @@ import {
   ejecutarListarObjetivosCliente,
   ejecutarContarEmpleadosPlantillaEmpresa,
   formatListadoFrancoRetParaChat,
+  formatListadoAusentesLicenciasParaChat,
   canQueryClientsCrm,
   type AssistantToolContext,
 } from './assistantDataTools';
@@ -802,6 +804,7 @@ function extractFechaFromRecentTurnosThread(recent: AssistantRecentMessage[], fa
 function recentFrancoRetThread(recent: AssistantRecentMessage[]): boolean {
   for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
     const c = normText(recent[i].content || '');
+    if (/\b(ausentes?\s+en\s+operaciones|faltaron|licencias?\s+en\s+rrhh)\b/.test(c)) return false;
     if (/\b(franco|ret\b|reten)\b/.test(c)) return true;
     if (/\b(codigos? de legajo|empleados con franco|en ret)\b/.test(c)) return true;
     if (/\bresumen_por_objetivo\b/.test(recent[i].content || '')) return true;
@@ -809,7 +812,128 @@ function recentFrancoRetThread(recent: AssistantRecentMessage[]): boolean {
   return false;
 }
 
+function recentAbsenceAggregateThread(recent: AssistantRecentMessage[]): { ausentes: number; fecha: string } | null {
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 8; i--) {
+    const c = recent[i].content || '';
+    if (!/\b(ausentes?|faltaron|licencias?)\b/i.test(c)) continue;
+    const aus = c.match(/\*\*(\d+)\*\*\s+ausentes/i) || c.match(/(\d+)\s+ausentes/i);
+    if (aus?.[1]) {
+      const iso = c.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+      return { ausentes: Number(aus[1]), fecha: iso?.[1] ?? '' };
+    }
+    if (/\b(ausentes?\s+en\s+operaciones|colaboradores?\s+ausentes?|no\s+hay\s+colaboradores?\s+marcados?\s+ausentes?)\b/i.test(c)) {
+      const iso = c.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+      return { ausentes: -1, fecha: iso?.[1] ?? '' };
+    }
+  }
+  const ops = parseOpsAggregateFromRecent(recent);
+  if (ops && ops.ausentes > 0) return { ausentes: ops.ausentes, fecha: ops.fecha };
+  return null;
+}
+
+function recentAbsenceThread(recent: AssistantRecentMessage[]): boolean {
+  if (recentAbsenceAggregateThread(recent)) return true;
+  for (let i = recent.length - 1; i >= 0 && i >= recent.length - 10; i--) {
+    const c = normText(recent[i].content || '');
+    if (/\b(ausentes?\s+en\s+operaciones|faltaron|licencias?\s+el|de\s+licencia)\b/.test(c)) return true;
+  }
+  return false;
+}
+
+function matchAbsenceFollowUpIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (recentFrancoRetThread(recent) && !recentAbsenceThread(recent)) return false;
+  const trimmed = t.trim();
+  const absenceCtx = recentAbsenceThread(recent);
+  const opsCtx = parseOpsAggregateFromRecent(recent);
+  if (!absenceCtx && !(opsCtx && opsCtx.ausentes > 0)) return false;
+  if (/^(quienes|quiénes|quien|quién)\s*(son|es|estan|están)?\.?$/i.test(trimmed)) return true;
+  if (/\b(quienes|quiénes)\s+(son|estan|están|es)\b/.test(t)) return true;
+  if (/\b(nombres|nombralos|nombrarlos|decime los nombres)\b/.test(t)) return true;
+  if (/\b(ausencias?|ausentes?|faltaron|licencias?)\b/.test(t) && /\b(dame|list|mostr|decime|podes|podés)\b/.test(t)) {
+    return true;
+  }
+  const m = t.match(/\b(?:son\s+)?(?:los?\s+)?(\d+)\b/);
+  if (m?.[1] && opsCtx && Number(m[1]) === opsCtx.ausentes) return true;
+  return false;
+}
+
+function matchAbsenceOrLicenseDayIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (matchAbsenceFollowUpIntent(t, recent)) return true;
+  if (/\bfranco\b/.test(t) && !/\b(ausent|falt|licencia|enfermedad|vacacion)\b/.test(t)) return false;
+  const hasAbsenceKw =
+    /\b(faltaron|falto|faltó|falta|ausent|inasisten|no\s+se\s+present|licencia|enfermedad|vacacion|vacaciones)\b/.test(
+      t,
+    );
+  if (!hasAbsenceKw) {
+    if (/\b(ausencias?)\b/.test(t) && /\b(dame|list|quien|quienes|mostr|decime|hay|podes|podés)\b/.test(t)) {
+      return true;
+    }
+    return false;
+  }
+  if (/\b(hoy|ayer|manana|mañana|el dia|el día|este dia|este día|20\d{2}-\d{2}-\d{2})\b/.test(t)) return true;
+  const blob = recent.slice(-4).map((m) => m.content).join(' ');
+  if (/\b(hoy|ayer|manana|mañana)\b/.test(normText(blob))) return true;
+  return /\b(faltaron|faltó|falto|ausent)\b/.test(t);
+}
+
+function extractAbsenceTipoFromQuery(t: string, recent: AssistantRecentMessage[]): 'ausentes' | 'licencias' | 'ambos' {
+  const blob = [t, ...recent.slice(-3).map((m) => m.content)].join(' ');
+  const n = normText(blob);
+  const licencia =
+    /\b(licencia|enfermedad|vacacion|vacaciones|art\b)\b/.test(n) && !/\b(ausent|faltaron|faltó|falto)\b/.test(t);
+  const ausente = /\b(faltaron|faltó|falto|falta|ausent|inasisten|no\s+se\s+present)\b/.test(n);
+  if (licencia && !ausente) return 'licencias';
+  if (ausente && !licencia) return 'ausentes';
+  if (/\bde\s+licencia\b/.test(n)) return 'licencias';
+  if (/\bausentes?\b/.test(t) && !/\blicencia\b/.test(t)) return 'ausentes';
+  return 'ambos';
+}
+
+async function tryDeterministicAusentesLicenciasDiaReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[],
+): Promise<string | null> {
+  if (!matchAbsenceOrLicenseDayIntent(t, recent)) return null;
+
+  const fecha =
+    (recentAbsenceAggregateThread(recent)?.fecha && matchAbsenceFollowUpIntent(t, recent)
+      ? recentAbsenceAggregateThread(recent)!.fecha
+      : null) ||
+    extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent) ||
+    extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
+  const tipo = extractAbsenceTipoFromQuery(t, recent);
+
+  const siteHint =
+    extractObjectiveSiteFromQuery(t) ||
+    extractObjectiveHintFromRecentMessages(recent) ||
+    extractObjectiveSiteFromQuery(recent.map((m) => m.content).join(' '));
+  let idObj: string | undefined;
+  if (siteHint && siteHint.length >= 3) {
+    const found = await ejecutarBuscarObjetivosPorNombre(toolCtx, { texto: siteHint, limite: 6 });
+    const coincidencias = (found.coincidencias ?? []) as Array<{ id_objetivo?: string }>;
+    if (coincidencias.length === 1) idObj = coincidencias[0].id_objetivo;
+  }
+
+  const data = await ejecutarListadoAusentesLicenciasDia(toolCtx, {
+    fecha,
+    tipo,
+    limite: 120,
+    id_objetivo: idObj,
+  });
+  const err = String(data.error ?? '').trim();
+  if (err) {
+    if (err === 'sin_permiso_requiere_modulo_operaciones_planificacion_o_similar') {
+      return 'Tu perfil no tiene permiso para consultar ausentes/licencias. Necesitás lectura en **Operaciones** o **Planificación**.';
+    }
+    return `No pude consultar ausentes/licencias (${err}).`;
+  }
+
+  return formatListadoAusentesLicenciasParaChat(data).slice(0, 7500);
+}
+
 function matchFrancoRetFollowUpIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (recentAbsenceThread(recent) && !recentFrancoRetThread(recent)) return false;
   const trimmed = t.trim();
   if (/^(cuantos|cuántas?)\s+son\.?$/i.test(trimmed) && recentFrancoRetThread(recent)) return true;
   if (/^(quienes|quiénes|quien|quién)\s*(son|es|estan|están)?\.?$/i.test(trimmed)) {
@@ -821,6 +945,8 @@ function matchFrancoRetFollowUpIntent(t: string, recent: AssistantRecentMessage[
 }
 
 function matchFrancoRetDiaIntent(t: string, recent: AssistantRecentMessage[]): boolean {
+  if (matchAbsenceOrLicenseDayIntent(t, recent)) return false;
+  if (/\b(faltaron|falto|faltó|ausent|licencia|enfermedad|vacacion|vacaciones|inasisten)\b/.test(t)) return false;
   if (matchFrancoRetFollowUpIntent(t, recent)) return true;
   if (!/\b(franco|ret\b|reten)\b/.test(t)) return false;
   if (/\b(quien|quién|quienes|quiénes|cuantos|cuántos|lista|hay|cuenta)\b/.test(t)) return true;
@@ -839,7 +965,11 @@ function extractFrancoRetTipoFromQuery(t: string, recent: AssistantRecentMessage
 }
 
 function extractObjectiveSiteFromQuery(t: string): string | null {
-  let m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?(?:hospital|h\.?)\s*([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
+  let m = t.match(
+    /\bturnos?\s+(?:del?\s+|de\s+(?:el\s+)?)?(?:h\.?\s*|hospital\s*)?([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i,
+  );
+  if (m?.[1]?.trim()) return m[1].trim();
+  m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?(?:hospital|h\.?)\s*([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
   if (m?.[1]?.trim()) return m[1].trim();
   m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?([a-záéíóúñ0-9.\s]{3,55}?)(?:\s+hoy|\s*\?|$)/i);
   if (m?.[1]?.trim()) {
@@ -903,8 +1033,10 @@ async function tryDeterministicFrancoRetDiaReply(
 /** «¿Quién tiene turno hoy?» y variantes — respuesta acotada vía listado operativo. */
 function matchTurnosObjetivoHoyIntent(t: string): boolean {
   if (!/\b(hoy|el dia|el día)\b/.test(t)) return false;
-  if (!/\b(turno|tarde|mañana|noche|personas?|alguien|viene|vienen)\b/.test(t)) return false;
-  return /\b(en|del|de)\s+(?:el\s+)?(?:h\.?|hospital|[a-záéíóúñ])/i.test(t);
+  if (!/\b(turnos?|tarde|mañana|noche|personas?|alguien|viene|vienen)\b/.test(t)) return false;
+  if (/\b(en|del|de)\s+(?:el\s+)?(?:h\.?|hospital|[a-záéíóúñ])/i.test(t)) return true;
+  if (/\bturnos?\s+(?:del?\s+|de\s+(?:el\s+)?)?(?:h\.?\s*|hospital\s*)?[a-záéíóúñ0-9]/i.test(t)) return true;
+  return false;
 }
 
 function matchWhoOnShiftTodayIntent(t: string): boolean {
@@ -1853,6 +1985,7 @@ async function tryDeterministicTurnosHoyReply(
   toolCtx: AssistantToolContext,
   recent: AssistantRecentMessage[],
 ): Promise<string | null> {
+  if (matchAbsenceOrLicenseDayIntent(t, recent)) return null;
   if (!matchTurnosHoyFollowUpIntent(t, recent) && !matchTurnosObjetivoHoyIntent(t)) return null;
 
   const opsCtx = recentOpsAggregateThread(recent);
@@ -2202,6 +2335,13 @@ export async function tryDeterministicDataReply(
 
   const t = normText(raw);
   const mk = typeof moduleKey === 'string' && moduleKey.trim() ? moduleKey.trim() : null;
+
+  try {
+    const ausentesLic = await tryDeterministicAusentesLicenciasDiaReply(t, toolCtx, recent);
+    if (ausentesLic?.trim()) return ausentesLic.trim();
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicAusentesLicenciasDiaReply', e);
+  }
 
   try {
     const francoRet = await tryDeterministicFrancoRetDiaReply(t, toolCtx, recent);

@@ -163,7 +163,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
     {
         name: 'listado_franco_ret_dia',
-        description: 'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador). Devuelve resumen_por_objetivo con nombres de legajos (desde RRHH) y filas[].empleado. Con id_objetivo_cercania ordena por distancia Haversine km al objetivo.',
+        description: 'Para «quién está de franco», «quién en RET», listado por día: turnos F/FF/FP/FT o código RET en objetivos de la empresa (incluye planificación/borrador). Devuelve resumen_por_objetivo con nombres de legajos (desde RRHH) y filas[].empleado. Con id_objetivo_cercania ordena por distancia Haversine km al objetivo. **No** usar para «faltaron», «ausentes» ni «licencia» — usá listado_ausentes_licencias_dia.',
         parameters: {
             type: generative_ai_1.SchemaType.OBJECT,
             properties: {
@@ -177,6 +177,26 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
                     description: 'Id Firestore del objetivo (CRM). Si el usuario dio sólo el nombre del sitio, llamá antes buscar_objetivos_por_nombre y usá id_objetivo de la coincidencia. Con coordenadas en CRM y legajos, la respuesta ordena por distancia km.',
                 },
                 limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (8–160, default 80).' },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'listado_ausentes_licencias_dia',
+        description: 'Para «quién faltó hoy», «ausentes», «licencias», «enfermedad/vacaciones» de un día: ausentes operativos (isAbsent en turnos visibles como Operaciones) y licencias (códigos V/L/E/A/PG/AA en turnos + colección ausencias RRHH). Devuelve resumen_por_objetivo con nombres. **No** confundir con franco (F) ni RET — eso es listado_franco_ret_dia.',
+        parameters: {
+            type: generative_ai_1.SchemaType.OBJECT,
+            properties: {
+                fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD; omitir = hoy del cliente.' },
+                tipo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'ausentes | licencias | ambos (default ambos). «Faltaron» → ausentes; «de licencia» → licencias.',
+                },
+                id_objetivo: {
+                    type: generative_ai_1.SchemaType.STRING,
+                    description: 'Opcional. Filtrar un objetivo por id Firestore (CRM).',
+                },
+                limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (8–160, default 120).' },
             },
             required: [],
         },

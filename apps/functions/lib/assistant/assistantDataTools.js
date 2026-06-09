@@ -4,6 +4,8 @@ exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = void 0;
 exports.canQueryClientsCrm = canQueryClientsCrm;
 exports.formatListadoFrancoRetParaChat = formatListadoFrancoRetParaChat;
 exports.ejecutarListadoFrancoRetDia = ejecutarListadoFrancoRetDia;
+exports.formatListadoAusentesLicenciasParaChat = formatListadoAusentesLicenciasParaChat;
+exports.ejecutarListadoAusentesLicenciasDia = ejecutarListadoAusentesLicenciasDia;
 exports.assistantToolsEnabledForContext = assistantToolsEnabledForContext;
 exports.resolveSelfEmployeeFirestoreId = resolveSelfEmployeeFirestoreId;
 exports.ejecutarBuscarEmpleadosPorNombre = ejecutarBuscarEmpleadosPorNombre;
@@ -506,13 +508,14 @@ async function collectFrancoRetTurnosDia(db, objectiveMap, fecha, tipo) {
 function nombreLegibleFromEmpleadoRow(row) {
     const ln = String(row.lastName ?? '').trim();
     const fn = String(row.firstName ?? '').trim();
-    const fromFields = [ln, fn].filter(Boolean).join(', ');
-    if (fromFields)
-        return fromFields;
+    if (ln && fn)
+        return `${ln} ${fn}`;
+    if (ln || fn)
+        return [ln, fn].filter(Boolean).join(' ');
     const nameRaw = String(row.name ?? row.nombre ?? '').trim();
     if (nameRaw)
-        return nameRaw;
-    return [fn, ln].filter(Boolean).join(' ');
+        return nameRaw.replace(/,\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    return '';
 }
 function empleadoEtiquetaPareceIdFirestore(etiqueta, empId) {
     const e = etiqueta.trim();
@@ -766,6 +769,314 @@ async function ejecutarListadoFrancoRetDia(ctx, args) {
         resumen_por_objetivo,
         filas,
         nota_tras_herramienta: 'Para «quién está de franco» o «quién en RET» usá **resumen_por_objetivo** (cliente, objetivo, lista **empleados** con nombres) o filas[].empleado. **Nunca** muestres IDs técnicos de Firestore al usuario. Si pedís cercanía a un objetivo, llamá de nuevo con id_objetivo_cercania.',
+    };
+}
+const LEAVE_SHIFT_CODES = new Set(['V', 'L', 'E', 'A', 'PG', 'AA']);
+const RRHH_ABSENCE_TYPE_TO_CODE = {
+    vacaciones: 'V',
+    vacacion: 'V',
+    enfermedad: 'E',
+    art: 'A',
+    autorizada: 'A',
+    'licencia esp.': 'L',
+    'licencia especial': 'L',
+    licencia: 'L',
+    'pg permiso gremial': 'PG',
+    'permiso gremial': 'PG',
+    injustificada: 'AA',
+    'falta injustificada': 'AA',
+};
+function inferAbsenceCodeFromRrhhDoc(doc) {
+    const direct = String(doc.absenceType ?? '').toUpperCase().trim();
+    if (LEAVE_SHIFT_CODES.has(direct))
+        return direct;
+    const code = String(doc.code ?? '').toUpperCase().trim();
+    if (LEAVE_SHIFT_CODES.has(code))
+        return code;
+    const typeKey = norm(String(doc.type ?? ''));
+    return RRHH_ABSENCE_TYPE_TO_CODE[typeKey] ?? 'L';
+}
+function ymdInInclusiveRange(fecha, start, end) {
+    const f = String(fecha).trim();
+    const s = String(start).trim();
+    const e = String(end || start).trim();
+    if (!f || !s)
+        return false;
+    return f >= s && f <= e;
+}
+function buildAusentesLicenciasResumenPorObjetivo(rows) {
+    const map = new Map();
+    for (const r of rows) {
+        let g = map.get(r.objetivo_id);
+        if (!g) {
+            g = { cliente: r.cliente, objetivo: r.objetivo, empleados: [] };
+            map.set(r.objetivo_id, g);
+        }
+        g.empleados.push({
+            nombre: r.empleado_etiqueta,
+            codigo: r.codigo,
+            categoria: r.categoria,
+        });
+    }
+    return Array.from(map.values())
+        .map((g) => ({
+        cliente: g.cliente,
+        objetivo: g.objetivo,
+        cantidad: g.empleados.length,
+        empleados: g.empleados,
+    }))
+        .sort((a, b) => `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'));
+}
+function enrichAusentesLicenciasRowsWithNombres(rows, nombres) {
+    return rows.map((r) => {
+        if (!r.employee_firestore_id)
+            return r;
+        const resolved = nombres.get(r.employee_firestore_id);
+        let etiqueta = r.empleado_etiqueta;
+        if (resolved)
+            etiqueta = resolved;
+        else if (empleadoEtiquetaPareceIdFirestore(etiqueta, r.employee_firestore_id)) {
+            etiqueta = '(sin nombre en legajo RRHH)';
+        }
+        else {
+            etiqueta = etiquetaEmpleadoParaUsuario(etiqueta, r.employee_firestore_id);
+        }
+        return { ...r, empleado_etiqueta: etiqueta };
+    });
+}
+function formatListadoAusentesLicenciasParaChat(data) {
+    const fecha = String(data.fecha_referencia ?? '').trim();
+    const tipo = String(data.tipo_filtro ?? 'ambos');
+    const cuentaAus = Number(data.cuenta_ausentes_operativos ?? 0);
+    const cuentaLic = Number(data.cuenta_licencias ?? 0);
+    const resumen = (data.resumen_por_objetivo ?? []);
+    const licenciasSinTurno = (data.licencias_rrhh_sin_turno_visible ?? []);
+    const trunc = data.truncado_consulta_turnos === true;
+    let fechaLabel = fecha;
+    try {
+        const p = parseYmd(fecha);
+        fechaLabel = new Intl.DateTimeFormat('es-AR', {
+            timeZone: 'America/Argentina/Cordoba',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+        }).format(new Date(`${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}T12:00:00.000-03:00`));
+    }
+    catch {
+    }
+    if (tipo === 'ausentes' && cuentaAus === 0) {
+        return `No hay colaboradores marcados **ausentes** en **Operaciones** para el **${fechaLabel}**.`;
+    }
+    if (tipo === 'licencias' && cuentaLic === 0 && licenciasSinTurno.length === 0) {
+        return `No hay colaboradores con **licencia** registrada para el **${fechaLabel}**.`;
+    }
+    if (cuentaAus === 0 && cuentaLic === 0 && licenciasSinTurno.length === 0) {
+        return `No hay **ausentes** ni **licencias** registradas para el **${fechaLabel}**.`;
+    }
+    let body = '';
+    if (tipo === 'ausentes' || tipo === 'ambos') {
+        body += `**Ausentes** en Operaciones el **${fechaLabel}** (**${cuentaAus}**):\n\n`;
+    }
+    else {
+        body += `**Licencias** el **${fechaLabel}** (**${cuentaLic}** en turnos + RRHH):\n\n`;
+    }
+    const rowsToShow = tipo === 'licencias'
+        ? resumen.map((g) => ({
+            ...g,
+            empleados: g.empleados.filter((e) => e.categoria !== 'ausente_operativo'),
+            cantidad: g.empleados.filter((e) => e.categoria !== 'ausente_operativo').length,
+        })).filter((g) => g.cantidad > 0)
+        : tipo === 'ausentes'
+            ? resumen.map((g) => ({
+                ...g,
+                empleados: g.empleados.filter((e) => e.categoria === 'ausente_operativo'),
+                cantidad: g.empleados.filter((e) => e.categoria === 'ausente_operativo').length,
+            })).filter((g) => g.cantidad > 0)
+            : resumen;
+    if (rowsToShow.length === 0 && tipo !== 'licencias') {
+        body += 'Ninguno por objetivo en la muestra consultada.\n\n';
+    }
+    for (const g of rowsToShow) {
+        body += `**${g.cliente}** — **${g.objetivo}** (${g.cantidad}):\n`;
+        for (const emp of g.empleados) {
+            const catLabel = emp.categoria === 'ausente_operativo'
+                ? 'ausente'
+                : emp.categoria === 'licencia_rrhh'
+                    ? 'licencia RRHH'
+                    : 'licencia';
+            body += `- **${etiquetaEmpleadoParaUsuario(emp.nombre)}** — ${emp.codigo} (${catLabel})\n`;
+        }
+        body += '\n';
+    }
+    if ((tipo === 'licencias' || tipo === 'ambos') && licenciasSinTurno.length > 0) {
+        body += `**Licencias en RRHH** sin turno visible ese día:\n`;
+        for (const r of licenciasSinTurno.slice(0, 40)) {
+            body += `- **${etiquetaEmpleadoParaUsuario(r.empleado)}** — ${r.codigo} (${r.tipo_rrhh})\n`;
+        }
+        body += '\n';
+    }
+    if (trunc) {
+        body += '*Nota:* la consulta alcanzó el límite de turnos del día; puede haber más registros en **Operaciones** o **RRHH**.\n';
+    }
+    return body.trim();
+}
+async function ejecutarListadoAusentesLicenciasDia(ctx, args) {
+    if (!canQueryOperationsDaySummary(ctx)) {
+        return { error: 'sin_permiso_requiere_modulo_operaciones_planificacion_o_similar' };
+    }
+    const fecha = String(args.fecha ?? ctx.referenceDateYsMmDd).trim();
+    const tipoRaw = String(args.tipo ?? 'ambos').trim().toLowerCase();
+    const tipo = tipoRaw === 'ausentes' || tipoRaw === 'licencias' || tipoRaw === 'ambos'
+        ? tipoRaw
+        : 'ambos';
+    try {
+        parseYmd(fecha);
+    }
+    catch (e) {
+        return { error: e?.message ?? 'fecha_invalida' };
+    }
+    let lim = Math.floor(Number(args.limite ?? 120));
+    if (!Number.isFinite(lim))
+        lim = 120;
+    lim = Math.max(8, Math.min(160, lim));
+    const db = admin.firestore();
+    const filterObj = String(args.id_objetivo ?? '').trim() || undefined;
+    const objectiveMap = await objectivesMapForEmpresa(db, ctx.empresaId, filterObj, ctx.scopeEmpresa);
+    if (objectiveMap.size === 0) {
+        return {
+            fecha_referencia: fecha,
+            nota: filterObj ? 'objetivo_no_encontrado_en_empresa' : 'sin_objetivos_para_esta_empresa',
+            cuenta_ausentes_operativos: 0,
+            cuenta_licencias: 0,
+            resumen_por_objetivo: [],
+            filas: [],
+        };
+    }
+    let visibleRows;
+    let truncadoConsultaTurnos;
+    try {
+        ({ rows: visibleRows, truncadoConsultaTurnos } = await queryTurnosVisiblesOperacionesEmpresaDia(db, ctx.empresaId, objectiveMap, fecha, ctx.scopeEmpresa));
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { error: 'error_consulta_turnos_operaciones', detalle: msg.slice(0, 280) };
+    }
+    const collected = [];
+    const seenTurnoKeys = new Set();
+    for (const r of visibleRows) {
+        if (!r.employee_firestore_id)
+            continue;
+        const codeU = String(r.codigo ?? '').trim().toUpperCase();
+        const keyBase = `${r.employee_firestore_id}|${r.oid}|${codeU}`;
+        if (r.isAbsent && (tipo === 'ausentes' || tipo === 'ambos')) {
+            if (seenTurnoKeys.has(`aus|${keyBase}`))
+                continue;
+            seenTurnoKeys.add(`aus|${keyBase}`);
+            collected.push({
+                employee_firestore_id: r.employee_firestore_id,
+                empleado_etiqueta: r.empleado_etiqueta,
+                codigo: r.codigo || 'AA',
+                categoria: 'ausente_operativo',
+                cliente: r.cliente,
+                objetivo: r.objetivo_nombre,
+                objetivo_id: r.oid,
+                hora_inicio_cor: r.h_inicio_cordoba,
+                puesto: r.puesto,
+            });
+        }
+        if (!r.isAbsent &&
+            !r.isPresent &&
+            LEAVE_SHIFT_CODES.has(codeU) &&
+            (tipo === 'licencias' || tipo === 'ambos')) {
+            if (seenTurnoKeys.has(`lic|${keyBase}`))
+                continue;
+            seenTurnoKeys.add(`lic|${keyBase}`);
+            collected.push({
+                employee_firestore_id: r.employee_firestore_id,
+                empleado_etiqueta: r.empleado_etiqueta,
+                codigo: codeU,
+                categoria: 'licencia_turno',
+                cliente: r.cliente,
+                objetivo: r.objetivo_nombre,
+                objetivo_id: r.oid,
+                hora_inicio_cor: r.h_inicio_cordoba,
+                puesto: r.puesto,
+            });
+        }
+    }
+    const licenciasRrhhSinTurno = [];
+    const empIdsFromTurnos = new Set(collected.map((r) => r.employee_firestore_id));
+    if (tipo === 'licencias' || tipo === 'ambos') {
+        const ausDocs = await (0, assistantEmpresaScope_1.queryCollectionDocsScoped)(db, 'ausencias', ctx.empresaId, ctx.scopeEmpresa, 600);
+        for (const docSnap of ausDocs) {
+            const row = docSnap.data();
+            if (!(0, assistantEmpresaScope_1.belongsToEmpresa)(row, ctx.empresaId, ctx.scopeEmpresa))
+                continue;
+            const status = String(row.status ?? '').trim();
+            if (/^rechazada$/i.test(status))
+                continue;
+            const startDate = String(row.startDate ?? '').trim();
+            const endDate = String(row.endDate ?? startDate).trim();
+            if (!ymdInInclusiveRange(fecha, startDate, endDate))
+                continue;
+            const empId = String(row.employeeId ?? '').trim();
+            if (!empId)
+                continue;
+            const code = inferAbsenceCodeFromRrhhDoc(row);
+            const tipoRrhh = String(row.type ?? row.reason ?? 'Licencia').trim();
+            const nombreEmp = String(row.employeeName ?? '').trim();
+            if (empIdsFromTurnos.has(empId))
+                continue;
+            licenciasRrhhSinTurno.push({
+                employeeId: empId,
+                empleado: nombreEmp || empId.slice(0, 12),
+                codigo: code,
+                tipo_rrhh: tipoRrhh,
+            });
+        }
+    }
+    const empIdsAll = [
+        ...new Set([
+            ...collected.map((r) => r.employee_firestore_id),
+            ...licenciasRrhhSinTurno.map((r) => r.employeeId),
+        ]),
+    ];
+    const nombresMap = await empleadosNombresBatch(db, ctx.empresaId, empIdsAll, ctx.scopeEmpresa);
+    const enriched = enrichAusentesLicenciasRowsWithNombres(collected, nombresMap);
+    const resumen_por_objetivo = buildAusentesLicenciasResumenPorObjetivo(enriched);
+    const licenciasSinTurnoVisible = licenciasRrhhSinTurno.map((r) => {
+        const resolved = nombresMap.get(r.employeeId);
+        const empleado = resolved ||
+            (empleadoEtiquetaPareceIdFirestore(r.empleado, r.employeeId)
+                ? '(sin nombre en legajo RRHH)'
+                : r.empleado);
+        return { empleado, codigo: r.codigo, tipo_rrhh: r.tipo_rrhh };
+    });
+    const cuentaAus = enriched.filter((r) => r.categoria === 'ausente_operativo').length;
+    const cuentaLicTurno = enriched.filter((r) => r.categoria !== 'ausente_operativo').length;
+    const cuentaLic = cuentaLicTurno + licenciasSinTurnoVisible.length;
+    const filas = enriched.slice(0, lim).map((r) => ({
+        empleado: r.empleado_etiqueta,
+        codigo: r.codigo,
+        categoria: r.categoria,
+        cliente: r.cliente,
+        objetivo: r.objetivo,
+        hora_inicio_cor: r.hora_inicio_cor,
+        puesto: r.puesto,
+    }));
+    return {
+        fecha_referencia: fecha,
+        tipo_filtro: tipo,
+        criterios: 'Ausentes operativos = turnos visibles (Operaciones) con isAbsent true. Licencias = códigos V/L/E/A/PG/AA en turnos visibles sin presente, más docs ausencias RRHH que cubren la fecha.',
+        cuenta_ausentes_operativos: cuentaAus,
+        cuenta_licencias: cuentaLic,
+        cuenta_licencias_en_turnos: cuentaLicTurno,
+        cuenta_licencias_rrhh_sin_turno: licenciasSinTurnoVisible.length,
+        truncado_consulta_turnos: truncadoConsultaTurnos,
+        resumen_por_objetivo,
+        licencias_rrhh_sin_turno: licenciasSinTurnoVisible.slice(0, 48),
+        filas,
+        nota_tras_herramienta: '**Faltaron / ausentes** ≠ **franco (F)**. Respondé con resumen_por_objetivo y nombres legibles; nunca IDs Firestore. Si preguntan licencias, incluí licencias_rrhh_sin_turno.',
     };
 }
 function assistantToolsEnabledForContext(ctx) {
@@ -2771,6 +3082,14 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
             fecha: args.fecha != null ? String(args.fecha) : undefined,
             tipo: args.tipo != null ? String(args.tipo) : undefined,
             id_objetivo_cercania: args.id_objetivo_cercania != null ? String(args.id_objetivo_cercania) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'listado_ausentes_licencias_dia') {
+        raw = await ejecutarListadoAusentesLicenciasDia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            tipo: args.tipo != null ? String(args.tipo) : undefined,
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }

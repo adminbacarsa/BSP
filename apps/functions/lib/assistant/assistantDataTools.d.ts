@@ -16,6 +16,13 @@ export declare function ejecutarListadoFrancoRetDia(ctx: AssistantToolContext, a
     id_objetivo_cercania?: string;
     limite?: number;
 }): Promise<Record<string, unknown>>;
+export declare function formatListadoAusentesLicenciasParaChat(data: Record<string, unknown>): string;
+export declare function ejecutarListadoAusentesLicenciasDia(ctx: AssistantToolContext, args: {
+    fecha?: string;
+    id_objetivo?: string;
+    tipo?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
 export declare function assistantToolsEnabledForContext(ctx: AssistantToolContext): boolean;
 export declare function resolveSelfEmployeeFirestoreId(uid: string): Promise<string | null>;
 export declare function ejecutarBuscarEmpleadosPorNombre(ctx: AssistantToolContext, args: {
