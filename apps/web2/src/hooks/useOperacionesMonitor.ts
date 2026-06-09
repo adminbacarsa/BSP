@@ -243,7 +243,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
             const isResolvedByOps = shift.origin === 'OPERATIONS_COVERAGE' || shift.resolvedBy === 'OPERACIONES';
-            const countsForCoverage = isValidEmployee || isReportedToPlanning; 
+            // Un ausente NO cubre el puesto — el slot queda descubierto y genera vacante
+            const countsForCoverage = (isValidEmployee && !isAbsent) || isReportedToPlanning;
 
             const isUnassigned = !isValidEmployee;
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
