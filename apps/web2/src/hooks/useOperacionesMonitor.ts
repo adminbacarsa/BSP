@@ -229,9 +229,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const hasActiveSLA = activeSlaMap.has(shift.objectiveId);
             const isAbsent = !!shift.isAbsent;
-            // isPresent solo puede ser true si el turno ya inició (evita turnos futuros con flag incorrecto)
-            const shiftAlreadyStarted = shift.shiftDateObj ? currentTime >= shift.shiftDateObj : true;
-            const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && shiftAlreadyStarted;
+            // isPresent solo si el turno arranca dentro de los próximos 60 min O ya inició
+            // Evita el bug de turnos con isPresent=true que en realidad no empiezan en horas
+            const isEarlyStartShift = shift.isEarlyStart === true || shift.isReten === true
+                || shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE';
+            const shiftStartMs = shift.shiftDateObj ? shift.shiftDateObj.getTime() : 0;
+            const withinWindow = !shiftStartMs || isEarlyStartShift
+                || (currentTime.getTime() + 60 * 60 * 1000) >= shiftStartMs; // dentro de 60 min o ya inició
+            const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && withinWindow;
             const isCompleted = !!shift.isCompleted;
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
