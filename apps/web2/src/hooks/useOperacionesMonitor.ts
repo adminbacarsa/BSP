@@ -306,7 +306,19 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const virtualVacancies: any[] = [];
         const dayCode = getDayCode(now);
 
-        servicesSLA.forEach(sla => {
+        // Dedup SLAs por objectiveId: si hay dos registros activos para el mismo objetivo
+        // (ej. solapamiento de contratos), usar solo el más reciente
+        const dedupedSLAs = servicesSLA.reduce((acc: any[], sla: any) => {
+            const existing = acc.find((s: any) => s.objectiveId === sla.objectiveId);
+            if (!existing) { acc.push(sla); }
+            // Si ya existe, usar el que tiene startDate más reciente (contrato vigente)
+            else if (sla.startDate && existing.startDate && sla.startDate > existing.startDate) {
+                const idx = acc.indexOf(existing); acc[idx] = sla;
+            }
+            return acc;
+        }, []);
+
+        dedupedSLAs.forEach(sla => {
             const objInfo = objMap.get(sla.objectiveId);
             if (!objInfo || !sla.positions) return;
 
@@ -358,9 +370,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 
                 if (has12hShifts && allowedShifts.length > 0) {
                     relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) > 10);
+                    // Fallback: si el filtro excluyó todo (ej. turno justo en 10h), usar todos
+                    if (relevantDefinitions.length === 0) relevantDefinitions = allowedShifts;
                 } else if (allowedShifts.length > 0) {
-                    // Si no hay 12hs activas, asumimos 8hs
-                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) < 10);
+                    // Si no hay 12hs activas, usar slots <12h (incluye 10h como Rondín)
+                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) <= 10);
+                    // Fallback: si el filtro excluyó todo, usar todos los slots definidos
+                    if (relevantDefinitions.length === 0) relevantDefinitions = allowedShifts;
                 }
 
                 // 🛑 UNIFICACIÓN V124:
@@ -751,9 +767,4 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const isClientLocked = !!forcedClientId;
     const handleSetSelectedClientId = (id: string) => { if (!isClientLocked) setSelectedClientId(id); };
     return {
-        employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA,
-        viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo,
-        selectedClientId, setSelectedClientId: handleSetSelectedClientId,
-        uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
-    };
-};
+        employees, now, processedData, listData, s
