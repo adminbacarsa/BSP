@@ -59,11 +59,10 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
     // Límite de 60 min para guardias ya marcados ausentes
     const LATE_LIMIT_MIN = 60;
     const wasAbsent = incomingShift.isAbsent === true;
-    // Solo bloquear DAR PRESENTE si el turno está cubierto (hay otro haciendo su trabajo)
-    // Si solo está tarde pero no cubierto, el operador DEBE poder darle presente igualmente
-    const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN && isCovered;
-    // Detectar si el turno ya fue cubierto por otro guardia
+    // Detectar si el turno ya fue cubierto por otro guardia — DEBE estar ANTES de tooLate (TDZ fix)
     const isCovered = incomingShift.status === 'COVERED' || !!incomingShift.coveredByEmployeeId;
+    // Solo bloquear DAR PRESENTE si el turno está cubierto (hay otro haciendo su trabajo)
+    const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN && isCovered;
 
     const samePost = (s: any) =>
         s.objectiveId === incomingShift.objectiveId &&
