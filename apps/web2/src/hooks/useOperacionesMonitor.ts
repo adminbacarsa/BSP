@@ -741,10 +741,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     }, empresaId, migracionCompleta);
                     await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                         employeeId: s.employeeId, employeeName: s.employeeName,
-                        clientId: s.clientId || null, type: 'No Presentación', absenceType: 'AA',
+                        clientId: s.clientId || null, type: 'No Presentacion', absenceType: 'AA',
                         startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
                         status: 'Confirmada',
-                        reason: `No presentación en turno — ${s.objectiveName} (${s.positionName})`,
+                        shiftCode: (s.code || '').toUpperCase() || null,
+                        reason: `No presentacion al turno ${shiftDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} - ${s.objectiveName} (${s.positionName})`,
                         hasCertificate: false, createdAt: serverTimestamp(), origin: 'AUTO_T30', shiftId: s.id,
                     }, shiftEmpresaId));
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({

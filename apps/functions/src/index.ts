@@ -2351,7 +2351,7 @@ export const detectarAusencias = functions
             employeeName: shift.employeeName || '',
             startDate: dateStr,
             endDate: dateStr,
-            type: 'No PresentaciÃ³n',
+            type: 'No Presentacion',
             absenceType: 'AA',
             origin: 'AUTO_T30',
             shiftId: docSnap.id,
@@ -2360,8 +2360,15 @@ export const detectarAusencias = functions
             clientId: shift.clientId || null,
             empresaId: shiftEmpresaId(shift) || null,
             positionName: shift.positionName || '',
-            reason: `No presentaciÃ³n en turno â€” ${shift.objectiveName || ''} (${shift.positionName || ''})`,
-            status: 'Confirmada',  // hecho operativo, no requiere autorizaciÃ³n
+            shiftCode: (shift.code || '').toUpperCase() || null,
+            reason: (() => {
+              const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
+              const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
+              const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+              const horario = et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
+              return `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`;
+            })(),
+            status: 'Confirmada',
             hasCertificate: false,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',

@@ -48,6 +48,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Vacaciones': 'V',
     'Enfermedad': 'E',
     'ART': 'A',
+    'No Presentacion': 'AA',
     'No Presentación': 'AA',
     'Injustificada': 'AA',
     'Justificada': 'AA',
@@ -57,7 +58,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
 
 /** Tipos disponibles para cargar manualmente en RRHH */
 export const RRHH_ABSENCE_TYPES = [
-    'No Presentación',
+    'No Presentacion',
     'Injustificada',
     'Justificada',
     'Enfermedad',
@@ -88,7 +89,7 @@ export const ABSENCE_STATUSES = [
 ] as const;
 
 /** Tipos que se originan automáticamente en operaciones (sin autorización) */
-export const AUTO_ABSENCE_TYPES = new Set(['No Presentación']);
+export const AUTO_ABSENCE_TYPES = new Set(['No Presentacion', 'No Presentación']);
 
 /** Tipos que requieren autorización gerencial antes de impactar planificación */
 export const REQUIRES_AUTHORIZATION_TYPES = new Set(['Vacaciones', 'Licencia Esp.', 'PG Permiso Gremial']);
