@@ -1775,6 +1775,54 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
+    const buildDayCoverageReport = (dateStr: string) => {
+        if (!positionStructure?.length) return null;
+        const dayLetter = getDayLetter(dateStr);
+        const codeCounts = buildDayCodeCountsByPosition(dateStr);
+        return analyzeDayCoverageGaps(
+            positionStructure,
+            dateStr,
+            dayLetter,
+            codeCounts,
+            coverageCyclesForObjective,
+            isPosActiveOnDay,
+        );
+    };
+
+    const renderDayCoverageClosures = (dateStr: string, opts?: { compact?: boolean }) => {
+        const dayReport = buildDayCoverageReport(dateStr);
+        if (!dayReport || dayReport.required === 0) return null;
+        const isFull = dayReport.isFull;
+        const openPositions = dayReport.positions.filter(p => p.missingUnits > 0);
+        return (
+            <div className={`rounded-xl border-2 mb-4 ${isFull ? 'border-emerald-200 bg-emerald-50/90' : 'border-rose-300 bg-rose-50/90'} ${opts?.compact ? 'px-2.5 py-2' : 'px-3 py-2.5'}`}>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <p className={`text-[10px] font-black uppercase tracking-wide flex items-center gap-1.5 ${isFull ? 'text-emerald-800' : 'text-rose-800'}`}>
+                        <ShieldCheck size={12}/>
+                        Cierres de cobertura · día {dateStr.slice(8, 10)}
+                    </p>
+                    <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${isFull ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'}`}>
+                        {dayReport.closed}/{dayReport.required} pax
+                    </span>
+                </div>
+                {isFull ? (
+                    <p className="text-[10px] font-bold text-emerald-700">Esquema SLA completo en todos los puestos activos.</p>
+                ) : (
+                    <div className="space-y-1">
+                        {openPositions.map(pg => (
+                            <div key={pg.positionName} className="text-[10px] font-bold text-rose-800 leading-snug">
+                                <span className="font-black">{pg.positionName}</span>
+                                <span className="text-rose-600"> — faltan {pg.missingUnits} pax</span>
+                                {pg.schemeLabel && <span className="text-rose-500 font-medium"> ({pg.schemeLabel})</span>}
+                                {pg.summary && <p className="text-[9px] text-rose-600/90 font-medium mt-0.5">{pg.summary}</p>}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const getPositionDailyCoverage = (dateStr: string, positionName: string) => {
         return calculateCoverageStats(dateStr, positionName, positionStructure, displayedEmployees, pendingChanges, shiftsMap);
     };
@@ -2819,7 +2867,11 @@ export default function PlanificacionPage() {
                         const end = new Date(start);
 
                         if(change.code === 'F' || change.code === 'FF' || change.code === 'V') end.setHours(23,59,59);
-                        else end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
+                        else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.endTime)) {
+                            const [eh, em] = change.endTime.split(':').map(Number);
+                            end.setHours(eh, em, 0);
+                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000); // turno nocturno
+                        } else end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
 
                         const safeSwapWith = change.swapWith || null;
                         const safeSwapDate = change.swapDate || null;
@@ -3446,7 +3498,10 @@ export default function PlanificacionPage() {
                 const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
                 if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
                 else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
-                else { if (!isLocked) { let initialModifiers = { extend: false, early: false, plannedNovedad: '' }; if (effectiveShift) { initialModifiers = { extend: effectiveShift.isExtended || false, early: effectiveShift.isEarlyStart || false, plannedNovedad: effectiveShift.plannedNovedad || '' }; } setModifiers(initialModifiers); setFrancoMode('NONE'); } setCellEditMode(false); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
+                else { if (!isLocked) { let initialModifiers = { extend: false, early: false, plannedNovedad: '' }; if (effectiveShift) { initialModifiers = { extend: effectiveShift.isExtended || false, early: effectiveShift.isEarlyStart || false, plannedNovedad: effectiveShift.plannedNovedad || '' }; } setModifiers(initialModifiers); setFrancoMode('NONE'); }
+                    const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
+                    setCellEditMode(correctionMode && !!publishStatusMap[pubKey]);
+                    setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
             }
         } 
     };
@@ -4919,7 +4974,7 @@ export default function PlanificacionPage() {
         snapshotData?: any,
         compareChangedKeys?: Set<string> | null,
         employeesForRows?: typeof displayedEmployees,
-        gridOpts?: { hideFooter?: boolean; compactRows?: boolean; minimalHeader?: boolean },
+        gridOpts?: { hideFooter?: boolean; compactRows?: boolean; minimalHeader?: boolean; highlightCoverageFooter?: boolean },
     ) => {
         const gridEmployees = employeesForRows ?? displayedEmployees;
         const compareMinimal = !!gridOpts?.minimalHeader;
@@ -5267,9 +5322,9 @@ export default function PlanificacionPage() {
                 })}
             </tbody>
             {!gridOpts?.hideFooter && (
-            <tfoot className="sticky bottom-0 z-10 bg-slate-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 border-slate-300">
+            <tfoot className={`sticky bottom-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] border-t-2 ${gridOpts?.highlightCoverageFooter ? 'bg-rose-50 border-rose-400 ring-2 ring-rose-300 ring-inset' : 'bg-slate-50 border-slate-300'}`}>
                 <tr>
-                    <td className="sticky left-0 z-20 bg-slate-50 p-2 border-r border-b font-black text-[10px] uppercase text-slate-500 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8" style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                    <td className={`sticky left-0 z-20 p-2 border-r border-b font-black text-[10px] uppercase shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${gridOpts?.highlightCoverageFooter ? 'bg-rose-50 text-rose-800' : 'bg-slate-50 text-slate-500'}`} style={{ width: nameColWidth, minWidth: nameColWidth }}>
                         <div className="flex items-center justify-between gap-2 w-full">
                             <button
                                 type="button"
@@ -5286,7 +5341,7 @@ export default function PlanificacionPage() {
                                 <span>Hs:</span>
                                 <span>{hoursMode === 'cct' ? 'CCT' : 'Mes'}</span>
                             </button>
-                            <span className="flex items-center gap-1 text-slate-500">
+                            <span className={`flex items-center gap-1 ${gridOpts?.highlightCoverageFooter ? 'text-rose-700' : 'text-slate-500'}`}>
                                 <ShieldCheck size={12}/> Cobertura:
                             </span>
                         </div>
@@ -6006,11 +6061,31 @@ export default function PlanificacionPage() {
                     ) : (
                         <>
                         {correctionMode && (
+                            <>
                             <div className="mx-2 mb-1 flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
                                 <ShieldAlert size={14}/>
                                 MODO CORRECCIÓN ACTIVO — Los cambios se guardan directamente sin FT/FF y quedan registrados como corrección de superadmin.
                                 <button onClick={() => setCorrectionMode(false)} className="ml-auto underline text-rose-100 hover:text-white">Desactivar</button>
                             </div>
+                            {objectiveCoverageGapReport && (
+                                <div className="mx-2 mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black no-print">
+                                    <span className="flex items-center gap-1.5 text-emerald-300">
+                                        <ShieldCheck size={12}/> Cierres: {objectiveCoverageGapReport.daysFull} días OK
+                                    </span>
+                                    {(objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty) > 0 && (
+                                        <span className="text-rose-300">
+                                            · {objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty} con huecos
+                                        </span>
+                                    )}
+                                    {objectiveCoverageGapReport.worstDays.slice(0, 4).map(wd => (
+                                        <span key={wd.dateStr} className="text-rose-200 font-bold">
+                                            {wd.dateStr.slice(8, 10)}: {wd.closed}/{wd.required}
+                                        </span>
+                                    ))}
+                                    <span className="text-slate-400 font-bold ml-auto hidden sm:inline">Fila «Cobertura» abajo · click celda roja = detalle</span>
+                                </div>
+                            )}
+                            </>
                         )}
                         {comparingSnapshot ? (
                             <div className={`flex h-full min-h-0 gap-1 p-0.5 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
@@ -6034,8 +6109,8 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className={`h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''}`}>
-                                {renderGrid(false)}
+                            <div className={`h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''} ${correctionMode ? 'pb-2' : ''}`}>
+                                {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                             </div>
                         )}
                         </>
@@ -6083,7 +6158,7 @@ export default function PlanificacionPage() {
                         ) : (
                             <>
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
-                                {bulkShifts.map((s: any) => ( <button key={s.code} onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime })} disabled={isServiceLocked} className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)}`}>{s.code}</button>))}
+                                {bulkShifts.map((s: any) => ( <button key={s.code} onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime })} disabled={isServiceLocked} className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)}`}>{s.code}</button>))}
                                 <button onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-8 h-8 rounded-lg bg-green-500 text-white font-black text-xs border border-green-600">F</button>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={handleCopySelection} title="Copiar selección (Ctrl+C)" className="p-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200 hover:text-white transition-colors flex items-center gap-1">
@@ -6842,6 +6917,8 @@ export default function PlanificacionPage() {
                                                 )}
                                             </div>
 
+                                            {correctionMode && previewIsPublished && renderDayCoverageClosures(selectedCell.dateStr)}
+
                                             {/* Acciones */}
                                             {canEdit && !previewIsPublished && (
                                                 <div className="flex gap-2">
@@ -7002,6 +7079,7 @@ export default function PlanificacionPage() {
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
                                             const coverageFull = coverageData.isActiveDay && coverageData.requiredUnits > 0 && isUnitsCovered;
+                                            const allowOverAssign = correctionMode;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
                                             const displayTarget = isExcludedDay
                                                 ? 'Excluido SLA'
@@ -7021,6 +7099,7 @@ export default function PlanificacionPage() {
                                                 : 'bg-slate-300';
                                             return (
                                                 <>
+                                                    {correctionMode && renderDayCoverageClosures(selectedCell.dateStr, { compact: true })}
                                                     <div className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
                                                         <div className="flex items-center justify-between mb-1">
                                                             <div className="flex items-center gap-2">
@@ -7050,13 +7129,13 @@ export default function PlanificacionPage() {
                                                     <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked || isExcludedDay ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
-                                                            const disabledByCoverage = coverageFull;
+                                                            const disabledByCoverage = coverageFull && !allowOverAssign;
                                                             const disabled = isServiceLocked || isBlocked || disabledByCoverage || isExcludedDay;
                                                             const timeRange = (s.startTime && s.endTime) ? `${s.startTime}–${s.endTime}` : null;
                                                             const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
                                                             const blockTitle = isExcludedDay
                                                                 ? 'Puesto excluido por SLA este día'
-                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
+                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : allowOverAssign && coverageFull ? 'Modo corrección: podés reasignar aunque el puesto figure cerrado' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
                                                             return (
                                                                 <button
                                                                     key={s.code}
