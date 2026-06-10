@@ -2339,9 +2339,10 @@ export const detectarAusencias = functions
           }
         }
 
-        // 3. Registro en colecciÃ³n 'ausencias' (el planificador la usa para mostrar badge AA)
-        const shiftDate = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
-        const dateStr = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
+        // 3. Registro en colección 'ausencias' — fecha en AR (UTC-3)
+        // Turno nocturno 23hs: en UTC son las 02hs del día siguiente → restar 3h para obtener fecha local
+        const arDate = new Date(startMs - 3 * 60 * 60 * 1000);
+        const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate.getUTCDate()).padStart(2, '0')}`;
         const ausenciaExistsSnap = await db.collection('ausencias')
           .where('shiftId', '==', docSnap.id)
           .limit(1).get();

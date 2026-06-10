@@ -727,9 +727,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (autoAbsentedIds.current.has(s.id)) continue;
             autoAbsentedIds.current.add(s.id);
 
+            // Usar la fecha del turno en timezone Argentina para turnos nocturnos (23hs = sigue siendo el día de inicio)
             const shiftDate = s.shiftDateObj instanceof Date ? s.shiftDateObj : new Date(s.shiftDateObj);
-            const dayStart = new Date(shiftDate); dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(shiftDate); dayEnd.setHours(23, 59, 59, 999);
+            const localDateStr = shiftDate.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Cordoba' });
+            const [ly, lm, ld] = localDateStr.split('-').map(Number);
+            const dayStart = new Date(ly, lm - 1, ld, 0, 0, 0, 0);
+            const dayEnd = new Date(ly, lm - 1, ld, 23, 59, 59, 999);
 
             getDocs(query(collection(db, 'ausencias'), where('shiftId', '==', s.id), where('absenceType', '==', 'AA'), limit(1)))
                 .then(async snap => {

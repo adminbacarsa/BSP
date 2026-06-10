@@ -19,7 +19,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, onSnapshot, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { db } from '@/lib/firebase';
@@ -204,11 +204,13 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                         : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
                     : serverTimestamp())
                 : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
+            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
             batch.update(doc(db, 'turnos', incomingShift.id), {
                 isPresent:           true,
                 status:              'PRESENT',
                 realStartTime:       incomingRealStart,
-                isLate:              status === 'LATE',
+                lateArrivalAt:       status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
+                isLate:              status === 'LATE' || wasAutoAbsent,
                 // Limpiar flags de ausencia — el guardia llegó tarde pero llegó
                 isAbsent:            false,
                 absenceType:         null,
@@ -216,6 +218,24 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                 absenceReversedAt:   serverTimestamp(),
                 absenceReversedBy:   'OPERACIONES',
             });
+            // Si fue marcado AA y el operador da presente, actualizar la ausencia en RRHH como "Llegada Tarde"
+            // (no borrarla — los X min de ausencia son un hecho, pero el tipo cambia)
+            if (wasAutoAbsent) {
+                const absSnap = await getDocs(query(
+                    collection(db, 'ausencias'),
+                    where('shiftId', '==', incomingShift.id),
+                    where('absenceType', '==', 'AA'),
+                    limit(1)
+                ));
+                if (!absSnap.empty) {
+                    batch.update(absSnap.docs[0].ref, {
+                        type: 'Llegada Tarde',
+                        status: 'Confirmada',
+                        reason: `Llegada tarde: guardia se presento despues de T+60 — ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                        arrivedAt: serverTimestamp(),
+                    });
+                }
+            }
             if (prevShiftId) {
                 // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
                 const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);

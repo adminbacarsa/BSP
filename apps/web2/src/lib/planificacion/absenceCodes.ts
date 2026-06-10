@@ -59,6 +59,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
 /** Tipos disponibles para cargar manualmente en RRHH */
 export const RRHH_ABSENCE_TYPES = [
     'No Presentacion',
+    'Llegada Tarde',
     'Injustificada',
     'Justificada',
     'Enfermedad',
