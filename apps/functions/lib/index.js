@@ -1936,8 +1936,8 @@ exports.detectarAusencias = functions
                     console.warn(`[detectarAusencias] Push error para ${shift.employeeId}:`, e);
                 }
             }
-            const shiftDate = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
-            const dateStr = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
+            const arDate = new Date(startMs - 3 * 60 * 60 * 1000);
+            const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate.getUTCDate()).padStart(2, '0')}`;
             const ausenciaExistsSnap = await db.collection('ausencias')
                 .where('shiftId', '==', docSnap.id)
                 .limit(1).get();
