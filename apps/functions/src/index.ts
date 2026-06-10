@@ -2346,7 +2346,27 @@ export const detectarAusencias = functions
         const ausenciaExistsSnap = await db.collection('ausencias')
           .where('shiftId', '==', docSnap.id)
           .limit(1).get();
-        if (ausenciaExistsSnap.empty) {
+        // Helper local para el horario del turno
+        const buildHorario = () => {
+          const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
+          const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
+          const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+          return et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
+        };
+        if (!ausenciaExistsSnap.empty) {
+          // Corregir fecha si fue guardada con UTC en lugar de UTC-3 (turnos nocturnos)
+          const existingAbs = ausenciaExistsSnap.docs[0];
+          const existingData = existingAbs.data();
+          if (existingData.startDate !== dateStr || existingData.endDate !== dateStr) {
+            const horario = buildHorario();
+            await existingAbs.ref.update({
+              startDate: dateStr,
+              endDate: dateStr,
+              reason: `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+            });
+            console.log(`[detectarAusencias] Fecha corregida: ${existingData.startDate} → ${dateStr} para turno ${docSnap.id}`);
+          }
+        } else {
           await db.collection('ausencias').add({
             employeeId: shift.employeeId,
             employeeName: shift.employeeName || '',
@@ -2362,13 +2382,7 @@ export const detectarAusencias = functions
             empresaId: shiftEmpresaId(shift) || null,
             positionName: shift.positionName || '',
             shiftCode: (shift.code || '').toUpperCase() || null,
-            reason: (() => {
-              const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
-              const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
-              const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-              const horario = et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
-              return `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`;
-            })(),
+            reason: `No presentacion al turno ${buildHorario()} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
             status: 'Confirmada',
             hasCertificate: false,
             createdAt: now,

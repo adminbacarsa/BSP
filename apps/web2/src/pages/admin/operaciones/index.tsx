@@ -221,17 +221,22 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
             // Si fue marcado AA y el operador da presente, actualizar la ausencia en RRHH como "Llegada Tarde"
             // (no borrarla — los X min de ausencia son un hecho, pero el tipo cambia)
             if (wasAutoAbsent) {
+                // Query por shiftId solo (evita índice compuesto); filtrar absenceType AA en cliente
                 const absSnap = await getDocs(query(
                     collection(db, 'ausencias'),
                     where('shiftId', '==', incomingShift.id),
-                    where('absenceType', '==', 'AA'),
-                    limit(1)
+                    limit(5)
                 ));
-                if (!absSnap.empty) {
-                    batch.update(absSnap.docs[0].ref, {
+                const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
+                if (aaDoc) {
+                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : null;
+                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : null;
+                    const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                    batch.update(aaDoc.ref, {
                         type: 'Llegada Tarde',
                         status: 'Confirmada',
-                        reason: `Llegada tarde: guardia se presento despues de T+60 — ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                        reason: `Llegada tarde al turno${horario ? ' ' + horario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
                         arrivedAt: serverTimestamp(),
                     });
                 }

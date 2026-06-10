@@ -77,6 +77,32 @@ exports.onTurnoWrite = functions
                 return;
         }
     }
+    if (before && after && before.isAbsent === true && after.isPresent === true && !after.isAbsent) {
+        const turnoId = change.after.id;
+        try {
+            const ausSnap = await db.collection('ausencias')
+                .where('shiftId', '==', turnoId)
+                .limit(5).get();
+            const aaDoc = ausSnap.docs.find(d => d.data().absenceType === 'AA');
+            if (aaDoc) {
+                const fmtT = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                const st = after.startTime?.toDate ? after.startTime.toDate() : null;
+                const et = after.endTime?.toDate ? after.endTime.toDate() : null;
+                const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                await aaDoc.ref.update({
+                    type: 'Llegada Tarde',
+                    status: 'Confirmada',
+                    reason: `Llegada tarde al turno${horario ? ' ' + horario : ''} - ${after.objectiveName || ''} (${after.positionName || ''})`,
+                    arrivedAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                console.log('[onTurnoWrite] Ausencia → Llegada Tarde para turno:', turnoId);
+            }
+        }
+        catch (e) {
+            console.warn('[onTurnoWrite] Error actualizando ausencia a Llegada Tarde:', e);
+        }
+        return;
+    }
     if (after && before && !before.isRetention && after.isRetention === true) {
         const employeeId = after.employeeId;
         if (!employeeId)
