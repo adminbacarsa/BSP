@@ -167,6 +167,66 @@ function resolveFtLiquidationHours(shift: any, fallback = 8): number {
     return fallback > 0 && fallback < 23.5 ? fallback : 8;
 }
 
+function shiftEndedForLiquidation(shift: any): boolean {
+    const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
+    return !!(endSec && new Date(endSec * 1000) <= new Date());
+}
+
+/** Evita duplicar FT cuando el doc F y el turno de cobertura con fichada coexisten el mismo dÃ­a. */
+export function buildFrancoDocLiquidationSkipIds(shifts: any[]): Set<string> {
+    const byDay = new Map<string, { francoIds: string[]; hasWorkCheckIn: boolean }>();
+    for (const s of shifts) {
+        const dk = shiftCalendarDateKey(s);
+        if (!dk || !s.id) continue;
+        const bucket = byDay.get(dk) ?? { francoIds: [], hasWorkCheckIn: false };
+        const code = String(s.code || '').trim().toUpperCase();
+        if (isFrancoTrabajadoShift(s) && code === 'F' && !shiftHasRealCheckIn(s)) {
+            bucket.francoIds.push(s.id);
+        } else if (
+            isLiquidationWorkCandidate(s)
+            && shiftHasRealCheckIn(s)
+            && isFrancoTrabajadoShift(s)
+        ) {
+            bucket.hasWorkCheckIn = true;
+        }
+        byDay.set(dk, bucket);
+    }
+    const skip = new Set<string>();
+    for (const { francoIds, hasWorkCheckIn } of byDay.values()) {
+        if (hasWorkCheckIn) francoIds.forEach((id) => skip.add(id));
+    }
+    return skip;
+}
+
+/** Total trabajado para liquidaciÃ³n: fichada real, o jornada FT/cobertura ya finalizada. */
+export function resolveLiquidationWorkedHours(
+    shift: any,
+    opts: {
+        rDur?: number | null;
+        duration?: number;
+        isAbsent?: boolean;
+        isFT?: boolean;
+        skipFrancoDoc?: boolean;
+    } = {},
+): number {
+    if (opts.skipFrancoDoc) return 0;
+    if (opts.isAbsent ?? (shift.isAbsent === true)) return 0;
+    if (!shiftEndedForLiquidation(shift)) return 0;
+    if (opts.rDur != null && opts.rDur >= 0 && opts.rDur <= 36) return opts.rDur;
+    const isFT = opts.isFT ?? isFrancoTrabajadoShift(shift);
+    if (!isFT) return 0;
+    const dur = opts.duration ?? resolveShiftDurationHours(shift);
+    return dur > 0 ? dur : 0;
+}
+
+export function liquidacion200FromWorkedHours(totalTrabajado: number) {
+    const t = Math.max(0, totalTrabajado);
+    return {
+        horasSimples: Math.min(t, 200),
+        excedente50: Math.max(0, t - 200),
+    };
+}
+
 /** Misma regla que operaciones: planificado sin publicar no entra a liquidaciÃ³n salvo fichada real u origen ops. */
 export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
@@ -496,6 +556,7 @@ const getNightDuration = (start: Date, end: Date) => {
 const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>) => {
     const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
     const sortedDocs = [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
+    const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs);
 
     let hoursTotalOperativas = 0; // teÃ³ricas
     let totalDiurnas = 0;
@@ -515,8 +576,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const isFT = isFrancoTrabajadoShift(d);
             if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
-            // Doc F convocado sin fichada: las horas van en el turno de cobertura (propagateFrancoTrabajadoFlags)
-            if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d)) return;
+            // Doc F sin fichada: liquida en el turno de cobertura si ese dÃ­a tiene fichada
+            if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
 
             const start = d.startTime.toDate();
             const end = d.endTime.toDate();
@@ -577,23 +638,25 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const rStart = rStartRaw ? clampS(rStartRaw, start) : null;
             const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)   : null;
+            let worked = 0;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
-                if (rDur >= 0 && rDur <= 24) { // cap 24h â€” retenciÃ³n extrema no puede pasar de un dÃ­a
-                    horasRealesTotal += rDur;
+                if (rDur >= 0 && rDur <= 24) {
+                    worked = rDur;
                     turnosConDatosReales++;
                 }
-                // rDur fuera de rango (dato corrupto) â†’ no sumar
+            } else if (isFT && !francoDocSkipIds.has(d.id)) {
+                worked = resolveFtLiquidationHours(d, duration);
             }
-            // sin fichada â†’ 0 reales (no fallback a teÃ³rico)
+            horasRealesTotal += worked;
         } catch (err) {
             console.warn("Saltando turno corrupto:", d.id);
         }
     });
 
     const baseLimit = 200;
-    const excess = Math.max(0, hoursTotalOperativas - baseLimit);
-    const horasSimples = Math.min(hoursTotalOperativas, baseLimit);
+    const excess = Math.max(0, horasRealesTotal - baseLimit);
+    const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
     const horasTeoricas = hoursTotalOperativas + hoursFT;
 
     return {
@@ -730,7 +793,7 @@ export function buildPayrollExportPayload(
     rows: any[],
     opts: { start: string; end: string; empresaId?: string; publishFilter: ReportPublishFilter },
 ) {
-    const bolsa = (r: any) => Math.max(0, (r.horasReales ?? 0) - (r.extra100 ?? 0));
+    const bolsa = (r: any) => Math.max(0, r.horasReales ?? 0);
     return {
         exportVersion: '1',
         source: 'COSP_REPORTES_UI',

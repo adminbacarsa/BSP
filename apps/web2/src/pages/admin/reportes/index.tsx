@@ -9,7 +9,7 @@ import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -885,6 +885,7 @@ export default function ReportsPage() {
         const baseShifts = dedupeShiftsByAbsencePriority(
             propagateFrancoTrabajadoFlags(detailItem.rawShifts || []),
         );
+        const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts);
         const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
         const objectivesForSelect = detailObjectiveSearch.trim()
@@ -964,6 +965,13 @@ export default function ReportsPage() {
 
                 const dateKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
                 const hFeriado = holidaysData[dateKey] ? (rDur ?? (isFT ? duration : 0)) : 0;
+                const horasTrabajadas = resolveLiquidationWorkedHours(s, {
+                    rDur,
+                    duration,
+                    isAbsent: isUnjustAbsentDetail,
+                    isFT,
+                    skipFrancoDoc: francoDocSkipIds.has(s.id),
+                });
 
                 return {
                     id: s.id,
@@ -977,6 +985,7 @@ export default function ReportsPage() {
                     night,
                     h100: isFT ? (rDur ?? (duration > 0 ? duration : 0)) : 0,
                     hFeriado,
+                    horasTrabajadas,
                     isFT,
                     isFF,
                     rStart,
@@ -998,16 +1007,14 @@ export default function ReportsPage() {
 
         const totalSum = rowsWithData.reduce((acc:any, curr:any) => ({
             total: acc.total + curr.total,
-            horasReales: acc.horasReales + (curr.rDur ?? 0),
+            horasTrabajadas: acc.horasTrabajadas + curr.horasTrabajadas,
             day: acc.day + curr.day,
             night: acc.night + curr.night,
             h100: acc.h100 + curr.h100,
             hFeriado: acc.hFeriado + curr.hFeriado
-        }), { total: 0, horasReales: 0, day: 0, night: 0, h100: 0, hFeriado: 0 });
+        }), { total: 0, horasTrabajadas: 0, day: 0, night: 0, h100: 0, hFeriado: 0 });
 
-        const horasParaBolsa = totalSum.horasReales - totalSum.h100;
-        const excedente = Math.max(0, horasParaBolsa - 200);
-        const horasSimples = Math.min(horasParaBolsa, 200);
+        const { horasSimples, excedente50: excedente } = liquidacion200FromWorkedHours(totalSum.horasTrabajadas);
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }}>
@@ -1138,9 +1145,9 @@ export default function ReportsPage() {
                                             )}
                                         </td>
                                         <td className="py-2 px-3 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
-                                        <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.rDur != null ? 'text-indigo-600' : 'text-slate-300'}`}>
-                                            {row.rDur != null ? row.rDur.toFixed(1) : '—'}
-                                            {row.hasOvertime && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
+                                        <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.horasTrabajadas > 0 ? 'text-indigo-600' : 'text-slate-300'}`}>
+                                            {row.horasTrabajadas > 0 ? row.horasTrabajadas.toFixed(1) : '—'}
+                                            {row.hasOvertime && row.rDur != null && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
                                         </td>
                                         <td className="py-2 px-3 text-center font-mono text-amber-600"><div className="flex items-center justify-center gap-1">{row.day > 0 && <Sun size={10}/>} {row.day > 0 ? row.day.toFixed(1) : '-'}</div></td>
                                         <td className="py-2 px-3 text-center font-mono text-violet-600"><div className="flex items-center justify-center gap-1">{row.night > 0 && <Moon size={10}/>} {row.night > 0 ? row.night.toFixed(1) : '-'}</div></td>
@@ -1177,7 +1184,7 @@ export default function ReportsPage() {
                                 <tr>
                                     <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider">Acumulado:</td>
                                     <td className="py-3 px-3 text-center text-slate-400 border-l border-slate-700">{totalSum.total.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center font-black text-emerald-400">{totalSum.horasReales.toFixed(1)}</td>
+                                    <td className="py-3 px-3 text-center font-black text-emerald-400">{totalSum.horasTrabajadas.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-amber-400">{totalSum.day.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-violet-300">{totalSum.night.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-orange-400 font-black border-l border-slate-700">{excedente > 0 ? excedente.toFixed(1) : '—'}</td>
