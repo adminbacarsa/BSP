@@ -753,6 +753,148 @@ const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName }: any) => { c
 const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6"><h3 className="font-bold">Franco Trabajado</h3><button onClick={onClose} className="w-full mt-4 py-2 bg-slate-100 rounded">Cerrar</button></div></div>); };
 
+// ── Popup de detalle de novedad ──────────────────────────────────────────────
+const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
+    AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
+    AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',         bg: 'bg-red-600',    text: 'text-white',     border: 'border-red-500' },
+    AVISO_AUSENCIA_ANTICIPADA:    { label: 'ANTICIPADA',      bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
+    VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',       bg: 'bg-orange-500', text: 'text-white',     border: 'border-orange-400' },
+    RELEVO_NO_PRESENTADO:         { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
+    POSICION_SIN_RELEVO:          { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
+    RETENCION_LARGA:              { label: 'RETENCIÓN',       bg: 'bg-orange-700', text: 'text-white',     border: 'border-orange-600' },
+    CONVOCATORIA_RETEN:           { label: 'CONVOCATORIA',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
+    FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
+    ADELANTO_TURNO:               { label: 'ADELANTO',        bg: 'bg-indigo-500', text: 'text-white',     border: 'border-indigo-400' },
+    RRHH_NOVEDAD:                 { label: 'RRHH',            bg: 'bg-purple-600', text: 'text-white',     border: 'border-purple-500' },
+};
+const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
+
+const AUTO_CLOSE_MS = 3000;
+
+const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
+    const [remaining, setRemaining] = React.useState(AUTO_CLOSE_MS);
+    const intervalRef = React.useRef<any>(null);
+    const meta = TYPE_META[novedad?.type] ?? DEFAULT_META;
+
+    React.useEffect(() => {
+        if (!novedad) return;
+        setRemaining(AUTO_CLOSE_MS);
+        const tick = 50;
+        intervalRef.current = setInterval(() => {
+            setRemaining(r => {
+                if (r <= tick) { clearInterval(intervalRef.current); onClose(); return 0; }
+                return r - tick;
+            });
+        }, tick);
+        return () => clearInterval(intervalRef.current);
+    }, [novedad?.id]);
+
+    if (!novedad) return null;
+
+    const ts = novedad.createdAt?.seconds ? new Date(novedad.createdAt.seconds * 1000) : null;
+    const pct = (remaining / AUTO_CLOSE_MS) * 100;
+
+    const pause = () => clearInterval(intervalRef.current);
+    const resume = () => {
+        clearInterval(intervalRef.current);
+        const tick = 50;
+        intervalRef.current = setInterval(() => {
+            setRemaining(r => {
+                if (r <= tick) { clearInterval(intervalRef.current); onClose(); return 0; }
+                return r - tick;
+            });
+        }, tick);
+    };
+
+    return (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center p-4"
+             style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)' }}
+             onClick={onClose}>
+            <div
+                className={`w-full max-w-sm rounded-2xl shadow-2xl border-2 ${meta.border} overflow-hidden`}
+                style={{ background: '#0f172a' }}
+                onClick={e => e.stopPropagation()}
+                onMouseEnter={pause}
+                onMouseLeave={resume}
+            >
+                {/* Barra de progreso auto-cierre */}
+                <div className="h-1 w-full bg-white/10">
+                    <div
+                        className={`h-full ${meta.bg} transition-none`}
+                        style={{ width: `${pct}%`, transition: 'width 50ms linear' }}
+                    />
+                </div>
+
+                {/* Header */}
+                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
+                    <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>{meta.label}</span>
+                    <div className="flex items-center gap-2">
+                        {ts && (
+                            <span className="text-[10px] font-mono text-white/70">
+                                {ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })}
+                            </span>
+                        )}
+                        <button onClick={onClose} className="text-white/60 hover:text-white transition-colors"><X size={14}/></button>
+                    </div>
+                </div>
+
+                {/* Cuerpo */}
+                <div className="px-5 py-4 space-y-3">
+                    {/* Empleado */}
+                    {novedad.employeeName && (
+                        <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-sm font-black text-white shrink-0">
+                                {novedad.employeeName[0]?.toUpperCase()}
+                            </div>
+                            <div>
+                                <p className="text-white font-black text-sm leading-tight">{novedad.employeeName}</p>
+                                {novedad.positionName && <p className="text-white/50 text-[10px]">{novedad.positionName}</p>}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Objetivo */}
+                    {novedad.objectiveName && (
+                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
+                            <MapPin size={13} className="text-white/40 shrink-0"/>
+                            <span className="text-white/90 text-xs font-bold">{novedad.objectiveName}</span>
+                        </div>
+                    )}
+
+                    {/* Descripción completa */}
+                    {novedad.description && (
+                        <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
+                            {novedad.description}
+                        </p>
+                    )}
+
+                    {/* Tiempo al turno */}
+                    {novedad.minutesBeforeShift != null && novedad.minutesBeforeShift > 0 && (
+                        <div className="flex items-center gap-1.5 text-amber-400">
+                            <Clock size={12}/>
+                            <span className="text-xs font-bold">{novedad.minutesBeforeShift} min al inicio del turno</span>
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer: acción + auto-cierre */}
+                <div className="px-4 pb-4 flex items-center justify-between gap-3">
+                    <span className="text-white/30 text-[10px]">
+                        Cerrando en {Math.ceil(remaining / 1000)}s · hover para pausar
+                    </span>
+                    <button
+                        onClick={() => { onAtender(novedad); onClose(); }}
+                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white transition-all hover:scale-105 ${meta.bg}`}
+                    >
+                        <CheckCircle size={13}/>
+                        ATENDER
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
@@ -1022,6 +1164,7 @@ export default function OperacionesPage() {
         }).catch(() => {});
     }, [session.isAutoMode, session.loading]);
 
+    const [detailNovedad, setDetailNovedad] = useState<any>(null);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
     const [showCoverageGrid, setShowCoverageGrid] = useState(false);
@@ -2382,7 +2525,7 @@ export default function OperacionesPage() {
                             const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
                             const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
                             return (
-                              <div key={n.id} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors`}>
+                              <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-12 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
@@ -2522,13 +2665,13 @@ export default function OperacionesPage() {
                                 const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
                                 const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
                                 const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
+                                                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
                                 const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
                                     ? ` · ${n.minutesBeforeShift}min`
                                     : '';
 
                                 return (
-                                    <div key={n.id} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors`}>
+                                    <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
                                         <div className="flex-1 min-w-0">
                                             <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
@@ -2556,7 +2699,7 @@ export default function OperacionesPage() {
                                                     <MessageCircle size={11}/>
                                                 </button>
                                             )}
-                                            <button onClick={() => handleAtenderNovedad(n)}
+                                            <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
                                                 className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title={actionTitle}>
                                                 <ActionIcon size={11}/>
                                             </button>
@@ -2606,6 +2749,15 @@ export default function OperacionesPage() {
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
+
+            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
+            {detailNovedad && (
+                <NovedadDetailPopup
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
+            )}
 
         </DashboardLayout>
     );
