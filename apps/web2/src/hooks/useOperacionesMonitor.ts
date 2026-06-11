@@ -111,6 +111,19 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
+    // Contador que fuerza re-suscripción de listeners al volver de background o reconectar red
+    const [refreshKey, setRefreshKey] = useState(0);
+    useEffect(() => {
+        const bump = () => setRefreshKey(k => k + 1);
+        const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('online', bump);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('online', bump);
+        };
+    }, []);
+
     useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
 
     // SUSCRIPCIONES
@@ -164,7 +177,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 .map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details })));
         }));
         return () => { unsubs.forEach(u => u()); };
-    }, [empresaId, migracionCompleta, scopeEmpresa]);
+    }, [empresaId, migracionCompleta, scopeEmpresa, refreshKey]);
 
     useEffect(() => {
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
@@ -178,9 +191,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setRawShifts(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
+        }, (err) => {
+            console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);
+            setRefreshKey(k => k + 1);
         });
         return () => unsub();
-    }, [empresaId, migracionCompleta, scopeEmpresa]);
+    }, [empresaId, migracionCompleta, scopeEmpresa, refreshKey]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
     const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);
