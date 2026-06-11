@@ -663,7 +663,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         }
     });
 
-    const baseLimit = 200;
+    const baseLimit = 204; // CCT 422/05 SUVICO
     const excess = Math.max(0, horasRealesTotal - baseLimit);
     const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
     const horasTeoricas = hoursTotalOperativas + hoursFT;
