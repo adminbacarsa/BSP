@@ -2225,8 +2225,33 @@ export const detectarAusencias = functions
       // â”€â”€ AUSENTE: T+30 sin marcar presente â†’ ausencia automÃ¡tica AA â”€â”€
       // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
       if (elapsedMin >= 60) {
-        // Evitar procesar dos veces
-        if (shift.absenceDetectedAt) continue;
+        // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
+        if (shift.absenceDetectedAt) {
+          // Corrección retroactiva: turnos nocturnos cuya ausencia fue guardada con fecha UTC en vez de UTC-3
+          try {
+            const fixArDate = new Date(startMs - 3 * 60 * 60 * 1000);
+            const fixDateStr = `${fixArDate.getUTCFullYear()}-${String(fixArDate.getUTCMonth() + 1).padStart(2, '0')}-${String(fixArDate.getUTCDate()).padStart(2, '0')}`;
+            const fixSnap = await db.collection('ausencias').where('shiftId', '==', docSnap.id).limit(1).get();
+            if (!fixSnap.empty) {
+              const fixData = fixSnap.docs[0].data();
+              if (fixData.startDate !== fixDateStr || fixData.endDate !== fixDateStr) {
+                const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
+                const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
+                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                const horario = et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
+                await fixSnap.docs[0].ref.update({
+                  startDate: fixDateStr,
+                  endDate: fixDateStr,
+                  reason: `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+                });
+                console.log(`[detectarAusencias] Corrección fecha retro: ${fixData.startDate} → ${fixDateStr} turno ${docSnap.id}`);
+              }
+            }
+          } catch (fixErr) {
+            console.warn('[detectarAusencias] Error corrección fecha retro:', fixErr);
+          }
+          continue;
+        }
         // Guardia con aviso de llegada tarde: no marcar ausente automÃ¡ticamente
         if (shift.lateArrivalAt) continue;
         // Caso 2: operador registrÃ³ aviso anticipado â†’ no marcar AA
@@ -3062,4 +3087,108 @@ export const lookupClientByCuit = functionsEmulator
 
 export const saveEmpresaAfipCredentials = functions.https.onCall(saveEmpresaAfipCredentialsHandler);
 export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigHandler);
+
+// =========================================================
+// 19. SCHEDULER: AUTO-INJUSTIFICADA a las 23:45 ARG
+// =========================================================
+// Marca como Injustificada toda ausencia AA del día que no tenga
+// certificado cargado y que RRHH no haya clasificado antes de medianoche.
+export const scheduledAutoInjustificada = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 300, memory: '256MB' })
+  .pubsub.schedule('45 23 * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const now = admin.firestore.Timestamp.now();
+
+    // Fecha de hoy en ARG (YYYY-MM-DD)
+    const todayArg = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const todayStr = `${todayArg.getUTCFullYear()}-${String(todayArg.getUTCMonth() + 1).padStart(2, '0')}-${String(todayArg.getUTCDate()).padStart(2, '0')}`;
+
+    console.log(`[autoInjustificada] Procesando ausencias del día ${todayStr}`);
+
+    // Buscar ausencias AA del día sin certificado y sin clasificar
+    const snap = await db.collection('ausencias')
+      .where('startDate', '==', todayStr)
+      .where('status', '==', 'Confirmada')
+      .get();
+
+    if (snap.empty) {
+      console.log('[autoInjustificada] Sin ausencias pendientes.');
+      return null;
+    }
+
+    const batch = db.batch();
+    let count = 0;
+
+    snap.docs.forEach((doc) => {
+      const data = doc.data();
+      // Solo AA sin certificado
+      const absType = String(data.absenceType || data.type || '').toUpperCase();
+      const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
+      if (!isAA) return;
+      if (data.certificateUrl) return; // tiene certificado → no tocar
+      batch.update(doc.ref, {
+        status: 'Injustificada',
+        autoInjustificadaAt: now,
+        reason: `${data.reason || 'No presentación'} — Auto-injustificada por sistema (sin certificado al 23:45)`,
+      });
+      count++;
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada.`);
+    }
+    return null;
+  });
+
+// =========================================================
+// 20. TRIGGER: CERTIFICADO PRESENTADO → NOVEDAD RRHH
+// =========================================================
+// Cuando el empleado sube un certificado médico desde el portal,
+// se crea una novedad en RRHH para que lo revisen y clasifiquen la ausencia.
+export const onAusenciaCertificado = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 30, memory: '128MB' })
+  .firestore.document('ausencias/{ausenciaId}')
+  .onUpdate(async (change) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    // Solo actuar cuando certificateUrl pasa de vacío a tener valor
+    if (after.certificateUrl && !before.certificateUrl) {
+      const db = admin.firestore();
+      const now = admin.firestore.Timestamp.now();
+
+      await db.collection('novedades').add({
+        type: 'CERTIFICADO_PRESENTADO',
+        title: 'Certificado presentado',
+        description: `${after.employeeName || 'Empleado'} presentó certificado médico para su ausencia del ${after.startDate || ''}`,
+        status: 'pending',
+        employeeId: after.employeeId || '',
+        employeeName: after.employeeName || '',
+        objectiveId: after.objectiveId || null,
+        objectiveName: after.objectiveName || '',
+        positionName: after.positionName || '',
+        clientId: after.clientId || null,
+        shiftId: after.shiftId || null,
+        ausenciaId: change.after.id,
+        certificateUrl: after.certificateUrl,
+        absenceDate: after.startDate || '',
+        urgency: 'HIGH',
+        handledBy: 'RRHH',
+        empresaId: after.empresaId || null,
+        createdAt: now,
+        source: 'PORTAL_EMPLEADO',
+        reportedBy: 'SISTEMA',
+      });
+
+      console.log(`[onAusenciaCertificado] Novedad creada para ausencia ${change.after.id}`);
+    }
+    return null;
+  });
+
+// checkLlegadaTardeReiterada → ver src/ausencias/llegadaTardeUtils.ts
 

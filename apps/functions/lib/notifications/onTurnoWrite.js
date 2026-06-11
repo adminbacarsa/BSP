@@ -4,6 +4,7 @@ exports.onTurnoWrite = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
+const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -85,17 +86,24 @@ exports.onTurnoWrite = functions
                 .limit(5).get();
             const aaDoc = ausSnap.docs.find(d => d.data().absenceType === 'AA');
             if (aaDoc) {
+                const ausData = aaDoc.data();
                 const fmtT = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
                 const st = after.startTime?.toDate ? after.startTime.toDate() : null;
                 const et = after.endTime?.toDate ? after.endTime.toDate() : null;
                 const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                const checkInTs = after.checkInTime?.toDate ? after.checkInTime.toDate() : null;
+                const checkInStr = checkInTs ? fmtT(checkInTs) : null;
                 await aaDoc.ref.update({
                     type: 'Llegada Tarde',
+                    absenceType: 'LT',
                     status: 'Confirmada',
                     reason: `Llegada tarde al turno${horario ? ' ' + horario : ''} - ${after.objectiveName || ''} (${after.positionName || ''})`,
                     arrivedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    checkInTime: after.checkInTime || null,
+                    checkInTimeStr: checkInStr,
                 });
-                console.log('[onTurnoWrite] Ausencia → Llegada Tarde para turno:', turnoId);
+                console.log('[onTurnoWrite] Ausencia → Llegada Tarde para turno:', turnoId, 'ingresó:', checkInStr);
+                await (0, llegadaTardeUtils_1.checkLlegadaTardeReiterada)(db, ausData.employeeId || after.employeeId || '', ausData.employeeName || after.employeeName || '', ausData.empresaId || after.empresaId || null, ausData.startDate || '');
             }
         }
         catch (e) {

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -1831,8 +1831,32 @@ exports.detectarAusencias = functions
         }
         const elapsedMin = (nowMs - startMs) / 60000;
         if (elapsedMin >= 60) {
-            if (shift.absenceDetectedAt)
+            if (shift.absenceDetectedAt) {
+                try {
+                    const fixArDate = new Date(startMs - 3 * 60 * 60 * 1000);
+                    const fixDateStr = `${fixArDate.getUTCFullYear()}-${String(fixArDate.getUTCMonth() + 1).padStart(2, '0')}-${String(fixArDate.getUTCDate()).padStart(2, '0')}`;
+                    const fixSnap = await db.collection('ausencias').where('shiftId', '==', docSnap.id).limit(1).get();
+                    if (!fixSnap.empty) {
+                        const fixData = fixSnap.docs[0].data();
+                        if (fixData.startDate !== fixDateStr || fixData.endDate !== fixDateStr) {
+                            const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
+                            const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
+                            const fmtT = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                            const horario = et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
+                            await fixSnap.docs[0].ref.update({
+                                startDate: fixDateStr,
+                                endDate: fixDateStr,
+                                reason: `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+                            });
+                            console.log(`[detectarAusencias] Corrección fecha retro: ${fixData.startDate} → ${fixDateStr} turno ${docSnap.id}`);
+                        }
+                    }
+                }
+                catch (fixErr) {
+                    console.warn('[detectarAusencias] Error corrección fecha retro:', fixErr);
+                }
                 continue;
+            }
             if (shift.lateArrivalAt)
                 continue;
             if (shift.notifiedAbsent === true)
@@ -2560,4 +2584,82 @@ exports.lookupClientByCuit = functionsEmulator
     : functions.runWith(lookupClientByCuitRuntime).https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler);
 exports.saveEmpresaAfipCredentials = functions.https.onCall(empresaAfipCredentialsHandler_1.saveEmpresaAfipCredentialsHandler);
 exports.getEmpresaAfipConfig = functions.https.onCall(empresaAfipCredentialsHandler_1.getEmpresaAfipConfigHandler);
+exports.scheduledAutoInjustificada = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 300, memory: '256MB' })
+    .pubsub.schedule('45 23 * * *')
+    .timeZone('America/Argentina/Buenos_Aires')
+    .onRun(async () => {
+    const db = admin.firestore();
+    const now = admin.firestore.Timestamp.now();
+    const todayArg = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const todayStr = `${todayArg.getUTCFullYear()}-${String(todayArg.getUTCMonth() + 1).padStart(2, '0')}-${String(todayArg.getUTCDate()).padStart(2, '0')}`;
+    console.log(`[autoInjustificada] Procesando ausencias del día ${todayStr}`);
+    const snap = await db.collection('ausencias')
+        .where('startDate', '==', todayStr)
+        .where('status', '==', 'Confirmada')
+        .get();
+    if (snap.empty) {
+        console.log('[autoInjustificada] Sin ausencias pendientes.');
+        return null;
+    }
+    const batch = db.batch();
+    let count = 0;
+    snap.docs.forEach((doc) => {
+        const data = doc.data();
+        const absType = String(data.absenceType || data.type || '').toUpperCase();
+        const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
+        if (!isAA)
+            return;
+        if (data.certificateUrl)
+            return;
+        batch.update(doc.ref, {
+            status: 'Injustificada',
+            autoInjustificadaAt: now,
+            reason: `${data.reason || 'No presentación'} — Auto-injustificada por sistema (sin certificado al 23:45)`,
+        });
+        count++;
+    });
+    if (count > 0) {
+        await batch.commit();
+        console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada.`);
+    }
+    return null;
+});
+exports.onAusenciaCertificado = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 30, memory: '128MB' })
+    .firestore.document('ausencias/{ausenciaId}')
+    .onUpdate(async (change) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    if (after.certificateUrl && !before.certificateUrl) {
+        const db = admin.firestore();
+        const now = admin.firestore.Timestamp.now();
+        await db.collection('novedades').add({
+            type: 'CERTIFICADO_PRESENTADO',
+            title: 'Certificado presentado',
+            description: `${after.employeeName || 'Empleado'} presentó certificado médico para su ausencia del ${after.startDate || ''}`,
+            status: 'pending',
+            employeeId: after.employeeId || '',
+            employeeName: after.employeeName || '',
+            objectiveId: after.objectiveId || null,
+            objectiveName: after.objectiveName || '',
+            positionName: after.positionName || '',
+            clientId: after.clientId || null,
+            shiftId: after.shiftId || null,
+            ausenciaId: change.after.id,
+            certificateUrl: after.certificateUrl,
+            absenceDate: after.startDate || '',
+            urgency: 'HIGH',
+            handledBy: 'RRHH',
+            empresaId: after.empresaId || null,
+            createdAt: now,
+            source: 'PORTAL_EMPLEADO',
+            reportedBy: 'SISTEMA',
+        });
+        console.log(`[onAusenciaCertificado] Novedad creada para ausencia ${change.after.id}`);
+    }
+    return null;
+});
 //# sourceMappingURL=index.js.map

@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
+import { checkLlegadaTardeReiterada } from '../ausencias/llegadaTardeUtils';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -88,17 +89,35 @@ export const onTurnoWrite = functions
           .limit(5).get();
         const aaDoc = ausSnap.docs.find(d => d.data().absenceType === 'AA');
         if (aaDoc) {
+          const ausData = aaDoc.data();
           const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
           const st = after.startTime?.toDate ? after.startTime.toDate() : null;
           const et = after.endTime?.toDate ? after.endTime.toDate() : null;
           const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+
+          // Hora real de llegada (checkInTime del turno)
+          const checkInTs = after.checkInTime?.toDate ? after.checkInTime.toDate() : null;
+          const checkInStr = checkInTs ? fmtT(checkInTs) : null;
+
           await aaDoc.ref.update({
             type: 'Llegada Tarde',
+            absenceType: 'LT',             // actualizar absenceType para que la grilla muestre LT
             status: 'Confirmada',
             reason: `Llegada tarde al turno${horario ? ' ' + horario : ''} - ${after.objectiveName || ''} (${after.positionName || ''})`,
             arrivedAt: admin.firestore.FieldValue.serverTimestamp(),
+            checkInTime: after.checkInTime || null,   // hora real de ingreso
+            checkInTimeStr: checkInStr,               // string formateado para UI
           });
-          console.log('[onTurnoWrite] Ausencia → Llegada Tarde para turno:', turnoId);
+          console.log('[onTurnoWrite] Ausencia → Llegada Tarde para turno:', turnoId, 'ingresó:', checkInStr);
+
+          // Verificar si acumula 3 tardanzas en el mes
+          await checkLlegadaTardeReiterada(
+            db,
+            ausData.employeeId || after.employeeId || '',
+            ausData.employeeName || after.employeeName || '',
+            ausData.empresaId || after.empresaId || null,
+            ausData.startDate || '',
+          );
         }
       } catch (e) {
         console.warn('[onTurnoWrite] Error actualizando ausencia a Llegada Tarde:', e);

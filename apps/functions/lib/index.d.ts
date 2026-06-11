@@ -43,3 +43,5 @@ export declare const scheduledBackup: functions.CloudFunction<unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;
 export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & functions.Runnable<any>;
 export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.Runnable<any>;
+export declare const scheduledAutoInjustificada: functions.CloudFunction<unknown>;
+export declare const onAusenciaCertificado: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
