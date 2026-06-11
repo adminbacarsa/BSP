@@ -1428,6 +1428,44 @@ export default function OperacionesPage() {
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
 
+    // ── Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
+    const autoExpiredRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        const nowMs = Date.now();
+        const expired = empNovedades.filter((n: any) => {
+            if (n.status === 'ATENDIDA') return false;
+            if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
+            if (autoExpiredRef.current.has(n.id)) return false;
+            const slotEnd = n.endTime?.seconds
+                ? n.endTime.seconds * 1000
+                : n.shiftEnd?.seconds
+                    ? n.shiftEnd.seconds * 1000
+                    : null;
+            if (!slotEnd || slotEnd > nowMs) return false;
+            const stillActive = logic.processedData.some((s: any) =>
+                s.isVirtual && s.isOperationalVacancy &&
+                s.objectiveId === n.objectiveId &&
+                (s.positionName || '').trim().toLowerCase() === (n.positionName || '').trim().toLowerCase()
+            );
+            return !stillActive;
+        });
+        if (expired.length === 0) return;
+        expired.forEach(async (n: any) => {
+            autoExpiredRef.current.add(n.id);
+            try {
+                await updateDoc(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA',
+                    atendidaAt: serverTimestamp(),
+                    atendidaPor: 'Sistema',
+                    resolution: 'NO_CUBIERTO',
+                });
+            } catch (e) {
+                autoExpiredRef.current.delete(n.id);
+                console.warn('[auto-expire] Error cerrando novedad vencida', e);
+            }
+        });
+    }, [empNovedades, logic.processedData]);
+
     const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY']);
     const filteredBitacora = useMemo(() => {
         const logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
@@ -2753,7 +2791,7 @@ export default function OperacionesPage() {
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
 
-            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
+            {/* Popup detalle novedad */}
             {detailNovedad && (
                 <NovedadDetailPopup
                     novedad={detailNovedad}

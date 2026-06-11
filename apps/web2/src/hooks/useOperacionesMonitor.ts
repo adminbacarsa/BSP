@@ -501,6 +501,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         // Un ausente sigue generando una vacante — la posición necesita cobertura
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
+            // Auto-expirar: slot ya terminó → no mostrar como vacante activa
+            if (v.endDateObj.getTime() < now.getTime()) return false;
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
@@ -841,7 +843,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     return {
         employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA,
         viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo,
-        selectedClientId, setSelectedClientId: handleSetSelectedClientId,
+        d: handleSetSelectedClientId,
         uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
         isReady,
     };

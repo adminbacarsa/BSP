@@ -95,15 +95,28 @@ const CoverageSection = ({ num, title, colorClass, badgeClass, items, empty }: a
     </section>
 );
 
-const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any) => {
+const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA, objectiveId }: any) => {
     const name = item.employeeName || item.fullName || '';
     const ph = item.phone || item.celular || '';
     const busy = loading === lKey;
+    const category = item.category || item.categoria || '';
+    // ¿Tiene experiencia registrada en este objetivo específico?
+    const expCount = objectiveId && item.experienciaObjetivos?.[objectiveId]?.count;
     return (
-        <div className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg gap-2 shadow-sm">
+        <div className="flex items-center justify-between p-2.5 bg-white border border-slate-100 rounded-lg gap-2 shadow-sm">
             <div className="min-w-0 flex-1">
-                <span className="text-xs font-bold text-slate-800 block truncate">{name}</span>
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-slate-800 leading-tight">{name}</span>
+                    {expCount > 0 && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0" title={`${expCount} turno(s) previos aquí`}>
+                            ✓ {expCount}T exp.
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    {category && (
+                        <span className="text-[9px] font-medium text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded">{category}</span>
+                    )}
                     {Number.isFinite(item.distance) && item.distance > 0.05
                         ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km · ~{item.eta}min</span>
                         : !Number.isFinite(item.distance) && <span className="text-[10px] text-slate-300 italic">Sin ubicación</span>
@@ -150,7 +163,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
         s.objectiveId === absenceShift.objectiveId &&
         s.positionName === absenceShift.positionName &&
-        toDate(s.shiftDateObj) > now
+        toDate(s.shiftDateObj) > now &&
+        isSameDay(s.shiftDateObj, now)   // ← solo turno de HOY, no del día siguiente
     ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
 
     const busyIds = new Set(
@@ -286,19 +300,19 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                         </div>
                         <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
                             empty="No hay guardias presentes en este objetivo."
-                            items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
+                            items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA} objectiveId={absenceShift.objectiveId}/>)}
                         />
-                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
-                            empty="No hay turno próximo planificado."
-                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
+                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado (hoy)" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
+                            empty="No hay turno próximo planificado para hoy."
+                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA} objectiveId={absenceShift.objectiveId}/>)}
                         />
                         <CoverageSection num="3" title="Retenes · Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
                             empty="No hay retenes disponibles."
-                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
+                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA} objectiveId={absenceShift.objectiveId}/>)}
                         />
                         <CoverageSection num="4" title="Francos · Día libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
                             empty="No hay francos disponibles hoy."
-                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
+                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA} objectiveId={absenceShift.objectiveId}/>)}
                         />
                     </div>
                 </div>
@@ -497,6 +511,47 @@ export default function TacticalMapView() {
         if (pendingNovedades.length > prevPendingCount.current) setNotifPanelOpen(true);
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
+
+    // ── Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
+    const autoExpiredRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        const nowMs = Date.now();
+        const expired = empNovedades.filter((n: any) => {
+            if (n.status === 'ATENDIDA') return false;
+            if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
+            if (autoExpiredRef.current.has(n.id)) return false;
+            // El slot ya terminó
+            const slotEnd = n.endTime?.seconds
+                ? n.endTime.seconds * 1000
+                : n.shiftEnd?.seconds
+                    ? n.shiftEnd.seconds * 1000
+                    : null;
+            if (!slotEnd || slotEnd > nowMs) return false;
+            // No hay vacante activa en processedData para ese objetivo/puesto → slot definitivamente no cubierto
+            const stillActive = logic.processedData.some((s: any) =>
+                s.isVirtual && s.isOperationalVacancy &&
+                s.objectiveId === n.objectiveId &&
+                (s.positionName || '').trim().toLowerCase() === (n.positionName || '').trim().toLowerCase()
+            );
+            return !stillActive;
+        });
+        if (expired.length === 0) return;
+        expired.forEach(async (n: any) => {
+            autoExpiredRef.current.add(n.id);
+            try {
+                await updateDoc(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA',
+                    atendidaAt: serverTimestamp(),
+                    atendidaPor: 'Sistema',
+                    resolution: 'NO_CUBIERTO',
+                });
+            } catch (e) {
+                autoExpiredRef.current.delete(n.id);
+                console.warn('[auto-expire] Error cerrando novedad vencida', e);
+            }
+        });
+    }, [empNovedades, logic.processedData]);
+
     // Marcar novedad como "en gestión" para que control center no la muestre como alerta activa
     const handleTomarGestion = async (novedad: any) => {
         if (novedad.enGestion) return; // ya la tomó otro
