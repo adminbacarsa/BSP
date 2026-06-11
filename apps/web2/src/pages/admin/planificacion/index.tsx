@@ -169,7 +169,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 
-const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA']);
+const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
 
 function resolveTitularCoverageName(
     titularEmpId: string,
@@ -226,6 +226,7 @@ const SHIFT_STYLES: any = {
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
+    'LT':  'bg-orange-50 text-orange-700 border-orange-400 font-black',
     'RET': 'bg-white text-slate-500 border border-slate-300 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
@@ -254,7 +255,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'V': 'Vacaciones',
     'L': 'Licencia Esp.',
     'E': 'Enfermedad',
-    'AA': 'Injustificada',
+    'AA': 'No Presentó',
+    'LT': 'Llegada Tarde',
     'LOCKED': 'Bloqueado (Cerrado/Pasado)',
     'PAST': 'Fecha Pasada',
     'C': 'Turno Consolidado (Fichado)',
@@ -304,7 +306,7 @@ const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'ESC': 8, 'C': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'ESC': 8, 'C': 8,
 };
 
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
@@ -9340,7 +9342,7 @@ export default function PlanificacionPage() {
                                         .sort((a, b) => b[1] - a[1])
                                         .map(([code, n]) => (
                                             <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
-                                                {n}×{code}
+                                                {n}x{code}
                                             </span>
                                         ))}
                                 </div>
