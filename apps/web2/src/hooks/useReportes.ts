@@ -1038,14 +1038,32 @@ export const useReportes = (forcedClientId?: string | null) => {
 
             const shiftsSnap = await getDocs(q);
             
-            const rawShifts = shiftsSnap.docs
+            // Base sin publishFilter: necesario para detectar FT (el turno F puede ser borrador)
+            const allShiftsBase = shiftsSnap.docs
                 .map(doc => ({ id: doc.id, ...doc.data() }))
                 .filter((d: any) => {
                     if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
                     if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
-                    return isShiftEligibleForReports(d, publishStatusMap, publishFilter);
+                    return true;
                 });
+            // Pre-computar flags FT sobre el set completo (antes del filtro de publicacion)
+            const ftShiftIds = new Set<string>();
+            const _allByEmp: Record<string, any[]> = {};
+            allShiftsBase.forEach((s: any) => {
+                if (!s.employeeId) return;
+                if (!_allByEmp[s.employeeId]) _allByEmp[s.employeeId] = [];
+                _allByEmp[s.employeeId].push(s);
+            });
+            Object.values(_allByEmp).forEach((empShifts: any[]) => {
+                propagateFrancoTrabajadoFlags(empShifts).forEach((s: any) => {
+                    if (s.isFrancoTrabajado || s._inferredFrancoTrabajado) ftShiftIds.add(s.id);
+                });
+            });
+            // rawShifts filtrado normalmente
+            const rawShifts = allShiftsBase.filter((d: any) =>
+                isShiftEligibleForReports(d, publishStatusMap, publishFilter)
+            );
 
             const ausSnap = await getDocs(
                 empresaScopedQuery('ausencias', empresaId, scopeEmpresa) as ReturnType<typeof query>,
@@ -1185,7 +1203,11 @@ export const useReportes = (forcedClientId?: string | null) => {
             rawShifts.forEach((s: any) => {
                 if (!s.employeeId || !empMap[s.employeeId]) return;
                 if(!empGroups[s.employeeId]) empGroups[s.employeeId] = [];
-                empGroups[s.employeeId].push(enrichShift(s));
+                // Aplicar flag FT pre-computado (detectado antes del filtro publishFilter)
+                const sWithFT = ftShiftIds.has(s.id)
+                    ? { ...s, isFrancoTrabajado: true, _inferredFrancoTrabajado: true, code: s.code || 'FT' }
+                    : s;
+                empGroups[s.employeeId].push(enrichShift(sWithFT));
             });
 
             const empRows = Object.keys(empGroups).map(empId => {
