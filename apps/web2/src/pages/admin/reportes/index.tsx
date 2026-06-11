@@ -3,7 +3,7 @@ import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
     Users, Building, Download, Printer,
-    Calendar, User, X, ChevronRight, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp
+    Calendar, User, X, ChevronRight, ChevronDown, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
@@ -104,6 +104,8 @@ export default function ReportsPage() {
     const [planFilterEmployee, setPlanFilterEmployee] = useState<string>('');
     const [planFilterDate, setPlanFilterDate] = useState<string>('');
     const [planObjectiveSearch, setPlanObjectiveSearch] = useState('');
+    const [planVsRealCollapsed, setPlanVsRealCollapsed] = useState(false);
+    const [planDetailCollapsed, setPlanDetailCollapsed] = useState(false);
     const [planEmployeeSearch, setPlanEmployeeSearch] = useState('');
     const [detailObjectiveSearch, setDetailObjectiveSearch] = useState('');
     const [auditActorSearch, setAuditActorSearch] = useState('');
@@ -1294,13 +1296,14 @@ export default function ReportsPage() {
             {/* ── Resumen Planificado vs Real ── */}
             {employeeReport.length > 0 && (
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
-                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-2">
+                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-2 cursor-pointer select-none" onClick={() => setPlanVsRealCollapsed(v => !v)}>
                         <TrendingUp size={16} className="text-violet-500 shrink-0"/>
                         <h3 className="font-black text-sm uppercase text-slate-800 dark:text-white flex-1">
                             Planificado vs Real
                             <span className="ml-2 text-[10px] font-normal text-slate-400 normal-case">({employeeReport.length} empleados)</span>
                         </h3>
-                        <button onClick={() => downloadCSV(employeeReport.map((e: any) => {
+                        <ChevronDown size={16} className={`text-slate-400 transition-transform ${planVsRealCollapsed ? '-rotate-90' : ''}`}/>
+                        <button onClick={(e) => { e.stopPropagation(); downloadCSV(employeeReport.map((e: any) => {
                             const p = e.horasTeoricas ?? e.total ?? 0;
                             const r = e.horasReales ?? 0;
                             return {
@@ -1312,12 +1315,14 @@ export default function ReportsPage() {
                                 delta: (r - p).toFixed(1),
                                 pct: p > 0 ? ((r / p) * 100).toFixed(0) + '%' : '0%',
                             };
-                        }), 'plan_vs_real')} aria-label="Descargar CSV Plan vs Real"
+                        }), 'plan_vs_real'); }} aria-label="Descargar CSV Plan vs Real"
                             className="p-2 bg-white dark:bg-slate-700 border dark:border-slate-600 rounded hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500">
                             <Download size={16}/>
                         </button>
                     </div>
 
+                    {!planVsRealCollapsed && (
+                    <>
                     {/* KPIs globales */}
                     <div className="grid grid-cols-4 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
                         <div className="p-4 text-center">
@@ -1394,17 +1399,20 @@ export default function ReportsPage() {
                             </tfoot>
                         </table>
                     </div>
+                    </>
+                    )}
                 </div>
             )}
 
             {/* ── Detalle de turnos planificados ── */}
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex flex-wrap gap-3 items-center no-print">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex flex-wrap gap-3 items-center no-print cursor-pointer select-none" onClick={() => setPlanDetailCollapsed(v => !v)}>
                     <h3 className="font-black text-sm uppercase flex gap-2 items-center text-slate-800 dark:text-white flex-1 min-w-[150px]">
                         <CalendarDays size={16} className="text-indigo-600"/> Detalle de Turnos Planificados
                         <span className="text-[10px] font-normal text-slate-400 normal-case">({filtered.length} turnos · {totalTeorico.toFixed(1)} hs)</span>
                     </h3>
-                    <button onClick={() => downloadCSV(filtered.map(s => ({
+                        <ChevronDown size={16} className={`text-slate-400 transition-transform ${planDetailCollapsed ? '-rotate-90' : ''}`}/>
+                    <button onClick={(e) => { e.stopPropagation(); downloadCSV(filtered.map(s => ({
                         fecha: formatDate(s.startTime),
                         empleado: s.employeeName || 'VACANTE',
                         objetivo: s._objName || '-',
@@ -1412,11 +1420,13 @@ export default function ReportsPage() {
                         codigo: s.code || '-',
                         inicio: formatTime(s.startTime),
                         fin: formatTime(s.endTime),
-                    })), 'planificado')} aria-label="Descargar CSV de planificación" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500">
+                    })), 'planificado'); }} aria-label="Descargar CSV de planificación" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500">
                         <Download size={16} aria-hidden="true"/>
                     </button>
                 </div>
 
+                {!planDetailCollapsed && (
+                <>
                 {/* KPIs rápidos */}
                 <div className="grid grid-cols-3 divide-x border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 no-print">
                     <div className="p-4 text-center">
@@ -1494,6 +1504,8 @@ export default function ReportsPage() {
                         </tfoot>
                     </table>
                 </div>
+                </>
+                )}
             </div>
             </>
         );
