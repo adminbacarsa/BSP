@@ -183,6 +183,11 @@ export default function EmployeeDashboard() {
   const [absenceFileUrl, setAbsenceFileUrl] = useState('');
   const [absenceFileName, setAbsenceFileName] = useState('');
   const [absenceUploading, setAbsenceUploading] = useState(false);
+  // Ausencias AA pendientes de justificación (para upload de certificado)
+  const [myPendingAbsences, setMyPendingAbsences] = useState<Array<{ id: string; startDate: string; reason?: string; objectiveName?: string; positionName?: string; certificateUrl?: string }>>([]);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [certUploadingId, setCertUploadingId] = useState<string | null>(null);
+  const [showCertModal, setShowCertModal] = useState<string | null>(null); // ausenciaId
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduleView, setScheduleView] = useState<'HOY' | 'SEMANA' | 'MES'>('HOY');
   const [showUpcomingTable, setShowUpcomingTable] = useState(false);
@@ -1198,6 +1203,59 @@ export default function EmployeeDashboard() {
     }
   };
 
+  // Cargar ausencias AA pendientes del empleado (últimos 7 días, sin certificado)
+  const loadMyPendingAbsences = async () => {
+    if (!user) return;
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const fromStr = sevenDaysAgo.toISOString().slice(0, 10);
+      const snap = await getDocs(query(
+        collection(db, 'ausencias'),
+        where('employeeId', '==', user.uid),
+        where('startDate', '>=', fromStr),
+        where('status', 'in', ['Confirmada', 'Injustificada']),
+      ));
+      const pending = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter((a: any) => {
+          const t = String(a.absenceType || a.type || '').toLowerCase();
+          return (t === 'aa' || t === 'no presentacion' || t === 'no presentación') && !a.certificateUrl;
+        });
+      setMyPendingAbsences(pending);
+    } catch (e) {
+      console.error('[loadMyPendingAbsences]', e);
+    }
+  };
+
+  // Subir certificado a una ausencia AA existente
+  const handleUploadCertificate = async (ausenciaId: string) => {
+    if (!user || !certFile) return;
+    setCertUploadingId(ausenciaId);
+    try {
+      const safeName = `${Date.now()}_${certFile.name.replace(/\s+/g, '_')}`;
+      const fileRef = ref(storage, `certificados/${user.uid}/${safeName}`);
+      await uploadBytes(fileRef, certFile);
+      const url = await getDownloadURL(fileRef);
+      await updateDoc(doc(db, 'ausencias', ausenciaId), {
+        certificateUrl: url,
+        certificateName: certFile.name,
+        certificateUploadedAt: serverTimestamp(),
+        hasCertificate: true,
+        status: 'Confirmada', // vuelve a Confirmada para que RRHH la revise
+      });
+      addToast('Certificado enviado — RRHH fue notificado', 'success');
+      setCertFile(null);
+      setShowCertModal(null);
+      await loadMyPendingAbsences();
+    } catch (e) {
+      console.error(e);
+      addToast('Error al subir el certificado', 'error');
+    } finally {
+      setCertUploadingId(null);
+    }
+  };
+
   const loadSwapRequests = async () => {
     if (!user) return;
     try {
@@ -1558,6 +1616,11 @@ export default function EmployeeDashboard() {
         if (pf && typeof pf === 'object') setPortalFeatures(prev => ({ ...prev, ...pf }));
       }
     }).catch(console.error);
+  }, [user?.uid]);
+
+  // Cargar ausencias AA pendientes al montar y cuando cambia el usuario
+  useEffect(() => {
+    if (user) loadMyPendingAbsences();
   }, [user?.uid]);
 
   return (
@@ -1946,6 +2009,64 @@ export default function EmployeeDashboard() {
               )}
             </div>
           </div>
+
+          {/* ===== AUSENCIAS PENDIENTES DE CERTIFICADO ===== */}
+          {myPendingAbsences.length > 0 && myPendingAbsences.map(aus => (
+            <div key={aus.id} className="bg-amber-950/40 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle size={16} className="text-amber-400"/>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-amber-300">Ausencia sin justificar</p>
+                  <p className="text-xs text-amber-200/70 mt-0.5">{aus.startDate}{aus.objectiveName ? ` — ${aus.objectiveName}` : ''}{aus.positionName ? ` · ${aus.positionName}` : ''}</p>
+                  <p className="text-[10px] text-amber-200/50 mt-1">Si tenés certificado médico, subilo antes de las 23:59 para evitar que quede como injustificada.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCertModal(aus.id); setCertFile(null); }}
+                className="w-full py-2.5 bg-amber-500 text-white rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2"
+              >
+                <FileText size={14}/> Subir certificado
+              </button>
+            </div>
+          ))}
+
+          {/* MODAL: UPLOAD CERTIFICADO */}
+          {showCertModal && (
+            <div className="fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-4">
+              <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl text-white">
+                <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mt-3 mb-4"/>
+                <div className="px-5 pb-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <FileText className="text-amber-400" size={18}/>
+                    <h2 className="font-black uppercase text-sm flex-1">Subir certificado médico</h2>
+                    <button onClick={() => setShowCertModal(null)} className="text-slate-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  <p className="text-xs text-slate-400">Adjuntá el certificado médico (PDF, JPG o PNG). RRHH lo revisará y clasificará tu ausencia.</p>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400">Certificado (PDF / JPG / PNG / foto)</label>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      capture="environment"
+                      onChange={e => setCertFile(e.target.files?.[0] || null)}
+                      className="w-full mt-1 p-3 border border-slate-800 rounded-xl text-sm bg-slate-950 text-white"
+                    />
+                    {certFile && <p className="text-[10px] text-slate-400 mt-1">{certFile.name}</p>}
+                  </div>
+                  <button
+                    onClick={() => handleUploadCertificate(showCertModal)}
+                    disabled={!certFile || certUploadingId === showCertModal}
+                    className="w-full py-3.5 bg-amber-500 text-white rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <FileText size={16}/>
+                    {certUploadingId === showCertModal ? 'Subiendo...' : 'Enviar certificado'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ===== HOY + MAÑANA ===== */}
           {(() => {
