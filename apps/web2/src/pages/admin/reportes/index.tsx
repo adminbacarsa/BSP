@@ -3,7 +3,7 @@ import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
     Users, Building, Download, Printer,
-    Calendar, User, X, ChevronRight, Sun, Moon, BarChart3, FileText, CalendarDays
+    Calendar, User, X, ChevronRight, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
@@ -1283,11 +1283,125 @@ export default function ReportsPage() {
         const vacantCount = 0;
         const staffedCount = filtered.length;
 
+        // ── Planificado vs Real summary ──
+        const totalPlan = employeeReport.reduce((a: number, e: any) => a + (e.horasTeoricas ?? e.total ?? 0), 0);
+        const totalReal = employeeReport.reduce((a: number, e: any) => a + (e.horasReales ?? 0), 0);
+        const globalDelta = totalReal - totalPlan;
+        const globalPct = totalPlan > 0 ? (totalReal / totalPlan) * 100 : 0;
+
         return (
+            <>
+            {/* ── Resumen Planificado vs Real ── */}
+            {employeeReport.length > 0 && (
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
+                    <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex items-center gap-2">
+                        <TrendingUp size={16} className="text-violet-500 shrink-0"/>
+                        <h3 className="font-black text-sm uppercase text-slate-800 dark:text-white flex-1">
+                            Planificado vs Real
+                            <span className="ml-2 text-[10px] font-normal text-slate-400 normal-case">({employeeReport.length} empleados)</span>
+                        </h3>
+                        <button onClick={() => downloadCSV(employeeReport.map((e: any) => {
+                            const p = e.horasTeoricas ?? e.total ?? 0;
+                            const r = e.horasReales ?? 0;
+                            return {
+                                legajo: e.legajo || '',
+                                empleado: e.name,
+                                turnos: e.shiftsTotal ?? e.shifts ?? 0,
+                                hs_plan: p.toFixed(1),
+                                hs_real: r.toFixed(1),
+                                delta: (r - p).toFixed(1),
+                                pct: p > 0 ? ((r / p) * 100).toFixed(0) + '%' : '0%',
+                            };
+                        }), 'plan_vs_real')} aria-label="Descargar CSV Plan vs Real"
+                            className="p-2 bg-white dark:bg-slate-700 border dark:border-slate-600 rounded hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500">
+                            <Download size={16}/>
+                        </button>
+                    </div>
+
+                    {/* KPIs globales */}
+                    <div className="grid grid-cols-4 divide-x divide-slate-200 dark:divide-slate-700 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
+                        <div className="p-4 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Hs. Planificadas</p>
+                            <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{totalPlan.toFixed(1)}</p>
+                        </div>
+                        <div className="p-4 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Hs. Reales</p>
+                            <p className="text-2xl font-black text-emerald-500 dark:text-emerald-400">{totalReal.toFixed(1)}</p>
+                        </div>
+                        <div className="p-4 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Δ Delta</p>
+                            <p className={`text-2xl font-black ${globalDelta > 0.5 ? 'text-amber-500' : globalDelta < -0.5 ? 'text-rose-500' : 'text-slate-400'}`}>
+                                {globalDelta > 0 ? '+' : ''}{globalDelta.toFixed(1)}
+                            </p>
+                        </div>
+                        <div className="p-4 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">% Ejecutado</p>
+                            <p className={`text-2xl font-black ${globalPct >= 90 ? 'text-emerald-600' : globalPct >= 50 ? 'text-amber-500' : 'text-rose-500'}`}>
+                                {globalPct.toFixed(0)}%
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Tabla por empleado */}
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-700">
+                                <tr>
+                                    <th className="p-3 pl-4">Legajo</th>
+                                    <th className="p-3">Empleado</th>
+                                    <th className="p-3 text-center">Turnos</th>
+                                    <th className="p-3 text-center text-indigo-500">Hs Plan</th>
+                                    <th className="p-3 text-center text-emerald-500">Hs Real</th>
+                                    <th className="p-3 text-center">Δ Delta</th>
+                                    <th className="p-3 pr-4 text-center">% Ejec.</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {employeeReport.map((emp: any) => {
+                                    const plan = emp.horasTeoricas ?? emp.total ?? 0;
+                                    const real = emp.horasReales ?? 0;
+                                    const empDelta = real - plan;
+                                    const empPct = plan > 0 ? (real / plan) * 100 : 0;
+                                    return (
+                                        <tr key={emp.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                            <td className="p-3 pl-4 text-xs text-slate-400 font-mono">{emp.legajo || '—'}</td>
+                                            <td className="p-3 font-bold text-slate-700 dark:text-slate-200">{emp.name}</td>
+                                            <td className="p-3 text-center text-slate-500 text-xs">{emp.shiftsTotal ?? emp.shifts ?? 0}</td>
+                                            <td className="p-3 text-center font-black text-indigo-600 dark:text-indigo-400">{plan.toFixed(1)}</td>
+                                            <td className="p-3 text-center font-black text-emerald-600 dark:text-emerald-400">{real > 0 ? real.toFixed(1) : <span className="text-slate-400">0.0</span>}</td>
+                                            <td className={`p-3 text-center font-black ${empDelta > 0.5 ? 'text-amber-500' : empDelta < -0.5 ? 'text-rose-500' : 'text-slate-400'}`}>
+                                                {empDelta > 0 ? '+' : ''}{empDelta.toFixed(1)}
+                                            </td>
+                                            <td className="p-3 pr-4 text-center">
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${empPct >= 90 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : empPct >= 50 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400'}`}>
+                                                    {empPct.toFixed(0)}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                            <tfoot className="bg-slate-900 dark:bg-slate-700 text-white font-black text-xs uppercase">
+                                <tr>
+                                    <td colSpan={3} className="p-3 pl-4 text-right">{employeeReport.length} empleados</td>
+                                    <td className="p-3 text-center text-indigo-300">{totalPlan.toFixed(1)}</td>
+                                    <td className="p-3 text-center text-emerald-300">{totalReal.toFixed(1)}</td>
+                                    <td className={`p-3 text-center ${globalDelta > 0.5 ? 'text-amber-300' : globalDelta < -0.5 ? 'text-rose-300' : 'text-slate-300'}`}>
+                                        {globalDelta > 0 ? '+' : ''}{globalDelta.toFixed(1)}
+                                    </td>
+                                    <td className="p-3 pr-4 text-center text-slate-300">{globalPct.toFixed(0)}%</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Detalle de turnos planificados ── */}
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden animate-in fade-in">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex flex-wrap gap-3 items-center no-print">
                     <h3 className="font-black text-sm uppercase flex gap-2 items-center text-slate-800 dark:text-white flex-1 min-w-[150px]">
-                        <CalendarDays size={16} className="text-indigo-600"/> Horas Planificadas
+                        <CalendarDays size={16} className="text-indigo-600"/> Detalle de Turnos Planificados
                         <span className="text-[10px] font-normal text-slate-400 normal-case">({filtered.length} turnos · {totalTeorico.toFixed(1)} hs)</span>
                     </h3>
                     <button onClick={() => downloadCSV(filtered.map(s => ({
@@ -1304,7 +1418,7 @@ export default function ReportsPage() {
                 </div>
 
                 {/* KPIs rápidos */}
-                <div className="grid grid-cols-3 divide-x border-b border-slate-200 bg-white no-print">
+                <div className="grid grid-cols-3 divide-x border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 no-print">
                     <div className="p-4 text-center">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Turnos cubiertos</p>
                         <p className="text-2xl font-black text-emerald-600">{staffedCount}</p>
@@ -1315,13 +1429,13 @@ export default function ReportsPage() {
                     </div>
                     <div className="p-4 text-center">
                         <p className="text-[10px] font-black text-slate-400 uppercase">Total turnos</p>
-                        <p className="text-2xl font-black text-slate-700">{filtered.length}</p>
+                        <p className="text-2xl font-black text-slate-700 dark:text-slate-200">{filtered.length}</p>
                     </div>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
+                        <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-700">
                             <tr>
                                 <th className="p-4">Fecha</th>
                                 <th className="p-4">Día</th>
@@ -1333,7 +1447,7 @@ export default function ReportsPage() {
                                 <th className="p-4 text-center text-indigo-600">Hs. Teóricas</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                             {filtered.map((s: any) => {
                                 const startD = s.startTime?.seconds ? new Date(s.startTime.seconds * 1000) : null;
                                 const endD = s.endTime?.seconds ? new Date(s.endTime.seconds * 1000) : null;
@@ -1344,10 +1458,10 @@ export default function ReportsPage() {
                                 const dayName = startD ? startD.toLocaleDateString('es-AR', {weekday:'short'}) : '-';
                                 const isVacant = !s.employeeName;
                                 return (
-                                    <tr key={s.id} className={`hover:bg-indigo-50/30 ${isVacant ? 'bg-amber-50/30' : ''}`}>
-                                        <td className="p-4 font-bold text-slate-700 whitespace-nowrap">{startD ? formatDate(s.startTime) : '-'}</td>
+                                    <tr key={s.id} className={`hover:bg-indigo-50/30 dark:hover:bg-slate-700/30 ${isVacant ? 'bg-amber-50/30' : ''}`}>
+                                        <td className="p-4 font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">{startD ? formatDate(s.startTime) : '-'}</td>
                                         <td className="p-4 text-xs text-slate-500 capitalize">{dayName}</td>
-                                        <td className={`p-4 font-bold text-sm ${isVacant ? 'text-amber-600 italic' : 'text-slate-700'}`}>
+                                        <td className={`p-4 font-bold text-sm ${isVacant ? 'text-amber-600 italic' : 'text-slate-700 dark:text-slate-200'}`}>
                                             {s.employeeName || 'VACANTE'}
                                             {s._coveringFor && (
                                                 <span className="block text-[9px] font-bold text-emerald-700 normal-case mt-0.5">
@@ -1355,22 +1469,22 @@ export default function ReportsPage() {
                                                 </span>
                                             )}
                                         </td>
-                                        <td className="p-4 text-xs text-slate-600 font-bold truncate max-w-[160px]">{s._objName || '-'}</td>
+                                        <td className="p-4 text-xs text-slate-600 dark:text-slate-400 font-bold truncate max-w-[160px]">{s._objName || '-'}</td>
                                         <td className="p-4 text-xs text-slate-400 truncate max-w-[120px]">{s._clientName || '-'}</td>
                                         <td className="p-4 text-center">
-                                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${isZero ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>{code || '-'}</span>
+                                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase border ${isZero ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-800'}`}>{code || '-'}</span>
                                         </td>
                                         <td className="p-4 text-center font-mono text-xs text-slate-500">
                                             {isLeaveReportShift(s) ? '—' : (startD && endD ? `${fmt(startD)} – ${fmt(endD)}` : '-')}
                                         </td>
-                                        <td className={`p-4 text-center font-black ${isZero ? 'text-slate-300' : 'text-indigo-600'}`}>
+                                        <td className={`p-4 text-center font-black ${isZero ? 'text-slate-300' : 'text-indigo-600 dark:text-indigo-400'}`}>
                                             {isZero ? '—' : dur > 0 ? dur.toFixed(1) : '-'}
                                         </td>
                                     </tr>
                                 );
                             })}
                         </tbody>
-                        <tfoot className="bg-slate-900 text-white font-black text-xs uppercase">
+                        <tfoot className="bg-slate-900 dark:bg-slate-700 text-white font-black text-xs uppercase">
                             <tr>
                                 <td colSpan={5} className="p-4 text-right">TOTAL</td>
                                 <td className="p-4 text-center">{filtered.length} turnos</td>
@@ -1381,6 +1495,7 @@ export default function ReportsPage() {
                     </table>
                 </div>
             </div>
+            </>
         );
     };
 
@@ -1716,15 +1831,15 @@ export default function ReportsPage() {
                 {activeTab === 'AUDIT' && (
                     <ContentCard padding={false} className="overflow-hidden">
                         {auditLogs.length > 0 && auditFilterActor && (
-                            <div className="px-4 py-2 border-b bg-indigo-50 flex items-center gap-2 text-xs">
+                            <div className="px-4 py-2 border-b bg-indigo-50 dark:bg-indigo-900/20 flex items-center gap-2 text-xs">
                                 <span className="font-black text-slate-500 uppercase">Filtrando por:</span>
                                 <span className="font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded">{auditFilterActor}</span>
-                                <button onClick={() => setAuditFilterActor('')} className="ml-auto text-rose-500 hover:text-rose-700 font-black">✕ Limpiar</button>
+                                <button onClick={() => setAuditFilterActor('')} className="ml-auto text-rose-500 hover:text-rose-700 font-black">&#x2715; Limpiar</button>
                             </div>
                         )}
                         <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 font-bold uppercase text-[10px]">
-                                <tr><th className="p-4">Fecha</th><th className="p-4">Actor</th><th className="p-4">Acción</th><th className="p-4">Detalle</th></tr>
+                                <tr><th className="p-4">Fecha</th><th className="p-4">Actor</th><th className="p-4">Acci&#xf3;n</th><th className="p-4">Detalle</th></tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                                 {auditLogs
