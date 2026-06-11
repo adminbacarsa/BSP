@@ -781,6 +781,8 @@ export default function TacticalMapView() {
                 const _now = new Date();
                 const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
                 const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
+                // Guardias que no llegaron: T+5 → T+60
+                const lateShiftsPanel = _hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified) && !s.isFranco && !s.isAbsent);
 
                 // Triage: urgentes vs PROT (automatizados, menos urgentes)
                 const urgentNovedades = pendingNovedades.filter(n =>
@@ -792,7 +794,7 @@ export default function TacticalMapView() {
                 const otherNovedades = pendingNovedades.filter(n =>
                     !urgentNovedades.includes(n) && !protNovedades.includes(n)
                 );
-                const totalAlerts = priorityShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
+                const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
 
                 const renderNovedad = (n: any) => {
                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
@@ -891,6 +893,35 @@ export default function TacticalMapView() {
                                             </div>
                                         </div>
                                     ))}
+                                </div>
+                            )}
+
+                            {lateShiftsPanel.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    <div className="px-3 py-1.5 bg-amber-50 flex items-center gap-1.5">
+                                        <Clock size={10} className="text-amber-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-amber-700 uppercase flex-1">No llegó · tardanza</span>
+                                        <span className="text-[9px] font-bold text-amber-500">{lateShiftsPanel.length} guardia{lateShiftsPanel.length > 1 ? 's' : ''}</span>
+                                    </div>
+                                    {lateShiftsPanel.map((s: any) => {
+                                        const minutesPast = Math.round(s.minutesPastStart || 0);
+                                        return (
+                                            <div key={s.id} className="px-3 py-2 flex items-center gap-2 border-l-4 border-l-amber-500 border-b border-slate-50 bg-white hover:bg-amber-50/30 transition-colors">
+                                                <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] font-black shrink-0">{(s.employeeName || '?')[0]}</div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[11px] font-bold text-slate-800 leading-snug">
+                                                        {s.employeeName || 'Desconocido'}
+                                                        <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700">+{minutesPast}min</span>
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                                </div>
+                                                <div className="flex gap-1 shrink-0">
+                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600" title="Dar presente (tarde)"><PlayCircle size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100" title="Marcar ausente"><AlertTriangle size={11}/></button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
 
