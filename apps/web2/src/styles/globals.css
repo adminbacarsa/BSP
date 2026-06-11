@@ -224,6 +224,7 @@
 .dark .bg-red-50        { background-color: rgba(239,  68,  68, 0.12) !important; }
 .dark .bg-red-100       { background-color: rgba(239,  68,  68, 0.18) !important; }
 /* Opacity variants */
+.dark .bg-rose-50\/20   { background-color: rgba(244,  63,  94, 0.08) !important; }
 .dark .bg-rose-50\/30   { background-color: rgba(244,  63,  94, 0.10) !important; }
 .dark .bg-rose-50\/40   { background-color: rgba(244,  63,  94, 0.12) !important; }
 .dark .bg-red-50\/30    { background-color: rgba(239,  68,  68, 0.10) !important; }
@@ -237,6 +238,7 @@
 .dark .bg-orange-100    { background-color: rgba(249, 115,  22, 0.18) !important; }
 .dark .bg-amber-50\/30  { background-color: rgba(245, 158,  11, 0.08) !important; }
 .dark .bg-amber-50\/60  { background-color: rgba(245, 158,  11, 0.14) !important; }
+.dark .bg-orange-50\/30 { background-color: rgba(249, 115,  22, 0.10) !important; }
 .dark .bg-orange-50\/40 { background-color: rgba(249, 115,  22, 0.12) !important; }
 
 /* Emerald / Green */
@@ -244,13 +246,19 @@
 .dark .bg-emerald-100   { background-color: rgba( 16, 185, 129, 0.18) !important; }
 .dark .bg-emerald-50\/20 { background-color: rgba(16, 185, 129, 0.08) !important; }
 
-/* Indigo / Blue / Purple / Cyan / Sky */
+/* Indigo / Blue / Purple / Violet / Cyan / Sky */
 .dark .bg-indigo-50     { background-color: rgba( 99, 102, 241, 0.12) !important; }
 .dark .bg-indigo-100    { background-color: rgba( 99, 102, 241, 0.18) !important; }
 .dark .bg-indigo-50\/40 { background-color: rgba( 99, 102, 241, 0.12) !important; }
+.dark .bg-indigo-50\/50 { background-color: rgba( 99, 102, 241, 0.14) !important; }
 .dark .bg-blue-50       { background-color: rgba( 59, 130, 246, 0.12) !important; }
 .dark .bg-blue-100      { background-color: rgba( 59, 130, 246, 0.18) !important; }
 .dark .bg-blue-50\/20   { background-color: rgba( 59, 130, 246, 0.08) !important; }
+.dark .bg-blue-50\/30   { background-color: rgba( 59, 130, 246, 0.10) !important; }
+.dark .bg-blue-50\/40   { background-color: rgba( 59, 130, 246, 0.12) !important; }
+.dark .bg-violet-50     { background-color: rgba(139,  92, 246, 0.12) !important; }
+.dark .bg-violet-100    { background-color: rgba(139,  92, 246, 0.18) !important; }
+.dark .bg-violet-50\/30 { background-color: rgba(139,  92, 246, 0.10) !important; }
 .dark .bg-purple-50     { background-color: rgba(168,  85, 247, 0.12) !important; }
 .dark .bg-purple-100    { background-color: rgba(168,  85, 247, 0.18) !important; }
 .dark .bg-cyan-50       { background-color: rgba(  6, 182, 212, 0.12) !important; }
@@ -273,6 +281,12 @@
 .dark .border-indigo-50 { border-color: rgba(99,  102, 241, 0.20) !important; }
 .dark .border-purple-100 { border-color: rgba(168, 85, 247, 0.25) !important; }
 .dark .border-purple-200 { border-color: rgba(168, 85, 247, 0.35) !important; }
+.dark .border-violet-100 { border-color: rgba(139,  92, 246, 0.25) !important; }
+.dark .border-violet-200 { border-color: rgba(139,  92, 246, 0.35) !important; }
+.dark .border-violet-300 { border-color: rgba(139,  92, 246, 0.45) !important; }
+.dark .border-blue-100  { border-color: rgba( 59, 130, 246, 0.25) !important; }
+.dark .border-blue-200  { border-color: rgba( 59, 130, 246, 0.35) !important; }
+.dark .border-blue-300  { border-color: rgba( 59, 130, 246, 0.45) !important; }
 .dark .border-cyan-200  { border-color: rgba(6,  182, 212, 0.35) !important; }
 .dark .border-slate-300 { border-color: #334155 !important; }
 
@@ -299,6 +313,11 @@
 .dark .text-blue-600    { color: #60a5fa !important; }
 .dark .text-cyan-700    { color: #67e8f9 !important; }
 .dark .text-cyan-600    { color: #22d3ee !important; }
+.dark .text-violet-800  { color: #c4b5fd !important; }
+.dark .text-violet-700  { color: #c4b5fd !important; }
+.dark .text-violet-600  { color: #a78bfa !important; }
+.dark .text-blue-800    { color: #bfdbfe !important; }
+.dark .text-blue-500    { color: #60a5fa !important; }
 
 /* Mejora legibilidad en tema claro */
 body:not(.dark) .text-slate-500 { color: #475569; }
