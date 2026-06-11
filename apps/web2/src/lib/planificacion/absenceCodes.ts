@@ -38,6 +38,10 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'injustificada': 'AA',
     'falta injustificada': 'AA',
     'aa': 'AA',
+    // Llegada Tarde
+    'llegada tarde': 'LT',
+    'tarde': 'LT',
+    'lt': 'LT',
     // Callable manageAbsences (backend Nest)
     'vacation': 'V',
     'sick_leave': 'E',
@@ -52,6 +56,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'No Presentación': 'AA',
     'Injustificada': 'AA',
     'Justificada': 'AA',
+    'Llegada Tarde': 'LT',
     'Licencia Esp.': 'L',
     'PG Permiso Gremial': 'PG',
 };
@@ -96,7 +101,7 @@ export const AUTO_ABSENCE_TYPES = new Set(['No Presentacion', 'No Presentación'
 export const REQUIRES_AUTHORIZATION_TYPES = new Set(['Vacaciones', 'Licencia Esp.', 'PG Permiso Gremial']);
 
 /** Códigos válidos de ausencia/licencia para grilla. */
-export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA']);
+export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT']);
 
 /** Códigos de licencias pagas (computan horas y bloquean planificación). */
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'A', 'E', 'PG']);
@@ -131,6 +136,7 @@ export function inferAbsenceCode(doc: any): string {
     if (t && ABSENCE_TYPE_TO_CODE[t]) return ABSENCE_TYPE_TO_CODE[t];
 
     // último intento: por keyword
+    if (t.includes('tarde') || t === 'lt') return 'LT';
     if (t.includes('vacac')) return 'V';
     if (t.includes('enferm')) return 'E';
     if (t.includes('art')) return 'A';
@@ -145,7 +151,16 @@ export function inferAbsenceCode(doc: any): string {
  * Devuelve true si el documento de ausencia debe ser considerado
  * para planificación. Excluye las rechazadas.
  */
+/** Devuelve true si el documento es una Llegada Tarde (el guardia SÍ trabajó el turno). */
+function isLlegadaTarde(doc: any): boolean {
+    const code = String(doc?.absenceType ?? '').trim().toUpperCase();
+    const type = String(doc?.type ?? '').trim().toLowerCase();
+    return code === 'LT' || type === 'llegada tarde';
+}
+
 export function isActiveAbsence(doc: any): boolean {
+    // Llegada Tarde: el guardia llegó y cumplió el turno → no bloquea planificación
+    if (isLlegadaTarde(doc)) return false;
     const st = String(doc?.status || '').toLowerCase().trim();
     if (!st) return true; // legacy: sin status → la respetamos
     if (st === 'rechazada' || st === 'rejected' || st === 'cancelada' || st === 'cancelled') return false;
@@ -157,7 +172,9 @@ export function isActiveAbsence(doc: any): boolean {
     return true;
 }
 
-export function absenceReplicatesToPlanning(doc: { status?: unknown; type?: unknown } | null | undefined): boolean {
+export function absenceReplicatesToPlanning(doc: { status?: unknown; type?: unknown; absenceType?: unknown } | null | undefined): boolean {
+    // Llegada Tarde: el guardia trabajó el turno → no reemplaza la celda de planificación
+    if (isLlegadaTarde(doc)) return false;
     const st = String(doc?.status ?? '').trim();
     if (st === 'Rechazada') return false;
     // Confirmada (No Presentación automática) siempre replica — es un hecho
@@ -264,7 +281,7 @@ export function buildAbsencesMapFromDocs(
 }
 
 export const PLANNING_ABSENCE_GRID_CODES = new Set([
-    'V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
+    'V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
 ]);
 
 export type GridShiftLike = {
@@ -276,4 +293,4 @@ export type GridShiftLike = {
     name?: string;
 };
 
-/** Banda/puesto que cubriría el titular si no estuviera de vacación/licencia. */
+/** Banda/puesto que cubriría el titular si no estuviera de vacación/licencia. */
