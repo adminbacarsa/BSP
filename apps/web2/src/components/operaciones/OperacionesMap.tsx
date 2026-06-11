@@ -166,13 +166,14 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                     const t2 = end ? end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 
                     let statusLabel = 'PLAN'; let statusColor = '#94a3b8';
-                    if (shift.isFranco)          { statusLabel = 'FRANCO';   statusColor = '#3b82f6'; }
-                    else if (shift.isPresent)    { statusLabel = 'ACTIVO';   statusColor = '#059669'; }
-                    else if (shift.isAbsent)     { statusLabel = 'AUSENTE';  statusColor = '#64748b'; }
-                    else if (shift.isUnassigned) { statusLabel = 'VACANTE';  statusColor = '#e11d48'; }
-                    else if (diffMin > 30)       { statusLabel = 'AUSENCIA'; statusColor = '#dc2626'; }
-                    else if (diffMin > 5)        { statusLabel = 'TARDE';    statusColor = '#d97706'; }
-                    else if (diffMin >= -15)     { statusLabel = 'EN HORA';  statusColor = '#4f46e5'; }
+                    if (shift.isFranco)                                        { statusLabel = 'FRANCO';   statusColor = '#3b82f6'; }
+                    else if (shift.isPresent)                                  { statusLabel = 'ACTIVO';   statusColor = '#059669'; }
+                    else if (shift.isAbsent)                                   { statusLabel = 'AUSENTE';  statusColor = '#64748b'; }
+                    else if (shift.isUnassigned && shift.isReportedToPlanning) { statusLabel = 'DEVUELTA'; statusColor = '#7c3aed'; }
+                    else if (shift.isUnassigned)                               { statusLabel = 'VACANTE';  statusColor = '#e11d48'; }
+                    else if (diffMin > 30)                                     { statusLabel = 'AUSENCIA'; statusColor = '#dc2626'; }
+                    else if (diffMin > 5)                                      { statusLabel = 'TARDE';    statusColor = '#d97706'; }
+                    else if (diffMin >= -15)                                   { statusLabel = 'EN HORA';  statusColor = '#4f46e5'; }
 
                     return (
                         <div key={shift.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderLeft: `3px solid ${s.borderColor}`, background: idx % 2 === 0 ? s.background : '#ffffff', padding: '3px 12px', minHeight: '28px', borderBottom: '1px solid #f1f5f9' }}>
