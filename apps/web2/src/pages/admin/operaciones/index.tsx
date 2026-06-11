@@ -2316,10 +2316,13 @@ export default function OperacionesPage() {
                                 const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
                                 const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
 
-                                // OBJ expandido: filtra por tab activo (mismo comportamiento que lista)
+                                // OBJ expandido: filtra por tab activo (mismo comportamiento que stats/objectivesWithAlerts)
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
+                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos
+                                    if (s.isCompleted && !s.isRetention) return false;
+                                    if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now2.getTime()) return false;
                                     const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
                                     if (!hoy2) return false;
                                     switch(logic.viewTab) {
