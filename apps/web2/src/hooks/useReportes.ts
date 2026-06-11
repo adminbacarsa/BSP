@@ -562,7 +562,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let hoursTotalOperativas = 0; // teÃ³ricas
     let totalDiurnas = 0;
     let totalNocturnas = 0;
-    let hoursFT = 0;
+    let hoursFT = 0;           // teÃ³ricas FT (para horasTeoricas)
+    let horasFTReal = 0;       // reales FT trabajadas (para extra100 y extra50)
     let hoursFeriado = 0;
     let horasRealesTotal = 0;   // reales (realStartTime/realEndTime)
     let turnosConDatosReales = 0;
@@ -607,7 +608,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 duration = resolveFtLiquidationHours(d, duration > 0 && duration < 23.5 ? duration : 8);
             }
 
-            if (isFeriado) hoursFeriado += duration;
+            // Fix 4: feriado solo aplica a turnos no-FT (no doble acumulaciÃ³n)
+            if (isFeriado && !isFT) hoursFeriado += duration;
             if (isFT) { hoursFT += duration; }
             else { hoursTotalOperativas += duration; }
 
@@ -642,13 +644,17 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             let worked = 0;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
-                if (rDur >= 0 && rDur <= 24) {
-                    worked = rDur;
+                if (rDur >= 0) {
+                    worked = Math.min(rDur, 24); // Fix 3: cap a 24h en lugar de descartar
                     turnosConDatosReales++;
                 }
             } else if (isFT && !francoDocSkipIds.has(d.id)) {
                 worked = resolveFtLiquidationHours(d, duration);
+            } else if (isRet) {
+                worked = duration; // Fix 5: RET sin fichada usa horas referenciales
             }
+            // Fix 1: acumular horas FT reales (solo trabajadas)
+            if (isFT && worked > 0) horasFTReal += worked;
             horasRealesTotal += worked;
             // Acumular diurnas/nocturnas basado en horas reales trabajadas
             if (worked > 0) {
@@ -664,8 +670,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     });
 
     const baseLimit = 204; // CCT 422/05 SUVICO
-    const excess = Math.max(0, horasRealesTotal - baseLimit);
-    const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
+    // Fix 2: extra50 solo sobre horas regulares (excluye FT real)
+    const regularReal = Math.max(0, horasRealesTotal - horasFTReal);
+    const excess = Math.max(0, regularReal - baseLimit);
+    const horasSimples = Math.min(regularReal, baseLimit);
     const horasTeoricas = hoursTotalOperativas + hoursFT;
 
     return {
@@ -677,7 +685,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         totalDiurnas,
         totalNocturnas,
         extra50: excess,
-        extra100: hoursFT,
+        extra100: horasFTReal, // Fix 1: usar horas FT reales, no teÃ³ricas
         plusFeriado: hoursFeriado,
         horasExtra: Math.max(0, horasRealesTotal - horasTeoricas),
     };
