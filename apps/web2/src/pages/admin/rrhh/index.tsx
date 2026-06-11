@@ -1183,6 +1183,15 @@ export default function EmployeesPage() {
     }
     // No Presentación confirmada: acciones rápidas sin necesidad de autorización
     if (a.status === 'Confirmada') {
+      const isLT = a.type === 'Llegada Tarde' || (a as any).absenceType === 'LT';
+      if (isLT) {
+        // Llegada Tarde: solo badge, sin clasificación RRHH
+        return (
+          <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-orange-100 text-orange-700 border border-orange-200">
+            Confirmada
+          </span>
+        );
+      }
       return (
         <div className="flex flex-col items-center gap-1">
           <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-blue-100 text-blue-700">
@@ -3175,4 +3184,3 @@ export default function EmployeesPage() {
     </DashboardLayout>
   );
 }
-
