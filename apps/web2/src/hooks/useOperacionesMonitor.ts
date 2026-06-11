@@ -426,27 +426,64 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     });
                 } 
                 // SOLO si no hay definiciones de turnos, usamos Gaps (Fallback para objetivos legacy)
+                // ⚠️  Discriminamos según tipo de turno:
+                //   - 24h (3×8h o 2×12h): findTimeGaps sobre la jornada completa
+                //   - Custom (franjas parciales, ej. Rondín 08-18): verificar turno por turno
                 else {
-                    const targetHours = (pos.quantity || 1) * 24;
-                    const coveredHours = posShifts.reduce((acc, s) => acc + s.duration, 0);
-                    
-                    if (coveredHours < targetHours) {
-                        const gaps = findTimeGaps(posShifts, now);
-                        gaps.forEach(gap => {
-                            const h = gap.start.getHours();
-                            let bestName = "COBERTURA";
-                            if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
-                            
-                            virtualVacancies.push({
-                                id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
-                                isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
-                                clientName: objInfo.clientName, clientId: objInfo.clientId,
-                                objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                employeeName: `VACANTE: ${bestName}`,
-                                shiftDateObj: gap.start, endDateObj: gap.end,
-                                minutesUntilStart: 0, isValidEmployee: false
+                    // Sin turnos planificados hoy: el puesto no opera → no generar vacantes falsas
+                    if (posShifts.length === 0) return;
+
+                    // Promedio de horas planificadas por guardia → determina el tipo de turno
+                    const guardQty = pos.quantity || 1;
+                    const totalPlannedH = posShifts.reduce((a: number, s: any) => a + (s.duration || 0), 0);
+                    const avgHPerGuard = totalPlannedH / guardQty;
+
+                    // ─── MODO 24H (3×8h o 2×12h) ─────────────────────────────────────────
+                    if (avgHPerGuard >= 20) {
+                        // Detectar brechas en la jornada completa (comportamiento original correcto)
+                        const coveringShifts = posShifts.filter((s: any) => s.countsForCoverage);
+                        const coveredHours = coveringShifts.reduce((acc: number, s: any) => acc + s.duration, 0);
+                        const targetHours = guardQty * 24;
+
+                        if (coveredHours < targetHours) {
+                            const gaps = findTimeGaps(posShifts, now);
+                            gaps.forEach(gap => {
+                                const h = gap.start.getHours();
+                                let bestName = "COBERTURA";
+                                if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
+
+                                virtualVacancies.push({
+                                    id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
+                                    isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    clientName: objInfo.clientName, clientId: objInfo.clientId,
+                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
+                                    employeeName: `VACANTE: ${bestName}`,
+                                    shiftDateObj: gap.start, endDateObj: gap.end,
+                                    minutesUntilStart: 0, isValidEmployee: false
+                                });
                             });
-                        });
+                        }
+                    }
+                    // ─── MODO CUSTOM (franjas parciales, ej. Rondín 08-18) ────────────────
+                    else {
+                        // Verificar cada turno planificado individualmente:
+                        //   • Sin guardia asignado (isUnassigned) → vacante real
+                        //   • Guardia ausente → lo maneja el sistema de auto-ausencias
+                        //   • Guardia presente → sin acción
+                        posShifts
+                            .filter((s: any) => s.isUnassigned)
+                            .forEach((shift: any) => {
+                                const startMs = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : Date.now();
+                                virtualVacancies.push({
+                                    id: `V124_CUST_${sla.objectiveId}_${pos.name}_${startMs}`,
+                                    isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    clientName: objInfo.clientName, clientId: objInfo.clientId,
+                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
+                                    employeeName: `VACANTE: TURNO SIN CUBRIR`,
+                                    shiftDateObj: shift.shiftDateObj, endDateObj: shift.endDateObj,
+                                    minutesUntilStart: 0, isValidEmployee: false
+                                });
+                            });
                     }
                 }
             });
@@ -559,8 +596,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 getDocs(query(collection(db, 'novedades'), where('virtualVacancyId', '==', v.id), where('type', '==', 'VACANTE_A_PLANIFICACION'), limit(1)))
                     .then(async snap => {
                         if (!snap.empty) return; // ya fue procesada antes
-                        const newRef = doc(collection(db, 'turnos'));
                         const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
+                        // ID determinístico: si dos PCs corren simultáneamente, setDoc con el mismo ID
+                        // es idempotente — el segundo setDoc sobreescribe con los mismos datos,
+                        // evitando duplicados en Firestore.
+                        const safeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+                        const newRef = doc(db, 'turnos', `autodev_${safeId}`);
                         await setDoc(newRef, stampEmpresaId({
                             clientId: v.clientId, clientName: v.clientName,
                             objectiveId: v.objectiveId, objectiveName: v.objectiveName,
@@ -576,7 +617,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         const cuando = minutesUntil > 0
                             ? `Faltan ${Math.round(minutesUntil)} min.`
                             : `Turno inició hace ${Math.round(Math.abs(minutesUntil))} min (sin cobertura).`;
-                        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                        // Novedad con ID determinístico para el mismo motivo
+                        const novedadRef = doc(db, 'novedades', `autodev_nov_${safeId}`);
+                        await setDoc(novedadRef, stampEmpresaId({
                             type: 'VACANTE_A_PLANIFICACION', status: 'ATENDIDA',
                             autoProcessed: true,
                             virtualVacancyId: v.id, shiftId: newRef.id,
@@ -778,16 +821,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         hasCertificate: false, createdAt: serverTimestamp(), origin: 'AUTO_T30', shiftId: s.id,
                     }, shiftEmpresaId));
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'AUSENCIA_AUTO', title: 'Ausencia Automática (AA)', status: 'PENDIENTE',
+                        type: 'AUSENCIA_AUTO', title: 'Ausencia Autom\u00e1tica (AA)', status: 'PENDIENTE',
                         source: 'SYSTEM_SCHEDULER',
                         employeeId: s.employeeId, employeeName: s.employeeName,
                         clientId: s.clientId || null,
                         objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
                         positionName: s.positionName || '', shiftId: s.id,
-                        description: `[AA] ${s.employeeName} no se presentó al turno en ${s.objectiveName} (${s.positionName}) — ${shiftDate.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}`,
+                        description: `[AA] ${s.employeeName} no se present\u00f3 al turno en ${s.objectiveName} (${s.positionName}) \u2014 ${shiftDate.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}`,
                         createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
                     }, shiftEmpresaId));
-                    toast.warning(`[AA] Ausencia automática: ${s.employeeName} — ${s.objectiveName}`);
+                    toast.warning(`[AA] Ausencia autom\u00e1tica: ${s.employeeName} \u2014 ${s.objectiveName}`);
                 })
                 .catch(e => console.warn('[autoAbsent]', e));
         }
