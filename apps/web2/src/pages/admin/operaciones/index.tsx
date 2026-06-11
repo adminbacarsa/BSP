@@ -187,6 +187,27 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
         try {
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
             if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
+
+            // ── Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) ──
+            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
+            let aaDoc: any = null;
+            let aaHorario = '';
+            if (wasAutoAbsent) {
+                const absSnap = await getDocs(query(
+                    collection(db, 'ausencias'),
+                    where('shiftId', '==', incomingShift.id),
+                    limit(5)
+                ));
+                aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA') ?? null;
+                if (aaDoc) {
+                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : null;
+                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : null;
+                    aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                }
+            }
+
+            // ── Construir y commitear el batch (sin lecturas async intercaladas) ──────────────────────
             const batch = writeBatch(db);
             // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
             // El guardia siempre cobra desde su hora planificada, llegue antes o después.
@@ -204,7 +225,6 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                         : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
                     : serverTimestamp())
                 : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
-            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
             batch.update(doc(db, 'turnos', incomingShift.id), {
                 isPresent:           true,
                 status:              'PRESENT',
@@ -218,28 +238,15 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                 absenceReversedAt:   serverTimestamp(),
                 absenceReversedBy:   'OPERACIONES',
             });
-            // Si fue marcado AA y el operador da presente, actualizar la ausencia en RRHH como "Llegada Tarde"
-            // (no borrarla — los X min de ausencia son un hecho, pero el tipo cambia)
-            if (wasAutoAbsent) {
-                // Query por shiftId solo (evita índice compuesto); filtrar absenceType AA en cliente
-                const absSnap = await getDocs(query(
-                    collection(db, 'ausencias'),
-                    where('shiftId', '==', incomingShift.id),
-                    limit(5)
-                ));
-                const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
-                if (aaDoc) {
-                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : null;
-                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : null;
-                    const horario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                    batch.update(aaDoc.ref, {
-                        type: 'Llegada Tarde',
-                        status: 'Confirmada',
-                        reason: `Llegada tarde al turno${horario ? ' ' + horario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                        arrivedAt: serverTimestamp(),
-                    });
-                }
+            // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leímos aaDoc arriba)
+            if (wasAutoAbsent && aaDoc) {
+                batch.update(aaDoc.ref, {
+                    type: 'Llegada Tarde',
+                    absenceType: 'LT',
+                    status: 'Confirmada',
+                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                    arrivedAt: serverTimestamp(),
+                });
             }
             if (prevShiftId) {
                 // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
