@@ -1015,6 +1015,11 @@ export default function ReportsPage() {
         }), { total: 0, horasTrabajadas: 0, day: 0, night: 0, h100: 0, hFeriado: 0 });
 
         const { horasSimples, excedente50: excedente } = liquidacion200FromWorkedHours(totalSum.horasTrabajadas);
+        const ausenciasCount      = rowsWithData.filter((r: any) => r.isAbsent).length;
+        const vacacionesDias      = rowsWithData.filter((r: any) => r.code === 'V').length;
+        const enfermedadDias      = rowsWithData.filter((r: any) => r.code === 'E').length;
+        const artDias             = rowsWithData.filter((r: any) => r.code === 'A').length;
+        const permisoGremialDias  = rowsWithData.filter((r: any) => r.code === 'PG').length;
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }}>
@@ -1194,14 +1199,39 @@ export default function ReportsPage() {
                                 </tr>
                                 <tr className="bg-slate-800 border-t border-slate-700">
                                     <td colSpan={4} className="py-3 px-3 text-right uppercase text-amber-400">Liquidación (200hs):</td>
-                                    <td colSpan={4} className="py-3 px-3">
+                                    <td colSpan={8} className="py-3 px-3">
                                         <div className="flex justify-around items-center">
-                                            <div className="flex flex-col items-center"><span className="text-[9px] text-slate-400 uppercase">Hs Simples</span><span className="text-white font-mono text-lg">{horasSimples.toFixed(1)}</span></div>
-                                            <div className="h-8 w-px bg-slate-600"></div>
-                                            <div className="flex flex-col items-center"><span className="text-[9px] text-amber-400 uppercase">Al 50%</span><span className="text-amber-400 font-mono text-lg font-black">{excedente.toFixed(1)}</span></div>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-slate-400 uppercase">Horas Totales</span>
+                                                <span className="text-white font-mono text-lg">{horasSimples.toFixed(1)}</span>
+                                            </div>
+                                            <div className="h-8 w-px bg-slate-600"/>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-rose-400 uppercase">Ausencias</span>
+                                                <span className={`font-mono text-lg font-black ${ausenciasCount > 0 ? 'text-rose-400' : 'text-slate-600'}`}>{ausenciasCount > 0 ? ausenciasCount : '—'}</span>
+                                            </div>
+                                            <div className="h-8 w-px bg-slate-600"/>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-emerald-400 uppercase">Vacaciones</span>
+                                                <span className={`font-mono text-lg font-black ${vacacionesDias > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>{vacacionesDias > 0 ? `${vacacionesDias}d` : '—'}</span>
+                                            </div>
+                                            <div className="h-8 w-px bg-slate-600"/>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-blue-400 uppercase">Enfermedad</span>
+                                                <span className={`font-mono text-lg font-black ${enfermedadDias > 0 ? 'text-blue-400' : 'text-slate-600'}`}>{enfermedadDias > 0 ? `${enfermedadDias}d` : '—'}</span>
+                                            </div>
+                                            <div className="h-8 w-px bg-slate-600"/>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-orange-400 uppercase">ART</span>
+                                                <span className={`font-mono text-lg font-black ${artDias > 0 ? 'text-orange-400' : 'text-slate-600'}`}>{artDias > 0 ? `${artDias}d` : '—'}</span>
+                                            </div>
+                                            <div className="h-8 w-px bg-slate-600"/>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[9px] text-violet-400 uppercase">P. Gremial</span>
+                                                <span className={`font-mono text-lg font-black ${permisoGremialDias > 0 ? 'text-violet-400' : 'text-slate-600'}`}>{permisoGremialDias > 0 ? `${permisoGremialDias}d` : '—'}</span>
+                                            </div>
                                         </div>
                                     </td>
-                                    <td colSpan={4} className="py-3 px-3 text-center text-xs text-slate-500 italic border-l border-slate-700">* FT y Feriados se pagan aparte.</td>
                                 </tr>
                             </tfoot>
                         </table>
