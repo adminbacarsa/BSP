@@ -264,9 +264,10 @@ export function isShiftEligibleForReports(
     }
 
     // published â€” liquidaciÃ³n oficial (sin borradores)
-    if (isDraft) return false;
+    // Los turnos de operaciones son siempre reales, nunca se excluyen por draft
     if (isOps) return true;
     if (isNovedad) return true;
+    if (isDraft) return false;
 
     if (shiftHasRealCheckIn(shift)) return true;
 
@@ -607,8 +608,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             }
 
             if (isFeriado) hoursFeriado += duration;
-            if (isFT) { hoursFT += duration; totalNocturnas += night; totalDiurnas += day; }
-            else { hoursTotalOperativas += duration; totalNocturnas += night; totalDiurnas += day; }
+            if (isFT) { hoursFT += duration; }
+            else { hoursTotalOperativas += duration; }
 
             // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teÃ³rico)
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
@@ -649,6 +650,14 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 worked = resolveFtLiquidationHours(d, duration);
             }
             horasRealesTotal += worked;
+            // Acumular diurnas/nocturnas basado en horas reales trabajadas
+            if (worked > 0) {
+                const effS = rStart || start;
+                const effE = rEnd || new Date(effS.getTime() + worked * 3600000);
+                const nightWorked = getNightDuration(effS, effE);
+                totalNocturnas += nightWorked;
+                totalDiurnas += Math.max(0, worked - nightWorked);
+            }
         } catch (err) {
             console.warn("Saltando turno corrupto:", d.id);
         }
@@ -1344,59 +1353,52 @@ export const useReportes = (forcedClientId?: string | null) => {
                     shifts: staffedShifts.length,
                     vacantShifts: vacantRawShifts.length,
                     vacantHours,
-                    vendidas: slaMap[objId] || 0,
-                    total: stats.totalReal,
+                    total: stats.horasTeoricas,
+                    horasTeoricas: stats.horasTeoricas,
+                    horasReales: stats.horasReales,
                     diurnas: stats.totalDiurnas,
                     nocturnas: stats.totalNocturnas,
                     extra50: stats.extra50,
                     extra100: stats.extra100,
                     plusFeriado: stats.plusFeriado,
-                    rawShifts: annotatedShifts
+                    rawShifts: annotatedShifts,
                 };
-            }).filter((row): row is NonNullable<typeof row> => row !== null);
-            setObjectiveReport(objRows.sort((a, b) => a.client.localeCompare(b.client) || a.name.localeCompare(b.name)));
+            });
 
-        } catch (error: any) {
-            console.error("Error generando reporte:", error);
-            if(error.message?.includes("index")) {
-                toast.error("Falta índice en Firebase. Revisa la consola.");
-            } else {
-                toast.error("Error al procesar datos.");
-            }
+            setObjectiveReport(objRows.filter(Boolean) as any[]);
+
+        } catch (err) {
+            console.error('Error generando reporte:', err);
+            toast.error('Error al generar el reporte');
         } finally {
             setLoading(false);
         }
     };
 
     const loadAudit = async () => {
-        setLoading(true);
+        if (!empresaId) return;
         try {
-            const startDate = new Date(`${dateRange.start}T00:00:00`);
-            const endDate = new Date(`${dateRange.end}T23:59:59.999`);
-
-            const q = query(
-                collection(db, 'audit_logs'), 
-                where('timestamp', '>=', Timestamp.fromDate(startDate)), 
-                where('timestamp', '<=', Timestamp.fromDate(endDate))
+            const snap = await getDocs(
+                query(
+                    collection(db, 'audit_logs'),
+                    where('empresaId', '==', empresaId),
+                )
             );
-            
-            const snap = await getDocs(q);
-            const logs = filterRowsByEmpresa(
-                snap.docs.map(d => ({ id: d.id, ...d.data() })),
-                empresaId,
-                scopeEmpresa,
-                migracionCompleta,
-            );
-            
-            setAuditLogs(logs.sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds));
-            
-        } catch(e) { console.error(e); } finally { setLoading(false); }
+            const logs = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .sort((a: any, b: any) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+            setAuditLogs(logs);
+        } catch (err) {
+            console.error('Error cargando auditoría:', err);
+        }
     };
 
     return {
         loading,
-        dateRange, setDateRange,
-        publishFilter, setPublishFilter,
+        dateRange,
+        setDateRange,
+        publishFilter,
+        setPublishFilter,
         generateReports,
         loadAudit,
         employeeReport,
@@ -1404,9 +1406,8 @@ export const useReportes = (forcedClientId?: string | null) => {
         auditLogs,
         objMap,
         empMap,
-        empMetaMap,
         holidaysData,
         SHIFT_HOURS_LOOKUP,
-        OPERATIVE_CODES
+        OPERATIVE_CODES,
     };
 };
