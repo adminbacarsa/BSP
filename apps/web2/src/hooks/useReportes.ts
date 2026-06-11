@@ -627,9 +627,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 isEarlyStartShift ? real : plan;  // adelanto â†’ hora real; normal â†’ hora planificada
 
             const clampE = (real: Date, plan: Date): Date => {
-                if (real < plan)        return plan;         // relevo anticipado â†’ horas completas
-                if (isRetentionShift)   return real;         // retenciÃ³n formal â†’ hora real (se paga extra)
-                return plan;                                  // salida tardÃ­a sin retenciÃ³n â†’ clampear
+                if (!plan || isNaN(plan.getTime())) return real; // sin planificado -> usar real
+                return real > plan ? real : plan; // max(real, plan): minimo horas planificadas, o mas si hubo extra
             };
 
             const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
@@ -670,10 +669,11 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     });
 
     const baseLimit = 204; // CCT 422/05 SUVICO
-    // Fix 2: extra50 solo sobre horas regulares (excluye FT real)
+    // Fix 2: extra50 solo sobre horas regulares (excluye FT real para no empujarlas al 50%)
     const regularReal = Math.max(0, horasRealesTotal - horasFTReal);
     const excess = Math.max(0, regularReal - baseLimit);
-    const horasSimples = Math.min(regularReal, baseLimit);
+    // horasSimples = total real capeado a 204 (para HORAS TOTALES display)
+    const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
     const horasTeoricas = hoursTotalOperativas + hoursFT;
 
     return {
