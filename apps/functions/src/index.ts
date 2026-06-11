@@ -3192,3 +3192,86 @@ export const onAusenciaCertificado = functions
 
 // checkLlegadaTardeReiterada → ver src/ausencias/llegadaTardeUtils.ts
 
+// =========================================================
+// UTILIDAD: LIMPIAR DEVUELTAS SLA FALSAS (una sola ejecución)
+// POST /cleanupSlaDevueltas?secret=<CLEANUP_SECRET>&empresaId=<ID>
+// Elimina turnos origin='SLA_VIRTUAL' + status='REPORTED_TO_PLANNING'
+// y las novedades type='DEVUELTA_PLANNING' origin='SLA_VIRTUAL'.
+// =========================================================
+export const cleanupSlaDevueltas = functions
+  .region('us-central1')
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onRequest(async (req, res) => {
+    const secret = req.query.secret as string | undefined;
+    const expectedSecret = process.env.CLEANUP_SECRET || 'crono-cleanup-2024';
+    if (secret !== expectedSecret) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const empresaId = (req.query.empresaId as string | undefined) || null;
+    const db = admin.firestore();
+    const BATCH_LIMIT = 400;
+
+    let deletedTurnos = 0;
+    let deletedNovedades = 0;
+    const deletedTurnoIds: string[] = [];
+
+    // ── 1. Borrar turnos SLA_VIRTUAL + REPORTED_TO_PLANNING ──────────────
+    let turnosQ = db.collection('turnos')
+      .where('origin', '==', 'SLA_VIRTUAL')
+      .where('status', '==', 'REPORTED_TO_PLANNING');
+    if (empresaId) turnosQ = turnosQ.where('empresaId', '==', empresaId) as any;
+
+    const turnosSnap = await turnosQ.get();
+    console.log(`[cleanupSlaDevueltas] Turnos a borrar: ${turnosSnap.size}`);
+
+    const turnoBatches: admin.firestore.WriteBatch[] = [];
+    let currentBatch = db.batch();
+    let batchCount = 0;
+    turnosSnap.docs.forEach(doc => {
+      currentBatch.delete(doc.ref);
+      deletedTurnoIds.push(doc.id);
+      batchCount++;
+      if (batchCount >= BATCH_LIMIT) {
+        turnoBatches.push(currentBatch);
+        currentBatch = db.batch();
+        batchCount = 0;
+      }
+    });
+    if (batchCount > 0) turnoBatches.push(currentBatch);
+    for (const batch of turnoBatches) await batch.commit();
+    deletedTurnos = turnosSnap.size;
+
+    // ── 2. Borrar novedades DEVUELTA_PLANNING / SLA_VIRTUAL ──────────────
+    let novedadesQ = db.collection('novedades')
+      .where('origin', '==', 'SLA_VIRTUAL');
+    if (empresaId) novedadesQ = novedadesQ.where('empresaId', '==', empresaId) as any;
+
+    const novedadesSnap = await novedadesQ.get();
+    console.log(`[cleanupSlaDevueltas] Novedades a borrar: ${novedadesSnap.size}`);
+
+    let novBatch = db.batch();
+    let novCount = 0;
+    let novBatches: admin.firestore.WriteBatch[] = [];
+    novedadesSnap.docs.forEach(doc => {
+      novBatch.delete(doc.ref);
+      novCount++;
+      if (novCount >= BATCH_LIMIT) {
+        novBatches.push(novBatch);
+        novBatch = db.batch();
+        novCount = 0;
+      }
+    });
+    if (novCount > 0) novBatches.push(novBatch);
+    for (const batch of novBatches) await batch.commit();
+    deletedNovedades = novedadesSnap.size;
+
+    console.log(`[cleanupSlaDevueltas] Listo: ${deletedTurnos} turnos + ${deletedNovedades} novedades eliminados`);
+    res.json({
+      ok: true,
+      deletedTurnos,
+      deletedNovedades,
+      turnoIds: deletedTurnoIds,
+    });
+  });

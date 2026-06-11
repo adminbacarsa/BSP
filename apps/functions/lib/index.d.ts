@@ -45,3 +45,4 @@ export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & funct
 export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledAutoInjustificada: functions.CloudFunction<unknown>;
 export declare const onAusenciaCertificado: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
+export declare const cleanupSlaDevueltas: functions.HttpsFunction;

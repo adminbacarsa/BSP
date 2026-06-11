@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -2661,5 +2661,77 @@ exports.onAusenciaCertificado = functions
         console.log(`[onAusenciaCertificado] Novedad creada para ausencia ${change.after.id}`);
     }
     return null;
+});
+exports.cleanupSlaDevueltas = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 120, memory: '256MB' })
+    .https.onRequest(async (req, res) => {
+    const secret = req.query.secret;
+    const expectedSecret = process.env.CLEANUP_SECRET || 'crono-cleanup-2024';
+    if (secret !== expectedSecret) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+    }
+    const empresaId = req.query.empresaId || null;
+    const db = admin.firestore();
+    const BATCH_LIMIT = 400;
+    let deletedTurnos = 0;
+    let deletedNovedades = 0;
+    const deletedTurnoIds = [];
+    let turnosQ = db.collection('turnos')
+        .where('origin', '==', 'SLA_VIRTUAL')
+        .where('status', '==', 'REPORTED_TO_PLANNING');
+    if (empresaId)
+        turnosQ = turnosQ.where('empresaId', '==', empresaId);
+    const turnosSnap = await turnosQ.get();
+    console.log(`[cleanupSlaDevueltas] Turnos a borrar: ${turnosSnap.size}`);
+    const turnoBatches = [];
+    let currentBatch = db.batch();
+    let batchCount = 0;
+    turnosSnap.docs.forEach(doc => {
+        currentBatch.delete(doc.ref);
+        deletedTurnoIds.push(doc.id);
+        batchCount++;
+        if (batchCount >= BATCH_LIMIT) {
+            turnoBatches.push(currentBatch);
+            currentBatch = db.batch();
+            batchCount = 0;
+        }
+    });
+    if (batchCount > 0)
+        turnoBatches.push(currentBatch);
+    for (const batch of turnoBatches)
+        await batch.commit();
+    deletedTurnos = turnosSnap.size;
+    let novedadesQ = db.collection('novedades')
+        .where('origin', '==', 'SLA_VIRTUAL');
+    if (empresaId)
+        novedadesQ = novedadesQ.where('empresaId', '==', empresaId);
+    const novedadesSnap = await novedadesQ.get();
+    console.log(`[cleanupSlaDevueltas] Novedades a borrar: ${novedadesSnap.size}`);
+    let novBatch = db.batch();
+    let novCount = 0;
+    let novBatches = [];
+    novedadesSnap.docs.forEach(doc => {
+        novBatch.delete(doc.ref);
+        novCount++;
+        if (novCount >= BATCH_LIMIT) {
+            novBatches.push(novBatch);
+            novBatch = db.batch();
+            novCount = 0;
+        }
+    });
+    if (novCount > 0)
+        novBatches.push(novBatch);
+    for (const batch of novBatches)
+        await batch.commit();
+    deletedNovedades = novedadesSnap.size;
+    console.log(`[cleanupSlaDevueltas] Listo: ${deletedTurnos} turnos + ${deletedNovedades} novedades eliminados`);
+    res.json({
+        ok: true,
+        deletedTurnos,
+        deletedNovedades,
+        turnoIds: deletedTurnoIds,
+    });
 });
 //# sourceMappingURL=index.js.map
