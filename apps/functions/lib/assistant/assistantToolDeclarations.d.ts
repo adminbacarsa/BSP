@@ -23,6 +23,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -60,6 +63,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -88,6 +94,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -122,6 +131,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -159,6 +171,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -193,6 +208,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -224,6 +242,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -261,6 +282,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_referencia?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -295,6 +319,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -316,6 +343,18 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
                 description: string;
             };
             id_objetivo: {
+                type: SchemaType;
+                description: string;
+            };
+            hora_inicio_cor: {
+                type: SchemaType;
+                description: string;
+            };
+            codigo_turno: {
+                type: SchemaType;
+                description: string;
+            };
+            solo_estado_presencia: {
                 type: SchemaType;
                 description: string;
             };
@@ -374,6 +413,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             texto_objetivo?: undefined;
             id_servicio_sla?: undefined;
             textos_objetivo?: undefined;
@@ -413,6 +455,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
             id_servicio_sla?: undefined;
@@ -443,6 +488,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -485,6 +533,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_desde?: undefined;
             fecha_hasta?: undefined;
             fecha?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             textos_objetivo?: undefined;
@@ -520,6 +571,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -568,6 +622,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             fecha_hasta?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -609,6 +666,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;
@@ -653,6 +713,9 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
             id_firestore_empleado?: undefined;
             fecha?: undefined;
             id_objetivo?: undefined;
+            hora_inicio_cor?: undefined;
+            codigo_turno?: undefined;
+            solo_estado_presencia?: undefined;
             tipo?: undefined;
             id_objetivo_cercania?: undefined;
             texto_objetivo?: undefined;

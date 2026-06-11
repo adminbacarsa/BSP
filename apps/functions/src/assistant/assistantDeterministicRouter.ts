@@ -246,6 +246,19 @@ function extractDayYmdFromQuery(t: string, refYmd: string, recent: AssistantRece
   if (/\b(hoy|este\s+dia|este\s+día)\b/.test(blob)) return refYmd;
   const iso = t.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
   if (iso?.[1]) return iso[1];
+  const dmy = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (dmy?.[1] && dmy?.[2]) {
+    try {
+      const ref = parseRefYmd(refYmd);
+      const dd = Number(dmy[1]);
+      const mm = Number(dmy[2]);
+      let yy = dmy[3] ? Number(dmy[3]) : ref.y;
+      if (yy < 100) yy += 2000;
+      if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) return ymdToString(yy, mm, dd);
+    } catch {
+      /* ignore invalid d/m */
+    }
+  }
   for (let i = recent.length - 1; i >= 0 && i >= recent.length - 6; i--) {
     const isoR = (recent[i].content || '').match(/\b(20\d{2}-\d{2}-\d{2})\b/);
     if (isoR?.[1] && /\b(manana|mañana|ayer|hoy)\b/.test(blob)) return isoR[1];
@@ -253,9 +266,55 @@ function extractDayYmdFromQuery(t: string, refYmd: string, recent: AssistantRece
   return refYmd;
 }
 
+/** «a las 7», «07:00», «7 hs» → HH:MM Cordoba. */
+function extractHourStartFilterFromQuery(t: string): string | null {
+  const n = normText(t);
+  let m = n.match(/\ba\s+las\s+(\d{1,2})(?::(\d{2}))?\s*(?:hs?|horas?)?\b/);
+  if (m?.[1]) {
+    const hh = String(Number(m[1])).padStart(2, '0');
+    const mm = m[2] ? String(Number(m[2])).padStart(2, '0') : '00';
+    return `${hh}:${mm}`;
+  }
+  m = n.match(/\b(\d{1,2}):(\d{2})\s*(?:hs?|horas?)?\b/);
+  if (m?.[1]) {
+    return `${String(Number(m[1])).padStart(2, '0')}:${String(Number(m[2])).padStart(2, '0')}`;
+  }
+  m = n.match(/\b(?:desde|entrada|inicio)\s+(?:las\s+)?(\d{1,2})\s*(?:hs?|horas?)\b/);
+  if (m?.[1]) return `${String(Number(m[1])).padStart(2, '0')}:00`;
+  return null;
+}
+
+/** Banda CCT cuando dicen «turno mañana/tarde/noche» sin hora exacta. */
+function extractShiftBandCodeFromQuery(t: string): string | null {
+  const n = normText(t);
+  if (/\b(turno\s+de\s+manana|turno\s+mañana|banda\s+m\b|codigo\s+m\b)\b/.test(n) && !extractHourStartFilterFromQuery(t)) {
+    return 'M';
+  }
+  if (/\b(turno\s+tarde|banda\s+t\b|codigo\s+t\b)\b/.test(n)) return 'T';
+  if (/\b(turno\s+noche|banda\s+n\b|codigo\s+n\b)\b/.test(n)) return 'N';
+  return null;
+}
+
+function matchMyAssignedShiftsIntent(t: string): boolean {
+  return /\b(mis turnos|mi turno|tengo asignad|me asignaron|que turnos tengo|cuales son mis turnos|cuáles son mis turnos)\b/.test(
+    t,
+  );
+}
+
+function matchObjectivePresentAtSiteIntent(t: string): boolean {
+  if (/\b(presentes?|fichados?|marcaron|marcacion|marcación|hay\s+ahora)\b/.test(t)) return true;
+  if (t.length > 90) return false;
+  if (/\b(casisa|obrador|malagueno|malagueño|misericordia|san\s+roque|cruz\s+del\s+eje|loteria|lotería)\b/.test(t)) {
+    if (/\b(todos los|toda la empresa|cuantos clientes|sla|horas vendidas)\b/.test(t)) return false;
+    return true;
+  }
+  return false;
+}
+
 function matchTurnosPlanificadosDiaIntent(t: string): boolean {
+  if (matchMyAssignedShiftsIntent(t)) return false;
   if (!/\b(turnos?|trunos?|planificad|guardias?|personal)\b/.test(t)) return false;
-  return /\b(hoy|manana|mañana|ayer|pasado\s+manana|pasado\s+mañana|20\d{2}-\d{2}-\d{2})\b/.test(t);
+  return /\b(hoy|manana|mañana|ayer|pasado\s+manana|pasado\s+mañana|20\d{2}-\d{2}-\d{2}|\d{1,2}\/\d{1,2})\b/.test(t);
 }
 
 function recentOpsAggregateThread(recent: AssistantRecentMessage[]): { count: number; fecha: string } | null {
@@ -782,7 +841,7 @@ function recentTurnosHoyThread(recent: AssistantRecentMessage[]): boolean {
 function matchTurnosHoyFollowUpIntent(t: string, recent: AssistantRecentMessage[]): boolean {
   if (matchOpsTurnoCountFollowUpIntent(t, recent)) return true;
   if (matchTurnosPlanificadosDiaIntent(t)) return true;
-  if (matchWhoOnShiftTodayIntent(t)) return true;
+  if (matchWhoOnShiftDayIntent(t)) return true;
   if (/^(si|sí|dale|ok|bueno|perfecto)\.?$/i.test(t.trim()) && recentTurnosHoyThread(recent)) return true;
   if (
     /\b(no hay nadie|nadie trabaja|esta vacio|está vacío|sin nadie|no hay turno|no hay guardia|hay alguien|alguien trabaja)\b/.test(t) &&
@@ -1040,27 +1099,41 @@ function matchTurnosObjetivoHoyIntent(t: string): boolean {
 }
 
 function matchWhoOnShiftTodayIntent(t: string): boolean {
-  if (/\b(franco|ret\b|reten|cercan)\b/.test(t)) return false;
+  return matchWhoOnShiftDayIntent(t);
+}
+
+function matchWhoOnShiftDayIntent(t: string): boolean {
+  if (/\b(franco|ret\b|reten|cercan|faltaron|falto|faltó|ausent|licencia|enfermedad|vacacion)\b/.test(t)) {
+    return false;
+  }
   if (matchTurnosObjetivoHoyIntent(t)) return true;
-  if (!/\b(quien|quién|quienes|quiénes)\b/.test(t) && !/\bturno\s+hoy\b/.test(t)) {
-    if (!/\b(hoy|el dia|el día)\b/.test(t) || !/\b(turno|trabaja|guardia|personal)\b/.test(t)) return false;
+  const hasDay =
+    /\b(hoy|manana|mañana|ayer|el dia|el día|este dia|este día|20\d{2}-\d{2}-\d{2}|\d{1,2}\/\d{1,2})\b/.test(t) ||
+    extractHourStartFilterFromQuery(t) != null;
+  if (!hasDay && !/\bturno\s+hoy\b/.test(t)) return false;
+  if (/\b(quien|quién|quienes|quiénes)\b/.test(t) && /\b(turno|trabaja|trabajan|guardia|guardias|personal|esta|están|hay)\b/.test(t)) {
+    return true;
   }
-  if (/\b(quien|quién|quienes|quiénes)\b/.test(t) && /\b(turno|trabaja|trabajan|guardia|guardias|personal)\b/.test(t)) {
-    return /\b(hoy|el dia|el día|este dia|este día)\b/.test(t) || /\bturno\s+hoy\b/.test(t);
-  }
-  return /\bturno\s+hoy\b/.test(t) || (/\b(hoy)\b/.test(t) && /\b(tiene|tienen|esta|están|hay)\b/.test(t));
+  if (/\bturno\s+hoy\b/.test(t)) return true;
+  if (/\b(hoy|manana|mañana)\b/.test(t) && /\b(tiene|tienen|esta|están|hay)\b/.test(t)) return true;
+  if (extractHourStartFilterFromQuery(t) && /\b(quien|quién|quienes|quiénes|turno|trabaja)\b/.test(t)) return true;
+  return false;
 }
 
 /** Preguntas abiertas (listados genéricos, cómo…) — dejan de lado el atajo y va el LLM + tools. */
 function shouldSkipDeterministicRouter(raw: string, recent: AssistantRecentMessage[] = []): boolean {
   const t = normText(raw);
+  if (matchAbsenceOrLicenseDayIntent(t, recent)) return false;
+  if (matchAbsenceFollowUpIntent(t, recent)) return false;
+  if (matchMyAssignedShiftsIntent(t)) return false;
+  if (matchObjectivePresentAtSiteIntent(t)) return false;
   if (matchOpsTurnoCountFollowUpIntent(t, recent)) return false;
   if (matchTurnosPlanificadosDiaIntent(t)) return false;
   if (matchEmployeePlannedHoursThresholdIntent(t)) return false;
   if (matchEmployeePlannedHoursThresholdFollowUp(t, recent)) return false;
   if (matchClientListIntent(t, recent)) return false;
   if (resolveClientFilterFromQuery(t)) return false;
-  if (matchWhoOnShiftTodayIntent(t)) return false;
+  if (matchWhoOnShiftDayIntent(t)) return false;
   if (matchFrancoRetDiaIntent(t, recent)) return false;
   if (matchAffirmativeShortIntent(t) && recentOffersSlaAllObjectivesBatch(recent)) return false;
   if (raw.length > 240) return true;
@@ -1827,14 +1900,16 @@ function formatDeterministicTurnosPlanificadosDiaReply(
     ausentes: number;
     sinMarcacion: number;
   },
+  filterLabel?: string,
 ): string {
   const total = Number(r.cuenta_total_turnos_visibles ?? 0);
   const muestra = (r.muestra_turnos ?? []) as Array<Record<string, unknown>>;
   const truncLista = r.muestra_truncada_vs_total === true;
   const truncQuery = r.truncado_limite_turnos_consultados === true;
+  const filtroTxt = filterLabel ? ` (${filterLabel})` : '';
 
   if (total === 0) {
-    return `Según **Firestore** (misma regla de visibilidad que **Operaciones**), para **${fecha}** no hay turnos visibles con guardia asignado o vacante reportada a planificación.`;
+    return `Según **Firestore** (misma regla de visibilidad que **Operaciones**), para **${fecha}**${filtroTxt} no hay turnos visibles con guardia asignado o vacante reportada a planificación.`;
   }
 
   let body = '';
@@ -1845,7 +1920,7 @@ function formatDeterministicTurnosPlanificadosDiaReply(
       body += `*No hay ausentes registrados; la lista son guardias con turno visible sin fichada todavía.*\n\n`;
     }
   } else {
-    body += `Según **Firestore** (turnos visibles como en **Operaciones**), para **${fecha}** hay **${total}** turno(s) planificado(s)/visible(s):\n\n`;
+    body += `Según **Firestore** (turnos visibles como en **Operaciones**), para **${fecha}**${filtroTxt} hay **${total}** turno(s) visible(s):\n\n`;
   }
 
   const bySite = new Map<string, Map<string, Array<{ persona: string; codigo: string }>>>();
@@ -1980,13 +2055,126 @@ async function tryDeterministicCrmReply(
   return null;
 }
 
+function formatPresentesEnObjetivoReply(
+  fecha: string,
+  siteLabel: string,
+  r: Record<string, unknown>,
+): string {
+  const total = Number(r.cuenta_total_turnos_visibles ?? 0);
+  const muestra = (r.muestra_turnos ?? []) as Array<Record<string, unknown>>;
+  if (total === 0) {
+    return `En **${siteLabel}** no hay guardias **presentes** registrados para **${fecha}** (según fichada en **Operaciones**).`;
+  }
+  let body = `En **${siteLabel}** hay **${total}** guardia(s) **presente(s)** el **${fecha}**:\n\n`;
+  for (const row of muestra) {
+    body += `- **${String(row.persona ?? '—')}** (${String(row.codigo ?? '—')}, ingreso planificado **${String(row.hora_inicio_cor ?? '—')}**)\n`;
+  }
+  if (r.muestra_truncada_vs_total === true) {
+    body += `\n*Lista acotada; el resto está en **Operaciones**.*`;
+  }
+  return body.trim();
+}
+
+async function tryDeterministicMyShiftsReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[],
+): Promise<string | null> {
+  if (!matchMyAssignedShiftsIntent(t)) return null;
+  const empId = toolCtx.selfEmployeeFirestoreId;
+  if (!empId) {
+    return 'Tu usuario de backoffice **no está vinculado a un legajo** (campo uid en **RRHH**). Para ver turnos de un guardia concreto, decime **apellido y nombre**; si sos guardia, entrá por el **portal empleado**.';
+  }
+  const fecha =
+    extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent) || toolCtx.referenceDateYsMmDd;
+  const detalle = await ejecutarConsultarTurnosEmpleado(toolCtx, {
+    id_firestore_empleado: empId,
+    fecha_desde: fecha,
+    fecha_hasta: fecha,
+  });
+  const err = String(detalle.error ?? '').trim();
+  if (err) {
+    if (err === 'sin_permiso_para_consultar_turnos') {
+      return 'Tu perfil no tiene permiso para consultar turnos. Necesitás lectura en **Planificación**, **Operaciones** o **Reportes**.';
+    }
+    return `No pude consultar tus turnos (${err}).`;
+  }
+  const nombre = String((detalle.empleado as Record<string, unknown> | undefined)?.nombre_legible ?? 'Tu legajo');
+  const turnos = (detalle.turnos ?? []) as Array<Record<string, unknown>>;
+  if (turnos.length === 0) {
+    return `**${nombre}**: no tenés turnos visibles asignados para el **${fecha}**.`;
+  }
+  let body = `**Tus turnos** (**${nombre}**) para el **${fecha}**:\n\n`;
+  for (const row of turnos.slice(0, 24)) {
+    body += `- **${String(row.fecha ?? fecha)}** · **${String(row.codigo ?? '—')}** · ${String(row.objetivo ?? '—')} (${String(row.cliente ?? '—')}) · ${String(row.hora_inicio ?? '—')}–${String(row.hora_fin ?? '—')}`;
+    const est = String(row.estado_presencia ?? '').trim();
+    if (est) body += ` · ${est}`;
+    body += '\n';
+  }
+  if (turnos.length > 24) body += `\n*… y ${turnos.length - 24} más.*`;
+  return body.trim().slice(0, 7500);
+}
+
+async function tryDeterministicPresentesEnObjetivoReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  recent: AssistantRecentMessage[],
+): Promise<string | null> {
+  if (!matchObjectivePresentAtSiteIntent(t)) return null;
+  const fecha = extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent);
+  const siteHint =
+    extractObjectiveSiteFromQuery(t) ||
+    extractObjectiveHintFromRecentMessages(recent) ||
+    t.trim();
+  if (!siteHint || siteHint.length < 3) return null;
+
+  const found = await ejecutarBuscarObjetivosPorNombre(toolCtx, { texto: siteHint, limite: 6 });
+  const coincidencias = (found.coincidencias ?? []) as Array<{
+    id_objetivo?: string;
+    nombre_objetivo?: string;
+    nombre_cliente?: string;
+  }>;
+  if (coincidencias.length === 0) {
+    return `No encontré el objetivo «${siteHint}». Probá el nombre como en **Clientes y Objetivos**.`;
+  }
+  if (coincidencias.length >= 2) {
+    const lista = coincidencias
+      .slice(0, 5)
+      .map((c) => `**${c.nombre_cliente ?? '—'} — ${c.nombre_objetivo ?? '—'}**`)
+      .join(', ');
+    return `Hay varios sitios parecidos a «${siteHint}»: ${lista}. Decime cuál para listar presentes.`;
+  }
+  const obj = coincidencias[0];
+  const idObj = String(obj.id_objetivo ?? '').trim();
+  if (!idObj) return null;
+  const siteLabel = `${obj.nombre_cliente ?? '—'} — ${obj.nombre_objetivo ?? siteHint}`;
+
+  const r = await ejecutarListadoTurnosOperativosDia(toolCtx, {
+    fecha,
+    id_objetivo: idObj,
+    limite: 48,
+    solo_estado_presencia: 'presente',
+  });
+  const err = String(r.error ?? '').trim();
+  if (err) {
+    return `No pude listar presentes en **${siteLabel}** (${err}).`;
+  }
+  return formatPresentesEnObjetivoReply(String(r.fecha_referencia ?? fecha), siteLabel, r).slice(0, 7500);
+}
+
 async function tryDeterministicTurnosHoyReply(
   t: string,
   toolCtx: AssistantToolContext,
   recent: AssistantRecentMessage[],
 ): Promise<string | null> {
   if (matchAbsenceOrLicenseDayIntent(t, recent)) return null;
-  if (!matchTurnosHoyFollowUpIntent(t, recent) && !matchTurnosObjetivoHoyIntent(t)) return null;
+  if (
+    !matchTurnosHoyFollowUpIntent(t, recent) &&
+    !matchTurnosObjetivoHoyIntent(t) &&
+    !matchWhoOnShiftDayIntent(t)
+  ) {
+    return null;
+  }
 
   const opsCtx = recentOpsAggregateThread(recent);
   const fecha =
@@ -1994,6 +2182,12 @@ async function tryDeterministicTurnosHoyReply(
     extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent) ||
     extractFechaFromRecentTurnosThread(recent, toolCtx.referenceDateYsMmDd);
   const siteHint = extractObjectiveSiteFromQuery(t) || extractObjectiveHintFromRecentMessages(recent);
+  const horaFiltro = extractHourStartFilterFromQuery(t);
+  const codigoFiltro = extractShiftBandCodeFromQuery(t);
+  let filterLabel = '';
+  if (horaFiltro) filterLabel = `inicio **${horaFiltro}**`;
+  else if (codigoFiltro) filterLabel = `código **${codigoFiltro}**`;
+
   let idObj: string | undefined;
   if (siteHint && siteHint.length >= 3) {
     const found = await ejecutarBuscarObjetivosPorNombre(toolCtx, { texto: siteHint, limite: 4 });
@@ -2005,6 +2199,8 @@ async function tryDeterministicTurnosHoyReply(
     fecha,
     limite: 96,
     id_objetivo: idObj,
+    hora_inicio_cor: horaFiltro ?? undefined,
+    codigo_turno: codigoFiltro ?? undefined,
   });
   const err = String(r.error ?? '').trim();
   if (err) {
@@ -2031,6 +2227,7 @@ async function tryDeterministicTurnosHoyReply(
               sinMarcacion: opsFollow.sinMarcacion,
             }
           : undefined,
+        filterLabel || undefined,
       )
     : formatDeterministicTurnosHoyReply(fechaOut, r);
   console.info('[assistant] deterministic turnos hoy', { fecha: fechaOut, total: r.cuenta_total_turnos_visibles });
@@ -2341,6 +2538,20 @@ export async function tryDeterministicDataReply(
     if (ausentesLic?.trim()) return ausentesLic.trim();
   } catch (e) {
     console.warn('[assistant] tryDeterministicAusentesLicenciasDiaReply', e);
+  }
+
+  try {
+    const misTurnos = await tryDeterministicMyShiftsReply(t, toolCtx, recent);
+    if (misTurnos?.trim()) return misTurnos.trim();
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicMyShiftsReply', e);
+  }
+
+  try {
+    const presentesObj = await tryDeterministicPresentesEnObjetivoReply(t, toolCtx, recent);
+    if (presentesObj?.trim()) return presentesObj.trim();
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicPresentesEnObjetivoReply', e);
   }
 
   try {

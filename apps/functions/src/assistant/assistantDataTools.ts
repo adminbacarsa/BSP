@@ -2506,7 +2506,14 @@ export async function ejecutarResumenPresenciasObjetivosDia(
 /** Lista legible para «quién está de turno hoy»: mismos turnos que resumen_presencias_objetivos_dia. */
 export async function ejecutarListadoTurnosOperativosDia(
   ctx: AssistantToolContext,
-  args: { fecha?: string; id_objetivo?: string; limite?: number },
+  args: {
+    fecha?: string;
+    id_objetivo?: string;
+    limite?: number;
+    hora_inicio_cor?: string;
+    codigo_turno?: string;
+    solo_estado_presencia?: 'presente' | 'ausente' | 'sin_marcacion';
+  },
 ): Promise<Record<string, unknown>> {
   if (!canQueryOperationsDaySummary(ctx)) {
     return { error: 'sin_permiso_resumen_operaciones_requiere_modulo_operaciones_planificacion_o_similar' };
@@ -2557,7 +2564,25 @@ export async function ejecutarListadoTurnosOperativosDia(
     return { error: 'error_consulta_turnos_operaciones', detalle: msg.slice(0, 280) };
   }
 
-  const muestra = visibleRows.slice(0, lim).map((r) => ({
+  let filteredRows = visibleRows;
+  const horaFiltro = String(args.hora_inicio_cor ?? '').trim().slice(0, 5);
+  if (horaFiltro) {
+    filteredRows = filteredRows.filter((r) => String(r.h_inicio_cordoba ?? '').startsWith(horaFiltro));
+  }
+  const codigoFiltro = String(args.codigo_turno ?? '').trim().toUpperCase();
+  if (codigoFiltro) {
+    filteredRows = filteredRows.filter((r) => String(r.codigo ?? '').trim().toUpperCase() === codigoFiltro);
+  }
+  const presFiltro = args.solo_estado_presencia;
+  if (presFiltro === 'presente') {
+    filteredRows = filteredRows.filter((r) => r.isPresent);
+  } else if (presFiltro === 'ausente') {
+    filteredRows = filteredRows.filter((r) => r.isAbsent);
+  } else if (presFiltro === 'sin_marcacion') {
+    filteredRows = filteredRows.filter((r) => !r.isPresent && !r.isAbsent);
+  }
+
+  const muestra = filteredRows.slice(0, lim).map((r) => ({
     cliente: r.cliente,
     objetivo: r.objetivo_nombre,
     hora_inicio_cor: r.h_inicio_cordoba,
@@ -2573,10 +2598,16 @@ export async function ejecutarListadoTurnosOperativosDia(
   return {
     fecha_referencia: fecha,
     criterios: 'Misma vista que Operaciones para el día referencia en zona Cordoba.',
-    cuenta_total_turnos_visibles: visibleRows.length,
+    cuenta_total_turnos_visibles: filteredRows.length,
+    cuenta_sin_filtros: visibleRows.length,
+    filtros_aplicados: {
+      hora_inicio_cor: horaFiltro || null,
+      codigo_turno: codigoFiltro || null,
+      solo_estado_presencia: presFiltro ?? null,
+    },
     muestra_cap: lim,
     truncado_limite_turnos_consultados: truncadoConsultaTurnos,
-    muestra_truncada_vs_total: visibleRows.length > muestra.length,
+    muestra_truncada_vs_total: filteredRows.length > muestra.length,
     muestra_turnos: muestra,
     nota_tras_herramienta:
       'Contestá agrupando por cliente/objetivo; si muestra_truncada_vs_total=true o truncado_limite_turnos_consultados=true, aclaralo al usuario.',
@@ -3628,6 +3659,12 @@ async function dispatchAssistantToolCallInner(
       fecha: args.fecha != null ? String(args.fecha) : undefined,
       id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
+      hora_inicio_cor: args.hora_inicio_cor != null ? String(args.hora_inicio_cor) : undefined,
+      codigo_turno: args.codigo_turno != null ? String(args.codigo_turno) : undefined,
+      solo_estado_presencia:
+        args.solo_estado_presencia != null
+          ? (String(args.solo_estado_presencia) as 'presente' | 'ausente' | 'sin_marcacion')
+          : undefined,
     });
   } else if (name === 'listado_franco_ret_dia') {
     raw = await ejecutarListadoFrancoRetDia(ctx, {

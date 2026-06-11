@@ -159,7 +159,7 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   {
     name: 'listado_turnos_operativos_dia',
     description:
-      'Lista nombres/horarios/objetivos de los turnos visibles para la empresa un día (misma vista que Operaciones). Usalo para «quién está de turno hoy», «qué obligaciones tiene el equipo hoy». Fecha opcional (= hoy cliente). Opcional limite 8–120 filas si el usuario sólo necesita muestra.',
+      'Lista nombres/horarios/objetivos de los turnos visibles para la empresa un día (misma vista que Operaciones). Usalo para «quién está de turno hoy/mañana», «a las 7 quién trabaja», «quién está presente en [objetivo]». Fecha opcional (= hoy cliente). Filtrá con hora_inicio_cor (ej. 07:00), codigo_turno (M/T/N) o solo_estado_presencia=presente si el usuario acota hora, banda o presentes. **No** usar para «mis turnos» del usuario logueado — consultar_turnos_empleado con su legajo.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
@@ -167,6 +167,18 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
         id_objetivo: {
           type: SchemaType.STRING,
           description: 'Filtrar un objetivo por id sólo si lo tenés; si no omití.',
+        },
+        hora_inicio_cor: {
+          type: SchemaType.STRING,
+          description: 'Hora inicio Cordoba HH:MM (ej. 07:00) si preguntan «a las 7», «07 hs».',
+        },
+        codigo_turno: {
+          type: SchemaType.STRING,
+          description: 'Código CCT M/T/N si preguntan banda mañana/tarde/noche sin hora exacta.',
+        },
+        solo_estado_presencia: {
+          type: SchemaType.STRING,
+          description: 'presente | ausente | sin_marcacion — ej. «quién está presente en CASISA» → presente.',
         },
         limite: { type: SchemaType.NUMBER, description: 'Filas máximas en muestra_turnos (8–120, default implícito 96).' },
       },

@@ -70,6 +70,9 @@ export declare function ejecutarListadoTurnosOperativosDia(ctx: AssistantToolCon
     fecha?: string;
     id_objetivo?: string;
     limite?: number;
+    hora_inicio_cor?: string;
+    codigo_turno?: string;
+    solo_estado_presencia?: 'presente' | 'ausente' | 'sin_marcacion';
 }): Promise<Record<string, unknown>>;
 export declare function ejecutarContarServiciosSlaVigentesEmpresa(ctx: AssistantToolContext, args: {
     fecha?: string;

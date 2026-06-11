@@ -360,6 +360,41 @@ exports.ASSISTANT_TRAINING_PAIRS = [
         herramienta_sugerida: 'resumen_horas_objetivo_sla_periodo',
         respuesta_ideal_bullet: 'Seguimiento SLA del hilo; objetivo del mensaje previo (ej. H. Misericordia); no buscar objetivo «cuantas horas».',
     },
+    {
+        id: 175,
+        categoria: 'listado_turnos',
+        pregunta_usuario: 'Mañana a las 7 quien esta de turno / a las 07:00',
+        herramienta_sugerida: 'listado_turnos_operativos_dia',
+        respuesta_ideal_bullet: 'fecha=mañana; hora_inicio_cor=07:00; listar sólo esa franja; no volcar todos los objetivos.',
+    },
+    {
+        id: 176,
+        categoria: 'listado_turnos',
+        pregunta_usuario: 'Quien tiene turno mañana el 10/06',
+        herramienta_sugerida: 'listado_turnos_operativos_dia',
+        respuesta_ideal_bullet: 'fecha=2026-06-10; codigo_turno=M si «turno mañana»; respuesta acotada al filtro.',
+    },
+    {
+        id: 177,
+        categoria: 'empleado_turnos',
+        pregunta_usuario: 'que turnos tengo asignados para el dia de hoy',
+        herramienta_sugerida: 'consultar_turnos_empleado',
+        respuesta_ideal_bullet: 'Sólo legajo del usuario logueado; no listado_turnos_operativos_dia de toda la empresa.',
+    },
+    {
+        id: 178,
+        categoria: 'presencias_dia',
+        pregunta_usuario: 'casisa es obrador malagueño / presentes en objetivo',
+        herramienta_sugerida: 'listado_turnos_operativos_dia',
+        respuesta_ideal_bullet: 'buscar_objetivos + solo_estado_presencia=presente; nombres legibles; no sólo el número 6.',
+    },
+    {
+        id: 179,
+        categoria: 'presencias_dia',
+        pregunta_usuario: 'quienes faltaron el dia de hoy (log pruebas SA)',
+        herramienta_sugerida: 'listado_ausentes_licencias_dia',
+        respuesta_ideal_bullet: 'tipo=ausentes; nunca listado_franco_ret_dia; nombres por sitio.',
+    },
 ];
 exports.ASSISTANT_TRAINING_PAIR_COUNT = exports.ASSISTANT_TRAINING_PAIRS.length;
 //# sourceMappingURL=assistantTrainingPairs.js.map
