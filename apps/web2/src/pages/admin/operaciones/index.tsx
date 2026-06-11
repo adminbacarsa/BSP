@@ -967,7 +967,7 @@ const useElapsedTime = (startTime: Date | null) => {
 
 export default function OperacionesPage() {
     const router = useRouter();
-    const { assignedClientId } = useAuth();
+    const { assignedClientId, userRole, isSuperAdmin } = useAuth();
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const logic = useOperacionesMonitor(assignedClientId);
@@ -980,6 +980,48 @@ export default function OperacionesPage() {
         activeOperatorId: session.mySession?.operatorId || null,
         processedData: logic.processedData,
     });
+
+    // Rol CC: operadores cuya única misión es el CC — se les auto-inicia guardia al abrir
+    // Supervisores y superadmin pueden entrar sin iniciar guardia
+    const isCCOperator = !isSuperAdmin && (userRole === 'OPERADOR' || userRole === 'OPERADOR_CC');
+
+    // Auto-inicio de guardia para rol OPERADOR cuando data está lista
+    const autoStartedRef = useRef(false);
+    useEffect(() => {
+        if (!isCCOperator) return;
+        if (!logic.isReady) return;
+        if (session.loading) return;
+        if (session.isMySession) return;
+        if (autoStartedRef.current) return;
+        autoStartedRef.current = true;
+        session.startSession().catch(e => console.warn('[CC auto-start]', e));
+    }, [isCCOperator, logic.isReady, session.loading, session.isMySession]);
+
+    // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
+    const prevAutoModeRef = useRef<boolean | null>(null);
+    useEffect(() => {
+        if (session.loading) return;
+        if (prevAutoModeRef.current === session.isAutoMode) return;
+        const wasInit = prevAutoModeRef.current === null;
+        prevAutoModeRef.current = session.isAutoMode;
+        if (wasInit) return; // primera carga, no auditar
+        const authInst = getAuth();
+        const uid = authInst.currentUser?.uid;
+        if (!uid || !empresaId) return;
+        addDoc(collection(db, 'audit_logs'), {
+            action: session.isAutoMode ? 'GUARDIA_FINALIZADA' : 'GUARDIA_INICIADA',
+            actorId: uid,
+            actorName: authInst.currentUser?.email?.split('@')[0] || 'Operador',
+            userRole: userRole || 'desconocido',
+            autoStarted: isCCOperator && !session.isAutoMode,
+            empresaId,
+            timestamp: serverTimestamp(),
+            details: session.isAutoMode
+                ? 'Operador finalizó guardia en CC'
+                : (isCCOperator ? 'Guardia iniciada automáticamente (rol OPERADOR)' : 'Operador inició guardia manualmente'),
+        }).catch(() => {});
+    }, [session.isAutoMode, session.loading]);
+
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
     const [showCoverageGrid, setShowCoverageGrid] = useState(false);
@@ -1965,9 +2007,14 @@ export default function OperacionesPage() {
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
                                         <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
-                                        <span className="text-[10px] font-black text-amber-700 uppercase">Modo Automático</span>
+                                        <span className="text-[10px] font-black text-amber-700 uppercase">
+                                            {isCCOperator ? 'Iniciando guardia…' : 'Modo Automático'}
+                                        </span>
                                     </div>
-                                    <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
+                                    {/* Operadores CC: no muestran el botón — se auto-inicia */}
+                                    {!isCCOperator && (
+                                        <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
+                                    )}
                                 </div>
                                 {session.activeSessions.length > 0 && (
                                     <p className="text-[9px] text-amber-800 leading-tight">
