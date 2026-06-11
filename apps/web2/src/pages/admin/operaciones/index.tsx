@@ -1764,6 +1764,32 @@ export default function OperacionesPage() {
         { id: 'FRANCOS', label: 'FRANCOS', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
+    if (!logic.isReady) return (
+        <DashboardLayout>
+            <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
+            <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 select-none" style={{ gap: '28px' }}>
+                {/* Logo + título */}
+                <div className="flex flex-col items-center gap-3">
+                    <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                        <Radio size={32} className="text-cyan-400" style={{ animation: 'pulse 1.8s ease-in-out infinite' }}/>
+                    </div>
+                    <div className="text-center">
+                        <p className="text-white text-xl font-black tracking-tight">Centro de Control</p>
+                        <p className="text-slate-500 text-xs mt-0.5 font-medium uppercase tracking-widest">COSP Operaciones</p>
+                    </div>
+                </div>
+                {/* Barra de progreso animada */}
+                <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-cyan-500 rounded-full" style={{ width: '60%', animation: 'ccLoadBar 1.6s ease-in-out infinite alternate' }}/>
+                </div>
+                <p className="text-slate-500 text-xs font-medium">Sincronizando datos en tiempo real…</p>
+                <style>{`
+                    @keyframes ccLoadBar { from { width: 15%; } to { width: 85%; } }
+                `}</style>
+            </div>
+        </DashboardLayout>
+    );
+
     return (
         <DashboardLayout>
             <Toaster position="top-right" />

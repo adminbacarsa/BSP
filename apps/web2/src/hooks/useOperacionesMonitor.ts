@@ -107,6 +107,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [isCompact, setIsCompact] = useState(false);
     const [operatorInfo, setOperatorInfo] = useState<{ name: string; startTime: Date | null }>({ name: 'Operador', startTime: null });
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
+    // isReady: true cuando los 3 listeners críticos (turnos, empleados, objetivos) recibieron su primer snapshot
+    const [isReady, setIsReady] = useState(false);
+    const readyFlags = useRef({ shifts: false, employees: false, objectives: false });
+    const checkReady = () => {
+        if (readyFlags.current.shifts && readyFlags.current.employees && readyFlags.current.objectives) {
+            setIsReady(true);
+        }
+    };
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
@@ -137,6 +145,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         unsubs.push(onSnapshot(empQ, snap => {
             const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
             setEmployees(mapEmps(docs));
+            readyFlags.current.employees = true; checkReady();
         }));
 
         const buildObjectives = (docs: any[]) => { const objs: any[] = []; docs.forEach(d => { const data = d.data(); if (data.objetivos) data.objetivos.forEach((o: any) => objs.push({ ...o, clientName: data.name, clientId: d.id })); else objs.push({ id: d.id, name: data.name, clientName: data.name, clientId: d.id }); }); return objs; };
@@ -144,6 +153,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         unsubs.push(onSnapshot(clientsQ, snap => {
             const docs = snap.docs.filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta));
             setObjectives(buildObjectives(docs));
+            readyFlags.current.objectives = true; checkReady();
         }));
 
         const svcQ = query(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa), where('status', '==', 'active'));
@@ -191,6 +201,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setRawShifts(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
+            readyFlags.current.shifts = true; checkReady();
         }, (err) => {
             console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);
             setRefreshKey(k => k + 1);
@@ -789,5 +800,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo,
         selectedClientId, setSelectedClientId: handleSetSelectedClientId,
         uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
+        isReady,
     };
 };
