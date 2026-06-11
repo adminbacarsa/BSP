@@ -666,6 +666,33 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const retainedShifts = processedData.filter((s: any) => s.isRetention && !s.isCompleted);
         for (const s of retainedShifts) {
             const endMs = s.endDateObj?.getTime?.() ?? 0;
+
+            // ── AUTO-FIN RETENCIÓN: puesto cubierto por turnos regulares ──
+            const autoEndKey = `${s.id}_AUTO_END_RETENTION`;
+            if (!alertedVacancyIds.current.has(autoEndKey)) {
+                const capacity = getPositionCapacity(servicesSLA, s.objectiveId, s.positionName);
+                const coverageCount = processedData.filter((other: any) =>
+                    other.id !== s.id &&
+                    other.isPresent && !other.isCompleted && !other.isRetention &&
+                    other.objectiveId === s.objectiveId &&
+                    normPosName(other.positionName) === normPosName(s.positionName)
+                ).length;
+                if (coverageCount >= capacity) {
+                    alertedVacancyIds.current.add(autoEndKey);
+                    updateDocForEmpresa('turnos', s.id, {
+                        status: 'COMPLETED', isCompleted: true, isPresent: false,
+                        completedAt: serverTimestamp(), completedBy: 'Sistema',
+                        completionReason: 'AUTO_COVERAGE_COMPLETE',
+                    }, empresaId, migracionCompleta).then(() => {
+                        toast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
+                    }).catch(e => {
+                        alertedVacancyIds.current.delete(autoEndKey);
+                        console.warn('[autoEndRetention]', e);
+                    });
+                    continue; // no generar alerta de retención larga para este turno
+                }
+            }
+
             if (!endMs) continue;
             const minutesOvertime = (nowMs - endMs) / 60000;
             if (minutesOvertime < 120) continue;
