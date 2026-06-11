@@ -1000,6 +1000,18 @@ export default function OperacionesPage() {
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
     const [absencesPanelOpen, setAbsencesPanelOpen] = useState(true);
+    // Refresh key: reconecta listeners al volver de background o recuperar red
+    const [listenerRefreshKey, setListenerRefreshKey] = useState(0);
+    useEffect(() => {
+        const bump = () => setListenerRefreshKey(k => k + 1);
+        const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('online', bump);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('online', bump);
+        };
+    }, []);
 
     const recentAtendidas = useMemo(() =>
         empNovedades.filter(n => n.status === 'ATENDIDA' || n.status === 'atendida').slice(0, 8),
@@ -1012,6 +1024,7 @@ export default function OperacionesPage() {
         return empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
+            if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // Protocolo de cobertura: no mostrar si el turno ya terminó o venció el tiempo de gracia
             if (n.type === 'VACANTE_PROTOCOLO_COBERTURA') {
@@ -1057,10 +1070,14 @@ export default function OperacionesPage() {
                 const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 docs.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
                 setEmpNovedades(docs);
+            },
+            err => {
+                console.warn('[operaciones] novedades listener error, reconectando:', err.code);
+                setListenerRefreshKey(k => k + 1);
             }
         );
         return () => unsub();
-    }, [empresaId, empresa]);
+    }, [empresaId, empresa, listenerRefreshKey]);
 
     useEffect(() => {
         const todayStr = new Date().toLocaleDateString('en-CA');
@@ -1086,10 +1103,14 @@ export default function OperacionesPage() {
                     });
                 docs.sort((a: any, b: any) => (a.employeeName || '').localeCompare(b.employeeName || ''));
                 setAuthorizedAbsences(docs);
+            },
+            err => {
+                console.warn('[operaciones] ausencias listener error, reconectando:', err.code);
+                setListenerRefreshKey(k => k + 1);
             }
         );
         return () => unsub();
-    }, [empresaId, empresa]);
+    }, [empresaId, empresa, listenerRefreshKey]);
 
     // Persiste en localStorage para no re-abrir el modal tras recargar la página
     const ABSENT_ACK_KEY = `ops_absent_ack_${new Date().toLocaleDateString('en-CA')}`;

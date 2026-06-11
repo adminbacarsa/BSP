@@ -9,7 +9,7 @@ import { doc, updateDoc, serverTimestamp, addDoc, collection, onSnapshot, query,
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { stampEmpresaId, updateDocForEmpresa } from '@/lib/multiempresa';
+import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -319,29 +319,64 @@ export default function TacticalMapView() {
     const logic = useOperacionesMonitor();
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
+    // Refresh key: reconecta listener al volver de background o recuperar red
+    const [refreshKey, setRefreshKey] = useState(0);
+    useEffect(() => {
+        const bump = () => setRefreshKey(k => k + 1);
+        const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('online', bump);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('online', bump);
+        };
+    }, []);
     const pendingNovedades = useMemo(() =>
-        empNovedades.filter(n => n.status !== 'ATENDIDA' && n.status !== 'atendida' && n.type !== 'VACANTE_A_PLANIFICACION'),
+        empNovedades.filter(n =>
+            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
+            n.type !== 'VACANTE_A_PLANIFICACION' &&
+            !n.enGestion   // excluir las que otro operador está gestionando
+        ),
     [empNovedades]);
+    // Nombre del operador actual (para marcar enGestion)
+    const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));
-        const unsub = onSnapshot(
-            query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200)),
-            snap => {
+        const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+        const q = scopeEmpresa
+            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200))
+            : query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200));
+        const unsub = onSnapshot(q, snap => {
                 const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 docs.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
                 setEmpNovedades(docs);
+            }, err => {
+                console.warn('[map-view] novedades listener error, reconectando:', err.code);
+                setRefreshKey(k => k + 1);
             }
         );
         return () => unsub();
-    }, []);
+    }, [empresaId, migracionCompleta, refreshKey]);
     const prevPendingCount = useRef(0);
     useEffect(() => {
         if (pendingNovedades.length > prevPendingCount.current) setNotifPanelOpen(true);
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
+    // Marcar novedad como "en gestión" para que control center no la muestre como alerta activa
+    const handleTomarGestion = async (novedad: any) => {
+        if (novedad.enGestion) return; // ya la tomó otro
+        try {
+            await updateDoc(doc(db, 'novedades', novedad.id), {
+                enGestion: true,
+                enGestionBy: operatorName,
+                enGestionAt: serverTimestamp(),
+            });
+        } catch (e) { /* silencioso */ }
+    };
+
     const handleAtenderNovedad = async (novedad: any) => {
         try {
-            await updateDoc(doc(db, 'novedades', novedad.id), { status: 'ATENDIDA', atendidaAt: serverTimestamp() });
+            await updateDoc(doc(db, 'novedades', novedad.id), { status: 'ATENDIDA', atendidaAt: serverTimestamp(), enGestion: false, enGestionBy: null });
             if (novedad.type === 'VACANTE_A_PLANIFICACION') {
                 toast.success('Vacante devuelta a planificación');
             } else if (novedad.type === 'VACANTE_PROTOCOLO_COBERTURA') {
