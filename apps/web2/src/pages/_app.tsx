@@ -27,7 +27,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const showAssistant = !router.pathname.startsWith('/empleado')
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
-    && !router.pathname.includes('crono-popout');
+    && !router.pathname.includes('crono-popout')
+    && router.pathname !== '/admin/operaciones';
   useEffect(() => {
     initTheme();
     applyCompanyThemeFromStorage();
