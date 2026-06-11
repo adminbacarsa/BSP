@@ -798,4 +798,110 @@ export default function TacticalMapView() {
                     </button>
                 ) : (
                     <div className="w-[520px] flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[80vh]">
-                        <div cla
+                        <div className="px-4 py-3 bg-slate-900 rounded-t-2xl flex items-center gap-2">
+                            <Siren size={14} className="text-rose-400 shrink-0 animate-pulse"/>
+                            <span className="font-black uppercase text-xs text-white flex-1 tracking-wide">Alertas y Prioridad</span>
+                            {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
+                            <button onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto">
+                            {priorityShiftsPanel.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    <div className="px-3 py-1.5 bg-rose-50 flex items-center gap-1.5">
+                                        <AlertTriangle size={10} className="text-rose-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-rose-700 uppercase flex-1">Acción inmediata</span>
+                                        <span className="text-[9px] font-bold text-rose-500">{priorityShiftsPanel.length} turno{priorityShiftsPanel.length > 1 ? 's' : ''}</span>
+                                    </div>
+                                    {priorityShiftsPanel.map((s: any) => (
+                                        <div key={s.id} className="px-3 py-2 flex items-center gap-2 border-l-4 border-l-rose-500 border-b border-slate-50 bg-white hover:bg-rose-50/30 transition-colors">
+                                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart || s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>{(s.employeeName || '?')[0]}</div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-[11px] font-bold text-slate-800 leading-snug">
+                                                    {s.employeeName || 'Desconocido'}
+                                                    <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                    </span>
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
+                                                {s.isRetention ? (<>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><LogOut size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100"><Siren size={11}/></button>
+                                                </>) : (<>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><PlayCircle size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100"><AlertTriangle size={11}/></button>
+                                                </>)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {urgentNovedades.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    <div className="px-3 py-1.5 bg-amber-50 flex items-center gap-1.5">
+                                        <AlertTriangle size={10} className="text-amber-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-amber-700 uppercase flex-1">Novedades urgentes</span>
+                                        <span className="text-[9px] font-bold text-amber-500">{urgentNovedades.length}</span>
+                                    </div>
+                                    {urgentNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {otherNovedades.length > 0 && (
+                                <div className="border-b border-slate-200">
+                                    {otherNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {protNovedades.length > 0 && (
+                                <div>
+                                    <button onClick={() => setShowProtAlerts(v => !v)}
+                                        className="w-full px-3 py-2 flex items-center gap-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
+                                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">
+                                            Protocolos de cobertura automáticos ({protNovedades.length})
+                                        </span>
+                                        <span className="text-[9px] text-slate-400">{showProtAlerts ? '▲ ocultar' : '▼ ver'}</span>
+                                    </button>
+                                    {showProtAlerts && protNovedades.map(renderNovedad)}
+                                </div>
+                            )}
+
+                            {totalAlerts === 0 && (
+                                <div className="p-6 text-center">
+                                    <CheckCircle size={28} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
+                                    <p className="text-sm font-bold text-slate-400">Sin alertas pendientes</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
+            </div>
+
+            {detailNovedad && (
+                <NovedadDetailPopupMap
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
+            )}
+
+            <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
+            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />
+            <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
+            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} onAudit={async (action, details, extra) => await registrarBitacora(action, details, extra)} />
+            <WorkedDayOffModal
+                isOpen={workedFrancoData.isOpen}
+                onClose={() => setWorkedFrancoData({ isOpen: false, shift: null })}
+                shift={workedFrancoData.shift}
+                availableShifts={logic.processedData}
+                referenceDate={logic.now}
+            />
+            <SimpleCheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
+            <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
+        </div>
+    );
+}
