@@ -45,7 +45,7 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 };
 
 // --- MODALES (LÓGICA OPERATIVA) ---
-const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: any) => {
+const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, recentlyRelievedIds, onRelieved }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     if (!isOpen || !incomingShift) return null;
@@ -84,7 +84,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
     // Ordenados por FIFO: quien lleva más minutos trabajados se va primero
     const activeGuards = logic.processedData
         .filter((s: any) => {
-            if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted) return false;
+            if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
             if (s.isRetention) return true;                                    // retenido → siempre candidato
             const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
             return minutesUntilEnd <= 15;                                      // ≤15 min para terminar
@@ -266,6 +266,31 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap }: an
                 });
             }
             await batch.commit();
+
+            // Registrar como relevado para evitar que aparezca en siguientes modales (race condition)
+            if (prevShiftId) onRelieved?.(prevShiftId);
+
+            // ── Audit log: presente / llegada tarde / relevo ──────────────────────
+            {
+                const _tenantId = String(incomingShift.empresaId || empresaId || '').trim();
+                const _actor    = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                const _prev     = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
+                const _detail   = _prev
+                    ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
+                    : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action:        status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
+                    module:        'OPERACIONES',
+                    actorName:     _actor,
+                    timestamp:     serverTimestamp(),
+                    employeeId:    incomingShift.employeeId,
+                    employeeName:  incomingShift.employeeName,
+                    objectiveId:   incomingShift.objectiveId,
+                    objectiveName: incomingShift.objectiveName,
+                    shiftId:       incomingShift.id,
+                    details:       _detail,
+                }, _tenantId)).catch(() => {});
+            }
 
             // Notificar al guardia saliente si fue relevado
             if (prevShiftId) {
@@ -631,6 +656,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             markCoverageResolved(batch, 'RETENTION', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'RETENCION', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} retenido hasta ${hiEnd} en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -651,6 +677,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'ADELANTO_TURNO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `Turno de ${s.employeeName} adelantado en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`Turno de ${s.employeeName} adelantado`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -672,6 +699,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'CONVOCATORIA_RETEN', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, details: `${empName} convocado como retén en ${absenceShift.objectiveName || ''}.` }, tenantId(absenceShift))).catch(() => {});
             toast.success(`${empName} convocado como retén`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -704,6 +732,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             markCoverageResolved(batch, 'FRANCO', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'FRANCO_TRABAJADO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} convocado (Franco Trabajado) en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -1172,6 +1201,8 @@ export default function OperacionesPage() {
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
+    const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1466,7 +1497,7 @@ export default function OperacionesPage() {
         });
     }, [empNovedades, logic.processedData]);
 
-    const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY']);
+    const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY','LLEGADA_TARDE','ADELANTO_TURNO','CONVOCATORIA_RETEN','FRANCO_TRABAJADO','BAJA_SERVICIO','INTERCAMBIO_TURNO','GUARDIA_INICIADA','GUARDIA_FINALIZADA']);
     const filteredBitacora = useMemo(() => {
         const logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
         if (bitacoraTab === 'reciente') return logs.slice(0, 20);
@@ -2786,7 +2817,7 @@ export default function OperacionesPage() {
             <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
             <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
             
-            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />
+            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
