@@ -536,7 +536,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
             // Auto-expirar: slot ya terminó → no mostrar como vacante activa
-            if (v.endDateObj.getTime() < now.getTime()) return false;
+            // EXCEPCIÓN: vacantes del DÍA DE HOY permanecen visibles aunque el turno haya terminado.
+            // Un puesto descubierto sigue siendo información operativa relevante hasta la medianoche.
+            // Solo se descartan vacantes de días anteriores que ya expiraron.
+            const vacancyIsToday = isSameDay(v.shiftDateObj, now);
+            if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
@@ -733,21 +737,32 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // ── AUTO-FIN TURNO (+1 min después del horario, sin retención manual) ──
             // Cierra automáticamente turnos custom que finalizaron y no fueron
             // retenidos explícitamente por operaciones (isRetentionByField = false).
-            // Genera también la notificación push al guardia (via onTurnoWrite).
+            // ⚠️ Para puestos 24h: si hay un relevo planificado (no presente aún),
+            //    NO cerrar — el AUTO_COVERAGE_COMPLETE lo manejará cuando llegue.
             const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
             if (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 360 && !alertedVacancyIds.current.has(autoShiftEndKey)) {
-                alertedVacancyIds.current.add(autoShiftEndKey);
-                updateDocForEmpresa('turnos', s.id, {
-                    status: 'COMPLETED', isCompleted: true, isPresent: false,
-                    completedAt: serverTimestamp(), completedBy: 'Sistema',
-                    completionReason: 'AUTO_SHIFT_END',
-                }, empresaId, migracionCompleta).then(() => {
-                    toast.success(`✅ Turno finalizado: ${s.employeeName || 'Guardia'}`);
-                }).catch(e => {
-                    alertedVacancyIds.current.delete(autoShiftEndKey);
-                    console.warn('[autoEndShift]', e);
-                });
-                continue;
+                // Verificar si hay relevo planificado esperando llegar (≤90 min del fin del turno)
+                const hasScheduledRelevo = processedData.some((other: any) =>
+                    other.id !== s.id &&
+                    other.objectiveId === s.objectiveId &&
+                    normPosName(other.positionName) === normPosName(s.positionName) &&
+                    !other.isPresent && !other.isCompleted && !other.isUnassigned &&
+                    Math.abs((other.shiftDateObj?.getTime?.() ?? 0) - endMs) < 90 * 60000
+                );
+                if (!hasScheduledRelevo) {
+                    alertedVacancyIds.current.add(autoShiftEndKey);
+                    updateDocForEmpresa('turnos', s.id, {
+                        status: 'COMPLETED', isCompleted: true, isPresent: false,
+                        completedAt: serverTimestamp(), completedBy: 'Sistema',
+                        completionReason: 'AUTO_SHIFT_END',
+                    }, empresaId, migracionCompleta).then(() => {
+                        toast.success(`✅ Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                    }).catch(e => {
+                        alertedVacancyIds.current.delete(autoShiftEndKey);
+                        console.warn('[autoEndShift]', e);
+                    });
+                    continue;
+                }
             }
 
             // ── AUTO-FIN POR TIEMPO EXCESIVO (>6h sin relevo) ─────────────────────
