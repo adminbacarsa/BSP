@@ -45,6 +45,33 @@ import type { Absence } from '@/services/absenceService';
 
 const NOVEDAD_TYPES = ['Vacaciones', 'Enfermedad', 'ART', 'Injustificada', 'Licencia Esp.', 'PG Permiso Gremial'] as const;
 
+function SelectionBox({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 shadow-sm transition-all ${
+        checked
+          ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950'
+          : 'border-slate-950 bg-white text-transparent hover:bg-slate-100 dark:border-white dark:bg-slate-900'
+      }`}
+    >
+      <span className="text-[11px] font-black leading-none">✓</span>
+    </button>
+  );
+}
+
 export interface AusenciasTabProps {
   canAdjust: boolean;
   filteredAbsences: Absence[];
@@ -313,20 +340,21 @@ export default function AusenciasTab({
         <table className="w-full text-left">
           <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
             <tr>
-              {canAdjust && (
-                <th className="p-2 w-8">
-                  <input
-                    type="checkbox"
-                    style={{ width: 14, height: 14, display: 'block', cursor: 'pointer', accentColor: '#e11d48' }}
-                    checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))}
-                    onChange={e => {
-                      const ids = filteredAbsences.map(a => a.id!);
-                      setSelectedAbsenceIds(e.target.checked ? new Set(ids) : new Set());
-                    }}
-                  />
-                </th>
-              )}
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">Empleado</th>
+              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">
+                <div className="flex items-center gap-2">
+                  {canAdjust && (
+                    <SelectionBox
+                      checked={filteredAbsences.length > 0 && filteredAbsences.every(a => selectedAbsenceIds.has(a.id!))}
+                      label="Seleccionar todas las novedades visibles"
+                      onChange={checked => {
+                        const ids = filteredAbsences.map(a => a.id!);
+                        setSelectedAbsenceIds(checked ? new Set(ids) : new Set());
+                      }}
+                    />
+                  )}
+                  <span>Empleado</span>
+                </div>
+              </th>
               <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th>
               <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">Periodo</th>
               <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th>
@@ -338,7 +366,7 @@ export default function AusenciasTab({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
             {filteredAbsences.length === 0 ? (
               <tr>
-                <td colSpan={canAdjust ? 8 : 7} className="px-4 py-8 text-center text-sm text-slate-400 font-bold">
+                <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400 font-bold">
                   No hay novedades con los filtros actuales
                 </td>
               </tr>
@@ -403,23 +431,24 @@ function AbsenceRow({
   const countdown = useCountdownTo2359(isAA && a.status === 'Confirmada' && !hasCert ? a.startDate : undefined);
   return (
     <tr className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${rowBg}`}>
-      {canAdjust && (
-        <td className="p-2 w-8">
-          <input
-            type="checkbox"
-            style={{ width: 14, height: 14, display: 'block', cursor: 'pointer', accentColor: '#e11d48' }}
-            checked={selectedAbsenceIds.has(a.id!)}
-            onChange={e => {
-              setSelectedAbsenceIds(prev => {
-                const next = new Set(prev);
-                e.target.checked ? next.add(a.id!) : next.delete(a.id!);
-                return next;
-              });
-            }}
-          />
-        </td>
-      )}
-      <td className="px-3 py-2 font-bold text-xs text-slate-900 dark:text-white uppercase">{getAbsenceEmployeeName(a)}</td>
+      <td className="px-3 py-2 font-bold text-xs text-slate-900 dark:text-white uppercase">
+        <div className="flex items-center gap-2">
+          {canAdjust && (
+            <SelectionBox
+              checked={selectedAbsenceIds.has(a.id!)}
+              label={`Seleccionar novedad de ${getAbsenceEmployeeName(a)}`}
+              onChange={checked => {
+                setSelectedAbsenceIds(prev => {
+                  const next = new Set(prev);
+                  checked ? next.add(a.id!) : next.delete(a.id!);
+                  return next;
+                });
+              }}
+            />
+          )}
+          <span>{getAbsenceEmployeeName(a)}</span>
+        </div>
+      </td>
       <td className="px-3 py-2">
         <div className="flex flex-col gap-0.5">
           {isLT ? (
