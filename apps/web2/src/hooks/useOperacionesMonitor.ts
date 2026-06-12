@@ -586,7 +586,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const cap = getPositionCapacity(servicesSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
-                !cover.isUnassigned && !cover.isAbsent && !cover.isCompleted &&
+                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
                 cover.objectiveId === s.objectiveId &&
                 normPosName(cover.positionName) === normPosName(s.positionName) &&
                 checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
@@ -613,7 +613,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
-                !cover.isUnassigned && !cover.isAbsent && !cover.isCompleted &&
+                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
                 cover.objectiveId === v.objectiveId &&
                 normPosName(cover.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [cover])
