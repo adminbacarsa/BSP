@@ -499,21 +499,46 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     }
                     // ─── MODO CUSTOM (franjas parciales, ej. Rondín 08-18) ────────────────
                     else {
-                        // Generar vacante por cada turno sin cubrir:
-                        //   • Sin guardia asignado (isUnassigned) → vacante real
-                        //   • Guardia ausente sin relevo activo que cubra el slot → vacante
-                        //   • Guardia presente → sin acción
+                        // Generar vacante por déficit de cobertura en cada slot:
+                        //   • Agrupar ausentes por slot temporal (mismo start+end)
+                        //   • Para cada slot: max(0, guardQty - coveredOnSlot) vacantes
+                        //     → respeta quantity del puesto (ej: 9 activos + 8 ausentes
+                        //       con guardQty=17 → 8 vacantes; con guardQty=9 → 0 vacantes)
+                        //   • Para no-asignados (isUnassigned): siempre generan vacante
                         const unassignedShifts = allPosShifts.filter((s: any) => s.isUnassigned);
-                        const absentUncoveredShifts = allPosShifts.filter((s: any) => {
-                            // Incluir tanto ausencias confirmadas (isAbsent) como potenciales (isPotentialAbsence)
-                            if ((!s.isAbsent && !s.isPotentialAbsence) || s.isCompleted) return false;
-                            // ¿Hay algún turno activo (presente/futuro) que cubre el mismo slot?
-                            return !posShifts.some((cover: any) =>
-                                checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
-                            );
+
+                        // Agrupar ausentes por slot (mismo start+end) para calcular déficit real
+                        const absentSlotMap = new Map<string, any>();
+                        allPosShifts
+                            .filter((s: any) => (s.isAbsent || s.isPotentialAbsence) && !s.isCompleted)
+                            .forEach((s: any) => {
+                                const key = `${s.shiftDateObj?.getTime?.() ?? 0}_${s.endDateObj?.getTime?.() ?? 0}`;
+                                if (!absentSlotMap.has(key)) absentSlotMap.set(key, s);
+                            });
+
+                        // Para cada slot con ausentes: generar tantas vacantes como el déficit
+                        absentSlotMap.forEach((refShift: any) => {
+                            const coveredOnSlot = posShifts.filter((cover: any) =>
+                                checkSlotCoverage(refShift.shiftDateObj, refShift.endDateObj, [cover])
+                            ).length;
+                            const deficit = Math.max(0, guardQty - coveredOnSlot);
+                            for (let i = 0; i < deficit; i++) {
+                                const startMs = refShift.shiftDateObj instanceof Date ? refShift.shiftDateObj.getTime() : Date.now();
+                                const shiftId = refShift.id || `${startMs}`;
+                                virtualVacancies.push({
+                                    id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}_${i}`,
+                                    isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    clientName: objInfo.clientName, clientId: objInfo.clientId,
+                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
+                                    employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
+                                    shiftDateObj: refShift.shiftDateObj, endDateObj: refShift.endDateObj,
+                                    minutesUntilStart: 0, isValidEmployee: false
+                                });
+                            }
                         });
 
-                        [...unassignedShifts, ...absentUncoveredShifts].forEach((shift: any) => {
+                        // No-asignados: siempre generan vacante independientemente del quantity
+                        unassignedShifts.forEach((shift: any) => {
                             const startMs = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : Date.now();
                             const shiftId = shift.id || `${startMs}`;
                             virtualVacancies.push({
