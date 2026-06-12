@@ -689,8 +689,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         try {
             // RETEN empieza AHORA (no en el pasado) — evita que detectarAusencias lo marque AA
             const slotStart = new Date(); // ahora
-            const eightHoursLater = new Date(now.getTime() + 8 * 3600000);
-            const endTime = eightHoursLater > absenceEnd ? eightHoursLater : absenceEnd;
+            // endTime = fin real del turno a cubrir (NO 8h fijos — respetar SLA)
+            const endTime = absenceEnd;
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
@@ -1497,7 +1497,7 @@ export default function OperacionesPage() {
         });
     }, [empNovedades, logic.processedData]);
 
-    const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY','LLEGADA_TARDE','ADELANTO_TURNO','CONVOCATORIA_RETEN','FRANCO_TRABAJADO','BAJA_SERVICIO','INTERCAMBIO_TURNO','GUARDIA_INICIADA','GUARDIA_FINALIZADA']);
+    const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY','LLEGADA_TARDE','ADELANTO_TURNO','CONVOCATORIA_RETEN','FRANCO_TRABAJADO','BAJA_SERVICIO','INTERCAMBIO_TURNO','GUARDIA_INICIADA','GUARDIA_FINALIZADA','COBERTURA_RELEVO','EXTENSION_TURNO']);
     const filteredBitacora = useMemo(() => {
         const logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
         if (bitacoraTab === 'reciente') return logs.slice(0, 20);

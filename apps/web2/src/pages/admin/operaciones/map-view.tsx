@@ -236,8 +236,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             // Usar el inicio del slot como startTime del turno para que checkSlotCoverage
             // vea cobertura completa (>90%) y suprima la vacante virtual
             const slotStart = toDate(absenceShift.shiftDateObj);
-            const eightHoursLater = new Date(now.getTime() + 8 * 3600000);
-            const endTime = eightHoursLater > absenceEnd ? eightHoursLater : absenceEnd;
+            // endTime = fin real del turno a cubrir (NO 8h fijos — respetar SLA)
+            const endTime = absenceEnd;
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
