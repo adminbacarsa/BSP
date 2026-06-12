@@ -385,13 +385,17 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
                 const allowedShifts = pos.allowedShiftTypes || [];
                 const targetPosName = normalizePosMatch(pos.name);
-                const posShifts = objShifts.filter(s => {
+                // TODOS los turnos del puesto (incluye ausentes) — para saber si "opera hoy"
+                const allPosShifts = objShifts.filter((s: any) => {
                     const sPos = normalizePosMatch(s.positionName);
-                    return (sPos === targetPosName || (sPos === 'general' && targetPosName === 'guardia')) && s.countsForCoverage;
+                    return sPos === targetPosName || (sPos === 'general' && targetPosName === 'guardia');
                 });
+                // Solo los que cuentan como cobertura real (excluye ausentes)
+                const posShifts = allPosShifts.filter((s: any) => s.countsForCoverage);
 
-                // Detectar ciclo 12h
-                const has12hShifts = posShifts.some(s => s.duration > 10);
+                // Detectar ciclo 12h usando TODOS los turnos (no solo activos)
+                // Si todos están ausentes, posShifts=[] y no detectaríamos el ciclo 12h
+                const has12hShifts = allPosShifts.some((s: any) => s.duration > 10);
                 
                 let relevantDefinitions = allowedShifts;
                 // Si hay turnos definidos, los usamos
@@ -445,11 +449,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 //   - Custom (franjas parciales, ej. Rondín 08-18): verificar turno por turno
                 else {
                     // Sin turnos planificados hoy: el puesto no opera → no generar vacantes falsas
-                    if (posShifts.length === 0) return;
+                    // ⚠️ Usar allPosShifts, NO posShifts:
+                    //    posShifts=[] puede significar "todos ausentes" (≠ "no hay turnos")
+                    if (allPosShifts.length === 0) return;
 
                     // Promedio de horas planificadas por guardia → determina el tipo de turno
+                    // Usar allPosShifts para calcular correctamente aunque todos estén ausentes
                     const guardQty = pos.quantity || 1;
-                    const totalPlannedH = posShifts.reduce((a: number, s: any) => a + (s.duration || 0), 0);
+                    const totalPlannedH = allPosShifts.reduce((a: number, s: any) => a + (s.duration || 0), 0);
                     const avgHPerGuard = totalPlannedH / guardQty;
 
                     // ─── MODO 24H (3×8h o 2×12h) ─────────────────────────────────────────
@@ -480,24 +487,32 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     }
                     // ─── MODO CUSTOM (franjas parciales, ej. Rondín 08-18) ────────────────
                     else {
-                        // Verificar cada turno planificado individualmente:
+                        // Generar vacante por cada turno sin cubrir:
                         //   • Sin guardia asignado (isUnassigned) → vacante real
-                        //   • Guardia ausente → lo maneja el sistema de auto-ausencias
+                        //   • Guardia ausente sin relevo activo que cubra el slot → vacante
                         //   • Guardia presente → sin acción
-                        posShifts
-                            .filter((s: any) => s.isUnassigned)
-                            .forEach((shift: any) => {
-                                const startMs = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : Date.now();
-                                virtualVacancies.push({
-                                    id: `V124_CUST_${sla.objectiveId}_${pos.name}_${startMs}`,
-                                    isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
-                                    clientName: objInfo.clientName, clientId: objInfo.clientId,
-                                    objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                    employeeName: `VACANTE: TURNO SIN CUBRIR`,
-                                    shiftDateObj: shift.shiftDateObj, endDateObj: shift.endDateObj,
-                                    minutesUntilStart: 0, isValidEmployee: false
-                                });
+                        const unassignedShifts = allPosShifts.filter((s: any) => s.isUnassigned);
+                        const absentUncoveredShifts = allPosShifts.filter((s: any) => {
+                            if (!s.isAbsent || s.isCompleted) return false;
+                            // ¿Hay algún turno activo (presente/futuro) que cubre el mismo slot?
+                            return !posShifts.some((cover: any) =>
+                                checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
+                            );
+                        });
+
+                        [...unassignedShifts, ...absentUncoveredShifts].forEach((shift: any) => {
+                            const startMs = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : Date.now();
+                            const shiftId = shift.id || `${startMs}`;
+                            virtualVacancies.push({
+                                id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}`,
+                                isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                clientName: objInfo.clientName, clientId: objInfo.clientId,
+                                objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
+                                employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
+                                shiftDateObj: shift.shiftDateObj, endDateObj: shift.endDateObj,
+                                minutesUntilStart: 0, isValidEmployee: false
                             });
+                        });
                     }
                 }
             });
