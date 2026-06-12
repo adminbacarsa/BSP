@@ -629,14 +629,16 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // - Inicio: siempre hora planificada (salvo adelanto explÃ­cito)
             // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retenciÃ³n formal
             const isEarlyStartShift = d.isEarlyStart === true;
-            const isRetentionShift  = d.isRetention === true; // solo campo Firestore, no retentionMinutes (computado)
+            const isRetentionShift  = d.isRetention === true || (d.retentionMinutes ?? 0) > 0;
 
             const clampS = (real: Date, plan: Date): Date =>
                 isEarlyStartShift ? real : plan;  // adelanto â†’ hora real; normal â†’ hora planificada
 
             const clampE = (real: Date, plan: Date): Date => {
                 if (!plan || isNaN(plan.getTime())) return real; // sin planificado -> usar real
-                return real > plan ? real : plan; // max(real, plan): minimo horas planificadas, o mas si hubo extra
+                if (real < plan)        return plan;         // relevo anticipado -> horas completas
+                if (isRetentionShift)   return real;         // retencion formal -> hora real
+                return plan;                                  // salida tardia sin retencion -> clampear
             };
 
             const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
