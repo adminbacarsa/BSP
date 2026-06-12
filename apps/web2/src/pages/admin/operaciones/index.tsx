@@ -2424,12 +2424,12 @@ export default function OperacionesPage() {
                                 return (
                                     <div key={obj.objectiveId} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all`}>
                                         {/* Header del objetivo */}
-                                        <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}>
+                                        <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
                                             {/* Indicador color */}
                                             <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
 
-                                            {/* Info principal */}
-                                            <div className="flex-1 min-w-0">
+                                            {/* Info principal — tappable para expandir */}
+                                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}>
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs font-black text-slate-800 truncate">{obj.name}</span>
                                                     <span className="text-[9px] text-slate-400 shrink-0">{obj.client}</span>
@@ -2458,7 +2458,7 @@ export default function OperacionesPage() {
                                             </div>
 
                                             {/* Acciones rápidas */}
-                                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                                            <div className="flex items-center gap-1 shrink-0">
                                                 {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
                                                     <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
                                                         className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
@@ -2466,9 +2466,10 @@ export default function OperacionesPage() {
                                                         <Siren size={14}/>
                                                     </button>
                                                 )}
-                                                <div className="p-2 lg:p-1.5 bg-slate-100 text-slate-600 rounded-lg">
+                                                <button onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}
+                                                    className="p-2 lg:p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
                                                     {isExpanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
-                                                </div>
+                                                </button>
                                             </div>
                                         </div>
 
