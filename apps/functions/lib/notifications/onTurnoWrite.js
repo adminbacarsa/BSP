@@ -135,6 +135,48 @@ exports.onTurnoWrite = functions
         }
         return;
     }
+    if (after && before && !before.isCompleted && after.isCompleted === true &&
+        after.completionReason === 'AUTO_SHIFT_END') {
+        const completedEmployeeId = after.employeeId;
+        if (!completedEmployeeId)
+            return;
+        const objective = after.objectiveName || after.clientName || 'tu puesto';
+        const fmtT = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+        const endDate = after.endTime?.toDate ? after.endTime.toDate() : null;
+        const endStr = endDate ? fmtT(endDate) : '';
+        const completedMsg = {
+            title: '✅ Turno finalizado',
+            body: endStr
+                ? `Tu turno en ${objective} finalizó a las ${endStr}. ¡Hasta luego!`
+                : `Tu turno en ${objective} ha concluido. ¡Hasta luego!`,
+        };
+        const empDocC = await db.collection('empleados').doc(completedEmployeeId).get();
+        const empUidC = empDocC.exists ? empDocC.data()?.uid : undefined;
+        const [byEmpIdC, byUidC] = await Promise.all([
+            db.collection('device_tokens').where('employeeId', '==', completedEmployeeId).get(),
+            empUidC ? db.collection('device_tokens').where('uid', '==', empUidC).get() : Promise.resolve({ docs: [] }),
+        ]);
+        const tokenSetC = new Set();
+        [...byEmpIdC.docs, ...byUidC.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10)
+            tokenSetC.add(t); });
+        const tokensC = Array.from(tokenSetC);
+        const turnoIdC = change.after.id;
+        await db.collection('user_notifications').add({
+            uid: empUidC || null, employeeId: completedEmployeeId,
+            title: completedMsg.title, body: completedMsg.body,
+            type: 'TURNO_COMPLETADO', turnoId: turnoIdC,
+            read: false, readAt: null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        if (tokensC.length) {
+            await admin.messaging().sendEachForMulticast({
+                tokens: tokensC,
+                notification: { title: completedMsg.title, body: completedMsg.body },
+                webpush: { notification: { icon: '/icons/icon-192x192.png' }, fcmOptions: { link: '/empleado/dashboard' } },
+            }).catch(e => console.warn('[onTurnoWrite] Completado push error:', e));
+        }
+        return;
+    }
     let eventType;
     const employeeId = (after || before)?.employeeId;
     if (!employeeId)
