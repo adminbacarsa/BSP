@@ -1991,7 +1991,7 @@ export default function OperacionesPage() {
             if (s.isRetention)                               obj.retention++;
             else if (s.isPresent && !s.isCompleted)          obj.active++;
             else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (s.isOperationalVacancy)               { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
+            else if (s.isUnassigned)                       { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; } // incluye devueltas
             else if (s.isFuture || s.isImminent)             obj.plan++;
         });
         // Aplicar filtro de cliente si está activo
@@ -2398,7 +2398,7 @@ export default function OperacionesPage() {
                                         case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
                                         case 'RETENIDOS':  return s.isRetention;
                                         case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
-                                        case 'VACANTES':   return s.isOperationalVacancy;
+                                        case 'VACANTES':   return s.isUnassigned; // incluye devueltas
                                         case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
                                         case 'FRANCOS':    return s.isFranco;
                                         default:           return !s.isFranco;

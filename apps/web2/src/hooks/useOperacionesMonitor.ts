@@ -274,8 +274,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isEarlyStartShift = shift.isEarlyStart === true || shift.isReten === true
                 || shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE';
             const shiftStartMs = shift.shiftDateObj ? shift.shiftDateObj.getTime() : 0;
+            // withinWindow: extendido a 4h para no ocultar guardias que marcan entrada anticipada.
+            // Antes era 60 min y causaba que guardias presentes "desaparecieran" al refrescar.
+            // Solo oculta isPresent=true si el turno empieza en más de 4h (claramente dato incorrecto).
             const withinWindow = !shiftStartMs || isEarlyStartShift
-                || (currentTime.getTime() + 60 * 60 * 1000) >= shiftStartMs; // dentro de 60 min o ya inició
+                || (currentTime.getTime() + 4 * 60 * 60 * 1000) >= shiftStartMs;
             const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && withinWindow;
             const isCompleted = !!shift.isCompleted;
             
@@ -285,6 +288,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
 
             const isUnassigned = !isValidEmployee;
+            // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
+            // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
+            // para incluir también las devueltas — ambas representan puestos sin cobertura real.
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
             const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
             
@@ -578,10 +584,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
-            // NO suprimir si hay ausente — mostrar como vacante para que el operador la cubra
-            // (quitado: if absentSlots.some(a => sameSlot(a)) return false)
-            // Solo suprimir la tarjeta de vacante si fue devuelta MANUALMENTE por el operador —
-            // los turnos auto-notificados (origin==='SLA_VIRTUAL') no deben suprimir la vacante.
+            // Suprimir vacante virtual si ya hay un turno real cubriendo el slot:
+            // - devuelta MANUAL por operador (isUnassigned && isReportedToPlanning && origin != SLA_VIRTUAL)
+            //   → operador la devolvió; planificación la está gestionando
+            // - vacante operativa real de Firestore (isOperationalVacancy)
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && s.origin !== 'SLA_VIRTUAL' && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
@@ -626,7 +632,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             case 'PLAN':       return hoy.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
             case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
             case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention);
-            case 'VACANTES':   return hoy.filter((s:any) => s.isOperationalVacancy); // Fix 3: sync con stats.vacantes (excluye devueltas)
+            case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
             case 'AUSENTES':   return hoy.filter((s:any) => s.isAbsent || s.isPotentialAbsence);
             case 'FRANCOS':    return hoy.filter((s:any) => s.isFranco);
             default:           return hoy;
@@ -636,7 +642,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (s.isCompleted && !s.isRetention) return false;
             if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isOperationalVacancy).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
