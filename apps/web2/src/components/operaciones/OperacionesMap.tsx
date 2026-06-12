@@ -129,7 +129,7 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
     );
 
     return (
-        <div style={{ width: '560px', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
+        <div style={{ width: 'min(560px, calc(100vw - 24px))', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
             {/* HEADER */}
             <div style={{ background: getHeaderGradient(marker.statusText), borderRadius: '12px 12px 0 0', padding: '8px 12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

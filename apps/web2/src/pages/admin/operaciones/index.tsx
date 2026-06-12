@@ -1197,6 +1197,12 @@ export default function OperacionesPage() {
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
     const [showCoverageGrid, setShowCoverageGrid] = useState(false);
+    // Auto-colapsar mapa en mobile al montar
+    useEffect(() => {
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+            setMapCollapsed(true);
+        }
+    }, []);
     const [confirmEndSession, setConfirmEndSession] = useState(false);
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -2010,12 +2016,12 @@ export default function OperacionesPage() {
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
     const tabs = [
-        { id: 'PLAN', label: 'PLAN', count: logic.stats.plan, color: 'text-indigo-600' },
-        { id: 'ACTIVOS', label: 'ACTIVOS', count: logic.stats.activos, color: 'text-emerald-600' },
-        { id: 'RETENIDOS', label: 'RETENIDOS', count: logic.stats.retenidos, color: 'text-orange-600' },
-        { id: 'VACANTES', label: 'VACANTES', count: logic.stats.vacantes, color: 'text-slate-800' },
-        { id: 'AUSENTES', label: 'AUSENTES', count: logic.stats.ausentes, color: 'text-rose-700' },
-        { id: 'FRANCOS', label: 'FRANCOS', count: logic.stats.francos, color: 'text-blue-600' }
+        { id: 'PLAN',      label: 'PLAN',    shortLabel: 'PLAN',  count: logic.stats.plan,      color: 'text-indigo-600' },
+        { id: 'ACTIVOS',   label: 'ACTIVOS', shortLabel: 'ACT',   count: logic.stats.activos,   color: 'text-emerald-600' },
+        { id: 'RETENIDOS', label: 'RETEN.',  shortLabel: 'RET',   count: logic.stats.retenidos, color: 'text-orange-600' },
+        { id: 'VACANTES',  label: 'VAC.',    shortLabel: 'VAC',   count: logic.stats.vacantes,  color: 'text-slate-800' },
+        { id: 'AUSENTES',  label: 'AUS.',    shortLabel: 'AUS',   count: logic.stats.ausentes,  color: 'text-rose-700' },
+        { id: 'FRANCOS',   label: 'FRANC.',  shortLabel: 'FRANC', count: logic.stats.francos,   color: 'text-blue-600' }
     ];
 
     if (!logic.isReady) return (
@@ -2105,14 +2111,14 @@ export default function OperacionesPage() {
                             <div className="px-3 pb-2 flex gap-2 flex-wrap">
                                 {logic.stats.ausentes > 0 && (
                                     <button onClick={() => logic.setViewTab('AUSENTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-1 bg-rose-600 text-white text-[10px] font-black rounded-lg hover:bg-rose-700 transition-colors">
-                                        <AlertTriangle size={11}/> {logic.stats.ausentes} AUSENTES — Gestionar
+                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-600 text-white text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-700 active:scale-95 transition-colors">
+                                        <AlertTriangle size={13}/> {logic.stats.ausentes} AUSENTES — Gestionar
                                     </button>
                                 )}
                                 {logic.stats.vacantes > 0 && (
                                     <button onClick={() => logic.setViewTab('VACANTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-700 border border-rose-300 text-[10px] font-black rounded-lg hover:bg-rose-200 transition-colors">
-                                        <UserX size={11}/> {logic.stats.vacantes} VACANTES — Ver
+                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-100 text-rose-700 border border-rose-300 text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-200 active:scale-95 transition-colors">
+                                        <UserX size={13}/> {logic.stats.vacantes} VACANTES — Ver
                                     </button>
                                 )}
                             </div>
@@ -2161,7 +2167,7 @@ export default function OperacionesPage() {
                 </div>
             )}
 
-            <div className={`${mapCollapsed || isExternalMap ? 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]' : 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]'} flex flex-col lg:flex-row gap-4 p-2 animate-in fade-in relative`}>
+            <div className={`flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative ${mapCollapsed || isExternalMap ? 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]' : 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]'}`}>
                 {!isExternalMap && !mapCollapsed && (
                     <div className="flex-1 max-h-[38%] lg:max-h-none lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
                         <OperacionesMap
@@ -2177,17 +2183,27 @@ export default function OperacionesPage() {
                         />
                         <div className="absolute top-4 right-4 z-[1000] flex gap-2">
                             <button onClick={() => setMapCollapsed(true)} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100" title="Colapsar mapa"><ChevronLeft size={18} className="text-slate-600"/></button>
-                            <button onClick={handleUndockMap} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
+                            <button onClick={handleUndockMap} className="hidden lg:flex bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
                         </div>
                     </div>
                 )}
                 {!isExternalMap && mapCollapsed && (
-                    <button onClick={() => setMapCollapsed(false)}
-                        className="hidden lg:flex items-center gap-2 w-10 bg-slate-100 rounded-xl border border-slate-200 shadow-inner hover:bg-slate-200 transition-colors writing-mode-vertical justify-center"
-                        title="Expandir mapa">
-                        <MapPin size={16} className="text-slate-400"/>
-                        <span className="text-[9px] font-black text-slate-400 uppercase" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>Ver mapa</span>
-                    </button>
+                    <>
+                        {/* Desktop: franja vertical */}
+                        <button onClick={() => setMapCollapsed(false)}
+                            className="hidden lg:flex items-center gap-2 w-10 bg-slate-100 rounded-xl border border-slate-200 shadow-inner hover:bg-slate-200 transition-colors writing-mode-vertical justify-center"
+                            title="Expandir mapa">
+                            <MapPin size={16} className="text-slate-400"/>
+                            <span className="text-[9px] font-black text-slate-400 uppercase" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>Ver mapa</span>
+                        </button>
+                        {/* Mobile: botón flotante abajo a la derecha */}
+                        <button onClick={() => setMapCollapsed(false)}
+                            className="lg:hidden fixed bottom-6 right-4 z-50 flex items-center gap-2 px-4 py-3 bg-slate-800 text-white rounded-full shadow-xl hover:bg-slate-700 active:scale-95 transition-all"
+                            title="Ver mapa">
+                            <MapPin size={16}/>
+                            <span className="text-xs font-black uppercase">Mapa</span>
+                        </button>
+                    </>
                 )}
 
                 <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
@@ -2288,13 +2304,13 @@ export default function OperacionesPage() {
                         </div>
 
                         {/* UNA SOLA FILA: número grande + label abajo, clickable para filtrar */}
-                        <div className="flex gap-0.5 overflow-x-auto">
+                        <div className="flex gap-0.5 overflow-x-auto pb-0.5 scrollbar-none">
                             {tabs.map(t => {
                                 const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                        className={`relative flex-1 px-1 py-1.5 rounded-lg transition-all whitespace-nowrap flex flex-col items-center gap-0
+                                        className={`relative flex-1 min-w-[44px] px-1 py-2 lg:py-1.5 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
                                                 ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
                                                 : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-50 text-slate-400 hover:bg-slate-100')
@@ -2306,7 +2322,8 @@ export default function OperacionesPage() {
                                             {t.count || 0}
                                         </span>
                                         <span className={`text-[8px] font-black uppercase leading-none mt-0.5 ${isActive ? 'text-white/80' : 'text-slate-400'}`}>
-                                            {t.label}
+                                            <span className="lg:hidden">{t.shortLabel}</span>
+                                            <span className="hidden lg:inline">{t.label}</span>
                                         </span>
                                     </button>
                                 );
@@ -2408,12 +2425,12 @@ export default function OperacionesPage() {
                                 return (
                                     <div key={obj.objectiveId} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all`}>
                                         {/* Header del objetivo */}
-                                        <div className="px-3 py-2.5 flex items-center gap-2">
+                                        <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}>
                                             {/* Indicador color */}
-                                            <div className={`w-2 h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
+                                            <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
 
                                             {/* Info principal */}
-                                            <div className="flex-1 min-w-0" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)} style={{cursor:'pointer'}}>
+                                            <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs font-black text-slate-800 truncate">{obj.name}</span>
                                                     <span className="text-[9px] text-slate-400 shrink-0">{obj.client}</span>
@@ -2442,18 +2459,17 @@ export default function OperacionesPage() {
                                             </div>
 
                                             {/* Acciones rápidas */}
-                                            <div className="flex items-center gap-1 shrink-0">
+                                            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                                                 {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
                                                     <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
-                                                        className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors"
+                                                        className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
                                                         title="Protocolo cobertura">
-                                                        <Siren size={12}/>
+                                                        <Siren size={14}/>
                                                     </button>
                                                 )}
-                                                <button onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}
-                                                    className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
-                                                    {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
-                                                </button>
+                                                <div className="p-2 lg:p-1.5 bg-slate-100 text-slate-600 rounded-lg">
+                                                    {isExpanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                                </div>
                                             </div>
                                         </div>
 
