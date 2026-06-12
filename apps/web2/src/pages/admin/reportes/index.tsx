@@ -1153,8 +1153,10 @@ export default function ReportsPage() {
                                         </td>
                                         <td className="py-2 px-3 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
                                         <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.horasTrabajadas > 0 ? 'text-indigo-600' : 'text-slate-300'}`}>
-                                            {row.horasTrabajadas > 0 ? row.horasTrabajadas.toFixed(1) : '—'}
-                                            {row.hasOvertime && row.rDur != null && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
+                                            {{row.rDur != null && row.rDur > 0 && row.horasTrabajadas === 0
+                                              ? row.rDur.toFixed(1)
+                                              : row.horasTrabajadas > 0 ? row.horasTrabajadas.toFixed(1) : '—'}
+                                            {row.hasOvertime && row.rDur != null && row.horasTrabajadas > 0 && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
                                         </td>
                                         <td className="py-2 px-3 text-center font-mono text-amber-600"><div className="flex items-center justify-center gap-1">{row.day > 0 && <Sun size={10}/>} {row.day > 0 ? row.day.toFixed(1) : '-'}</div></td>
                                         <td className="py-2 px-3 text-center font-mono text-violet-600"><div className="flex items-center justify-center gap-1">{row.night > 0 && <Moon size={10}/>} {row.night > 0 ? row.night.toFixed(1) : '-'}</div></td>
