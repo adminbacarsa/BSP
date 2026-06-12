@@ -334,10 +334,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
             // isReportedToPlanning solo cuenta como cobertura cuando el turno es VACANTE NO-ASIGNADO reportado
-            // (para no generar vacante virtual duplicada encima del existente).
-            // Para empleados AUSENTES reportados: la ausencia fue notificada, pero el puesto sigue descubierto.
-            const countsForCoverage = (isValidEmployee && !isAbsent && !isPotentialAbsence) ||
-                (isReportedToPlanning && !isValidEmployee);
+            // MANUALMENTE por el operador (no si fue auto-notificación del sistema).
+            // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
+            // el puesto sigue descubierto y NO cuentan como cobertura real.
+            const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
+            const countsForCoverage = !isAutoNotification && (
+                (isValidEmployee && !isAbsent && !isPotentialAbsence) ||
+                (isReportedToPlanning && !isValidEmployee)
+            );
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
@@ -551,7 +555,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
             // NO suprimir si hay ausente — mostrar como vacante para que el operador la cubra
             // (quitado: if absentSlots.some(a => sameSlot(a)) return false)
-            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
+            // Solo suprimir la tarjeta de vacante si fue devuelta MANUALMENTE por el operador —
+            // los turnos auto-notificados (origin==='SLA_VIRTUAL') no deben suprimir la vacante.
+            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && s.origin !== 'SLA_VIRTUAL' && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
             if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
