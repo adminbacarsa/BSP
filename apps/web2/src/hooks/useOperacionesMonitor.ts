@@ -75,6 +75,17 @@ const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
 
 const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
 
+// Normalización agresiva para matching entre SLA y turnos:
+// elimina acentos (á→a, é→e, í→i, ó→o, ú→u) y prefijo "Puesto " para que
+// "Puesto Rondin" matchee "Rondín", "Puesto 1" matchee "1", etc.
+const normalizePosMatch = (n: unknown): string => {
+    let s = String(n ?? '').trim().toLowerCase();
+    // eslint-disable-next-line no-misleading-character-class
+    s = s.normalize('NFD').replace(/[̀-ͯ]/g, ''); // strip diacríticos
+    s = s.replace(/^puesto\s+/, '');                         // strip prefijo "puesto "
+    return s;
+};
+
 const getPositionCapacity = (servicesSLA: any[], objectiveId: string, positionName: string): number => {
     const sla = servicesSLA.find((s: any) => s.objectiveId === objectiveId);
     const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(positionName));
@@ -373,9 +384,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 }
 
                 const allowedShifts = pos.allowedShiftTypes || [];
-                const targetPosName = (pos.name || '').trim().toLowerCase();
+                const targetPosName = normalizePosMatch(pos.name);
                 const posShifts = objShifts.filter(s => {
-                    const sPos = (s.positionName || '').trim().toLowerCase();
+                    const sPos = normalizePosMatch(s.positionName);
                     return (sPos === targetPosName || (sPos === 'general' && targetPosName === 'guardia')) && s.countsForCoverage;
                 });
 
@@ -401,17 +412,20 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     relevantDefinitions.forEach((slot: any) => {
                         const start = createDateFromTime(slot.startTime, now);
                         let end = createDateFromTime(slot.endTime, now);
-                        
+
                         if (start && end) {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
-                            
-                            // CHECKEO: ¿Está cubierto ESTE turno específico?
-                            // Esto unifica "Noche" en una sola tarjeta porque checkea el rango completo 19:00 -> 07:00
-                            const isCovered = checkSlotCoverage(start, end, posShifts);
-                            
-                            if (!isCovered) {
+
+                            // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
+                            const coveredCount = posShifts.filter((s: any) => checkSlotCoverage(start, end, [s])).length;
+                            // Capacidad requerida según SLA (quantity del puesto)
+                            const requiredCount = pos.quantity || 1;
+                            const missing = Math.max(0, requiredCount - coveredCount);
+
+                            // Generar una tarjeta de vacante por cada puesto faltante
+                            for (let i = 0; i < missing; i++) {
                                 virtualVacancies.push({
-                                    id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}`,
+                                    id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId,
@@ -695,6 +709,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             if (!endMs) continue;
             const minutesOvertime = (nowMs - endMs) / 60000;
+
+            // ── AUTO-FIN POR TIEMPO EXCESIVO (>6h sin relevo) ─────────────────────
+            // Cubre el caso en que nadie tuvo la plataforma abierta durante la noche
+            // y los turnos del día anterior quedaron en isRetention sin auto-completarse.
+            // Si el turno lleva >6h de retención, se cierra automáticamente.
+            const autoTimeKey = `${s.id}_AUTO_END_OVERTIME`;
+            if (minutesOvertime > 360 && !alertedVacancyIds.current.has(autoTimeKey)) {
+                alertedVacancyIds.current.add(autoTimeKey);
+                updateDocForEmpresa('turnos', s.id, {
+                    status: 'COMPLETED', isCompleted: true, isPresent: false,
+                    completedAt: serverTimestamp(), completedBy: 'Sistema',
+                    completionReason: 'AUTO_OVERTIME_LIMIT',
+                }, empresaId, migracionCompleta).then(() => {
+                    toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
+                }).catch(e => {
+                    alertedVacancyIds.current.delete(autoTimeKey);
+                    console.warn('[autoEndRetentionTime]', e);
+                });
+                continue;
+            }
+
             if (minutesOvertime < 120) continue;
             const alertKey = `${s.id}_RETENCION_LARGA`;
             if (alertedVacancyIds.current.has(alertKey)) continue;
