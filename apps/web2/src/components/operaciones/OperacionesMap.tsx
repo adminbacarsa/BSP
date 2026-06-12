@@ -58,21 +58,21 @@ const getInitials = (name: string) => {
 };
 
 const getShiftStatusStyle = (shift: any, diffMin: number): { borderColor: string; background: string; avatarBg: string } => {
-    if (shift.isUnassigned)                          return { borderColor: '#e11d48', background: '#fff1f2', avatarBg: '#fda4af' };
-    if (shift.isFranco)                              return { borderColor: '#3b82f6', background: '#eff6ff', avatarBg: '#93c5fd' };
-    if (shift.isPresent)                             return { borderColor: '#10b981', background: '#f0fdf4', avatarBg: '#6ee7b7' };
-    if (!shift.isPresent && diffMin > 60)            return { borderColor: '#f97316', background: '#fff7ed', avatarBg: '#fdba74' };
-    if (!shift.isPresent && diffMin > 5)             return { borderColor: '#f59e0b', background: '#fffbeb', avatarBg: '#fde68a' };
+    if (shift.isUnassigned)                                    return { borderColor: '#e11d48', background: '#fff1f2', avatarBg: '#fda4af' };
+    if (shift.isFranco)                                        return { borderColor: '#3b82f6', background: '#eff6ff', avatarBg: '#93c5fd' };
+    if (shift.isPresent)                                       return { borderColor: '#10b981', background: '#f0fdf4', avatarBg: '#6ee7b7' };
+    if (shift.isAbsent || shift.isPotentialAbsence)            return { borderColor: '#f97316', background: '#fff7ed', avatarBg: '#fdba74' };
+    if (!shift.isPresent && diffMin > 5)                       return { borderColor: '#f59e0b', background: '#fffbeb', avatarBg: '#fde68a' };
     return { borderColor: '#cbd5e1', background: '#f8fafc', avatarBg: '#e2e8f0' };
 };
 
 const getStatusPriority = (shift: any, diffMin: number): number => {
-    if (shift.isUnassigned)                          return 0;
-    if (shift.isAbsent || (!shift.isFranco && diffMin > 30)) return 1;
-    if (!shift.isFranco && diffMin > 5)              return 2;
-    if (shift.isPresent)                             return 3;
-    if (diffMin >= -15)                              return 4;
-    if (shift.isFranco)                              return 6; // Franco: sin urgencia, al final
+    if (shift.isUnassigned)                                    return 0;
+    if (shift.isAbsent || shift.isPotentialAbsence)            return 1;
+    if (!shift.isFranco && diffMin > 5)                        return 2;
+    if (shift.isPresent)                                       return 3;
+    if (diffMin >= -15)                                        return 4;
+    if (shift.isFranco)                                        return 6;
     return 5;
 };
 
@@ -171,7 +171,7 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                     else if (shift.isAbsent)                                   { statusLabel = 'AUSENTE';  statusColor = '#64748b'; }
                     else if (shift.isUnassigned && shift.isReportedToPlanning) { statusLabel = 'DEVUELTA'; statusColor = '#7c3aed'; }
                     else if (shift.isUnassigned)                               { statusLabel = 'VACANTE';  statusColor = '#e11d48'; }
-                    else if (diffMin > 30)                                     { statusLabel = 'AUSENCIA'; statusColor = '#dc2626'; }
+                    else if (shift.isPotentialAbsence)                         { statusLabel = 'AUSENCIA'; statusColor = '#dc2626'; }
                     else if (diffMin > 5)                                      { statusLabel = 'TARDE';    statusColor = '#d97706'; }
                     else if (diffMin >= -15)                                   { statusLabel = 'EN HORA';  statusColor = '#4f46e5'; }
 
@@ -243,11 +243,11 @@ const OperacionesMap = ({
                         icon = Icons.VIOLET;
                         statusText = isReturned ? 'DEVUELTA A PLANIF.' : 'VACANTE REPORTADA';
                         priority = 5;
-                    } else if ((s.isUnassigned || (!s.isPresent && !s.isCompleted && !s.isFranco && diffMin > 60)) && priority < 5) {
+                    } else if ((s.isUnassigned || s.isAbsent || s.isPotentialAbsence) && priority < 5) {
                         icon = Icons.RED; statusText = s.isUnassigned ? 'VACANTE' : 'AUSENCIA'; priority = 5;
                     } else if (s.isRetention && priority < 4) {
                         icon = Icons.ORANGE; statusText = 'RETENCIÓN'; priority = 4;
-                    } else if (!s.isPresent && !s.isCompleted && !s.isFranco && diffMin > 5 && diffMin <= 60 && priority < 3) {
+                    } else if (!s.isPresent && !s.isAbsent && !s.isPotentialAbsence && !s.isCompleted && !s.isFranco && diffMin > 5 && priority < 3) {
                         icon = Icons.YELLOW; statusText = 'TARDE'; priority = 3;
                     } else if ((s.isPresent || (diffMin >= -15 && diffMin <= 5 && !s.isPresent)) && priority < 2) {
                         icon = Icons.GREEN; statusText = s.isPresent ? 'ACTIVO' : 'A TIEMPO'; priority = 2;
