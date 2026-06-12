@@ -553,15 +553,17 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
                 return false;
             }
-            // Si el slot ya inició y hay un guardia PRESENTE ahora en esa posición
-            // (llegó tarde pero ya está cubriendo), suprimir la vacante.
-            // La ausencia del tramo inicial ya quedó capturada como AUSENCIA del guardia ausente.
+            // Si el slot ya inició y hay un guardia PRESENTE cubriendo ese mismo intervalo,
+            // suprimir la vacante. El guardia debe cubrir ≥90% del slot (checkSlotCoverage).
+            // ⚠️ SIN checkSlotCoverage un guardia mañana (07-15) suprimiría la vacante
+            //    del turno tarde (12-20) que apenas se solapa.
             const slotAlreadyStarted = v.shiftDateObj && v.shiftDateObj.getTime() <= now.getTime();
             if (slotAlreadyStarted) {
                 const hasCurrentGuard = dedupedRealShifts.some((s: any) =>
                     s.isPresent && !s.isCompleted &&
                     s.objectiveId === v.objectiveId &&
-                    normPosName(s.positionName) === normPosName(v.positionName)
+                    normPosName(s.positionName) === normPosName(v.positionName) &&
+                    checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s])
                 );
                 if (hasCurrentGuard) return false;
             }
@@ -579,7 +581,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
         const hoy = list.filter((s:any) => {
             if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
         });
         switch (viewTab) {
@@ -597,7 +599,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [processedData, viewTab, filterText, selectedClientId, now]);
     const stats = useMemo(() => { const hoy = processedData.filter(s => {
             if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
         }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isOperationalVacancy).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
