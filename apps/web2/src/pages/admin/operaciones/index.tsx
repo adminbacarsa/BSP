@@ -2016,12 +2016,12 @@ export default function OperacionesPage() {
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
     const tabs = [
-        { id: 'PLAN',      label: 'PLAN',    shortLabel: 'PLAN',  count: logic.stats.plan,      color: 'text-indigo-600' },
-        { id: 'ACTIVOS',   label: 'ACTIVOS', shortLabel: 'ACT',   count: logic.stats.activos,   color: 'text-emerald-600' },
-        { id: 'RETENIDOS', label: 'RETEN.',  shortLabel: 'RET',   count: logic.stats.retenidos, color: 'text-orange-600' },
-        { id: 'VACANTES',  label: 'VAC.',    shortLabel: 'VAC',   count: logic.stats.vacantes,  color: 'text-slate-800' },
-        { id: 'AUSENTES',  label: 'AUS.',    shortLabel: 'AUS',   count: logic.stats.ausentes,  color: 'text-rose-700' },
-        { id: 'FRANCOS',   label: 'FRANC.',  shortLabel: 'FRANC', count: logic.stats.francos,   color: 'text-blue-600' }
+        { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600' },
+        { id: 'ACTIVOS',   label: 'ACT',     count: logic.stats.activos,   color: 'text-emerald-600' },
+        { id: 'RETENIDOS', label: 'RET',     count: logic.stats.retenidos, color: 'text-orange-600' },
+        { id: 'VACANTES',  label: 'VAC',     count: logic.stats.vacantes,  color: 'text-slate-800' },
+        { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700' },
+        { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
     ];
 
     if (!logic.isReady) return (
@@ -2304,13 +2304,13 @@ export default function OperacionesPage() {
                         </div>
 
                         {/* UNA SOLA FILA: número grande + label abajo, clickable para filtrar */}
-                        <div className="flex gap-0.5 overflow-x-auto pb-0.5 scrollbar-none">
+                        <div className="flex gap-0.5 overflow-x-auto">
                             {tabs.map(t => {
                                 const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                        className={`relative flex-1 min-w-[44px] px-1 py-2 lg:py-1.5 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
+                                        className={`relative flex-1 px-1 py-2 lg:py-1.5 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
                                                 ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
                                                 : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-50 text-slate-400 hover:bg-slate-100')
@@ -2322,8 +2322,7 @@ export default function OperacionesPage() {
                                             {t.count || 0}
                                         </span>
                                         <span className={`text-[8px] font-black uppercase leading-none mt-0.5 ${isActive ? 'text-white/80' : 'text-slate-400'}`}>
-                                            <span className="lg:hidden">{t.shortLabel}</span>
-                                            <span className="hidden lg:inline">{t.label}</span>
+                                            {t.label}
                                         </span>
                                     </button>
                                 );
