@@ -27,21 +27,17 @@ const db = getFirestore();
 const DELETE_MODE = process.argv.includes('--delete');
 const EMPRESA_ID = 'pruebas_sa'; // ← cambiar si hay múltiples empresas
 
-// Rango: últimos 30 días hacia adelante (captura basura reciente)
-const rangeStart = new Date();
-rangeStart.setDate(rangeStart.getDate() - 30);
-const rangeEnd = new Date();
-rangeEnd.setDate(rangeEnd.getDate() + 2);
-
 async function main() {
     console.log('\n══════════════════════════════════════════');
     console.log(' LIMPIEZA SLA_VIRTUAL — comtroldata');
     console.log(` Empresa: ${EMPRESA_ID}`);
     console.log(` Modo: ${DELETE_MODE ? '🗑️  BORRAR' : '🔍 DRY RUN (solo lista)'}`);
+    console.log(' Sin filtro de fecha → borra TODOS los históricos');
     console.log('══════════════════════════════════════════\n');
 
-    // Buscar todos los SLA_VIRTUAL (sin filtro de fecha para evitar índice compuesto)
-    // El filtro de rango se aplica en memoria abajo
+    // Buscar TODOS los SLA_VIRTUAL sin filtro de fecha.
+    // El filtro anterior (últimos 30 días) dejaba pasar docs con startTime nulo
+    // o con fechas incorrectas (ej. Rondín con startTime = medianoche).
     const snap = await db.collection('turnos')
         .where('origin', '==', 'SLA_VIRTUAL')
         .where('empresaId', '==', EMPRESA_ID)
@@ -52,17 +48,7 @@ async function main() {
         return;
     }
 
-    // Filtrar por rango de fechas en memoria
-    const filteredDocs = snap.docs.filter(doc => {
-        const d = doc.data();
-        const t = d.startTime?.toDate?.()?.getTime?.() ?? 0;
-        return t >= rangeStart.getTime() && t <= rangeEnd.getTime();
-    });
-
-    if (filteredDocs.length === 0) {
-        console.log(`✅ Sin documentos SLA_VIRTUAL en el período (${snap.size} total históricos).\n`);
-        return;
-    }
+    const filteredDocs = snap.docs;
 
     // Agrupar por objectiveName + positionName para mejor visualización
     const byObjective: Record<string, any[]> = {};
@@ -90,7 +76,7 @@ async function main() {
     });
 
     console.log(`─────────────────────────────────────────`);
-    console.log(`Total período: ${totalCount} docs  |  Histórico total: ${snap.size} docs`);
+    console.log(`Total SLA_VIRTUAL: ${totalCount} docs`);
 
     if (!DELETE_MODE) {
         console.log('\n💡 Para borrar, corré:');

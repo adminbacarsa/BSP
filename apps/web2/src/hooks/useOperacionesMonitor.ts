@@ -570,48 +570,59 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return true;
         });
 
+        // ── Suprimir DEVUELTO/SLA_VIRTUAL del display cuando ya no son accionables:
+        //    a) el slot ya terminó (vacante pasada)
+        //    b) hay guardias plan/presentes suficientes para cubrir el slot
+        //       → planning ya asignó alguien; la vacante está resuelta aunque el guardia no llegó
+        const suppressedDevuelto = new Set<string>();
+        dedupedRealShifts.forEach(s => {
+            if (!s.isUnassigned || !s.isReportedToPlanning || !s.shiftDateObj || !s.endDateObj) return;
+            // a) Slot ya terminó
+            if (s.endDateObj.getTime() < now.getTime()) {
+                suppressedDevuelto.add(s.id);
+                return;
+            }
+            // b) Cobertura (plan + presentes) suficiente
+            const cap = getPositionCapacity(servicesSLA, s.objectiveId, s.positionName);
+            if (cap <= 0) return;
+            const coveringCount = dedupedRealShifts.filter(cover =>
+                !cover.isUnassigned && !cover.isAbsent && !cover.isCompleted &&
+                cover.objectiveId === s.objectiveId &&
+                normPosName(cover.positionName) === normPosName(s.positionName) &&
+                checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
+            ).length;
+            if (coveringCount >= cap) suppressedDevuelto.add(s.id);
+        });
+        const visibleRealShifts = dedupedRealShifts.filter(s => !suppressedDevuelto.has(s.id));
+
         // ── Suprimir vacantes virtuales solo si están CUBIERTAS (no suprimir por ausencias)
         // Un ausente sigue generando una vacante — la posición necesita cobertura
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
-            // Auto-expirar: slot ya terminó → no mostrar como vacante activa
-            // EXCEPCIÓN: vacantes del DÍA DE HOY permanecen visibles aunque el turno haya terminado.
-            // Un puesto descubierto sigue siendo información operativa relevante hasta la medianoche.
-            // Solo se descartan vacantes de días anteriores que ya expiraron.
+            // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
             const vacancyIsToday = isSameDay(v.shiftDateObj, now);
             if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
-            // Suprimir vacante virtual si ya hay un doc devuelto a planificación para este slot:
-            // - devuelta MANUAL por operador (origin != SLA_VIRTUAL)
-            // - doc SLA_VIRTUAL del auto-notificador (ya representa la vacante; no duplicar)
-            // → en ambos casos el puesto ya figura en la lista; la vacante virtual es redundante.
+            // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
+            // Suprimir si hay guardias plan O presentes suficientes para el slot
+            // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
-            if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
-                return false;
-            }
-            // Si el slot ya inició y hay un guardia PRESENTE cubriendo ese mismo intervalo,
-            // suprimir la vacante. El guardia debe cubrir ≥90% del slot (checkSlotCoverage).
-            // ⚠️ SIN checkSlotCoverage un guardia mañana (07-15) suprimiría la vacante
-            //    del turno tarde (12-20) que apenas se solapa.
-            const slotAlreadyStarted = v.shiftDateObj && v.shiftDateObj.getTime() <= now.getTime();
-            if (slotAlreadyStarted) {
-                const hasCurrentGuard = dedupedRealShifts.some((s: any) =>
-                    s.isPresent && !s.isCompleted &&
-                    s.objectiveId === v.objectiveId &&
-                    normPosName(s.positionName) === normPosName(v.positionName) &&
-                    checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s])
-                );
-                if (hasCurrentGuard) return false;
-            }
+            const coveringCount = dedupedRealShifts.filter((cover: any) =>
+                !cover.isUnassigned && !cover.isAbsent && !cover.isCompleted &&
+                cover.objectiveId === v.objectiveId &&
+                normPosName(cover.positionName) === normPosName(v.positionName) &&
+                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [cover])
+            ).length;
+            if (coveringCount >= cap) return false;
             return true;
         });
 
-        return [...dedupedRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
+        return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [rawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
     // ... Resto del hook igual ...
