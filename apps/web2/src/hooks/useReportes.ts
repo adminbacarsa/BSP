@@ -581,8 +581,14 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // Doc F sin fichada: liquida en el turno de cobertura si ese dÃ­a tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
 
-            const start = d.startTime.toDate();
-            const end = d.endTime.toDate();
+            // Fallback a tiempos reales si no hay planificado (ej: turno RET sin endTime)
+            const rStartFB = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
+                           : d.checkInTime?.seconds  ? new Date(d.checkInTime.seconds  * 1000) : null;
+            const rEndFB   = d.realEndTime?.seconds   ? new Date(d.realEndTime.seconds   * 1000)
+                           : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds  * 1000) : null;
+            const start = d.startTime?.toDate ? d.startTime.toDate() : rStartFB;
+            const end   = d.endTime?.toDate   ? d.endTime.toDate()   : rEndFB;
+            if (!start || !end) return;
             const isRet = rawCode === 'RET' || d.isReten === true;
             let duration: number;
 
@@ -610,8 +616,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             // Fix 4: feriado solo aplica a turnos no-FT (no doble acumulaciÃ³n)
             if (isFeriado && !isFT) hoursFeriado += duration;
+            // Solo sumar a teóricas si el turno tiene tiempos planificados reales
+            const hasPlannedTimes = !!(d.startTime?.toDate) && !!(d.endTime?.toDate);
             if (isFT) { hoursFT += duration; }
-            else { hoursTotalOperativas += duration; }
+            else if (hasPlannedTimes) { hoursTotalOperativas += duration; }
 
             // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teÃ³rico)
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
@@ -1050,7 +1058,10 @@ export const useReportes = (forcedClientId?: string | null) => {
             const allShiftsBase = shiftsSnap.docs
                 .map(doc => ({ id: doc.id, ...doc.data() }))
                 .filter((d: any) => {
-                    if (!d.startTime || !d.endTime || typeof d.startTime.toDate !== 'function') return false;
+                    // Aceptar turno si tiene tiempos planificados O tiempos reales
+                    const hasPlanned = d.startTime && typeof d.startTime.toDate === 'function';
+                    const hasReal    = d.realStartTime && typeof d.realStartTime.toDate === 'function';
+                    if (!hasPlanned && !hasReal) return false;
                     if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
                     return true;
