@@ -281,8 +281,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             
             const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
             const isResolvedByOps = shift.origin === 'OPERATIONS_COVERAGE' || shift.resolvedBy === 'OPERACIONES';
-            // Un ausente NO cubre el puesto — el slot queda descubierto y genera vacante
-            const countsForCoverage = (isValidEmployee && !isAbsent) || isReportedToPlanning;
+            // countsForCoverage se calcula después de isPotentialAbsence (línea ~332)
+            // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
 
             const isUnassigned = !isValidEmployee;
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
@@ -328,8 +328,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
             const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
             const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
-            // Potencial ausencia: T+30 sin confirmar presencia
+            // Potencial ausencia: T+60 sin confirmar presencia
             const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 60;
+
+            // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
+            // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
+            const countsForCoverage = (isValidEmployee && !isAbsent && !isPotentialAbsence) || isReportedToPlanning;
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
@@ -493,7 +497,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         //   • Guardia presente → sin acción
                         const unassignedShifts = allPosShifts.filter((s: any) => s.isUnassigned);
                         const absentUncoveredShifts = allPosShifts.filter((s: any) => {
-                            if (!s.isAbsent || s.isCompleted) return false;
+                            // Incluir tanto ausencias confirmadas (isAbsent) como potenciales (isPotentialAbsence)
+                            if ((!s.isAbsent && !s.isPotentialAbsence) || s.isCompleted) return false;
                             // ¿Hay algún turno activo (presente/futuro) que cubre el mismo slot?
                             return !posShifts.some((cover: any) =>
                                 checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
