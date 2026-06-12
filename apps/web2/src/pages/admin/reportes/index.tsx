@@ -482,12 +482,16 @@ export default function ReportsPage() {
                                                                             // Regla liquidación: inicio = hora planificada (salvo adelanto); fin = planificado (salvo retención)
                                                                             const isEarlyStartShift = s.isEarlyStart === true;
                                                                             const isRetentionShift  = s.isRetention === true || (s.retentionMinutes ?? 0) > 0;
-                                                                            const rStart = rStartRaw && start && !isEarlyStartShift ? start : rStartRaw;
-                                                                            const rEnd   = rEndRaw && end
-                                                                                ? (rEndRaw < end ? end                          // relevo anticipado → horas completas
-                                                                                : isRetentionShift ? rEndRaw                    // retención formal → hora real
-                                                                                : end)                                          // salida mínimamente tardía sin retención → hora planificada
-                                                                                : rEndRaw;
+                                                                            // Solo usar start/end planificado si existe un timestamp válido (>0)
+                                                                            const hasValidPlan = (startSec ?? 0) > 0 && (endSec ?? 0) > 0;
+                                                                            const rStart = rStartRaw && hasValidPlan && !isEarlyStartShift ? start : rStartRaw;
+                                                                            const rEnd   = rEndRaw
+                                                                                ? (hasValidPlan
+                                                                                    ? (rEndRaw < end ? end                       // relevo anticipado -> horas completas
+                                                                                      : isRetentionShift ? rEndRaw               // retencion -> hora real
+                                                                                      : end)                                     // sin retencion -> clampear a planificado
+                                                                                    : rEndRaw)                                   // sin planificado -> usar real
+                                                                                : null;
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;
                                                                             const hasOvertime = isRetentionShift && rDur != null && rDur > dur + 0.1;
                                                                             const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
@@ -1882,3 +1886,4 @@ export default function ReportsPage() {
         </DashboardLayout>
     );
 }
+ 
