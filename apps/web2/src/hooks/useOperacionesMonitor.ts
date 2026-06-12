@@ -584,11 +584,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 s.objectiveId === v.objectiveId &&
                 normPosName(s.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
-            // Suprimir vacante virtual si ya hay un turno real cubriendo el slot:
-            // - devuelta MANUAL por operador (isUnassigned && isReportedToPlanning && origin != SLA_VIRTUAL)
-            //   → operador la devolvió; planificación la está gestionando
-            // - vacante operativa real de Firestore (isOperationalVacancy)
-            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && s.origin !== 'SLA_VIRTUAL' && sameSlot(s))) return false;
+            // Suprimir vacante virtual si ya hay un doc devuelto a planificación para este slot:
+            // - devuelta MANUAL por operador (origin != SLA_VIRTUAL)
+            // - doc SLA_VIRTUAL del auto-notificador (ya representa la vacante; no duplicar)
+            // → en ambos casos el puesto ya figura en la lista; la vacante virtual es redundante.
+            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
             if (countPresentOnSlot(dedupedRealShifts, v.objectiveId, v.positionName, v.shiftDateObj, v.endDateObj) >= cap) {
