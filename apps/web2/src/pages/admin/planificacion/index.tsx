@@ -827,19 +827,28 @@ export default function PlanificacionPage() {
     const activeGuestIdsForObjective = useMemo(() => {
         if (!selectedObjective) return new Set<string>();
         const ids = new Set<string>();
-        for (const shift of Object.values(shiftsMap) as any[]) {
+        const planYear = currentDate.getFullYear();
+        const planMonth = currentDate.getMonth(); // 0-indexed
+        for (const [key, shift] of Object.entries(shiftsMap) as [string, any][]) {
             if (shift?.objectiveId === selectedObjective && shift?.employeeId) {
-                ids.add(shift.employeeId);
+                // Key format: "${employeeId}_YYYY-MM-DD" — date is always last 10 chars
+                const [sy, sm] = key.slice(-10).split('-').map(Number);
+                if (sy === planYear && sm - 1 === planMonth) {
+                    ids.add(shift.employeeId);
+                }
             }
         }
         // Incluir empleados asignados temporalmente via pendingChanges (cobertura externa de planificación)
-        for (const change of Object.values(pendingChanges) as any[]) {
+        for (const [key, change] of Object.entries(pendingChanges) as [string, any][]) {
             if (change?.objectiveId === selectedObjective && change?.employeeId && !change?.isDeleted) {
-                ids.add(change.employeeId);
+                const [cy, cm] = key.slice(-10).split('-').map(Number);
+                if (cy === planYear && cm - 1 === planMonth) {
+                    ids.add(change.employeeId);
+                }
             }
         }
         return ids;
-    }, [shiftsMap, pendingChanges, selectedObjective]);
+    }, [shiftsMap, pendingChanges, selectedObjective, currentDate]);
 
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
