@@ -333,7 +333,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
-            const countsForCoverage = (isValidEmployee && !isAbsent && !isPotentialAbsence) || isReportedToPlanning;
+            // isReportedToPlanning solo cuenta como cobertura cuando el turno es VACANTE NO-ASIGNADO reportado
+            // (para no generar vacante virtual duplicada encima del existente).
+            // Para empleados AUSENTES reportados: la ausencia fue notificada, pero el puesto sigue descubierto.
+            const countsForCoverage = (isValidEmployee && !isAbsent && !isPotentialAbsence) ||
+                (isReportedToPlanning && !isValidEmployee);
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
