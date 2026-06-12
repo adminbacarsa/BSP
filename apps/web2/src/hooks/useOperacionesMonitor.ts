@@ -344,7 +344,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
             };
         }).filter(Boolean);
 
@@ -729,6 +729,26 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             if (!endMs) continue;
             const minutesOvertime = (nowMs - endMs) / 60000;
+
+            // ── AUTO-FIN TURNO (+1 min después del horario, sin retención manual) ──
+            // Cierra automáticamente turnos custom que finalizaron y no fueron
+            // retenidos explícitamente por operaciones (isRetentionByField = false).
+            // Genera también la notificación push al guardia (via onTurnoWrite).
+            const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
+            if (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 360 && !alertedVacancyIds.current.has(autoShiftEndKey)) {
+                alertedVacancyIds.current.add(autoShiftEndKey);
+                updateDocForEmpresa('turnos', s.id, {
+                    status: 'COMPLETED', isCompleted: true, isPresent: false,
+                    completedAt: serverTimestamp(), completedBy: 'Sistema',
+                    completionReason: 'AUTO_SHIFT_END',
+                }, empresaId, migracionCompleta).then(() => {
+                    toast.success(`✅ Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                }).catch(e => {
+                    alertedVacancyIds.current.delete(autoShiftEndKey);
+                    console.warn('[autoEndShift]', e);
+                });
+                continue;
+            }
 
             // ── AUTO-FIN POR TIEMPO EXCESIVO (>6h sin relevo) ─────────────────────
             // Cubre el caso en que nadie tuvo la plataforma abierta durante la noche
