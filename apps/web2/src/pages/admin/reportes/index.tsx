@@ -1153,7 +1153,7 @@ export default function ReportsPage() {
                                         </td>
                                         <td className="py-2 px-3 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
                                         <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.horasTrabajadas > 0 ? 'text-indigo-600' : 'text-slate-300'}`}>
-                                            {{row.rDur != null && row.rDur > 0 && row.horasTrabajadas === 0
+                                            {row.rDur != null && row.rDur > 0 && row.horasTrabajadas === 0
                                               ? row.rDur.toFixed(1)
                                               : row.horasTrabajadas > 0 ? row.horasTrabajadas.toFixed(1) : '—'}
                                             {row.hasOvertime && row.rDur != null && row.horasTrabajadas > 0 && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
@@ -1202,7 +1202,7 @@ export default function ReportsPage() {
                                     <td></td>
                                 </tr>
                                 <tr className="bg-slate-800 border-t border-slate-700">
-                                    <td colSpan={4} className="py-3 px-3 text-right uppercase text-amber-400">Liquidación (200hs):</td>
+                                    <td colSpan={4} className="py-3 px-3 text-right uppercase text-amber-400">Liquidación (204hs):</td>
                                     <td colSpan={8} className="py-3 px-3">
                                         <div className="flex justify-around items-center">
                                             <div className="flex flex-col items-center">
