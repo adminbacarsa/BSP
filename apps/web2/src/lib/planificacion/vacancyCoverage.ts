@@ -1,4 +1,5 @@
 /** Lógica de cobertura por licencia/vacante en planificador. */
+import { toCalendarDateStr } from './absenceCodes';
 
 export const VACANCY_ABSENCE_TYPE_CODES: Record<string, string> = {
   Vacaciones: 'V',
@@ -13,9 +14,11 @@ export const VACANCY_NON_WORK_CODES = new Set([
   'V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
 ]);
 
-export function listDateRangeInclusive(startYmd: string, endYmd: string): string[] {
-  const [sy, sm, sd] = (startYmd || '').split('-').map(Number);
-  const [ey, em, ed] = (endYmd || startYmd || '').split('-').map(Number);
+export function listDateRangeInclusive(startYmd: unknown, endYmd?: unknown): string[] {
+  const s = toCalendarDateStr(startYmd) || '';
+  const e = toCalendarDateStr(endYmd ?? startYmd) || s;
+  const [sy, sm, sd] = (s || '').split('-').map(Number);
+  const [ey, em, ed] = (e || s || '').split('-').map(Number);
   if (!sy || !sm || !sd || !ey || !em || !ed) return [];
   const out: string[] = [];
   const cur = new Date(sy, sm - 1, sd);
