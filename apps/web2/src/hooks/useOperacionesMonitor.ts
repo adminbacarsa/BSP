@@ -589,6 +589,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isFranco &&  // franco no cubre — está de descanso
                 cover.objectiveId === s.objectiveId &&
                 normPosName(cover.positionName) === normPosName(s.positionName) &&
                 checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
@@ -616,6 +617,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isFranco &&  // franco no cubre — está de descanso
                 cover.objectiveId === v.objectiveId &&
                 normPosName(cover.positionName) === normPosName(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [cover])
@@ -883,6 +885,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         operatorInfo,
         isCompact, setIsCompact,
         employees,
-        rawShifts,  // expuesto para el DebugPanel
+        rawShifts,
     };
 };
