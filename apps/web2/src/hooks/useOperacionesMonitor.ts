@@ -876,6 +876,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         isReady,
         servicesSLA,
         uniqueClients,
+        objectives,
         filteredObjectives,
         recentLogs,
         publishStatusMap,
