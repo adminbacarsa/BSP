@@ -591,7 +591,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
                 !cover.isFranco &&  // franco no cubre — está de descanso
                 cover.objectiveId === s.objectiveId &&
-                normPosName(cover.positionName) === normPosName(s.positionName) &&
+                normalizePosMatch(cover.positionName) === normalizePosMatch(s.positionName) &&
                 checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
             ).length;
             if (coveringCount >= cap) suppressedDevuelto.add(s.id);
@@ -605,9 +605,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
             const vacancyIsToday = isSameDay(v.shiftDateObj, now);
             if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
+            // normalizePosMatch para que "Puesto Rondín" === "Rondín" (sin prefijo ni acentos)
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
-                normPosName(s.positionName) === normPosName(v.positionName) &&
+                normalizePosMatch(s.positionName) === normalizePosMatch(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
             // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
@@ -619,7 +620,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
                 !cover.isFranco &&  // franco no cubre — está de descanso
                 cover.objectiveId === v.objectiveId &&
-                normPosName(cover.positionName) === normPosName(v.positionName) &&
+                normalizePosMatch(cover.positionName) === normalizePosMatch(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [cover])
             ).length;
             if (coveringCount >= cap) return false;
