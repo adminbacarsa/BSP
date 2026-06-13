@@ -27,6 +27,7 @@ import { getAuth } from 'firebase/auth';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
+import { DebugPanel } from '@/components/operaciones/DebugPanel';
 
 // --- HELPERS ---
 const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) return d; if (d.seconds) return new Date(d.seconds * 1000); return new Date(d); };
@@ -1194,6 +1195,7 @@ export default function OperacionesPage() {
     }, [session.isAutoMode, session.loading]);
 
     const [detailNovedad, setDetailNovedad] = useState<any>(null);
+    const [showDebugPanel, setShowDebugPanel] = useState(false);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
     const [showCoverageGrid, setShowCoverageGrid] = useState(false);
@@ -2225,6 +2227,7 @@ export default function OperacionesPage() {
                                 </div>
                                 {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
                                 {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
+                                <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
                         </div>
@@ -2858,6 +2861,17 @@ export default function OperacionesPage() {
                     novedad={detailNovedad}
                     onClose={() => setDetailNovedad(null)}
                     onAtender={handleAtenderNovedad}
+                />
+            )}
+
+            {/* Panel de diagnóstico */}
+            {showDebugPanel && (
+                <DebugPanel
+                    processedData={logic.processedData}
+                    servicesSLA={logic.servicesSLA}
+                    publishStatusMap={logic.publishStatusMap}
+                    rawShifts={(logic as any).rawShifts}
+                    onClose={() => setShowDebugPanel(false)}
                 />
             )}
 
