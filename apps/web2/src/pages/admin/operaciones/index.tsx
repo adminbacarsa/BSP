@@ -2655,7 +2655,13 @@ export default function OperacionesPage() {
                 </div>
 
                 {/* ── PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa ── */}
-                {!isExternalMap && <div className="absolute bottom-8 left-8 z-[1000]">
+                {!isExternalMap && (
+                <React.Fragment>
+                {/* Backdrop mobile cuando panel abierto */}
+                {notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
+                <div className={notifPanelOpen
+                    ? 'fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8'
+                    : 'absolute bottom-8 left-8 z-[1000]'}>
                 {(() => {
                     // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)
                     const _now = new Date();
@@ -2672,12 +2678,18 @@ export default function OperacionesPage() {
                         </span>
                     </button>
                 ) : (
-                    <div className="w-[480px] flex flex-col bg-white rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[70vh]">
-                        <div className="px-3 py-2.5 bg-slate-900 rounded-t-2xl flex items-center gap-2">
-                            <Siren size={14} className="text-rose-400 shrink-0"/>
-                            <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
-                            {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
-                            <button onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
+                    <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[82vh] lg:max-h-[70vh]">
+                        <div className="bg-slate-900 rounded-t-2xl">
+                            {/* Drag handle — solo mobile */}
+                            <div className="flex justify-center pt-2 pb-0 lg:hidden">
+                                <div className="w-10 h-1 bg-white/30 rounded-full"/>
+                            </div>
+                            <div className="px-3 py-2.5 flex items-center gap-2">
+                                <Siren size={14} className="text-rose-400 shrink-0"/>
+                                <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
+                                {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
+                                <button onClick={() => setNotifPanelOpen(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
+                            </div>
                         </div>
 
                         {/* ── Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) ── */}
@@ -2772,7 +2784,7 @@ export default function OperacionesPage() {
                                             </p>
                                             <p className="text-[9px] text-slate-400 truncate leading-tight">
                                                 {(isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⏱ {n.minutesBeforeShift}min al turno</span>
+                                                                ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⼱ {n.minutesBeforeShift}min al turno</span>
                                                     : null}
                                                 {n.description || '-'}
                                             </p>
@@ -2825,7 +2837,9 @@ export default function OperacionesPage() {
                     </div>
                 );
                 })()}
-                </div>}
+                </div>
+                </React.Fragment>
+                )}
             </div>
 
             <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
@@ -2838,7 +2852,7 @@ export default function OperacionesPage() {
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
 
-            {/* Popup detalle novedad */}
+            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
             {detailNovedad && (
                 <NovedadDetailPopup
                     novedad={detailNovedad}
