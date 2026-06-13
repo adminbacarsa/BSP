@@ -228,7 +228,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const yearMonth = `${now.getFullYear()}_${now.getMonth() + 1}`;
         const empMap = new Map(); employees.forEach(e => empMap.set(e.id, e.fullName));
         const empPhoneMap = new Map(); employees.forEach(e => empPhoneMap.set(e.id, e.phone || e.celular || ''));
-        const objMap = new Map(); objectives.forEach(o => objMap.set(o.id, { clientName: o.clientName, name: o.name, clientId: o.clientId }));
+        // Los objetivos usan "objectiveId" como ID, no "id" — mapear ambos para compatibilidad
+        const objMap = new Map();
+        objectives.forEach(o => {
+            const key = o.id || o.objectiveId;
+            if (key) objMap.set(key, { clientName: o.clientName, name: o.name, clientId: o.clientId });
+        });
         const activeSlaMap = new Set(servicesSLA.map(s => s.objectiveId));
 
         const realShifts = rawShifts.map(shift => {
