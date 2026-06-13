@@ -244,7 +244,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // (retén, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
             // siempre se muestran sin importar el estado de publicación.
             const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
-            const isAlreadyProcessed = !!shift.isPresent || shift.status === 'PRESENT' || shift.status === 'COMPLETED' || !!shift.isReportedToPlanning || !!shift.isReported;
+            // isAbsent incluido: un turno ausente de planificación no publicada igual debe mostrarse
+            // para que PATH-B detecte la vacante. Sin esto, allPosShifts queda vacío → sin vacante.
+            const isAlreadyProcessed = !!shift.isPresent || shift.status === 'PRESENT' || shift.status === 'COMPLETED' || !!shift.isReportedToPlanning || !!shift.isReported || !!shift.isAbsent;
             if (!isOperationalOrigin && !isAlreadyProcessed) {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(
@@ -849,173 +851,37 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
                     await addDoc(collection(db, 'novedades'), stampEmpresaId({
                         type: 'RETENCION_LARGA', status: 'PENDIENTE',
-                        shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
-                        clientId: s.clientId || null, positionName: s.positionName || '',
-                        employeeId: s.employeeId, employeeName: s.employeeName || '',
-                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min de retención en ${s.objectiveName}. Requiere autorización o reemplazo.`,
-                        minutesOvertime: Math.round(minutesOvertime),
-                        createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                    }, shiftEmpresaId));
-                }).catch(e => console.warn('[autoAlertRetencion]', e));
-        }
-
-        // ── POSICIÓN SIN RELEVO (<30 min para fin, sin entrante) ─────────
-        const expiringShifts = processedData.filter((s: any) => s.isPresent && !s.isCompleted && !s.isRetention);
-        for (const s of expiringShifts) {
-            const endMs = s.endDateObj?.getTime?.() ?? 0;
-            if (!endMs) continue;
-            const minutesUntilEnd = (endMs - nowMs) / 60000;
-            if (minutesUntilEnd > 30 || minutesUntilEnd < -5) continue;
-            const hasRelevo = processedData.some((other: any) =>
-                other.id !== s.id &&
-                other.objectiveId === s.objectiveId &&
-                other.positionName === s.positionName &&
-                !other.isPresent && !other.isCompleted && !other.isUnassigned &&
-                Math.abs((other.shiftDateObj?.getTime?.() ?? 0) - endMs) < 90 * 60000
-            );
-            if (hasRelevo) continue;
-            const alertKey = `${s.id}_POSICION_SIN_RELEVO`;
-            if (alertedVacancyIds.current.has(alertKey)) continue;
-            alertedVacancyIds.current.add(alertKey);
-            getDocs(query(collection(db, 'novedades'), where('shiftId', '==', s.id), where('type', '==', 'POSICION_SIN_RELEVO'), limit(1)))
-                .then(async snap => {
-                    if (!snap.empty) return;
-                    const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'POSICION_SIN_RELEVO', status: 'PENDIENTE',
-                        shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
-                        clientId: s.clientId || null, positionName: s.positionName || '',
-                        employeeId: s.employeeId, employeeName: s.employeeName || '',
-                        description: `${s.employeeName || 'Guardia'} termina en ${Math.round(minutesUntilEnd)} min sin relevo planificado en ${s.objectiveName} — ${s.positionName}.`,
-                        minutesUntilEnd: Math.round(minutesUntilEnd),
-                        createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                    }, shiftEmpresaId));
-                }).catch(e => console.warn('[autoAlertRelevo]', e));
-        }
-
-        // ── RECARGO 12H / 16H ──────────────────────────────────────────────
-        // Cualquier guardia presente con 12+ horas activas: alerta para decidir.
-        // Con 16+ horas (dos turnos completos): recargo máximo, reemplazo requerido.
-        const recargoShifts = processedData.filter((s: any) =>
-            s.isPresent && !s.isCompleted && s.activeStartTime
-        );
-        for (const s of recargoShifts) {
-            const startMs = (s.activeStartTime as Date).getTime();
-            const horasActivas = (nowMs - startMs) / 3600000;
-
-            if (horasActivas >= 12) {
-                const key12 = `${s.id}_RECARGO_12H`;
-                if (!alertedVacancyIds.current.has(key12)) {
-                    alertedVacancyIds.current.add(key12);
-                    getDocs(query(collection(db, 'novedades'), where('shiftId', '==', s.id), where('type', '==', 'RECARGO_12H'), limit(1)))
-                        .then(async snap => {
-                            if (!snap.empty) return;
-                            const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                            await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                                type: 'RECARGO_12H', status: 'PENDIENTE',
-                                shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
-                                clientId: s.clientId || null, positionName: s.positionName || '',
-                                employeeId: s.employeeId, employeeName: s.employeeName || '',
-                                description: `${s.employeeName || 'Guardia'} lleva 12hs de recargo activo en ${s.objectiveName} (${s.positionName}). ¿Continúa el recargo?`,
-                                horasActivas: Math.round(horasActivas * 10) / 10,
-                                createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                            }, shiftEmpresaId));
-                            toast.warning(`⏱ 12hs recargo: ${s.employeeName || 'Guardia'} — ${s.objectiveName}`);
-                        }).catch(e => console.warn('[autoAlertRecargo12]', e));
-                }
-            }
-
-            if (horasActivas >= 16) {
-                const key16 = `${s.id}_RECARGO_MAXIMO`;
-                if (!alertedVacancyIds.current.has(key16)) {
-                    alertedVacancyIds.current.add(key16);
-                    getDocs(query(collection(db, 'novedades'), where('shiftId', '==', s.id), where('type', '==', 'RECARGO_MAXIMO'), limit(1)))
-                        .then(async snap => {
-                            if (!snap.empty) return;
-                            const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'RECARGO_MAXIMO', title: 'Recargo máximo (16h+)', status: 'PENDIENTE',
-                        source: 'SYSTEM_SCHEDULER',
-                        employeeId: s.employeeId, employeeName: s.employeeName,
+                        shiftId: s.id,
+                        objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
                         clientId: s.clientId || null,
-                        objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
-                        positionName: s.positionName || '', shiftId: s.id,
-                        description: `🚨 RECARGO MÁXIMO: ${s.employeeName} lleva ${Math.round(horasActivas)}h en ${s.objectiveName}. Relevar URGENTE.`,
-                        createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
-                    }, shiftEmpresaId));
-                        }).catch(e => console.warn('[recargo16h]', e));
-                }
-            }
-        }
-    }, [processedData, now, empresaId]);
-
-    // ── AUTO-AUSENCIA T+30 ──────────────────────────────────────────────
-    useEffect(() => {
-        const toAbsent = processedData.filter((s: any) => {
-            if (!s.isPotentialAbsence || s.lateArrivalAt || !s.id || s.id.startsWith('SLA_GAP') || s.id.startsWith('V124_') || s.isVirtual) return false;
-            // Retenes NO se auto-ausentan — son convocados urgentes, el CF ya los saltea igual
-            const isFullyOp = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || !!s.isReten || s.resolvedBy === 'OPERACIONES';
-            if (isFullyOp) return false;
-            if (!(s.shiftDateObj instanceof Date)) return false;
-            const pubKey = planificacionPublishLookupKey(
-                s.objectiveId,
-                s.shiftDateObj.getFullYear(),
-                s.shiftDateObj.getMonth() + 1,
-            );
-            return !!publishStatusMap[pubKey];
-        });
-        if (!toAbsent.length) return;
-
-        for (const s of toAbsent) {
-            if (autoAbsentedIds.current.has(s.id)) continue;
-            autoAbsentedIds.current.add(s.id);
-
-            // Fecha en AR (UTC-3): turno nocturno 23hs sigue siendo el día de inicio
-            const shiftDate = s.shiftDateObj instanceof Date ? s.shiftDateObj : new Date(s.shiftDateObj);
-            const arDate = new Date(shiftDate.getTime() - 3 * 60 * 60 * 1000);
-            const dayStart = new Date(arDate.getUTCFullYear(), arDate.getUTCMonth(), arDate.getUTCDate(), 0, 0, 0, 0);
-            const dayEnd   = new Date(arDate.getUTCFullYear(), arDate.getUTCMonth(), arDate.getUTCDate(), 23, 59, 59, 999);
-
-            getDocs(query(collection(db, 'ausencias'), where('shiftId', '==', s.id), where('absenceType', '==', 'AA'), limit(1)))
-                .then(async snap => {
-                    if (!snap.empty) return;
-                    const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                    await updateDocForEmpresa('turnos', s.id, {
-                        status: 'ABSENT', isAbsent: true, absenceType: 'AA',
-                        absenceRegisteredAt: serverTimestamp(),
-                    }, empresaId, migracionCompleta);
-                    await addDoc(collection(db, 'ausencias'), stampEmpresaId({
-                        employeeId: s.employeeId, employeeName: s.employeeName,
-                        clientId: s.clientId || null, type: 'No Presentacion', absenceType: 'AA',
-                        startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
-                        status: 'Confirmada',
-                        shiftCode: (s.code || '').toUpperCase() || null,
-                        reason: `No presentacion al turno ${shiftDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} - ${s.objectiveName} (${s.positionName})`,
-                        hasCertificate: false, createdAt: serverTimestamp(), origin: 'AUTO_T30', shiftId: s.id,
-                    }, shiftEmpresaId));
-                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'AUSENCIA_AUTO', title: 'Ausencia Autom\u00e1tica (AA)', status: 'PENDIENTE',
+                        positionName: s.positionName || '',
+                        employeeName: s.employeeName || '',
+                        description: `Guardia ${s.employeeName || ''} lleva más de 2h de retención en ${s.objectiveName || ''}. Verificar relevo.`,
+                        createdAt: serverTimestamp(),
                         source: 'SYSTEM_SCHEDULER',
-                        employeeId: s.employeeId, employeeName: s.employeeName,
-                        clientId: s.clientId || null,
-                        objectiveId: s.objectiveId || null, objectiveName: s.objectiveName || '',
-                        positionName: s.positionName || '', shiftId: s.id,
-                        description: `[AA] ${s.employeeName} no se present\u00f3 al turno en ${s.objectiveName} (${s.positionName}) \u2014 ${shiftDate.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})}`,
-                        createdAt: serverTimestamp(), reportedBy: 'SYSTEM_AUTO',
                     }, shiftEmpresaId));
-                    toast.warning(`[AA] Ausencia autom\u00e1tica: ${s.employeeName} \u2014 ${s.objectiveName}`);
                 })
-                .catch(e => console.warn('[autoAbsent]', e));
+                .catch(e => console.warn('[retentionAlert]', e));
         }
-    }, [processedData]);
+    }, [processedData, now, empresaId, migracionCompleta, servicesSLA]);
 
-    const isClientLocked = !!forcedClientId;
-    const handleSetSelectedClientId = (id: string) => { if (!isClientLocked) setSelectedClientId(id); };
     return {
-        employees, now, processedData, listData, stats, recentLogs, objectives, servicesSLA,
-        viewTab, setViewTab, filterText, setFilterText, isCompact, setIsCompact, operatorInfo,
-        d: handleSetSelectedClientId,
-        uniqueClients, filteredObjectives, handleAction, isClientLocked, publishStatusMap,
+        processedData,
+        listData,
+        stats,
+        handleAction,
+        viewTab, setViewTab,
+        filterText, setFilterText,
+        selectedClientId, setSelectedClientId,
         isReady,
+        servicesSLA,
+        uniqueClients,
+        filteredObjectives,
+        recentLogs,
+        publishStatusMap,
+        operatorInfo,
+        isCompact, setIsCompact,
+        employees,
+        rawShifts,  // expuesto para el DebugPanel
     };
 };
