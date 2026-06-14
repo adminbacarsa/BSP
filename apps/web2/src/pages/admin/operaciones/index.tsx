@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
@@ -45,7 +45,7 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
     return ( <section className={`relative pl-6 border-l-2 ${s.border}`}> <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 border-white ${s.dot}`}></div> <h4 className={`text-xs font-black uppercase mb-2 cursor-pointer flex items-center gap-2 ${s.text}`} onClick={onToggle}> {title} {expanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} </h4> {expanded && ( <div className="mt-2 space-y-2 max-h-48 overflow-y-auto custom-scrollbar p-1"> {items?.length > 0 ? items.map((e:any) => ( <div key={e.id} className={`flex justify-between items-center p-2 border rounded-lg shadow-sm ${s.bg}`}> <div> <span className="text-xs font-bold text-slate-800 block">{e.fullName || e.employeeName}</span> {context === 'INTERCAMBIO' && <span className="text-[10px] text-purple-700 block">{e.objectiveName} (Quedan: {e.remainingGuards})</span>} {e.distance !== undefined && e.distance < 1000 && ( <div className="flex items-center gap-2 mt-0.5"> <span className="text-[9px] bg-white border px-1.5 rounded text-slate-500 flex items-center gap-1"><Navigation size={8}/> {e.distance.toFixed(1)} km</span> <span className="text-[9px] text-slate-400">~{e.eta} min</span> </div> )} </div> <div className="flex gap-1"> <button onClick={()=>onWhatsapp(e, context)} className="p-1.5 bg-white text-emerald-600 border rounded hover:bg-emerald-50"><MessageCircle size={14}/></button> <button onClick={()=>onPhone(e)} className="p-1.5 bg-white text-blue-600 border rounded hover:bg-blue-50"><Phone size={14}/></button> <button onClick={()=>onAction(e)} className={`px-2 py-1.5 text-white text-[10px] font-bold rounded shadow-sm ${s.btn}`}> {context === 'INTERCAMBIO' ? 'MOVER' : 'ASIGNAR'} </button> </div> </div> )) : <p className="text-[10px] text-slate-400 italic">No hay candidatos.</p>} </div> )} </section> );
 };
 
-// --- MODALES (LÓGICA OPERATIVA) ---
+// --- MODALES (LÃ“GICA OPERATIVA) ---
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, recentlyRelievedIds, onRelieved }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
@@ -57,12 +57,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     let status = 'ON_TIME';
     if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
 
-    // Límite de 60 min para guardias ya marcados ausentes
+    // LÃ­mite de 60 min para guardias ya marcados ausentes
     const LATE_LIMIT_MIN = 60;
     const wasAbsent = incomingShift.isAbsent === true;
-    // Detectar si el turno ya fue cubierto por otro guardia — DEBE estar ANTES de tooLate (TDZ fix)
+    // Detectar si el turno ya fue cubierto por otro guardia â€” DEBE estar ANTES de tooLate (TDZ fix)
     const isCovered = incomingShift.status === 'COVERED' || !!incomingShift.coveredByEmployeeId;
-    // Solo bloquear DAR PRESENTE si el turno está cubierto (hay otro haciendo su trabajo)
+    // Solo bloquear DAR PRESENTE si el turno estÃ¡ cubierto (hay otro haciendo su trabajo)
     const tooLate = wasAbsent && diffMin > LATE_LIMIT_MIN && isCovered;
 
     const samePost = (s: any) =>
@@ -80,34 +80,34 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     };
 
     // Candidatos a relevar:
-    // 1. Guardias en retención (siempre — llevan tiempo extra esperando)
-    // 2. Guardias a ≤15 min de terminar su turno (están por salir)
-    // Ordenados por FIFO: quien lleva más minutos trabajados se va primero
+    // 1. Guardias en retenciÃ³n (siempre â€” llevan tiempo extra esperando)
+    // 2. Guardias a â‰¤15 min de terminar su turno (estÃ¡n por salir)
+    // Ordenados por FIFO: quien lleva mÃ¡s minutos trabajados se va primero
     const activeGuards = logic.processedData
         .filter((s: any) => {
             if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
-            if (s.isRetention) return true;                                    // retenido → siempre candidato
+            if (s.isRetention) return true;                                    // retenido â†’ siempre candidato
             const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
-            return minutesUntilEnd <= 15;                                      // ≤15 min para terminar
+            return minutesUntilEnd <= 15;                                      // â‰¤15 min para terminar
         })
-        .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: más tiempo → primero
+        .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: mÃ¡s tiempo â†’ primero
 
     const sla = (logic.servicesSLA || []).find((s: any) => s.objectiveId === incomingShift.objectiveId);
     const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(incomingShift.positionName));
     const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
     const mustRelevar = activeGuards.length >= positionCapacity;
 
-    // ── INTERCAMBIO DE TURNOS ────────────────────────────────────────────────
+    // â”€â”€ INTERCAMBIO DE TURNOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Cuando Guard A llega tarde (>60 min) y su turno fue cubierto por Guard B,
-    // Guard A puede tomar el próximo turno de Guard B como compensación.
+    // Guard A puede tomar el prÃ³ximo turno de Guard B como compensaciÃ³n.
     const handleIntercambio = async () => {
         try {
             const coveringEmpId = incomingShift.coveredByEmployeeId;
             if (!coveringEmpId) {
-                toast.error('No hay guardia cubridor registrado. Verificá el turno.');
+                toast.error('No hay guardia cubridor registrado. VerificÃ¡ el turno.');
                 return;
             }
-            // Buscar el turno planificado de Guard B que aún no inició
+            // Buscar el turno planificado de Guard B que aÃºn no iniciÃ³
             const today = new Date();
             const guardBNextShift = logic.processedData.find((s: any) =>
                 s.employeeId === coveringEmpId &&
@@ -116,7 +116,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 s.id !== incomingShift.id
             );
             if (!guardBNextShift) {
-                toast.error('No se encontró turno disponible para el intercambio. Guard B no tiene turno pendiente hoy.');
+                toast.error('No se encontrÃ³ turno disponible para el intercambio. Guard B no tiene turno pendiente hoy.');
                 return;
             }
             // Obtener nombre del cubridor
@@ -149,15 +149,15 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: incomingShift.employeeId,
                 type: 'INTERCAMBIO',
-                title: '🔄 Intercambio de turno',
-                body: `Cubrís el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
+                title: 'ðŸ”„ Intercambio de turno',
+                body: `CubrÃ­s el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: coveringEmpId,
                 type: 'INTERCAMBIO',
-                title: '🔄 Intercambio de turno',
-                body: `${incomingShift.employeeName} tomó tu turno de ${guardBNextShift.objectiveName}. Tu turno de la mañana queda registrado.`,
+                title: 'ðŸ”„ Intercambio de turno',
+                body: `${incomingShift.employeeName} tomÃ³ tu turno de ${guardBNextShift.objectiveName}. Tu turno de la maÃ±ana queda registrado.`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
 
@@ -176,20 +176,20 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     };
 
     const handleConfirm = async (prevShiftId: string | null) => {
-        // Un guardia tardío SIEMPRE puede dar presente — el relevo es secundario.
-        // Si el puesto está lleno y no seleccionó relevo, dar presente igual con aviso.
+        // Un guardia tardÃ­o SIEMPRE puede dar presente â€” el relevo es secundario.
+        // Si el puesto estÃ¡ lleno y no seleccionÃ³ relevo, dar presente igual con aviso.
         if (mustRelevar && !prevShiftId && status !== 'LATE') {
-            toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
+            toast.error(`Puesto completo (${positionCapacity} pax). SeleccionÃ¡ a quiÃ©n relevar.`);
             return;
         }
         if (mustRelevar && !prevShiftId && status === 'LATE') {
-            toast.warning(`${incomingShift.employeeName} ingresó. Hay guardias en retención — relevalos manualmente.`);
+            toast.warning(`${incomingShift.employeeName} ingresÃ³. Hay guardias en retenciÃ³n â€” relevalos manualmente.`);
         }
         try {
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
             if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
 
-            // ── Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) ──
+            // â”€â”€ Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) â”€â”€
             const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
             let aaDoc: any = null;
             let aaHorario = '';
@@ -208,17 +208,17 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 }
             }
 
-            // ── Construir y commitear el batch (sin lecturas async intercaladas) ──────────────────────
+            // â”€â”€ Construir y commitear el batch (sin lecturas async intercaladas) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             const batch = writeBatch(db);
-            // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
-            // El guardia siempre cobra desde su hora planificada, llegue antes o después.
-            // Excepción: adelanto por cobertura (isEarlyStart) → usa adjustedStartTime del operador.
+            // Regla de liquidaciÃ³n: realStartTime = hora planificada (no la real de llegada)
+            // El guardia siempre cobra desde su hora planificada, llegue antes o despuÃ©s.
+            // ExcepciÃ³n: adelanto por cobertura (isEarlyStart) â†’ usa adjustedStartTime del operador.
             const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
                 ? incomingShift.shiftDateObj
                 : toDate(incomingShift.shiftDateObj);
             const isEarlyStartShift = !!incomingShift.isEarlyStart;
             // Adelanto: usa adjustedStartTime (= inicio de la vacante a cubrir, no la hora de llegada)
-            // Así el guardia cobra desde las 7 AM aunque haya llegado a las 8 AM
+            // AsÃ­ el guardia cobra desde las 7 AM aunque haya llegado a las 8 AM
             const incomingRealStart = isEarlyStartShift
                 ? (incomingShift.adjustedStartTime
                     ? (incomingShift.adjustedStartTime.toDate
@@ -232,14 +232,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 realStartTime:       incomingRealStart,
                 lateArrivalAt:       status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
                 isLate:              status === 'LATE' || wasAutoAbsent,
-                // Limpiar flags de ausencia — el guardia llegó tarde pero llegó
+                // Limpiar flags de ausencia â€” el guardia llegÃ³ tarde pero llegÃ³
                 isAbsent:            false,
                 absenceType:         null,
                 absenceDetectedAt:   null,
                 absenceReversedAt:   serverTimestamp(),
                 absenceReversedBy:   'OPERACIONES',
             });
-            // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leímos aaDoc arriba)
+            // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leÃ­mos aaDoc arriba)
             if (wasAutoAbsent && aaDoc) {
                 batch.update(aaDoc.ref, {
                     type: 'Llegada Tarde',
@@ -256,8 +256,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 const nowDate = new Date();
                 const isEarlyRelevo = prevEnd && prevEnd > nowDate;
                 const outgoingRealEnd = isEarlyRelevo
-                    ? Timestamp.fromDate(prevEnd!)   // hora programada → horas completas
-                    : serverTimestamp();              // ya pasó el horario → hora real
+                    ? Timestamp.fromDate(prevEnd!)   // hora programada â†’ horas completas
+                    : serverTimestamp();              // ya pasÃ³ el horario â†’ hora real
                 batch.update(doc(db, 'turnos', prevShiftId), {
                     realEndTime: outgoingRealEnd,
                     isCompleted: true,
@@ -267,31 +267,31 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 });
             }
             await batch.commit();
-            // Confirmar que el write llegó al servidor antes de cerrar el modal.
+            // Confirmar que el write llegÃ³ al servidor antes de cerrar el modal.
             // Con persistentLocalCache el commit resuelve localmente (IndexedDB) aunque
             // no haya llegado al servidor. Si hay problema de red en el celular, el cron
             // detectarAusencias corre y marca ausente antes de que llegue el update.
-            // waitForPendingWrites espera confirmación del servidor (max 8s).
+            // waitForPendingWrites espera confirmaciÃ³n del servidor (max 8s).
             await Promise.race([
                 waitForPendingWrites(db),
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('âš ï¸ ConexiÃ³n lenta â€” verificÃ¡ que el presente quedÃ³ guardado antes de cerrar.');
                 }
             });
 
             // Registrar como relevado para evitar que aparezca en siguientes modales (race condition)
             if (prevShiftId) onRelieved?.(prevShiftId);
 
-            // ── Audit log: presente / llegada tarde / relevo ──────────────────────
+            // â”€â”€ Audit log: presente / llegada tarde / relevo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             {
                 const _tenantId = String(incomingShift.empresaId || empresaId || '').trim();
                 const _actor    = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
                 const _prev     = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
                 const _detail   = _prev
-                    ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
-                    : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
+                    ? `${incomingShift.employeeName} ingresÃ³${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. RelevÃ³ a ${_prev.employeeName}.`
+                    : `${incomingShift.employeeName} ingresÃ³${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
                 addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                     action:        status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
                     module:        'OPERACIONES',
@@ -314,8 +314,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                     await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                         userId:   prevShift.employeeId,
                         type:     'RELEVO',
-                        title:    '✅ Turno finalizado — relevado',
-                        body:     `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
+                        title:    'âœ… Turno finalizado â€” relevado',
+                        body:     `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizÃ³.`,
                         read:     false,
                         createdAt: serverTimestamp(),
                     }, shiftEmpresaId)).catch(() => {});
@@ -342,23 +342,23 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-1">
                         <div className="flex items-center gap-2">
                             <MapPin size={13} className="text-indigo-500 shrink-0"/>
-                            <span className="text-xs font-black text-slate-800 truncate">{incomingShift.objectiveName || '—'}</span>
-                            {incomingShift.clientName && <span className="text-[10px] text-slate-400 truncate">· {incomingShift.clientName}</span>}
+                            <span className="text-xs font-black text-slate-800 truncate">{incomingShift.objectiveName || 'â€”'}</span>
+                            {incomingShift.clientName && <span className="text-[10px] text-slate-400 truncate">Â· {incomingShift.clientName}</span>}
                         </div>
                         <div className="flex items-center gap-2 pl-5">
-                            <span className="text-[10px] font-bold text-indigo-600">{incomingShift.positionName || '—'}</span>
-                            <span className="text-slate-300">·</span>
+                            <span className="text-[10px] font-bold text-indigo-600">{incomingShift.positionName || 'â€”'}</span>
+                            <span className="text-slate-300">Â·</span>
                             <span className="text-[10px] font-mono text-slate-600">{formatTimeRange(incomingShift.shiftDateObj, incomingShift.endDateObj)}</span>
-                            <span className="text-[9px] text-slate-400">· {positionCapacity} pax</span>
+                            <span className="text-[9px] text-slate-400">Â· {positionCapacity} pax</span>
                         </div>
                     </div>
 
-                    {/* CASO: turno cubierto o >60 min → ofrecer intercambio */}
+                    {/* CASO: turno cubierto o >60 min â†’ ofrecer intercambio */}
                     {(tooLate || isCovered) ? (
                         <div className="space-y-3">
                             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                                 <p className="text-sm font-bold text-amber-800">
-                                    <b>{incomingShift.employeeName}</b> llegó con {Math.round(diffMin)} min de retraso.
+                                    <b>{incomingShift.employeeName}</b> llegÃ³ con {Math.round(diffMin)} min de retraso.
                                 </p>
                                 {isCovered && (
                                     <p className="text-xs text-amber-700 mt-1">
@@ -368,32 +368,32 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                                 )}
                                 {tooLate && !isCovered && (
                                     <p className="text-xs text-amber-700 mt-1">
-                                        Pasaron más de {LATE_LIMIT_MIN} minutos desde el inicio del turno.
+                                        Pasaron mÃ¡s de {LATE_LIMIT_MIN} minutos desde el inicio del turno.
                                     </p>
                                 )}
                             </div>
-                            <p className="text-xs text-slate-500 text-center">¿Qué hacemos con {incomingShift.employeeName}?</p>
+                            <p className="text-xs text-slate-500 text-center">Â¿QuÃ© hacemos con {incomingShift.employeeName}?</p>
                             <button onClick={handleIntercambio}
                                 className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
                                 <ArrowLeftRight size={16}/> INTERCAMBIO DE TURNO
                             </button>
                             <p className="text-[10px] text-slate-400 text-center">
-                                Toma el turno de quien lo cubrió · Ambos quedan con un turno trabajado
+                                Toma el turno de quien lo cubriÃ³ Â· Ambos quedan con un turno trabajado
                             </p>
                             <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">
-                                Cancelar — gestionar manualmente
+                                Cancelar â€” gestionar manualmente
                             </button>
                         </div>
                     ) : (
                     <>
                     <p className="text-sm text-slate-600 mb-4">
-                        El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar.
-                        {status === 'LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>}
-                        {mustRelevar && <span className="block mt-1 text-rose-600 font-bold text-xs">Puesto al tope ({activeGuards.length}/{positionCapacity}). Relevá a un guardia activo.</span>}
+                        El guardia <b>{incomingShift.employeeName}</b> estÃ¡ listo para ingresar.
+                        {status === 'LATE' && <span className="block mt-1 text-amber-600 font-bold">âš ï¸ Retraso de {Math.round(diffMin)} minutos.</span>}
+                        {mustRelevar && <span className="block mt-1 text-rose-600 font-bold text-xs">Puesto al tope ({activeGuards.length}/{positionCapacity}). RelevÃ¡ a un guardia activo.</span>}
                     </p>
                     {activeGuards.length > 0 ? (
                         <div className="space-y-2 mb-4">
-                            <p className="text-xs font-bold text-slate-400 uppercase">Seleccioná a quién relevar — ordenado por tiempo trabajado:</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase">SeleccionÃ¡ a quiÃ©n relevar â€” ordenado por tiempo trabajado:</p>
                             {activeGuards.map((s: any) => {
                                 const minutesWorked = s.totalMinutesWorked ?? 0;
                                 const hoursWorked = (minutesWorked / 60).toFixed(1);
@@ -404,11 +404,11 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                                         <div className="text-left">
                                             <div className="flex items-center gap-2">
                                                 <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
-                                                {s.isRetention && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-500 text-white animate-pulse">EN RETENCIÓN {s.retentionMinutes > 0 ? `+${s.retentionMinutes}min` : ''}</span>}
+                                                {s.isRetention && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-500 text-white animate-pulse">EN RETENCIÃ“N {s.retentionMinutes > 0 ? `+${s.retentionMinutes}min` : ''}</span>}
                                                 {isOver12h && !s.isRetention && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">+12h</span>}
                                             </div>
                                             <span className="block text-[10px] text-slate-400">
-                                                Salida: {formatTimeSimple(s.endDateObj)} · {hoursWorked}h trabajadas
+                                                Salida: {formatTimeSimple(s.endDateObj)} Â· {hoursWorked}h trabajadas
                                             </span>
                                         </div>
                                         <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span>
@@ -446,7 +446,7 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
         try {
             await updateDocForEmpresa('turnos', shift.id, { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
             const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotaciÃ³n.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
             toast.success("Baja registrada. Puesto cubierto.");
             onClose();
         } catch (e: any) { toast.error('Error al registrar baja: ' + (e?.message || e?.code || String(e))); }
@@ -470,7 +470,7 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
         } catch (e: any) { toast.error('Error al iniciar protocolo: ' + (e?.message || e?.code || String(e))); }
     };
-    return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-xl shadow-sm overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
+    return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-xl shadow-sm overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? 'âš ï¸ GUARDIA SOLO EN EL OBJETIVO' : `âœ… HAY ${colleagues.length} COMPAÃ‘EROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedarÃ¡ descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotaciÃ³n actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
 };
 
 const CoverageSection = ({ num, title, colorClass, badgeClass, items, empty }: any) => (
@@ -490,9 +490,9 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
     // Badge de experiencia
     const expLv: number = item.experienceLv ?? 0;
     const expBadge = expLv === 3
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">★ Titular</span>
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">â˜… Titular</span>
         : expLv === 2
-            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">◆ Conoce el objetivo</span>
+            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">â—† Conoce el objetivo</span>
             : expLv === 1
                 ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">Mismo cliente</span>
                 : null;
@@ -505,12 +505,12 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                     {Number.isFinite(item.distance) && item.distance > 0.05
-                        ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km · ~{item.eta}min</span>
-                        : !Number.isFinite(item.distance) && <span className="text-[10px] text-slate-300 italic">Sin ubicación</span>
+                        ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km Â· ~{item.eta}min</span>
+                        : !Number.isFinite(item.distance) && <span className="text-[10px] text-slate-300 italic">Sin ubicaciÃ³n</span>
                     }
                     {item.shiftDateObj && !item.isFranco && (
                         <span className="text-[10px] text-indigo-500 font-medium">
-                            {formatDateShort(item.shiftDateObj)} · {formatTimeSimple(item.shiftDateObj)}–{formatTimeSimple(item.endDateObj)}
+                            {formatDateShort(item.shiftDateObj)} Â· {formatTimeSimple(item.shiftDateObj)}â€“{formatTimeSimple(item.endDateObj)}
                         </span>
                     )}
                 </div>
@@ -532,7 +532,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     if (!isOpen || !absenceShift) return null;
     if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
-        toast.info('Vacante devuelta a planificación — no se puede cubrir desde operaciones.');
+        toast.info('Vacante devuelta a planificaciÃ³n â€” no se puede cubrir desde operaciones.');
         onClose();
         return null;
     }
@@ -544,25 +544,25 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const objLat = absenceShift.lat || -31.4201;
     const objLng = absenceShift.lng || -64.1888;
 
-    // 1. RETENCIÓN: presentes en mismo objetivo y posición CUYO TURNO YA INICIÓ
-    // Fix: excluir guardias con turno futuro — solo quien está físicamente en el puesto ahora
+    // 1. RETENCIÃ“N: presentes en mismo objetivo y posiciÃ³n CUYO TURNO YA INICIÃ“
+    // Fix: excluir guardias con turno futuro â€” solo quien estÃ¡ fÃ­sicamente en el puesto ahora
     const retencion = logic.processedData.filter((s: any) => {
         if (!s.isPresent || s.isCompleted) return false;
         if (s.objectiveId !== absenceShift.objectiveId) return false;
         if (s.positionName !== absenceShift.positionName) return false;
         if (s.id === absenceShift.id) return false;
-        // Verificar que el turno ya empezó (no mostrar turnos futuros)
+        // Verificar que el turno ya empezÃ³ (no mostrar turnos futuros)
         const shiftStartMs = s.shiftDateObj ? toDate(s.shiftDateObj).getTime() : 0;
         return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
     });
 
-    // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición — HOY únicamente
+    // 2. ADELANTO: solo el turno siguiente mÃ¡s prÃ³ximo en el mismo objetivo/posiciÃ³n â€” HOY Ãºnicamente
     const adelanto = logic.processedData.filter((s: any) =>
         !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
         s.objectiveId === absenceShift.objectiveId &&
         s.positionName === absenceShift.positionName &&
         toDate(s.shiftDateObj) > now &&
-        isSameDay(toDate(s.shiftDateObj), now)  // ← solo HOY, no mañana
+        isSameDay(toDate(s.shiftDateObj), now)  // â† solo HOY, no maÃ±ana
     ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
 
     // Helper de experiencia: nivel usando experienciaObjetivos (mapa por objectiveId)
@@ -582,19 +582,19 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         return 0;
     };
 
-    // Helper de restricciones: igual que Planificación — no mostrar guardias vetados
+    // Helper de restricciones: igual que PlanificaciÃ³n â€” no mostrar guardias vetados
     const isRestricted = (e: any): boolean => {
         if ((e.restriccionesObjetivo || []).some((r: any) => r.objectiveId === absenceShift.objectiveId)) return true;
         if ((e.restriccionesCliente  || []).some((r: any) => r.clientId    === absenceShift.clientId))   return true;
         return false;
     };
 
-    // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por experiencia, luego cercanía
+    // 3. RETENES: empleados sin turno hoy â€” sin restricciones, ordenados por experiencia, luego cercanÃ­a
     const busyIds = new Set(
         logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
     );
     const retenes = (logic.employees || [])
-        .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // ← excluir restringidos
+        .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // â† excluir restringidos
         .map((e: any) => {
             const dist  = calculateDistance(objLat, objLng, e.lat, e.lng);
             const expLv = experienceLevel(e);
@@ -613,12 +613,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         })
         .slice(0, 12);
 
-    // 4. FRANCOS: turnos franco hoy, no trabajados — sin restricciones, mismo orden
+    // 4. FRANCOS: turnos franco hoy, no trabajados â€” sin restricciones, mismo orden
     const francos = logic.processedData
         .filter((s: any) => {
             if (!s.isFranco || !isSameDay(s.shiftDateObj, now) || s.isFrancoTrabajado) return false;
             const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
-            if (emp && isRestricted(emp)) return false; // ← excluir restringidos
+            if (emp && isRestricted(emp)) return false; // â† excluir restringidos
             return true;
         })
         .map((s: any) => {
@@ -654,8 +654,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 resolvedBy:            'OPERACIONES',
                 coverageType,                           // RETENTION | EARLY_START | RETEN | FRANCO
                 coveredAt:             serverTimestamp(),
-                coveredByEmployeeId:   covEmpId,        // quién cubrió
-                coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificación
+                coveredByEmployeeId:   covEmpId,        // quiÃ©n cubriÃ³
+                coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificaciÃ³n
                 operacionallyCovered:  true,            // slot operativo cubierto
             });
         }
@@ -674,10 +674,10 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('âš ï¸ ConexiÃ³n lenta â€” verificÃ¡ que el presente quedÃ³ guardado antes de cerrar.');
                 }
             });
-            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'RetenciÃ³n de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'RETENCION', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} retenido hasta ${hiEnd} en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
             onClose();
@@ -695,7 +695,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 ? Timestamp.fromDate(absenceShift.shiftDateObj)
                 : Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
             batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: vacancyStart, isEarlyStart: true });
-            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. ConfirmÃ¡ llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
             await Promise.race([
@@ -703,7 +703,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('âš ï¸ ConexiÃ³n lenta â€” verificÃ¡ que el presente quedÃ³ guardado antes de cerrar.');
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
@@ -717,15 +717,15 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const handleReten = async (emp: any) => {
         setLoading('reten_' + emp.id);
         try {
-            // RETEN empieza AHORA (no en el pasado) — evita que detectarAusencias lo marque AA
+            // RETEN empieza AHORA (no en el pasado) â€” evita que detectarAusencias lo marque AA
             const slotStart = new Date(); // ahora
-            // endTime = fin real del turno a cubrir (NO 8h fijos — respetar SLA)
+            // endTime = fin real del turno a cubrir (NO 8h fijos â€” respetar SLA)
             const endTime = absenceEnd;
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
             batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
-            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de RetÃ©n', read: false, body: `Sos convocado como retÃ©n en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();
             await Promise.race([
@@ -733,12 +733,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('âš ï¸ ConexiÃ³n lenta â€” verificÃ¡ que el presente quedÃ³ guardado antes de cerrar.');
                 }
             });
-            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'CONVOCATORIA_RETEN', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, details: `${empName} convocado como retén en ${absenceShift.objectiveName || ''}.` }, tenantId(absenceShift))).catch(() => {});
-            toast.success(`${empName} convocado como retén`);
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retÃ©n', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retÃ©n en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'CONVOCATORIA_RETEN', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, details: `${empName} convocado como retÃ©n en ${absenceShift.objectiveName || ''}.` }, tenantId(absenceShift))).catch(() => {});
+            toast.success(`${empName} convocado como retÃ©n`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
         finally { setLoading(null); }
@@ -764,7 +764,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 francoTrabajadoAt: serverTimestamp(),
                 francoObjectiveId: absenceShift.objectiveId,
                 francoObjectiveName: absenceShift.objectiveName,
-                comments: `Franco Trabajado (Convocado) — cubre ${absenceShift.objectiveName || 'vacante'}`,
+                comments: `Franco Trabajado (Convocado) â€” cubre ${absenceShift.objectiveName || 'vacante'}`,
             });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'FRANCO', s);
@@ -774,7 +774,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('âš ï¸ ConexiÃ³n lenta â€” verificÃ¡ que el presente quedÃ³ guardado antes de cerrar.');
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
@@ -796,22 +796,22 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
                         <div className="bg-rose-50 p-3 rounded-xl border border-rose-100 text-xs">
                             <span className="font-black text-rose-800">{absenceShift.objectiveName}</span>
-                            <span className="text-rose-600"> · {absenceShift.positionName} · {hiStart}–{hiEnd}</span>
+                            <span className="text-rose-600"> Â· {absenceShift.positionName} Â· {hiStart}â€“{hiEnd}</span>
                             {absenceShift.employeeName && <span className="block text-rose-500 mt-0.5">Ausente: {absenceShift.employeeName}</span>}
                         </div>
-                        <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
+                        <CoverageSection num="1" title="RetenciÃ³n Â· Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
                             empty="No hay guardias presentes en este objetivo."
                             items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
-                            empty="No hay turno próximo planificado."
+                        <CoverageSection num="2" title="Adelanto Â· PrÃ³ximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
+                            empty="No hay turno prÃ³ximo planificado."
                             items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="3" title="Retenes · Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
+                        <CoverageSection num="3" title="Retenes Â· Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
                             empty="No hay retenes disponibles."
                             items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="4" title="Francos · Día libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
+                        <CoverageSection num="4" title="Francos Â· DÃ­a libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
                             empty="No hay francos disponibles hoy."
                             items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
                         />
@@ -823,12 +823,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     );
 };
 
-const RetentionModal = ({ isOpen, onClose, retainedShift }: any) => { if (!isOpen) return null; return ( <div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4 animate-in fade-in"> <div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6"> <h3 className="font-bold mb-2">Retención de Guardia</h3> <p className="text-sm text-slate-500 mb-4">{retainedShift?.employeeName || 'Guardia'}</p> <button onClick={onClose} className="w-full py-2 bg-slate-100 rounded font-bold">Cerrar</button> </div> </div> ); };
+const RetentionModal = ({ isOpen, onClose, retainedShift }: any) => { if (!isOpen) return null; return ( <div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4 animate-in fade-in"> <div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6"> <h3 className="font-bold mb-2">RetenciÃ³n de Guardia</h3> <p className="text-sm text-slate-500 mb-4">{retainedShift?.employeeName || 'Guardia'}</p> <button onClick={onClose} className="w-full py-2 bg-slate-100 rounded font-bold">Cerrar</button> </div> </div> ); };
 const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName }: any) => { const [novedad, setNovedad] = useState(''); if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6"><h3 className="font-bold mb-4">Salida: {employeeName}</h3><button onClick={() => { onConfirm(false); onClose(); }} className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold mb-2">Salida Normal</button><textarea className="w-full p-2 border rounded mb-2" placeholder="Novedad..." value={novedad} onChange={e=>setNovedad(e.target.value)}/><button onClick={() => { onConfirm(novedad); setNovedad(''); onClose(); }} className="w-full py-2 bg-slate-100 font-bold rounded">Reportar y Salir</button><button onClick={onClose} className="mt-2 text-sm text-slate-400 w-full">Cancelar</button></div></div>); };
-const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
+const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">Â¿{shift?.employeeName} no se presentÃ³?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl shadow-sm p-6"><h3 className="font-bold">Franco Trabajado</h3><button onClick={onClose} className="w-full mt-4 py-2 bg-slate-100 rounded">Cerrar</button></div></div>); };
 
-// ── Popup de detalle de novedad ──────────────────────────────────────────────
+// â”€â”€ Popup de detalle de novedad â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',         bg: 'bg-red-600',    text: 'text-white',     border: 'border-red-500' },
@@ -836,7 +836,7 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',       bg: 'bg-orange-500', text: 'text-white',     border: 'border-orange-400' },
     RELEVO_NO_PRESENTADO:         { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
     POSICION_SIN_RELEVO:          { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
-    RETENCION_LARGA:              { label: 'RETENCIÓN',       bg: 'bg-orange-700', text: 'text-white',     border: 'border-orange-600' },
+    RETENCION_LARGA:              { label: 'RETENCIÃ“N',       bg: 'bg-orange-700', text: 'text-white',     border: 'border-orange-600' },
     CONVOCATORIA_RETEN:           { label: 'CONVOCATORIA',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
     FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
     ADELANTO_TURNO:               { label: 'ADELANTO',        bg: 'bg-indigo-500', text: 'text-white',     border: 'border-indigo-400' },
@@ -936,7 +936,7 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         </div>
                     )}
 
-                    {/* Descripción completa */}
+                    {/* DescripciÃ³n completa */}
                     {novedad.description && (
                         <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
                             {novedad.description}
@@ -952,10 +952,10 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                     )}
                 </div>
 
-                {/* Footer: acción + auto-cierre */}
+                {/* Footer: acciÃ³n + auto-cierre */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s · hover para pausar
+                        Cerrando en {Math.ceil(remaining / 1000)}s Â· hover para pausar
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
@@ -994,7 +994,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         !!shift.isReten ||
         (diff >= -15 && diff <= 120)
     );
-    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
+    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`Â¿CONFIRMAR NOTIFICACIÃ“N?\nSe enviarÃ¡ alerta a PlanificaciÃ³n.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
     const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
 
@@ -1007,13 +1007,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
-    else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">⏱ LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
+    else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÃ“ TARDE {shift.minutesRemainingLate != null ? `Â· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
     else if (shift.isPresent)        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
     else if (shift.isAbsent)         badge = shift.operacionallyCovered
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">✓ cubierto</span></span>
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">âœ“ cubierto</span></span>
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
@@ -1029,14 +1029,14 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {badge}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
-                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shift.positionName}</span></span>
+                    <span className="truncate">{shift.objectiveName} Â· <span className="text-indigo-500">{shift.positionName}</span></span>
                     <span className={`shrink-0 font-bold ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
                     <span className="shrink-0 font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
-                {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
-                {canCover && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button><button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button></>)}
+                {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin telÃ©fono'}><MessageCircle size={12}/></button>)}
+                {canCover && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button><button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificaciÃ³n"><CornerUpLeft size={12}/></button></>)}
                 {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
@@ -1050,9 +1050,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         return shiftEnded
                             ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>
                             : <div className="flex gap-1">
-                                <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde — dar presente"><UserCheck size={12}/></button>
+                                <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Guardia llegÃ³ tarde â€” dar presente"><UserCheck size={12}/></button>
                                 <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>
-                                <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>
+                                <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia â€” error de sistema"><XCircle size={12}/></button>
                               </div>;
                       })()
                     : <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Confirmar ausencia"><AlertTriangle size={12}/></button>
@@ -1061,7 +1061,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         </div>
     );
 
-    // ── Vista expandida ──────────────────────────────────────────────
+    // â”€â”€ Vista expandida â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     return (
         <div className={`relative rounded-xl border border-slate-200 mb-2 shadow-sm overflow-hidden transition-all ${rowBg}`}>
             <div className={`h-1 w-full ${accentColor}`}/>
@@ -1079,11 +1079,11 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">{badge}</div>
                 </div>
-                {/* Fila 2: objetivo · posición */}
+                {/* Fila 2: objetivo Â· posiciÃ³n */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
                     <MapPin size={10} className="text-indigo-400 shrink-0"/>
                     <span className="truncate font-medium">{shift.objectiveName}</span>
-                    <span className="text-slate-300">·</span>
+                    <span className="text-slate-300">Â·</span>
                     <span className="text-indigo-600 font-bold truncate">{shift.positionName}</span>
                     <span className="ml-auto font-mono text-slate-600 shrink-0 flex items-center gap-1">
                         <span className={`font-bold not-font-mono text-[9px] ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
@@ -1119,7 +1119,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             return shiftEnded
                                 ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
                                 : <div className="flex gap-1.5">
-                                    <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde"><UserCheck size={11}/>LLEGÓ TARDE</button>
+                                    <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors" title="Guardia llegÃ³ tarde"><UserCheck size={11}/>LLEGÃ“ TARDE</button>
                                     <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>
                                   </div>;
                           })()
@@ -1164,7 +1164,7 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
     );
 };
 
-// Formatea duración en HH:MM desde una fecha de inicio
+// Formatea duraciÃ³n en HH:MM desde una fecha de inicio
 const useElapsedTime = (startTime: Date | null) => {
     const [elapsed, setElapsed] = useState('');
     useEffect(() => {
@@ -1198,11 +1198,11 @@ export default function OperacionesPage() {
         processedData: logic.processedData,
     });
 
-    // Rol CC: operadores cuya única misión es el CC — se les auto-inicia guardia al abrir
+    // Rol CC: operadores cuya Ãºnica misiÃ³n es el CC â€” se les auto-inicia guardia al abrir
     // Supervisores y superadmin pueden entrar sin iniciar guardia
     const isCCOperator = !isSuperAdmin && (userRole === 'OPERADOR' || userRole === 'OPERADOR_CC');
 
-    // Auto-inicio de guardia para rol OPERADOR cuando data está lista
+    // Auto-inicio de guardia para rol OPERADOR cuando data estÃ¡ lista
     const autoStartedRef = useRef(false);
     useEffect(() => {
         if (!isCCOperator) return;
@@ -1214,7 +1214,7 @@ export default function OperacionesPage() {
         session.startSession().catch(e => console.warn('[CC auto-start]', e));
     }, [isCCOperator, logic.isReady, session.loading, session.isMySession]);
 
-    // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
+    // Audit log: registra cada vez que el modo automÃ¡tico cambia (operador entra/sale de guardia)
     const prevAutoModeRef = useRef<boolean | null>(null);
     useEffect(() => {
         if (session.loading) return;
@@ -1234,8 +1234,8 @@ export default function OperacionesPage() {
             empresaId,
             timestamp: serverTimestamp(),
             details: session.isAutoMode
-                ? 'Operador finalizó guardia en CC'
-                : (isCCOperator ? 'Guardia iniciada automáticamente (rol OPERADOR)' : 'Operador inició guardia manualmente'),
+                ? 'Operador finalizÃ³ guardia en CC'
+                : (isCCOperator ? 'Guardia iniciada automÃ¡ticamente (rol OPERADOR)' : 'Operador iniciÃ³ guardia manualmente'),
         }).catch(() => {});
     }, [session.isAutoMode, session.loading]);
 
@@ -1254,7 +1254,7 @@ export default function OperacionesPage() {
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
+    // Guard contra race condition: IDs relevados en esta sesiÃ³n excluidos de futuros activeGuards
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1293,9 +1293,9 @@ export default function OperacionesPage() {
         return empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
-            if (n.enGestion) return false; // otro operador (mapa) la está gestionando
+            if (n.enGestion) return false; // otro operador (mapa) la estÃ¡ gestionando
 
-            // Protocolo de cobertura: no mostrar si el turno ya terminó o venció el tiempo de gracia
+            // Protocolo de cobertura: no mostrar si el turno ya terminÃ³ o venciÃ³ el tiempo de gracia
             if (n.type === 'VACANTE_PROTOCOLO_COBERTURA') {
                 // Buscar el turno en processedData por shiftId o virtualVacancyId
                 const refId = n.shiftId || n.virtualVacancyId;
@@ -1312,12 +1312,12 @@ export default function OperacionesPage() {
                     const startMs = shift.shiftDateObj?.getTime?.() ?? 0;
                     const graceMs = COVERAGE_GRACE_MINUTES * 60 * 1000;
 
-                    // Ocultar si el turno ya terminó
+                    // Ocultar si el turno ya terminÃ³
                     if (endMs > 0 && now > endMs) return false;
-                    // Ocultar si superó el tiempo de gracia desde el inicio
+                    // Ocultar si superÃ³ el tiempo de gracia desde el inicio
                     if (startMs > 0 && now > startMs + graceMs) return false;
                 } else {
-                    // Sin turno encontrado: ocultar si la novedad tiene más de 2 horas
+                    // Sin turno encontrado: ocultar si la novedad tiene mÃ¡s de 2 horas
                     const createdMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
                     if (createdMs && now - createdMs > 2 * 3600 * 1000) return false;
                 }
@@ -1381,7 +1381,7 @@ export default function OperacionesPage() {
         return () => unsub();
     }, [empresaId, empresa, listenerRefreshKey]);
 
-    // Persiste en localStorage para no re-abrir el modal tras recargar la página
+    // Persiste en localStorage para no re-abrir el modal tras recargar la pÃ¡gina
     const ABSENT_ACK_KEY = `ops_absent_ack_${new Date().toLocaleDateString('en-CA')}`;
     const _loadAcked = (): Set<string> => {
         try { return new Set(JSON.parse(localStorage.getItem(ABSENT_ACK_KEY) || '[]')); } catch { return new Set(); }
@@ -1394,7 +1394,7 @@ export default function OperacionesPage() {
             if (!s.isAbsent || s.absenceType !== 'AA') return false;
             if (!isSameDay(s.shiftDateObj, new Date())) return false;
             if (autoAbsentTriggeredRef.current.has(s.id)) return false;
-            // No auto-abrir si ya pasó el tiempo de gracia — el operador puede abrir manualmente
+            // No auto-abrir si ya pasÃ³ el tiempo de gracia â€” el operador puede abrir manualmente
             const startMs = s.shiftDateObj?.getTime?.() ?? 0;
             if (startMs > 0 && now > startMs + COVERAGE_GRACE_MINUTES * 60 * 1000) return false;
             return true;
@@ -1424,7 +1424,7 @@ export default function OperacionesPage() {
             return true;
         }
         logic.setViewTab('PRIORIDAD');
-        toast.info('Buscá al guardia en PRIORIDAD para dar presente.');
+        toast.info('BuscÃ¡ al guardia en PRIORIDAD para dar presente.');
         return false;
     };
 
@@ -1441,7 +1441,7 @@ export default function OperacionesPage() {
 
             if (novedad.type === 'VACANTE_A_PLANIFICACION') {
                 // Ya fue auto-devuelta, solo informar
-                toast.success('Vacante devuelta a planificación');
+                toast.success('Vacante devuelta a planificaciÃ³n');
                 logic.setViewTab('VACANTES');
 
             } else if (novedad.type === 'VACANTE_PROTOCOLO_COBERTURA') {
@@ -1472,7 +1472,7 @@ export default function OperacionesPage() {
                     logic.setViewTab('VACANTES');
                 } else {
                     logic.setViewTab('VACANTES');
-                    toast.info('Usá el botón CUBRIR en la vacante correspondiente');
+                    toast.info('UsÃ¡ el botÃ³n CUBRIR en la vacante correspondiente');
                 }
 
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
@@ -1480,7 +1480,7 @@ export default function OperacionesPage() {
 
             } else if (novedad.type === 'AUSENCIA_AUTO' || novedad.type === 'RELEVO_NO_PRESENTADO') {
                 logic.setViewTab('AUSENTES');
-                toast.info('Revisá la pestaña AUSENTES para gestionar');
+                toast.info('RevisÃ¡ la pestaÃ±a AUSENTES para gestionar');
 
             } else if (novedad.type === 'AUSENCIA_CORTO_PLAZO' || novedad.type === 'AVISO_AUSENCIA_ANTICIPADA') {
                 // Buscar el turno afectado y abrir CoverageModal directamente
@@ -1495,7 +1495,7 @@ export default function OperacionesPage() {
                     setCoverageData({ isOpen: true, shift: targetShift });
                     toast.info(`Protocolo de cobertura abierto para ${novedad.employeeName || 'empleado'}`);
                 } else {
-                    toast.info('Turno no encontrado. Buscá en PLAN o AUSENTES.');
+                    toast.info('Turno no encontrado. BuscÃ¡ en PLAN o AUSENTES.');
                 }
 
             } else {
@@ -1512,7 +1512,7 @@ export default function OperacionesPage() {
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
 
-    // ── Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
+    // â”€â”€ Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venciÃ³ sin cobertura
     const autoExpiredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         const nowMs = Date.now();
@@ -1586,13 +1586,13 @@ export default function OperacionesPage() {
         const fmt24 = (d: any) => { try { return toDate(d).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', hour12: false, timeZone: tz }); } catch { return '--:--'; } };
         const fmtDT = (d: Date) => d.toLocaleString('es-AR', { timeZone: tz, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12: false });
         const fmtDateLong = (d: Date) => d.toLocaleDateString('es-AR', { timeZone: tz, weekday:'long', day:'2-digit', month:'long', year:'numeric' });
-        const operatorName = session.activeSession?.operatorName || 'Sistema Automático';
+        const operatorName = session.activeSession?.operatorName || 'Sistema AutomÃ¡tico';
         const guardStart   = session.activeSession?.startTime ? fmtDT(session.activeSession.startTime) : 'No registrado';
         const reportTime   = fmtDT(now);
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
 
-        // ── Helpers de sección ───────────────────────────────────────────
+        // â”€â”€ Helpers de secciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const sectionHeader = (title: string, r: number, g: number, b: number) => {
             pdf.addPage();
             pdf.setFillColor(r, g, b);
@@ -1605,7 +1605,7 @@ export default function OperacionesPage() {
         };
         const kv = (label: string, value: string) => [label, value];
 
-        // Datos base del día
+        // Datos base del dÃ­a
         const todayShifts    = logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now));
         const completedToday = todayShifts.filter((s: any) => s.isCompleted || s.status === 'COMPLETED');
         const activeNow      = todayShifts.filter((s: any) => s.isPresent && !s.isCompleted);
@@ -1617,7 +1617,7 @@ export default function OperacionesPage() {
         const totalPlanHrs   = todayShifts.filter((s:any)=>!s.isUnassigned).reduce((a:number,s:any)=>{ try{ return a+Math.max(0,(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); }catch{return a;} },0);
         const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a+((toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000);} return a+((toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); },0);
         const totalOpShifts  = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-        // Cobertura por turnos (no por objetivos): cuántos turnos tienen guardia vs total planificado
+        // Cobertura por turnos (no por objetivos): cuÃ¡ntos turnos tienen guardia vs total planificado
         const coveredShifts  = completedToday.length + activeNow.length + retainedNow.length;
         const coveragePct    = totalOpShifts > 0 ? Math.round((coveredShifts / totalOpShifts) * 100) : 0;
         // Logs operativos para PDF: siempre filtrado por acciones de operaciones, independiente del tab activo
@@ -1631,9 +1631,9 @@ export default function OperacionesPage() {
         const hasIncidents   = (absentToday.length + vacantToday.length + retainedNow.length) > 0;
         const statusLabel    = hasIncidents ? 'CON INCIDENCIAS' : 'NORMAL';
 
-        // ════════════════════════════════════════════════════════════════
-        // PÁGINA 1 — PORTADA
-        // ════════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // PÃGINA 1 â€” PORTADA
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         pdf.setFillColor(15, 23, 42);
         pdf.rect(0, 0, pageW, pageH * 0.45, 'F');
         pdf.setTextColor(255, 255, 255);
@@ -1663,14 +1663,14 @@ export default function OperacionesPage() {
         pdf.setFont('helvetica', 'normal'); pdf.text(reportTime, col1 + 42, infoY + 16);
         pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS CUBIERTOS:', col2, infoY);
         pdf.setFont('helvetica', 'normal'); pdf.text(`${coveredShifts} / ${totalOpShifts} (${coveragePct}%)`, col2 + 46, infoY);
-        pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS DEL DÍA:', col2, infoY + 8);
+        pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS DEL DÃA:', col2, infoY + 8);
         pdf.setFont('helvetica', 'normal'); pdf.text(String(totalOpShifts), col2 + 38, infoY + 8);
         pdf.setFont('helvetica', 'bold'); pdf.text('HORAS PLANIFICADAS:', col2, infoY + 16);
         pdf.setFont('helvetica', 'normal'); pdf.text(`${totalPlanHrs.toFixed(1)} hs`, col2 + 48, infoY + 16);
 
-        // ════════════════════════════════════════════════════════════════
-        // PÁGINA 2 — RESUMEN EJECUTIVO (KPIs)
-        // ════════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // PÃGINA 2 â€” RESUMEN EJECUTIVO (KPIs)
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         const y2 = sectionHeader('RESUMEN EJECUTIVO', 30, 64, 175);
         autoTable(pdf, {
             head: [['INDICADOR', 'VALOR', 'INDICADOR', 'VALOR']],
@@ -1680,7 +1680,7 @@ export default function OperacionesPage() {
                 ['Vacantes sin cubrir',       String(logic.stats.vacantes), 'Ausencias registradas',       String(absentToday.length)],
                 ['Objetivos con cobertura',   `${coveredObjs.size} / ${distinctObjs.size}`,'% Turnos cubiertos', `${coveragePct}%`],
                 ['Horas planificadas',        `${totalPlanHrs.toFixed(1)} hs`,'Horas reales (completados)', `${totalRealHrs.toFixed(1)} hs`],
-                ['Índice de puntualidad',     `${punctualPct}%`,            'Alertas gestionadas',         String(empNovedades.filter((n:any)=>n.status==='ATENDIDA').length)],
+                ['Ãndice de puntualidad',     `${punctualPct}%`,            'Alertas gestionadas',         String(empNovedades.filter((n:any)=>n.status==='ATENDIDA').length)],
                 ['Alertas pendientes',        String(pendingNovedades.length),'Estado de guardia',          statusLabel],
             ],
             startY: y2,
@@ -1703,9 +1703,9 @@ export default function OperacionesPage() {
             },
         });
 
-        // ════════════════════════════════════════════════════════════════
-        // PÁGINA 3 — TURNOS COMPLETADOS
-        // ════════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // PÃGINA 3 â€” TURNOS COMPLETADOS
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         const y3 = sectionHeader('TURNOS COMPLETADOS', 5, 150, 105);
         const completedRows = completedToday
             .sort((a:any,b:any) => toDate(a.shiftDateObj).getTime()-toDate(b.shiftDateObj).getTime())
@@ -1719,11 +1719,11 @@ export default function OperacionesPage() {
                 const lateMin = realS ? Math.round((realS.getTime()-planS.getTime())/60000) : 0;
                 const punct   = lateMin > 5 ? `TARDE +${lateMin}m` : 'A TIEMPO';
                 return [s.employeeName||'-', s.objectiveName||'-', s.positionName||'-',
-                    `${fmt24(planS)} – ${fmt24(planE)}`, `${planHr}h`, `${realHr}h`, punct];
+                    `${fmt24(planS)} â€“ ${fmt24(planE)}`, `${planHr}h`, `${realHr}h`, punct];
             });
         autoTable(pdf, {
-            head: [['Guardia','Objetivo','Posición','Horario Plan.','Hs Plan','Hs Real','Puntualidad']],
-            body: completedRows.length>0 ? completedRows : [['—','—','—','Sin turnos completados hoy','—','—','—']],
+            head: [['Guardia','Objetivo','PosiciÃ³n','Horario Plan.','Hs Plan','Hs Real','Puntualidad']],
+            body: completedRows.length>0 ? completedRows : [['â€”','â€”','â€”','Sin turnos completados hoy','â€”','â€”','â€”']],
             startY: y3,
             styles: { fontSize: 8 },
             headStyles: { fillColor: [5,150,105] },
@@ -1734,10 +1734,10 @@ export default function OperacionesPage() {
             },
         });
 
-        // ════════════════════════════════════════════════════════════════
-        // PÁGINA 4 — BITÁCORA DE OPERACIONES
-        // ════════════════════════════════════════════════════════════════
-        const y4 = sectionHeader('BITÁCORA DE OPERACIONES', 15, 23, 42);
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // PÃGINA 4 â€” BITÃCORA DE OPERACIONES
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        const y4 = sectionHeader('BITÃCORA DE OPERACIONES', 15, 23, 42);
         const logRows = pdfOpsLogs
             .map((log:any) => [
                 fmt24(log.time),
@@ -1748,22 +1748,22 @@ export default function OperacionesPage() {
             ]);
         autoTable(pdf, {
             head: [['Hora','Evento','Operador','Guardia / Objetivo','Detalle']],
-            body: logRows.length>0 ? logRows : [['—','—','—','—','Sin eventos registrados']],
+            body: logRows.length>0 ? logRows : [['â€”','â€”','â€”','â€”','Sin eventos registrados']],
             startY: y4,
             styles: { fontSize: 7.5 },
             headStyles: { fillColor: [15,23,42] },
             columnStyles: { 4: { cellWidth: 65 } },
         });
 
-        // ════════════════════════════════════════════════════════════════
-        // PÁGINA 5 — TRATAMIENTO DE ALERTAS
-        // ════════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // PÃGINA 5 â€” TRATAMIENTO DE ALERTAS
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         const y5 = sectionHeader('TRATAMIENTO DE ALERTAS', 153, 27, 27);
         const alertTypeLabel = (t:string) => ({
             AUSENCIA_AUTO:'AUSENCIA', VACANTE_PROTOCOLO_COBERTURA:'PROT. COBERTURA',
             VACANTE_A_PLANIFICACION:'VACANTE PLAN', RELEVO_NO_PRESENTADO:'RELEVO',
             VACANTE_NO_CUBIERTA:'SIN CUBRIR', BAJA_CUBIERTA:'BAJA CUBIERTA',
-            RETENCION_LARGA:'RETENCIÓN', POSICION_SIN_RELEVO:'SIN RELEVO',
+            RETENCION_LARGA:'RETENCIÃ“N', POSICION_SIN_RELEVO:'SIN RELEVO',
         } as any)[t] || t;
         const pendientesAlerts = empNovedades.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida'&&n.type!=='VACANTE_A_PLANIFICACION');
         const atendidasAlerts  = empNovedades.filter((n:any)=>n.status==='ATENDIDA'||n.status==='atendida');
@@ -1773,8 +1773,8 @@ export default function OperacionesPage() {
             return [ts, alertTypeLabel(n.type), n.objectiveName||'-', n.positionName||'-', n.description||'-', st];
         });
         autoTable(pdf, {
-            head: [['Hora','Tipo','Objetivo','Posición','Descripción','Estado']],
-            body: alertRows.length>0 ? alertRows : [['—','—','—','—','Sin alertas registradas','—']],
+            head: [['Hora','Tipo','Objetivo','PosiciÃ³n','DescripciÃ³n','Estado']],
+            body: alertRows.length>0 ? alertRows : [['â€”','â€”','â€”','â€”','Sin alertas registradas','â€”']],
             startY: y5,
             styles: { fontSize: 7.5 },
             headStyles: { fillColor: [153,27,27] },
@@ -1786,13 +1786,13 @@ export default function OperacionesPage() {
             },
         });
 
-        // Pie de página en todas las páginas
+        // Pie de pÃ¡gina en todas las pÃ¡ginas
         const totalPages = (pdf as any).internal.getNumberOfPages();
         for (let i=1; i<=totalPages; i++) {
             pdf.setPage(i);
             pdf.setFontSize(7); pdf.setFont('helvetica','normal'); pdf.setTextColor(150,150,150);
-            pdf.text(`Informe confidencial — ${operatorName} — ${reportTime}`, 14, pageH-6);
-            pdf.text(`Página ${i} / ${totalPages}`, pageW-14, pageH-6, { align:'right' });
+            pdf.text(`Informe confidencial â€” ${operatorName} â€” ${reportTime}`, 14, pageH-6);
+            pdf.text(`PÃ¡gina ${i} / ${totalPages}`, pageW-14, pageH-6, { align:'right' });
         }
 
         pdf.save(`guardia_${now.toLocaleDateString('es-AR',{timeZone:tz}).replace(/\//g,'-')}.pdf`);
@@ -1807,7 +1807,7 @@ export default function OperacionesPage() {
             const dayEnd    = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
             const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
 
-            // Si ya fue marcado automáticamente (AA), evitar doble registro en ausencias
+            // Si ya fue marcado automÃ¡ticamente (AA), evitar doble registro en ausencias
             const alreadyAutoAbsent = shift.isAbsent === true && shift.absenceType === 'AA';
 
             // 1. Marcar el turno como ausente (confirma la ausencia con origen operador)
@@ -1819,17 +1819,17 @@ export default function OperacionesPage() {
                 absenceConfirmedAt: serverTimestamp(),
             }, empresaId, migracionCompleta);
 
-            // 2. Crear registro en ausencias SOLO si no fue creado automáticamente
+            // 2. Crear registro en ausencias SOLO si no fue creado automÃ¡ticamente
             if (!alreadyAutoAbsent) {
                 await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                     employeeId:     shift.employeeId,
                     employeeName:   shift.employeeName,
                     clientId:       shift.clientId   || null,
-                    type:           'NO_PRESENTACION',   // tipo correcto: no presentación
+                    type:           'NO_PRESENTACION',   // tipo correcto: no presentaciÃ³n
                     startDate:      Timestamp.fromDate(dayStart),
                     endDate:        Timestamp.fromDate(dayEnd),
                     status:         'Pendiente',
-                    reason:         `No presentación en turno — ${shift.objectiveName} (${shift.positionName})`,
+                    reason:         `No presentaciÃ³n en turno â€” ${shift.objectiveName} (${shift.positionName})`,
                     hasCertificate: false,
                     createdAt:      serverTimestamp(),
                     origin:         'OPERACIONES',
@@ -1837,7 +1837,7 @@ export default function OperacionesPage() {
                 }, shiftEmpresaId));
             }
 
-            // 3. Notificar a RRHH y Planificación vía novedades
+            // 3. Notificar a RRHH y PlanificaciÃ³n vÃ­a novedades
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type:         'AUSENCIA_OPERATIVA',
                 title:        'Ausencia confirmada desde Operaciones',
@@ -1847,7 +1847,7 @@ export default function OperacionesPage() {
                 clientId:     shift.clientId   || null,
                 objectiveId:  shift.objectiveId || null,
                 shiftId:      shift.id,
-                description:  `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${new Date(shiftDate).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})})${alreadyAutoAbsent ? ' [ya detectado automáticamente]' : ''}`,
+                description:  `${shift.employeeName} no se presentÃ³ en ${shift.objectiveName} â€” ${shift.positionName} (${new Date(shiftDate).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})})${alreadyAutoAbsent ? ' [ya detectado automÃ¡ticamente]' : ''}`,
                 createdAt:    serverTimestamp(),
                 reportedBy:   'OPERACIONES',
             }, shiftEmpresaId));
@@ -1855,8 +1855,8 @@ export default function OperacionesPage() {
             setAttendanceData({isOpen:false, shift:null});
             setCoverageData({isOpen:true, shift: shift});
             const msg = alreadyAutoAbsent
-                ? `Ausencia de ${shift.employeeName} confirmada (ya detectada automáticamente).`
-                : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y Planificación.`;
+                ? `Ausencia de ${shift.employeeName} confirmada (ya detectada automÃ¡ticamente).`
+                : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y PlanificaciÃ³n.`;
             toast.success(msg);
         } catch (e: any) {
             toast.error('Error al marcar ausencia: ' + (e?.message || e?.code || String(e)));
@@ -1866,7 +1866,7 @@ export default function OperacionesPage() {
 
     // Revertir ausencia incorrecta (bug sistema o error del operador)
     const handleRevertAbsence = async (shift: any) => {
-        if (!confirm(`¿Revertir la ausencia de ${shift.employeeName}?\nSe limpiará el flag de ausencia. Usá esto solo si fue un error.`)) return;
+        if (!confirm(`Â¿Revertir la ausencia de ${shift.employeeName}?\nSe limpiarÃ¡ el flag de ausencia. UsÃ¡ esto solo si fue un error.`)) return;
         try {
             await updateDocForEmpresa('turnos', shift.id, {
                 isAbsent:          false,
@@ -1881,19 +1881,19 @@ export default function OperacionesPage() {
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     };
     const handleNovedadAbsence = async (shift: any) => {
-        if (!confirm(`¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificará a RRHH y Planificación.`)) return;
+        if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificarÃ¡ a RRHH y PlanificaciÃ³n.`)) return;
         try {
             const batch = writeBatch(db);
-            // Marca el turno con aviso → el planificador muestra barra ámbar
+            // Marca el turno con aviso â†’ el planificador muestra barra Ã¡mbar
             if (shift.id && !shift.isVirtual) {
                 batch.update(doc(db, 'turnos', shift.id), {
                     plannedNovedad:     'AVISO',
-                    notifiedAbsent:     true,         // protege al turno del AA automático a T+30
+                    notifiedAbsent:     true,         // protege al turno del AA automÃ¡tico a T+30
                     notifiedAbsentAt:   serverTimestamp(),
                 });
             }
             await batch.commit();
-            // Abrir inmediatamente el protocolo de cobertura — no esperar T+30
+            // Abrir inmediatamente el protocolo de cobertura â€” no esperar T+30
             setCoverageData({ isOpen: true, shift });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'AVISO_AUSENCIA_ANTICIPADA',
@@ -1906,11 +1906,11 @@ export default function OperacionesPage() {
                 objectiveName: shift.objectiveName || '',
                 positionName: shift.positionName || '',
                 shiftId: shift.id,
-                description: `${shift.employeeName} avisó que no se presentará al turno en ${shift.objectiveName} (${shift.positionName}) — ${formatTimeRange(shift.shiftDateObj, shift.endDateObj)}.`,
+                description: `${shift.employeeName} avisÃ³ que no se presentarÃ¡ al turno en ${shift.objectiveName} (${shift.positionName}) â€” ${formatTimeRange(shift.shiftDateObj, shift.endDateObj)}.`,
                 createdAt: serverTimestamp(),
                 reportedBy: 'OPERACIONES',
             }, String(shift.empresaId || empresaId || '').trim()));
-            toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a Planificación.`);
+            toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a PlanificaciÃ³n.`);
         } catch (e: any) {
             toast.error('Error al registrar novedad: ' + (e?.message || e?.code || String(e)));
         }
@@ -1928,7 +1928,7 @@ export default function OperacionesPage() {
                     positionName: shift.positionName,
                     employeeId: 'VACANTE', employeeName: 'VACANTE',
                     // Fix 4: asegurar que el Date sea correcto antes de convertir a Timestamp
-                    // shiftDateObj es un Date local de Argentina — Timestamp.fromDate lo convierte a UTC correctamente
+                    // shiftDateObj es un Date local de Argentina â€” Timestamp.fromDate lo convierte a UTC correctamente
                     startTime: Timestamp.fromDate(shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj)),
                     endTime:   Timestamp.fromDate(shift.endDateObj   instanceof Date ? shift.endDateObj   : new Date(shift.endDateObj)),
                     status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
@@ -1945,7 +1945,7 @@ export default function OperacionesPage() {
                 clientId: shift.clientId, objectiveId: shift.objectiveId, shiftId: targetId,
                 objectiveName: shift.objectiveName || '',
                 positionName: shift.positionName || '',
-                description: `Sin cubrir: ${shift.positionName || '—'} en ${shift.objectiveName}${shift.shiftDateObj ? ' · ' + formatTimeRange(shift.shiftDateObj, shift.endDateObj) : ''}`,
+                description: `Sin cubrir: ${shift.positionName || 'â€”'} en ${shift.objectiveName}${shift.shiftDateObj ? ' Â· ' + formatTimeRange(shift.shiftDateObj, shift.endDateObj) : ''}`,
                 createdAt: serverTimestamp(), reportedBy: 'OPERACIONES'
             }, String(shift.empresaId || empresaId || '').trim()));
             toast.success('Reporte enviado correctamente');
@@ -1960,11 +1960,11 @@ export default function OperacionesPage() {
     useEffect(() => {
         if (autoTabDoneRef.current) return;
         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-        if (total === 0) return; // datos aún no cargaron
+        if (total === 0) return; // datos aÃºn no cargaron
         autoTabDoneRef.current = true;
         if (logic.stats.ausentes > 0 && (logic.viewTab === 'PRIORIDAD' || logic.viewTab === 'PLAN')) {
             logic.setViewTab('AUSENTES' as any);
-            // Compact automático si hay muchos ausentes
+            // Compact automÃ¡tico si hay muchos ausentes
             if (logic.stats.ausentes > 4 && !logic.isCompact) logic.setIsCompact(true);
         } else if (logic.stats.vacantes > 0 && logic.stats.ausentes === 0 && (logic.viewTab === 'PRIORIDAD' || logic.viewTab === 'PLAN')) {
             logic.setViewTab('VACANTES' as any);
@@ -1983,7 +1983,7 @@ export default function OperacionesPage() {
         }
     }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
-    // ── COBERTURA POR OBJETIVO ─────────────────────────────────────────────────
+    // â”€â”€ COBERTURA POR OBJETIVO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const coverageByObjective = useMemo(() => {
         const now = new Date();
         const map: Record<string, {name:string; client:string; total:number; active:number; absent:number; vacant:number; objectiveId:string}> = {};
@@ -1993,7 +1993,7 @@ export default function OperacionesPage() {
         hoy.forEach((s:any) => {
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';
-            if (!map[key]) map[key] = { name: s.objectiveName || '—', client: s.clientName || '', total: 0, active: 0, absent: 0, vacant: 0, objectiveId: key };
+            if (!map[key]) map[key] = { name: s.objectiveName || 'â€”', client: s.clientName || '', total: 0, active: 0, absent: 0, vacant: 0, objectiveId: key };
             map[key].total++;
             if (s.isPresent || s.isRetention) map[key].active++;
             if (s.isAbsent || s.isPotentialAbsence) map[key].absent++;
@@ -2014,7 +2014,7 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
-    // ── VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad ──
+    // â”€â”€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â”€â”€
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
@@ -2029,12 +2029,12 @@ export default function OperacionesPage() {
             if (!map.has(key)) {
                 map.set(key, {
                     objectiveId: key,
-                    name:    s.objectiveName  || '—',
+                    name:    s.objectiveName  || 'â€”',
                     client:  s.clientName     || '',
                     clientId: s.clientId      || '',
                     lat: s.lat, lng: s.lng,
                     active: 0, absent: 0, vacant: 0, retention: 0, plan: 0, total: 0,
-                    criticalShift: null as any,  // el más urgente para abrir cobertura directo
+                    criticalShift: null as any,  // el mÃ¡s urgente para abrir cobertura directo
                     shifts: [] as any[],
                 });
             }
@@ -2047,12 +2047,12 @@ export default function OperacionesPage() {
             else if (s.isUnassigned)                       { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; } // incluye devueltas
             else if (s.isFuture || s.isImminent)             obj.plan++;
         });
-        // Aplicar filtro de cliente si está activo
+        // Aplicar filtro de cliente si estÃ¡ activo
         const clientFilter = logic.selectedClientId;
         return Array.from(map.values())
             .filter(o => !clientFilter || o.clientId === clientFilter)
             .sort((a, b) => {
-                // Criticidad: ausentes > vacantes > retención > ok
+                // Criticidad: ausentes > vacantes > retenciÃ³n > ok
                 const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
                 const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
                 return scoreB - scoreA;
@@ -2075,7 +2075,7 @@ export default function OperacionesPage() {
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 select-none" style={{ gap: '28px' }}>
-                {/* Logo + título */}
+                {/* Logo + tÃ­tulo */}
                 <div className="flex flex-col items-center gap-3">
                     <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
                         <Radio size={32} className="text-cyan-400" style={{ animation: 'pulse 1.8s ease-in-out infinite' }}/>
@@ -2089,7 +2089,7 @@ export default function OperacionesPage() {
                 <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
                     <div className="h-full bg-cyan-500 rounded-full" style={{ width: '60%', animation: 'ccLoadBar 1.6s ease-in-out infinite alternate' }}/>
                 </div>
-                <p className="text-slate-500 text-xs font-medium">Sincronizando datos en tiempo real…</p>
+                <p className="text-slate-500 text-xs font-medium">Sincronizando datos en tiempo realâ€¦</p>
                 <style>{`
                     @keyframes ccLoadBar { from { width: 15%; } to { width: 85%; } }
                 `}</style>
@@ -2103,11 +2103,11 @@ export default function OperacionesPage() {
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
             
-            {/* ── Banda Estado del Día ── */}
+            {/* â”€â”€ Banda Estado del DÃ­a â”€â”€ */}
             {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
                 const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                 const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                // Solo sobre turnos que debieron iniciar (excluye los planificados para más tarde)
+                // Solo sobre turnos que debieron iniciar (excluye los planificados para mÃ¡s tarde)
                 const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                 const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
                 const isCrisis  = cobertura < 50;
@@ -2123,7 +2123,7 @@ export default function OperacionesPage() {
                             <div className="flex items-center gap-2">
                                 {isCrisis && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block shrink-0"/>}
                                 <span className={`text-[10px] font-black uppercase tracking-wider shrink-0 ${isCrisis ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
-                                    {isCrisis ? '⚠ COBERTURA CRÍTICA' : isWarning ? '▲ ATENCIÓN' : 'Estado del día'}
+                                    {isCrisis ? 'âš  COBERTURA CRÃTICA' : isWarning ? 'â–² ATENCIÃ“N' : 'Estado del dÃ­a'}
                                 </span>
                             </div>
                             <div className="flex items-center gap-2 flex-1 min-w-[120px]">
@@ -2153,19 +2153,19 @@ export default function OperacionesPage() {
                                 ))}
                             </div>
                         </div>
-                        {/* Barra de alertas rápidas cuando hay crisis */}
+                        {/* Barra de alertas rÃ¡pidas cuando hay crisis */}
                         {isCrisis && (logic.stats.vacantes > 0 || logic.stats.ausentes > 0) && (
                             <div className="px-3 pb-2 flex gap-2 flex-wrap">
                                 {logic.stats.ausentes > 0 && (
                                     <button onClick={() => logic.setViewTab('AUSENTES' as any)}
                                         className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-600 text-white text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-700 active:scale-95 transition-colors">
-                                        <AlertTriangle size={13}/> {logic.stats.ausentes} AUSENTES — Gestionar
+                                        <AlertTriangle size={13}/> {logic.stats.ausentes} AUSENTES â€” Gestionar
                                     </button>
                                 )}
                                 {logic.stats.vacantes > 0 && (
                                     <button onClick={() => logic.setViewTab('VACANTES' as any)}
                                         className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-100 text-rose-700 border border-rose-300 text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-200 active:scale-95 transition-colors">
-                                        <UserX size={13}/> {logic.stats.vacantes} VACANTES — Ver
+                                        <UserX size={13}/> {logic.stats.vacantes} VACANTES â€” Ver
                                     </button>
                                 )}
                             </div>
@@ -2174,7 +2174,7 @@ export default function OperacionesPage() {
                 );
             })()}
 
-            {/* ── GRID COBERTURA POR OBJETIVO (colapsable) ── */}
+            {/* â”€â”€ GRID COBERTURA POR OBJETIVO (colapsable) â”€â”€ */}
             {coverageByObjective.length > 0 && (
                 <div className="mx-2 mb-2">
                     <button onClick={() => setShowCoverageGrid(v => !v)}
@@ -2243,7 +2243,7 @@ export default function OperacionesPage() {
                             <MapPin size={16} className="text-slate-400"/>
                             <span className="text-[9px] font-black text-slate-400 uppercase" style={{writingMode:'vertical-rl', transform:'rotate(180deg)'}}>Ver mapa</span>
                         </button>
-                        {/* Mobile: botón flotante abajo a la derecha */}
+                        {/* Mobile: botÃ³n flotante abajo a la derecha */}
                         <button onClick={() => setMapCollapsed(false)}
                             className="lg:hidden fixed bottom-6 right-4 z-50 flex items-center gap-2 px-4 py-3 bg-slate-800 text-white rounded-full shadow-xl hover:bg-slate-700 active:scale-95 transition-all"
                             title="Ver mapa">
@@ -2255,7 +2255,7 @@ export default function OperacionesPage() {
 
                 <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
                     <div className="px-3 pt-2 pb-2 border-b">
-                        {/* Fila 1: título + controles */}
+                        {/* Fila 1: tÃ­tulo + controles */}
                         <div className="flex justify-between items-center mb-1.5">
                             <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5"><Radio className="text-rose-600 animate-pulse" size={13}/> Estado de Operaciones</h2>
                             <div className="flex items-center gap-1">
@@ -2272,22 +2272,22 @@ export default function OperacionesPage() {
                                 </div>
                                 {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
                                 {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
-                                <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>
+                                <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnÃ³stico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">ðŸ” Debug</button>
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
                         </div>
 
-                        {/* Barra de sesión compacta */}
+                        {/* Barra de sesiÃ³n compacta */}
                         {session.isAutoMode ? (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
                                         <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
                                         <span className="text-[10px] font-black text-amber-700 uppercase">
-                                            {isCCOperator ? 'Iniciando guardia…' : 'Modo Automático'}
+                                            {isCCOperator ? 'Iniciando guardiaâ€¦' : 'Modo AutomÃ¡tico'}
                                         </span>
                                     </div>
-                                    {/* Operadores CC: no muestran el botón — se auto-inicia */}
+                                    {/* Operadores CC: no muestran el botÃ³n â€” se auto-inicia */}
                                     {!isCCOperator && (
                                         <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
                                     )}
@@ -2295,7 +2295,7 @@ export default function OperacionesPage() {
                                 {session.activeSessions.length > 0 && (
                                     <p className="text-[9px] text-amber-800 leading-tight">
                                         <span className="font-black">En guardia:</span>{' '}
-                                        {session.activeSessions.map(s => s.operatorName).join(' · ')}
+                                        {session.activeSessions.map(s => s.operatorName).join(' Â· ')}
                                     </p>
                                 )}
                             </div>
@@ -2310,36 +2310,36 @@ export default function OperacionesPage() {
                                     </div>
                                     {confirmEndSession ? (
                                         <div className="flex items-center gap-1 shrink-0">
-                                            <span className="text-[8px] text-rose-600 font-black">¿Confirmar?</span>
+                                            <span className="text-[8px] text-rose-600 font-black">Â¿Confirmar?</span>
                                             <button
                                                 onClick={async () => {
                                                     try {
                                                         await session.endSession();
-                                                        toast.success('Sesión finalizada');
+                                                        toast.success('SesiÃ³n finalizada');
                                                         setConfirmEndSession(false);
                                                     } catch (e) {
                                                         console.error(e);
-                                                        toast.error('No se pudo finalizar la sesión');
+                                                        toast.error('No se pudo finalizar la sesiÃ³n');
                                                     }
                                                 }}
                                                 className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700"
-                                            >Sí</button>
+                                            >SÃ­</button>
                                             <button onClick={() => setConfirmEndSession(false)} className="px-1.5 py-1 bg-slate-200 text-slate-700 text-[8px] font-black rounded-lg hover:bg-slate-300">No</button>
                                         </div>
                                     ) : (
-                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900 shrink-0">Finalizar Sesión</button>
+                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900 shrink-0">Finalizar SesiÃ³n</button>
                                     )}
                                 </div>
                                 {session.otherSessions.length > 0 && (
                                     <p className="text-[9px] text-emerald-800 leading-tight">
-                                        <span className="font-black">También en guardia:</span>{' '}
-                                        {session.otherSessions.map(s => s.operatorName).join(' · ')}
+                                        <span className="font-black">TambiÃ©n en guardia:</span>{' '}
+                                        {session.otherSessions.map(s => s.operatorName).join(' Â· ')}
                                     </p>
                                 )}
                             </div>
                         )}
 
-                        {/* Búsqueda + cliente en una fila */}
+                        {/* BÃºsqueda + cliente en una fila */}
                         <div className="flex gap-1.5 mb-1.5">
                             <select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="flex-1 py-1 px-2 text-[10px] font-bold border border-slate-300 rounded-lg bg-slate-50 outline-none text-slate-700">
                                 <option value="">TODOS LOS CLIENTES</option>
@@ -2351,7 +2351,7 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* UNA SOLA FILA: número grande + label abajo, clickable para filtrar */}
+                        {/* UNA SOLA FILA: nÃºmero grande + label abajo, clickable para filtrar */}
                         <div className="flex gap-0.5 overflow-x-auto">
                             {tabs.map(t => {
                                 const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES') && t.count > 0;
@@ -2375,7 +2375,7 @@ export default function OperacionesPage() {
                                     </button>
                                 );
                             })}
-                            {/* TOTAL — no clickable, solo info */}
+                            {/* TOTAL â€” no clickable, solo info */}
                             <div className="flex-1 px-1 py-1.5 rounded-lg bg-slate-100 flex flex-col items-center gap-0">
                                 <span className="text-sm font-black leading-none text-slate-600">
                                     {logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes}
@@ -2385,7 +2385,7 @@ export default function OperacionesPage() {
                         </div>
                     </div>
 
-                    {/* ── Panel ausencias autorizadas hoy ── */}
+                    {/* â”€â”€ Panel ausencias autorizadas hoy â”€â”€ */}
                     {authorizedAbsences.length > 0 && (
                         <div className="px-3 py-1.5 border-b border-amber-100 bg-amber-50/60 shrink-0">
                             <button
@@ -2422,8 +2422,8 @@ export default function OperacionesPage() {
                                         return (
                                             <div key={a.id} className="flex items-center gap-2 bg-white border border-amber-100 rounded-lg px-2 py-1">
                                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${typeColor}`}>{typeShort}</span>
-                                                <span className="text-[10px] font-bold text-slate-700 flex-1 truncate">{a.employeeName || '—'}</span>
-                                                <span className="text-[9px] text-slate-400 font-mono shrink-0">{fmtD(a.startDate)}→{fmtD(a.endDate)}</span>
+                                                <span className="text-[10px] font-bold text-slate-700 flex-1 truncate">{a.employeeName || 'â€”'}</span>
+                                                <span className="text-[9px] text-slate-400 font-mono shrink-0">{fmtD(a.startDate)}â†’{fmtD(a.endDate)}</span>
                                             </div>
                                         );
                                     })}
@@ -2434,7 +2434,7 @@ export default function OperacionesPage() {
 
                     <div className="flex-1 overflow-y-auto bg-slate-50">
 
-                        {/* ══ MODO OBJETIVOS (default) ════════════════════════════════ */}
+                        {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'objetivos' && (
                         <div className="p-2 space-y-1.5">
                             {objectivesWithAlerts.length === 0 ? (
@@ -2453,7 +2453,7 @@ export default function OperacionesPage() {
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
-                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos de OTRO día
+                                    // Mismo filtro "hoy" que stats â€” excluye completados y virtuales vencidos de OTRO dÃ­a
                                     if (s.isCompleted && !s.isRetention) return false;
                                     if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now2) && s.endDateObj.getTime() < now2.getTime()) return false;
                                     const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
@@ -2476,7 +2476,7 @@ export default function OperacionesPage() {
                                             {/* Indicador color */}
                                             <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
 
-                                            {/* Info principal — tappable para expandir */}
+                                            {/* Info principal â€” tappable para expandir */}
                                             <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : obj.objectiveId)}>
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs font-black text-slate-800 truncate">{obj.name}</span>
@@ -2505,7 +2505,7 @@ export default function OperacionesPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Acciones rápidas */}
+                                            {/* Acciones rÃ¡pidas */}
                                             <div className="flex items-center gap-1 shrink-0">
                                                 {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
                                                     <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
@@ -2525,7 +2525,7 @@ export default function OperacionesPage() {
                                         {isExpanded && (
                                             <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
                                                 {objShifts.length === 0 ? (
-                                                    <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                                    <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categorÃ­a</p>
                                                 ) : objShifts.map((s: any) => (
                                                     <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
                                                         isAutoMode={session.isAutoMode}
@@ -2549,10 +2549,10 @@ export default function OperacionesPage() {
                         </div>
                         )}
 
-                        {/* ══ MODO LISTA (existente) ══════════════════════════════════ */}
+                        {/* â•â• MODO LISTA (existente) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'lista' && (
                         <div className="p-3 space-y-2">
-                        {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
+                        {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categorÃ­a</div> :
                             isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} isPublished={isPublished}/>; })) :
                             (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onRevertAbsence={handleRevertAbsence}/>))
                         }
@@ -2561,13 +2561,13 @@ export default function OperacionesPage() {
 
                     </div>
 
-                    {/* ── BITÁCORA collapsible ─────────────────────────── */}
+                    {/* â”€â”€ BITÃCORA collapsible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                     <div className={`border-t border-slate-200 bg-white flex flex-col shrink-0 transition-all duration-200 ${bitacoraOpen ? 'h-80' : ''}`}>
-                      {/* Header — always visible, click to toggle */}
+                      {/* Header â€” always visible, click to toggle */}
                       <div className="px-3 py-1.5 flex items-center gap-1 bg-slate-50 cursor-pointer select-none"
                            onClick={() => setBitacoraOpen(v => !v)}>
                         <ClipboardList size={12} className="text-slate-400 shrink-0"/>
-                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">Bitácora</span>
+                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">BitÃ¡cora</span>
                         {!bitacoraOpen && filteredBitacora.length > 0 && (
                           <span className="text-[9px] text-slate-400 mr-1">{filteredBitacora.length} eventos</span>
                         )}
@@ -2576,7 +2576,7 @@ export default function OperacionesPage() {
                         )}
                         {bitacoraOpen ? <ChevronDown size={12} className="text-slate-400"/> : <ChevronRight size={12} className="text-slate-400"/>}
                       </div>
-                      {/* Content — only when open */}
+                      {/* Content â€” only when open */}
                       {bitacoraOpen && (<>
                         <div className="px-2 py-1 border-b border-slate-100 flex items-center gap-1 bg-slate-50" onClick={e => e.stopPropagation()}>
                           {([
@@ -2601,7 +2601,7 @@ export default function OperacionesPage() {
                             <Printer size={11}/>
                           </button>
                         </div>
-                        {/* ── Tab Actividad / Operaciones ── */}
+                        {/* â”€â”€ Tab Actividad / Operaciones â”€â”€ */}
                         {bitacoraTab !== 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           <table className="w-full text-[10px] text-left">
@@ -2615,7 +2615,7 @@ export default function OperacionesPage() {
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                               {filteredBitacora.length === 0 ? (
-                                <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-300 text-[10px]">Sin registros en esta sección</td></tr>
+                                <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-300 text-[10px]">Sin registros en esta secciÃ³n</td></tr>
                               ) : filteredBitacora.map((log: any) => {
                                 const action = (log.action || '').toUpperCase();
                                 const isOp = action.includes('CHECK') || action.includes('ABSENT') || action.includes('HANDOVER') || action.includes('FRANCO');
@@ -2640,7 +2640,7 @@ export default function OperacionesPage() {
                         </div>
                         )}
 
-                        {/* ── Tab Novedades (inline, siempre accesible) ── */}
+                        {/* â”€â”€ Tab Novedades (inline, siempre accesible) â”€â”€ */}
                         {bitacoraTab === 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           {pendingNovedades.length === 0 ? (
@@ -2666,9 +2666,9 @@ export default function OperacionesPage() {
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
                                     {n.employeeName && n.objectiveName
-                                      ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                      ? <>{n.employeeName} <span className="text-slate-400 font-normal">Â·</span> {n.objectiveName}</>
                                       : n.objectiveName || n.employeeName || n.type}
-                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> Â· {n.positionName}</span>}
                                   </p>
                                   <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
                                 </div>
@@ -2702,7 +2702,7 @@ export default function OperacionesPage() {
                     </div>
                 </div>
 
-                {/* ── PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa ── */}
+                {/* â”€â”€ PANEL FLOTANTE DE ALERTAS â€” solo visible cuando el mapa NO estÃ¡ en ventana externa â”€â”€ */}
                 {!isExternalMap && (
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
@@ -2728,7 +2728,7 @@ export default function OperacionesPage() {
                 ) : (
                     <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[92vh] lg:max-h-[70vh]">
                         <div className="bg-slate-900 rounded-t-2xl">
-                            {/* Drag handle — solo mobile */}
+                            {/* Drag handle â€” solo mobile */}
                             <div className="flex justify-center pt-2 pb-0 lg:hidden">
                                 <div className="w-10 h-1 bg-white/30 rounded-full"/>
                             </div>
@@ -2740,7 +2740,7 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* ── Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) ── */}
+                        {/* â”€â”€ SecciÃ³n PRIORIDAD â€” usa priorityShiftsPanel ya calculado (mismo filtro que stats) â”€â”€ */}
                         {priorityShiftsPanel.length > 0 && (() => {
                             const priorityShifts = priorityShiftsPanel;
                             return (
@@ -2762,7 +2762,7 @@ export default function OperacionesPage() {
                                                         {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
                                                 </p>
-                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} Â· <span className="text-indigo-500">{s.positionName}</span> Â· <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
                                                 {s.isRetention ? (<>
@@ -2779,12 +2779,12 @@ export default function OperacionesPage() {
                             );
                         })()}
 
-                        {/* ── Columnas header novedades ── */}
+                        {/* â”€â”€ Columnas header novedades â”€â”€ */}
                         <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase">
                             <span className="w-14 shrink-0">Tipo</span>
-                            <span className="flex-1">Objetivo / Posición</span>
+                            <span className="flex-1">Objetivo / PosiciÃ³n</span>
                             <span className="w-10 text-right">Hora</span>
-                            <span className="w-16 text-center">Acción</span>
+                            <span className="w-16 text-center">AcciÃ³n</span>
                         </div>
                         <div className="flex-1 overflow-y-auto">
                             {pendingNovedades.length === 0 ? (
@@ -2792,7 +2792,7 @@ export default function OperacionesPage() {
                                     <CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/>
                                     <p className="text-xs font-bold text-slate-400">
                                         {priorityShiftsPanel.length > 0
-                                            ? 'Sin novedades pendientes — revisá la sección Prioridad arriba'
+                                            ? 'Sin novedades pendientes â€” revisÃ¡ la secciÃ³n Prioridad arriba'
                                             : 'Sin alertas pendientes'}
                                     </p>
                                 </div>
@@ -2813,9 +2813,9 @@ export default function OperacionesPage() {
                                 const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
                                 const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
                                 const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
+                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retenciÃ³n' : 'Atender';
                                 const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                    ? ` · ${n.minutesBeforeShift}min`
+                                    ? ` Â· ${n.minutesBeforeShift}min`
                                     : '';
 
                                 return (
@@ -2824,15 +2824,15 @@ export default function OperacionesPage() {
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
                                                 {n.employeeName && n.objectiveName
-                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">Â·</span> {n.objectiveName}</>
                                                     : n.objectiveName || n.employeeName
                                                     || (n.description ? n.description.replace(/\s*\(detectado[^)]*\)/,'').replace(/\s*\(\d+\s*min\)/,'').trim() : null)
-                                                    || (isAbsence ? 'Ausencia automática' : 'Sin info')}
-                                                {n.positionName && <span className="text-slate-400 font-normal"> · {n.positionName}</span>}
+                                                    || (isAbsence ? 'Ausencia automÃ¡tica' : 'Sin info')}
+                                                {n.positionName && <span className="text-slate-400 font-normal"> Â· {n.positionName}</span>}
                                             </p>
                                             <p className="text-[9px] text-slate-400 truncate leading-tight">
                                                 {(isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⼱ {n.minutesBeforeShift}min al turno</span>
+                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>â¼± {n.minutesBeforeShift}min al turno</span>
                                                     : null}
                                                 {n.description || '-'}
                                             </p>
@@ -2868,7 +2868,7 @@ export default function OperacionesPage() {
                                             <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
                                                 <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
                                                 <span className="flex-1 truncate text-slate-600">{n.objectiveName || n.employeeName || n.type}</span>
-                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || '—'}</span>
+                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || 'â€”'}</span>
                                                 <span className="text-slate-400 font-mono shrink-0 w-10 text-right">
                                                     {ts ? ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }) : '--'}
                                                 </span>
@@ -2900,7 +2900,7 @@ export default function OperacionesPage() {
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
 
-            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
+            {/* Popup detalle novedad â€” auto-cierre 3s, pausa en hover */}
             {detailNovedad && (
                 <NovedadDetailPopup
                     novedad={detailNovedad}
@@ -2909,7 +2909,7 @@ export default function OperacionesPage() {
                 />
             )}
 
-            {/* Panel de diagnóstico */}
+            {/* Panel de diagnÃ³stico */}
             {showDebugPanel && (
                 <DebugPanel
                     processedData={logic.processedData}
@@ -2923,145 +2923,3 @@ export default function OperacionesPage() {
         </DashboardLayout>
     );
 }
-                                                    {s.employeeName || 'Desconocido'}
-                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                        {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
-                                                    </span>
-                                                </p>
-                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
-                                            </div>
-                                            <div className="flex gap-1 shrink-0">
-                                                {s.isRetention ? (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja"><Siren size={11}/></button>
-                                                </>) : (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-indigo-600 text-white rounded-xl lg:rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={16} className="lg:hidden"/><PlayCircle size={11} className="hidden lg:block"/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl lg:rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={16} className="lg:hidden"/><AlertTriangle size={11} className="hidden lg:block"/></button>
-                                                </>)}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            );
-                        })()}
-
-                        {/* ── Columnas header novedades ── */}
-                        <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase">
-                            <span className="w-14 shrink-0">Tipo</span>
-                            <span className="flex-1">Objetivo / Posición</span>
-                            <span className="w-10 text-right">Hora</span>
-                            <span className="w-16 text-center">Acción</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            {pendingNovedades.length === 0 ? (
-                                <div className="p-4 text-center">
-                                    <CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/>
-                                    <p className="text-xs font-bold text-slate-400">
-                                        {priorityShiftsPanel.length > 0
-                                            ? 'Sin novedades pendientes — revisá la sección Prioridad arriba'
-                                            : 'Sin alertas pendientes'}
-                                    </p>
-                                </div>
-                            ) : pendingNovedades.map((n: any) => {
-                                const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
-                                const isAbsence = n.type === 'AUSENCIA_AUTO';
-                                const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
-                                const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
-                                const isRetencion = n.type === 'RETENCION_LARGA';
-                                const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
-                                const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
-
-                                const isAdelanto = n.type === 'ADELANTO_TURNO';
-                                const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO' || n.type === 'RETENCION';
-
-                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAdelanto || isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isAdelanto ? 'ADEL.' : isConvocado ? 'CONV.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
-                                const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
-                                const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                    ? ` · ${n.minutesBeforeShift}min`
-                                    : '';
-
-                                return (
-                                    <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
-                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                {n.employeeName && n.objectiveName
-                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                                    : n.objectiveName || n.employeeName
-                                                    || (n.description ? n.description.replace(/\s*\(detectado[^)]*\)/,'').replace(/\s*\(\d+\s*min\)/,'').trim() : null)
-                                                    || (isAbsence ? 'Ausencia automática' : 'Sin info')}
-                                                {n.positionName && <span className="text-slate-400 font-normal"> · {n.positionName}</span>}
-                                            </p>
-                                            <p className="text-[9px] text-slate-400 truncate leading-tight">
-                                                {(isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                                                ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⼱ {n.minutesBeforeShift}min al turno</span>
-                                                    : null}
-                                                {n.description || '-'}
-                                            </p>
-                                        </div>
-                                        <span className="text-[9px] text-slate-400 font-mono w-10 text-right shrink-0">
-                                            {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
-                                        </span>
-                                        <div className="flex gap-1 shrink-0 w-16 justify-end">
-                                            {n.employeePhone && (
-                                                <button onClick={() => openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||''))}
-                                                    className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors" title="WhatsApp">
-                                                    <MessageCircle size={11}/>
-                                                </button>
-                                            )}
-                                            <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                                className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title={actionTitle}>
-                                                <ActionIcon size={11}/>
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            {recentAtendidas.length > 0 && (
-                                <div className="border-t border-slate-100 bg-slate-50/80">
-                                    <p className="px-3 py-1 text-[9px] font-black uppercase text-slate-400">Atendidas recientes</p>
-                                    {recentAtendidas.map((n: any) => {
-                                        const ts = n.atendidaAt?.seconds
-                                            ? new Date(n.atendidaAt.seconds * 1000)
-                                            : n.createdAt?.seconds
-                                                ? new Date(n.createdAt.seconds * 1000)
-                                                : null;
-                                        return (
-                                            <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
-                                                <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
-                                                <span className="flex-1 truncate text-slate-600">{n.objectiveName || n.employeeName || n.type}</span>
-                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || '—'}</span>
-                                                <span className="text-slate-400 font-mono shrink-0 w-10 text-right">
-                                                    {ts ? ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }) : '--'}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                        <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-between items-center">
-                            <p className="text-[9px] text-slate-400">{empNovedades.filter((n:any)=>n.status==='ATENDIDA').length} atendidas</p>
-                            <p className="text-[9px] text-slate-400">{pendingNovedades.length} pendientes</p>
-                        </div>
-                    </div>
-                );
-                })()}
-                </div>
-                </React.Fragment>
-                )}
-            </div>
-
-            <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
-            <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={()=>setWorkedFrancoData({isOpen:false, shift:null})} shift={workedFrancoData.shift} />
-            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
-            <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
-            
-            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
-            <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
-            <WAComposeModal isOpen={waD
