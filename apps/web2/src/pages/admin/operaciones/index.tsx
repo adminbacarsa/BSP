@@ -2664,7 +2664,7 @@ export default function OperacionesPage() {
                               <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-12 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                  <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
                                     {n.employeeName && n.objectiveName
                                       ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
                                       : n.objectiveName || n.employeeName || n.type}
@@ -2726,7 +2726,7 @@ export default function OperacionesPage() {
                         </span>
                     </button>
                 ) : (
-                    <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[82vh] lg:max-h-[70vh]">
+                    <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[92vh] lg:max-h-[70vh]">
                         <div className="bg-slate-900 rounded-t-2xl">
                             {/* Drag handle — solo mobile */}
                             <div className="flex justify-center pt-2 pb-0 lg:hidden">
@@ -2751,8 +2751,8 @@ export default function OperacionesPage() {
                                         <span className="text-[9px] font-bold text-rose-500">{priorityShifts.length} turnos</span>
                                     </div>
                                     {priorityShifts.map((s: any) => (
-                                        <div key={s.id} className="px-3 py-1.5 flex items-center gap-2 border-l-4 border-l-rose-500 border-b border-slate-50 bg-white hover:bg-rose-50/30 transition-colors">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
+                                        <div key={s.id} className="px-3 py-3 lg:py-1.5 flex items-center gap-3 lg:gap-2 border-l-4 border-l-rose-500 border-b border-slate-50 bg-white hover:bg-rose-50/30 transition-colors">
+                                            <div className={`w-9 h-9 lg:w-6 lg:h-6 rounded-full flex items-center justify-center text-sm lg:text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
                                                 {(s.employeeName || '?')[0]}
                                             </div>
                                             <div className="flex-1 min-w-0">
@@ -2762,15 +2762,15 @@ export default function OperacionesPage() {
                                                         {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
                                                 </p>
-                                                <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
                                                 {s.isRetention ? (<>
                                                     <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={11}/></button>
                                                     <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja"><Siren size={11}/></button>
                                                 </>) : (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-indigo-600 text-white rounded-xl lg:rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={16} className="lg:hidden"/><PlayCircle size={11} className="hidden lg:block"/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl lg:rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={16} className="lg:hidden"/><AlertTriangle size={11} className="hidden lg:block"/></button>
                                                 </>)}
                                             </div>
                                         </div>
@@ -2898,28 +2898,4 @@ export default function OperacionesPage() {
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
-            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
-
-            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
-            {detailNovedad && (
-                <NovedadDetailPopup
-                    novedad={detailNovedad}
-                    onClose={() => setDetailNovedad(null)}
-                    onAtender={handleAtenderNovedad}
-                />
-            )}
-
-            {/* Panel de diagnóstico */}
-            {showDebugPanel && (
-                <DebugPanel
-                    processedData={logic.processedData}
-                    servicesSLA={logic.servicesSLA}
-                    publishStatusMap={logic.publishStatusMap}
-                    rawShifts={(logic as any).rawShifts}
-                    onClose={() => setShowDebugPanel(false)}
-                />
-            )}
-
-        </DashboardLayout>
-    );
-}
+            <WAComposeModal isOpen={waD
