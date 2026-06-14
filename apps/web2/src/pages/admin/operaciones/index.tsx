@@ -1975,7 +1975,7 @@ export default function OperacionesPage() {
         const map = new Map<string, any>();
         const hoy = logic.processedData.filter((s: any) => {
             if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now.getTime()) return false;
+            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
         });
         hoy.forEach((s: any) => {
@@ -2408,9 +2408,9 @@ export default function OperacionesPage() {
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
-                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos
+                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos de OTRO día
                                     if (s.isCompleted && !s.isRetention) return false;
-                                    if (s.isVirtual && s.endDateObj && s.endDateObj.getTime() < now2.getTime()) return false;
+                                    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now2) && s.endDateObj.getTime() < now2.getTime()) return false;
                                     const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
                                     if (!hoy2) return false;
                                     switch(logic.viewTab) {

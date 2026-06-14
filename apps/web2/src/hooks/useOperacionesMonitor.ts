@@ -893,5 +893,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         isCompact, setIsCompact,
         employees,
         rawShifts,
+        isReady,
     };
 };
