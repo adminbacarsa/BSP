@@ -628,7 +628,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 normalizePosMatch(s.positionName) === normalizePosMatch(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
             // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
-            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && sameSlot(s))) return false;
+            // Excluir origin=SLA_VIRTUAL: esos docs tienen timestamps auto-generados incorrectos
+            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && s.origin !== 'SLA_VIRTUAL' && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
