@@ -2813,6 +2813,172 @@ export default function OperacionesPage() {
                                 const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
                                 const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
                                 const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
+                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
+                                const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
+                                    ? ` · ${n.minutesBeforeShift}min`
+                                    : '';
+
+                                return (
+                                    <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-1.5 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
+                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                                {n.employeeName && n.objectiveName
+                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                                    : n.objectiveName || n.employeeName
+                                                    || (n.description ? n.description.replace(/\s*\(detectado[^)]*\)/,'').replace(/\s*\(\d+\s*min\)/,'').trim() : null)
+                                                    || (isAbsence ? 'Ausencia automática' : 'Sin info')}
+                                                {n.positionName && <span className="text-slate-400 font-normal"> · {n.positionName}</span>}
+                                            </p>
+                                            <p className="text-[9px] text-slate-400 truncate leading-tight">
+                                                {(isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
+                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⼱ {n.minutesBeforeShift}min al turno</span>
+                                                    : null}
+                                                {n.description || '-'}
+                                            </p>
+                                        </div>
+                                        <span className="text-[9px] text-slate-400 font-mono w-10 text-right shrink-0">
+                                            {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
+                                        </span>
+                                        <div className="flex gap-1 shrink-0 w-16 justify-end">
+                                            {n.employeePhone && (
+                                                <button onClick={() => openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||''))}
+                                                    className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors" title="WhatsApp">
+                                                    <MessageCircle size={11}/>
+                                                </button>
+                                            )}
+                                            <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
+                                                className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title={actionTitle}>
+                                                <ActionIcon size={11}/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {recentAtendidas.length > 0 && (
+                                <div className="border-t border-slate-100 bg-slate-50/80">
+                                    <p className="px-3 py-1 text-[9px] font-black uppercase text-slate-400">Atendidas recientes</p>
+                                    {recentAtendidas.map((n: any) => {
+                                        const ts = n.atendidaAt?.seconds
+                                            ? new Date(n.atendidaAt.seconds * 1000)
+                                            : n.createdAt?.seconds
+                                                ? new Date(n.createdAt.seconds * 1000)
+                                                : null;
+                                        return (
+                                            <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
+                                                <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
+                                                <span className="flex-1 truncate text-slate-600">{n.objectiveName || n.employeeName || n.type}</span>
+                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || '—'}</span>
+                                                <span className="text-slate-400 font-mono shrink-0 w-10 text-right">
+                                                    {ts ? ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }) : '--'}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <div className="px-3 py-1.5 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-between items-center">
+                            <p className="text-[9px] text-slate-400">{empNovedades.filter((n:any)=>n.status==='ATENDIDA').length} atendidas</p>
+                            <p className="text-[9px] text-slate-400">{pendingNovedades.length} pendientes</p>
+                        </div>
+                    </div>
+                );
+                })()}
+                </div>
+                </React.Fragment>
+                )}
+            </div>
+
+            <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
+            <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={()=>setWorkedFrancoData({isOpen:false, shift:null})} shift={workedFrancoData.shift} />
+            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
+            <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
+
+            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
+            <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
+            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
+            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
+
+            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
+            {detailNovedad && (
+                <NovedadDetailPopup
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
+            )}
+
+            {/* Panel de diagnóstico */}
+            {showDebugPanel && (
+                <DebugPanel
+                    processedData={logic.processedData}
+                    servicesSLA={logic.servicesSLA}
+                    publishStatusMap={logic.publishStatusMap}
+                    rawShifts={(logic as any).rawShifts}
+                    onClose={() => setShowDebugPanel(false)}
+                />
+            )}
+
+        </DashboardLayout>
+    );
+}
+                                                    {s.employeeName || 'Desconocido'}
+                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                    </span>
+                                                </p>
+                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
+                                                {s.isRetention ? (<>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={11}/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja"><Siren size={11}/></button>
+                                                </>) : (<>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-indigo-600 text-white rounded-xl lg:rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={16} className="lg:hidden"/><PlayCircle size={11} className="hidden lg:block"/></button>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl lg:rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={16} className="lg:hidden"/><AlertTriangle size={11} className="hidden lg:block"/></button>
+                                                </>)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+
+                        {/* ── Columnas header novedades ── */}
+                        <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase">
+                            <span className="w-14 shrink-0">Tipo</span>
+                            <span className="flex-1">Objetivo / Posición</span>
+                            <span className="w-10 text-right">Hora</span>
+                            <span className="w-16 text-center">Acción</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            {pendingNovedades.length === 0 ? (
+                                <div className="p-4 text-center">
+                                    <CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/>
+                                    <p className="text-xs font-bold text-slate-400">
+                                        {priorityShiftsPanel.length > 0
+                                            ? 'Sin novedades pendientes — revisá la sección Prioridad arriba'
+                                            : 'Sin alertas pendientes'}
+                                    </p>
+                                </div>
+                            ) : pendingNovedades.map((n: any) => {
+                                const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                const isAbsence = n.type === 'AUSENCIA_AUTO';
+                                const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
+                                const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
+                                const isRetencion = n.type === 'RETENCION_LARGA';
+                                const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
+                                const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
+
+                                const isAdelanto = n.type === 'ADELANTO_TURNO';
+                                const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO' || n.type === 'RETENCION';
+
+                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAdelanto || isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
+                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isAdelanto ? 'ADEL.' : isConvocado ? 'CONV.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
+                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
+                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
+                                const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
                                                                 const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
                                 const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
                                     ? ` · ${n.minutesBeforeShift}min`
