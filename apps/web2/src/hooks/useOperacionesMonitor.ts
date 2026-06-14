@@ -421,10 +421,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 // Detectar ciclo 12h usando TODOS los turnos (no solo activos)
                 // Si todos están ausentes, posShifts=[] y no detectaríamos el ciclo 12h
                 const has12hShifts = allPosShifts.some((s: any) => s.duration > 10);
-                if (pos.name === 'Puesto 3' && sla.objectiveId === '2zoYSNsJtbLz3IQWZNXe') {
-                    console.log('[PATHB_P3_DEBUG]', JSON.stringify({ objId: sla.objectiveId, pos: pos.name, allPos: allPosShifts.map((s:any)=>({id:s.id?.slice(0,8),cfc:s.countsForCoverage,abs:s.isAbsent,dur:s.duration,start:s.shiftDateObj?.toLocaleTimeString()})), posShifts: posShifts.length, has12h: has12hShifts, allowedShifts: allowedShifts.length, relevantBeforeFilter: allowedShifts.map((d:any)=>d.code) }));
-                }
-                
                 let relevantDefinitions = allowedShifts;
                 // Si hay turnos definidos, los usamos
                 // Si no, fallback a gap
@@ -432,8 +428,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 if (has12hShifts && allowedShifts.length > 0) {
                     relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) > 10);
                 } else if (allowedShifts.length > 0) {
-                    // Si no hay 12hs activas, asumimos 8hs
-                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) < 10);
+                    // Si no hay 12hs activas: incluir slots de hasta 11h (cubre 8h, 9h, 10h)
+                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) < 12);
                 }
 
                 // 🛑 UNIFICACIÓN V124:
@@ -628,8 +624,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 normalizePosMatch(s.positionName) === normalizePosMatch(v.positionName) &&
                 checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
             // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
-            // Excluir origin=SLA_VIRTUAL: esos docs tienen timestamps auto-generados incorrectos
-            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning && s.origin !== 'SLA_VIRTUAL' && sameSlot(s))) return false;
+            // Solo suprimir si el doc tiene startTime cercano al slot virtual (±2h) Y aún no expiró,
+            // para evitar que docs expirados o con timestamps erróneos supriman slots correctos
+            if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning &&
+                s.endDateObj && s.endDateObj.getTime() > now.getTime() &&
+                Math.abs((s.shiftDateObj?.getTime() || 0) - (v.shiftDateObj?.getTime() || 0)) < 7200000 &&
+                sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
@@ -900,9 +900,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         recentLogs,
         publishStatusMap,
         operatorInfo,
-        isCompact, setIsCompact,
-        employees,
-        rawShifts,
+        isCompact, setIsCompact, employees, rawShifts,
         isReady,
     };
 };
