@@ -19,7 +19,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, onSnapshot, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, onSnapshot, query, where, orderBy, limit, getDocs, waitForPendingWrites } from 'firebase/firestore';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { db } from '@/lib/firebase';
@@ -267,6 +267,19 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 });
             }
             await batch.commit();
+            // Confirmar que el write llegó al servidor antes de cerrar el modal.
+            // Con persistentLocalCache el commit resuelve localmente (IndexedDB) aunque
+            // no haya llegado al servidor. Si hay problema de red en el celular, el cron
+            // detectarAusencias corre y marca ausente antes de que llegue el update.
+            // waitForPendingWrites espera confirmación del servidor (max 8s).
+            await Promise.race([
+                waitForPendingWrites(db),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
+            ]).catch(err => {
+                if ((err as Error).message === 'sync_timeout') {
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                }
+            });
 
             // Registrar como relevado para evitar que aparezca en siguientes modales (race condition)
             if (prevShiftId) onRelieved?.(prevShiftId);
@@ -656,6 +669,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'RETENTION', s);
             await batch.commit();
+            await Promise.race([
+                waitForPendingWrites(db),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
+            ]).catch(err => {
+                if ((err as Error).message === 'sync_timeout') {
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                }
+            });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'RETENCION', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} retenido hasta ${hiEnd} en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
@@ -677,6 +698,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
+            await Promise.race([
+                waitForPendingWrites(db),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
+            ]).catch(err => {
+                if ((err as Error).message === 'sync_timeout') {
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                }
+            });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'ADELANTO_TURNO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `Turno de ${s.employeeName} adelantado en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`Turno de ${s.employeeName} adelantado`);
@@ -699,6 +728,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();
+            await Promise.race([
+                waitForPendingWrites(db),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
+            ]).catch(err => {
+                if ((err as Error).message === 'sync_timeout') {
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                }
+            });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'CONVOCATORIA_RETEN', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, details: `${empName} convocado como retén en ${absenceShift.objectiveName || ''}.` }, tenantId(absenceShift))).catch(() => {});
             toast.success(`${empName} convocado como retén`);
@@ -732,6 +769,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
             markCoverageResolved(batch, 'FRANCO', s);
             await batch.commit();
+            await Promise.race([
+                waitForPendingWrites(db),
+                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
+            ]).catch(err => {
+                if ((err as Error).message === 'sync_timeout') {
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                }
+            });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'FRANCO_TRABAJADO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} convocado (Franco Trabajado) en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
@@ -2853,28 +2898,4 @@ export default function OperacionesPage() {
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
-            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
-
-            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
-            {detailNovedad && (
-                <NovedadDetailPopup
-                    novedad={detailNovedad}
-                    onClose={() => setDetailNovedad(null)}
-                    onAtender={handleAtenderNovedad}
-                />
-            )}
-
-            {/* Panel de diagnóstico */}
-            {showDebugPanel && (
-                <DebugPanel
-                    processedData={logic.processedData}
-                    servicesSLA={logic.servicesSLA}
-                    publishStatusMap={logic.publishStatusMap}
-                    rawShifts={(logic as any).rawShifts}
-                    onClose={() => setShowDebugPanel(false)}
-                />
-            )}
-
-        </DashboardLayout>
-    );
-}
+            <WAComposeModal isOpen={waD
