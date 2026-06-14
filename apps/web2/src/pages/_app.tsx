@@ -55,7 +55,7 @@ export default function App({ Component, pageProps }: AppProps) {
         </Head>
         <AdminFcmRegistrar />
         <Component {...pageProps} />
-        {showAssistant && <AssistantFloatingBubble />}
+        {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
       </ToastProvider>
       </EmpresaProvider>
     </AuthProvider>

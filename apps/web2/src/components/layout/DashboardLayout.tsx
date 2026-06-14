@@ -34,11 +34,10 @@ function getTitleByPath(pathname: string): string | null {
 
 // ─── BOTTOM NAV (mobile) ─────────────────────────────────────────────────────
 const BOTTOM_NAV = [
-  { href: '/admin/dashboard',      icon: LayoutDashboard, label: 'Inicio'   },
-  { href: '/admin/operaciones',    icon: Radio,           label: 'CC'       },
-  { href: '/admin/planificacion',  icon: Calendar,        label: 'Plan.'    },
-  { href: '/admin/empleados',      icon: Users,           label: 'Personal' },
-  { href: '/admin/configuracion',  icon: Settings,        label: 'Config'   },
+  { href: '/admin/dashboard',   icon: LayoutDashboard, label: 'Inicio'   },
+  { href: '/admin/operaciones', icon: Radio,           label: 'CC'       },
+  { href: '/admin/rrhh',        icon: Users,           label: 'RRHH'     },
+  { href: '/admin/reportes',    icon: BarChart3,        label: 'Reportes' },
 ];
 
 function BottomNav() {

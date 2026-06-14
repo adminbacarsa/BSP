@@ -2751,27 +2751,57 @@ export default function OperacionesPage() {
                                         <span className="text-[9px] font-bold text-rose-500">{priorityShifts.length} turnos</span>
                                     </div>
                                     {priorityShifts.map((s: any) => (
-                                        <div key={s.id} className="px-3 py-3 lg:py-1.5 flex items-center gap-3 lg:gap-2 border-l-4 border-l-rose-500 border-b border-slate-50 bg-white hover:bg-rose-50/30 transition-colors">
-                                            <div className={`w-9 h-9 lg:w-6 lg:h-6 rounded-full flex items-center justify-center text-sm lg:text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                {(s.employeeName || '?')[0]}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                    {s.employeeName || 'Desconocido'}
-                                                    <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                        <div key={s.id} className="border-b border-slate-100">
+                                            {/* Mobile: tarjeta grande */}
+                                            <div className="lg:hidden px-4 py-4 bg-white active:bg-slate-50">
+                                                <div className="flex items-center gap-3 mb-3">
+                                                    <div className={`w-11 h-11 rounded-full flex items-center justify-center text-base font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {(s.employeeName || '?')[0]}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-black text-slate-900 truncate">{s.employeeName || 'Desconocido'}</p>
+                                                        <p className="text-xs text-slate-500 truncate">{s.objectiveName}</p>
+                                                        <p className="text-xs text-indigo-500 font-semibold truncate">{s.positionName} · <span className="font-mono text-slate-500">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                    </div>
+                                                    <span className={`text-[10px] font-black px-2 py-1 rounded-full shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
                                                         {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
-                                                </p>
-                                                <p className="text-[10px] lg:text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} Â· <span className="text-indigo-500">{s.positionName}</span> Â· <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                </div>
+                                                {s.isRetention ? (
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="flex-1 flex items-center justify-center gap-2 py-3 bg-purple-600 text-white rounded-xl font-black text-sm active:bg-purple-700"><LogOut size={16}/>SALIDA</button>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="px-4 py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl active:bg-red-100"><Siren size={18}/></button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-black text-sm active:bg-indigo-700"><PlayCircle size={16}/>DAR PRESENTE</button>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="px-4 py-3 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl active:bg-amber-100"><AlertTriangle size={18}/></button>
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div className="flex gap-1 shrink-0">
-                                                {s.isRetention ? (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja"><Siren size={11}/></button>
-                                                </>) : (<>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-indigo-600 text-white rounded-xl lg:rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={16} className="lg:hidden"/><PlayCircle size={11} className="hidden lg:block"/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-2.5 lg:p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl lg:rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={16} className="lg:hidden"/><AlertTriangle size={11} className="hidden lg:block"/></button>
-                                                </>)}
+                                            {/* Desktop: fila compacta */}
+                                            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 border-l-4 border-l-rose-500 bg-white hover:bg-rose-50/30 transition-colors">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                    {(s.employeeName || '?')[0]}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                                        {s.employeeName || 'Desconocido'}
+                                                        <span className={`ml-1.5 text-[9px] font-black px-1 rounded ${s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                            {s.isRetention ? 'RECARGO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                        </span>
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-400 truncate leading-tight">{s.objectiveName} · <span className="text-indigo-500">{s.positionName}</span> · <span className="font-mono">{formatTimeRange(s.shiftDateObj, s.endDateObj)}</span></p>
+                                                </div>
+                                                <div className="flex gap-1 shrink-0">
+                                                    {s.isRetention ? (<>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={11}/></button>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja"><Siren size={11}/></button>
+                                                    </>) : (<>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={11}/></button>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={11}/></button>
+                                                    </>)}
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -2813,9 +2843,9 @@ export default function OperacionesPage() {
                                 const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
                                 const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
                                 const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isAdelanto || isConvocado ? PlayCircle : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
-                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retenciÃ³n' : 'Atender';
+                                const actionTitle = isCortoplazo ? 'Protocolo urgente' : isAnticipada ? 'Gestionar ausencia' : isAdelanto || isConvocado ? 'Dar presente' : isProto ? 'Cubrir vacante' : isAbsence ? 'Gestionar ausencia' : isRelevo ? 'Gestionar relevo' : isRetencion ? 'Gestionar retención' : 'Atender';
                                 const minutesLabel = (isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                    ? ` Â· ${n.minutesBeforeShift}min`
+                                    ? ` · ${n.minutesBeforeShift}min`
                                     : '';
 
                                 return (
@@ -2824,15 +2854,15 @@ export default function OperacionesPage() {
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
                                                 {n.employeeName && n.objectiveName
-                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">Â·</span> {n.objectiveName}</>
+                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
                                                     : n.objectiveName || n.employeeName
                                                     || (n.description ? n.description.replace(/\s*\(detectado[^)]*\)/,'').replace(/\s*\(\d+\s*min\)/,'').trim() : null)
-                                                    || (isAbsence ? 'Ausencia automÃ¡tica' : 'Sin info')}
-                                                {n.positionName && <span className="text-slate-400 font-normal"> Â· {n.positionName}</span>}
+                                                    || (isAbsence ? 'Ausencia automática' : 'Sin info')}
+                                                {n.positionName && <span className="text-slate-400 font-normal"> · {n.positionName}</span>}
                                             </p>
                                             <p className="text-[9px] text-slate-400 truncate leading-tight">
                                                 {(isCortoplazo || isAnticipada) && n.minutesBeforeShift != null && n.minutesBeforeShift > 0
-                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>â¼± {n.minutesBeforeShift}min al turno</span>
+                                                    ? <span className={`font-black mr-1 ${isCortoplazo ? 'text-red-600' : 'text-amber-600'}`}>⼱ {n.minutesBeforeShift}min al turno</span>
                                                     : null}
                                                 {n.description || '-'}
                                             </p>
@@ -2868,7 +2898,7 @@ export default function OperacionesPage() {
                                             <div key={n.id} className="px-3 py-1 flex items-center gap-2 border-b border-slate-100 text-[9px]">
                                                 <CheckCircle size={10} className="text-emerald-500 shrink-0"/>
                                                 <span className="flex-1 truncate text-slate-600">{n.objectiveName || n.employeeName || n.type}</span>
-                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || 'â€”'}</span>
+                                                <span className="text-emerald-700 font-bold shrink-0">{n.atendidaPor || '—'}</span>
                                                 <span className="text-slate-400 font-mono shrink-0 w-10 text-right">
                                                     {ts ? ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }) : '--'}
                                                 </span>
@@ -2900,7 +2930,7 @@ export default function OperacionesPage() {
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
 
-            {/* Popup detalle novedad â€” auto-cierre 3s, pausa en hover */}
+            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
             {detailNovedad && (
                 <NovedadDetailPopup
                     novedad={detailNovedad}
@@ -2909,7 +2939,7 @@ export default function OperacionesPage() {
                 />
             )}
 
-            {/* Panel de diagnÃ³stico */}
+            {/* Panel de diagnóstico */}
             {showDebugPanel && (
                 <DebugPanel
                     processedData={logic.processedData}
