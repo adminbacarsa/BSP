@@ -1546,8 +1546,8 @@ export default function PlanificacionPage() {
                 // Solo bloquear si el código ya fue asignado PAX veces (saturado)
                 const codeCount = assigned.filter(a => a.code === code).length;
                 if (codeCount >= pax) { disabled.add(code); return; }
-                // Bloquear si el total de turnos ya alcanza el máximo (pax 8h + pax 12h)
-                if (assigned.length >= pax * 2) { disabled.add(code); return; }
+                // Bloquear si el total de turnos ya alcanza el máximo posible para este SLA
+                if (assigned.length >= max8hSlots + max12hSlots) { disabled.add(code); return; }
             }
         });
         return disabled;
