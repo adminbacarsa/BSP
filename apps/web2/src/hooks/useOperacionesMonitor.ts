@@ -476,15 +476,23 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 //   - 24h (3×8h o 2×12h): findTimeGaps sobre la jornada completa
                 //   - Custom (franjas parciales, ej. Rondín 08-18): verificar turno por turno
                 else {
-                    // Sin turnos planificados hoy: el puesto no opera → no generar vacantes falsas
-                    // ⚠️ Usar allPosShifts, NO posShifts:
-                    //    posShifts=[] puede significar "todos ausentes" (≠ "no hay turnos")
-                    if (allPosShifts.length === 0) return;
+                    // Turnos de franco del puesto: también necesitan reemplazo.
+                    // objShifts excluye franco, los buscamos directamente en realShifts.
+                    const posFrancoShifts = realShifts.filter((s: any) => {
+                        if (!isSameDay(s.shiftDateObj, now)) return false;
+                        if (s.objectiveId !== sla.objectiveId) return false;
+                        if (!s.isFranco) return false;
+                        const sPos = normalizePosMatch(s.positionName);
+                        return sPos === targetPosName || (sPos === 'general' && targetPosName === 'guardia');
+                    });
 
-                    // Promedio de horas planificadas por guardia → determina el tipo de turno
-                    // Usar allPosShifts para calcular correctamente aunque todos estén ausentes
+                    // Sin turnos NI francos → el puesto realmente no opera hoy
+                    if (allPosShifts.length === 0 && posFrancoShifts.length === 0) return;
+
+                    // Para avgHPerGuard: preferir allPosShifts (más exacto), fallback a francos
+                    const refShiftsForCalc = allPosShifts.length > 0 ? allPosShifts : posFrancoShifts;
                     const guardQty = pos.quantity || 1;
-                    const totalPlannedH = allPosShifts.reduce((a: number, s: any) => a + (s.duration || 0), 0);
+                    const totalPlannedH = refShiftsForCalc.reduce((a: number, s: any) => a + (s.duration || 0), 0);
                     const avgHPerGuard = totalPlannedH / guardQty;
 
                     // ─── MODO 24H (3×8h o 2×12h) ─────────────────────────────────────────
@@ -523,10 +531,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         //   • Para no-asignados (isUnassigned): siempre generan vacante
                         const unassignedShifts = allPosShifts.filter((s: any) => s.isUnassigned);
 
-                        // Agrupar ausentes por slot (mismo start+end) para calcular déficit real
+                        // Agrupar ausentes Y francos por slot (mismo start+end) para calcular déficit real
+                        // Franco = el puesto opera pero la persona descansa → necesita reemplazo
                         const absentSlotMap = new Map<string, any>();
-                        allPosShifts
-                            .filter((s: any) => (s.isAbsent || s.isPotentialAbsence) && !s.isCompleted)
+                        [...allPosShifts, ...posFrancoShifts]
+                            .filter((s: any) => (s.isAbsent || s.isPotentialAbsence || s.isFranco) && !s.isCompleted)
                             .forEach((s: any) => {
                                 const key = `${s.shiftDateObj?.getTime?.() ?? 0}_${s.endDateObj?.getTime?.() ?? 0}`;
                                 if (!absentSlotMap.has(key)) absentSlotMap.set(key, s);
