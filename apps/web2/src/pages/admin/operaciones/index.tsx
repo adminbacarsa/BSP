@@ -2898,4 +2898,28 @@ export default function OperacionesPage() {
             <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} recentlyRelievedIds={recentlyRelievedRef.current} onRelieved={(id: string) => recentlyRelievedRef.current.add(id)} />
             <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
             <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} />
-            <WAComposeModal isOpen={waD
+            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen: false}))} ctx={waData.ctx} />
+
+            {/* Popup detalle novedad — auto-cierre 3s, pausa en hover */}
+            {detailNovedad && (
+                <NovedadDetailPopup
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
+            )}
+
+            {/* Panel de diagnóstico */}
+            {showDebugPanel && (
+                <DebugPanel
+                    processedData={logic.processedData}
+                    servicesSLA={logic.servicesSLA}
+                    publishStatusMap={logic.publishStatusMap}
+                    rawShifts={(logic as any).rawShifts}
+                    onClose={() => setShowDebugPanel(false)}
+                />
+            )}
+
+        </DashboardLayout>
+    );
+}
