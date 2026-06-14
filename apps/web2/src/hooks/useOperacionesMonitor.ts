@@ -421,6 +421,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 // Detectar ciclo 12h usando TODOS los turnos (no solo activos)
                 // Si todos están ausentes, posShifts=[] y no detectaríamos el ciclo 12h
                 const has12hShifts = allPosShifts.some((s: any) => s.duration > 10);
+                if (pos.name === 'Puesto 3' && sla.objectiveId === '2zoYSNsJtbLz3IQWZNXe') {
+                    console.log('[PATHB_P3_DEBUG]', JSON.stringify({ objId: sla.objectiveId, pos: pos.name, allPos: allPosShifts.map((s:any)=>({id:s.id?.slice(0,8),cfc:s.countsForCoverage,abs:s.isAbsent,dur:s.duration,start:s.shiftDateObj?.toLocaleTimeString()})), posShifts: posShifts.length, has12h: has12hShifts, allowedShifts: allowedShifts.length, relevantBeforeFilter: allowedShifts.map((d:any)=>d.code) }));
+                }
                 
                 let relevantDefinitions = allowedShifts;
                 // Si hay turnos definidos, los usamos
@@ -871,18 +874,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 })
                 .catch(e => console.warn('[retentionAlert]', e));
         }
-    }, [processedData, now, empresaId, migracionCompleta, servicesSLA]);
+    }, [processedData, now, empresaId, migracionCompleta]);
 
     return {
         processedData,
         listData,
         stats,
-        handleAction,
         viewTab, setViewTab,
         filterText, setFilterText,
         selectedClientId, setSelectedClientId,
-        isReady,
-        servicesSLA,
+        handleAction,
         uniqueClients,
         objectives,
         filteredObjectives,
