@@ -757,23 +757,24 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const protKey = `${v.id}_VACANTE_PROTOCOLO_COBERTURA`;
             if (alertedVacancyIds.current.has(protKey)) continue;
             alertedVacancyIds.current.add(protKey);
-            getDocs(query(collection(db, 'novedades'), where('virtualVacancyId', '==', v.id), where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA'), limit(1)))
-                .then(async snap => {
-                    if (!snap.empty) return;
-                    const desc = minutesUntil <= 0
-                        ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
-                        : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
-                    const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
-                        virtualVacancyId: v.id,
-                        objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
-                        clientId: v.clientId || null, positionName: v.positionName || '',
-                        description: desc,
-                        minutesUntilStart: Math.round(minutesUntil),
-                        createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                    }, shiftEmpresaId));
-                })
+            // ID determinístico para PROTOCOLO — setDoc es idempotente:
+            // si dos operadores abren simultáneamente, el segundo setDoc
+            // sobreescribe con los mismos datos (sin duplicados en novedades).
+            const protSafeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+            const protRef = doc(db, 'novedades', `autodev_prot_${protSafeId}`);
+            const desc = minutesUntil <= 0
+                ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
+                : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
+            const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
+            setDoc(protRef, stampEmpresaId({
+                type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
+                virtualVacancyId: v.id,
+                objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
+                clientId: v.clientId || null, positionName: v.positionName || '',
+                description: desc,
+                minutesUntilStart: Math.round(minutesUntil),
+                createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
+            }, shiftEmpresaId), { merge: true })
                 .catch(e => console.warn('[autoAlertVacante:prot]', e));
         }
 
