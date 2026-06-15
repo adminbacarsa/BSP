@@ -2549,7 +2549,7 @@ export default function OperacionesPage() {
     if (!logic.isReady) return (
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
-            <div className="min-h-screen flex items-center justify-center bg-slate-950 select-none p-4">
+            <div className="min-h-screen flex items-center justify-center select-none p-4">
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-5 w-full max-w-xs">
                     <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
                         <Radio size={28} className="text-cyan-400" style={{ animation: 'pulse 1.8s ease-in-out infinite' }}/>
