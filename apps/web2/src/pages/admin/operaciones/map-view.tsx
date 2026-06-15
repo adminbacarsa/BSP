@@ -614,6 +614,46 @@ const RRHHVacancyModal = ({ isOpen, onClose, shift, onSendToPlanning, onOpenCove
 };
 
 const WorkedDayOffModal = (props: any) => <WorkedDayOffModalPro {...props} />;
+const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName, shift }: any) => {
+    const [novedad, setNovedad] = React.useState('');
+    const [showNovedad, setShowNovedad] = React.useState(false);
+    if (!isOpen) return null;
+    const initials = (employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                <div className="p-4 bg-purple-700 flex justify-between items-start">
+                    <div>
+                        <p className="text-purple-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Salida del guardia</p>
+                        <p className="text-white font-bold text-base leading-tight">{shift?.objectiveName || 'Turno'}</p>
+                        {shift && (<div className="flex gap-1.5 mt-1.5 flex-wrap">
+                            {shift.positionName && <span className="bg-purple-900/50 text-purple-100 text-[10px] px-2 py-0.5 rounded">{shift.positionName}</span>}
+                            <span className="bg-purple-900/50 text-purple-100 text-[10px] px-2 py-0.5 rounded font-mono">{shift.shiftCode || ''}</span>
+                        </div>)}
+                    </div>
+                    <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
+                </div>
+                <div className="p-5">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                            <span className="text-purple-700 font-bold text-base">{initials}</span>
+                        </div>
+                        <div><p className="font-bold text-slate-900 text-sm">{employeeName}</p><p className="text-xs text-slate-500 mt-0.5">Registrar salida del turno</p></div>
+                    </div>
+                    <button onClick={() => { onConfirm(false); onClose(); }} className="w-full py-3 bg-purple-700 text-white font-bold rounded-xl hover:bg-purple-800 transition-colors text-sm mb-3">CONFIRMAR SALIDA</button>
+                    <button onClick={() => setShowNovedad(v => !v)} className="w-full py-2 text-xs text-slate-500 hover:text-slate-700 border border-dashed border-slate-200 rounded-xl transition-colors mb-2">
+                        {showNovedad ? '▲ Ocultar novedad' : '+ Reportar novedad al salir'}
+                    </button>
+                    {showNovedad && (<>
+                        <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm mb-2 resize-none focus:outline-none focus:border-purple-400" rows={3} placeholder="Describí la novedad..." value={novedad} onChange={e=>setNovedad(e.target.value)}/>
+                        <button onClick={() => { onConfirm(novedad); setNovedad(''); onClose(); }} disabled={!novedad.trim()} className="w-full py-2.5 bg-slate-700 text-white font-bold rounded-xl hover:bg-slate-800 transition-colors text-sm disabled:opacity-40 mb-2">REPORTAR Y SALIR</button>
+                    </>)}
+                    <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
 const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
 
 // ── NOVEDAD DETAIL POPUP ─────────────────────────────────────────────────────
@@ -1314,7 +1354,7 @@ export default function TacticalMapView() {
                 onOpenWA={handleOpenWAMap}
             />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen:false}))} ctx={waData.ctx}/>
-            <SimpleCheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
+            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
             <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
         </div>
     );
