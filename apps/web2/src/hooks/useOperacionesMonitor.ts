@@ -842,14 +842,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             //    NO cerrar — el AUTO_COVERAGE_COMPLETE lo manejará cuando llegue.
             const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
             if (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 360 && !alertedVacancyIds.current.has(autoShiftEndKey)) {
-                // Verificar si hay relevo planificado esperando llegar (≤90 min del fin del turno)
-                const hasScheduledRelevo = processedData.some((other: any) =>
-                    other.id !== s.id &&
-                    other.objectiveId === s.objectiveId &&
-                    normPosName(other.positionName) === normPosName(s.positionName) &&
-                    !other.isPresent && !other.isCompleted && !other.isUnassigned &&
-                    Math.abs((other.shiftDateObj?.getTime?.() ?? 0) - endMs) < 90 * 60000
-                );
+                // Verificar si hay relevo planificado esperando llegar.
+                // Solo cuenta como relevo si:
+                //   • empieza DESPUÉS del fin del turno actual (no antes de endMs-15min)
+                //   • no está ausente (si el relevo está ausente, no bloquea el auto-fin)
+                const hasScheduledRelevo = processedData.some((other: any) => {
+                    const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
+                    return (
+                        other.id !== s.id &&
+                        other.objectiveId === s.objectiveId &&
+                        normPosName(other.positionName) === normPosName(s.positionName) &&
+                        !other.isPresent && !other.isCompleted && !other.isUnassigned &&
+                        !other.isAbsent && !other.isPotentialAbsence &&
+                        otherStart >= endMs - 15 * 60000 &&   // empieza cerca o después del fin
+                        otherStart <= endMs + 90 * 60000       // no más de 90 min después
+                    );
+                });
                 if (!hasScheduledRelevo) {
                     alertedVacancyIds.current.add(autoShiftEndKey);
                     updateDocForEmpresa('turnos', s.id, {
@@ -909,7 +917,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         reportedBy: 'SISTEMA',
                     }, empresaId)).catch(e => console.warn('[novedadRetencionLarga]', e));
                 }).catch(e => console.warn('[checkNovedadRetencionLarga]', e));
-        }
+           }
     }, [processedData, empresaId, migracionCompleta, now]);
 
     return {
@@ -931,5 +939,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         rawShifts,
         isReady,
         servicesSLA,
+        now,
     };
 }
