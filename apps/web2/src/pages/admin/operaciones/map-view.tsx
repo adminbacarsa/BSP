@@ -502,10 +502,11 @@ const AbsenceDecisionModal = ({ isOpen, onClose, shift, onDeclareAbsent, onLateA
     const hiEnd   = shift.endDateObj   ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
     const preMsg  = waMensaje.tardanza(shift.employeeName || '', shift.objectiveName || '', hiStart);
     return (
-        <div className="fixed inset-0 z-[9000] bg-black/70 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" style={{background:'#0f0f1a'}}>
+        <div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                {/* Header */}
                 <div className="bg-orange-500 p-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-orange-300/30 flex items-center justify-center shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                         <span className="text-white font-black text-sm">{initials}</span>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -514,99 +515,109 @@ const AbsenceDecisionModal = ({ isOpen, onClose, shift, onDeclareAbsent, onLateA
                     </div>
                     <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
                 </div>
-                <div className="flex gap-1.5 px-4 py-3 flex-wrap">
-                    {shift.objectiveName && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><MapPin size={9}/>{shift.objectiveName}</span>}
-                    {shift.positionName  && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Shield size={9}/>{shift.positionName}</span>}
-                    {hiStart && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}&ndash;{hiEnd}</span>}
+                {/* Chips */}
+                <div className="px-4 py-2 flex flex-wrap gap-1.5 bg-orange-50 border-b border-orange-100">
+                    {shift.objectiveName && <span className="flex items-center gap-1 text-[10px] font-bold text-orange-700 bg-white border border-orange-200 px-2.5 py-1 rounded-full"><MapPin size={9}/>{shift.objectiveName}</span>}
+                    {shift.positionName  && <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-full"><Shield size={9}/>{shift.positionName}</span>}
+                    {hiStart && hiEnd     && <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}–{hiEnd}</span>}
                 </div>
-                <div className="px-4 pb-5 space-y-4">
-                    <div>
-                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Contactar</p>
-                        <div className="bg-slate-800/60 rounded-xl p-3 flex items-center justify-between gap-3 mb-2">
-                            <div className="min-w-0">
-                                <p className="text-white font-bold text-sm truncate">{shift.phone || 'Sin telefono'}</p>
-                                <p className="text-slate-400 text-[10px] mt-0.5">Celular registrado</p>
-                            </div>
-                            <div className="flex gap-2 shrink-0">
-                                <button onClick={() => onOpenWA(shift)} disabled={!shift.phone} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${shift.phone ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-700 opacity-50 cursor-not-allowed'}`}><MessageCircle size={16} className="text-white"/></button>
-                                {shift.phone ? <a href={`tel:${shift.phone}`} className="w-10 h-10 rounded-xl bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors"><Phone size={16} className="text-white"/></a> : <div className="w-10 h-10 rounded-xl bg-slate-700 opacity-50 flex items-center justify-center"><Phone size={16} className="text-slate-500"/></div>}
+
+                {view === 'decision' ? (
+                    <div className="p-4 space-y-3">
+                        {/* Contactar */}
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                            <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Contactar</p>
+                            <div className="flex gap-2">
+                                <button onClick={() => onOpenWA && onOpenWA(shift, 'tardanza')} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-colors"><MessageCircle size={14}/>WhatsApp</button>
+                                <button onClick={() => shift.phone && window.open(`tel:${shift.phone}`)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition-colors"><Phone size={14}/>Llamar</button>
                             </div>
                         </div>
-                        <div className="bg-green-900/25 border border-green-800/40 rounded-xl p-3">
-                            <p className="text-green-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1.5"><MessageCircle size={9}/>Mensaje pre-armado</p>
-                            <p className="text-green-100 text-xs leading-relaxed">{preMsg}</p>
+                        {/* Mensaje preconfigurado */}
+                        <div className="border border-emerald-200 rounded-xl p-3 bg-emerald-50">
+                            <p className="text-[10px] font-black text-emerald-700 uppercase mb-1.5">Mensaje sugerido</p>
+                            <p className="text-xs text-slate-600 leading-relaxed line-clamp-3">{preMsg}</p>
+                        </div>
+                        {/* Decisión */}
+                        <div>
+                            <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Decisión</p>
+                            <div className="space-y-2">
+                                <button onClick={() => setView('late')} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-orange-300 hover:bg-orange-50 transition-colors text-left">
+                                    <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center shrink-0"><Clock size={15} className="text-orange-600"/></div>
+                                    <div><p className="text-sm font-bold text-slate-800">Llegada tarde</p><p className="text-[10px] text-slate-500">Registrar hora estimada de llegada</p></div>
+                                </button>
+                                <button onClick={async () => { setLoading(true); await onDeclareAbsent?.(shift); setLoading(false); onClose(); }} disabled={loading} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-red-300 hover:bg-red-50 transition-colors text-left">
+                                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center shrink-0"><XCircle size={15} className="text-red-600"/></div>
+                                    <div><p className="text-sm font-bold text-slate-800">Declarar ausente</p><p className="text-[10px] text-slate-500">Inicia protocolo de cobertura</p></div>
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    {view === 'decision' && (
-                        <div>
-                            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Decision</p>
-                            <div className="space-y-2">
-                                <button onClick={() => setView('late')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><Clock size={15}/>Llegada tarde &mdash; esta en camino</button>
-                                <button onClick={async () => { setLoading(true); try { await onDeclareAbsent(shift); onClose(); } finally { setLoading(false); } }} disabled={loading} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700 disabled:opacity-60"><UserX size={15}/>{loading ? 'Registrando...' : 'Declarar ausente — activar cobertura'}</button>
-                            </div>
+                ) : (
+                    <div className="p-4 space-y-3">
+                        <button onClick={() => setView('decision')} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"><CornerUpLeft size={13}/>Volver</button>
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                            <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Hora estimada de llegada</p>
+                            <input type="time" value={etaTime} onChange={e => setEtaTime(e.target.value)} className="w-full text-sm border border-slate-300 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-orange-400"/>
                         </div>
-                    )}
-                    {view === 'late' && (
-                        <div>
-                            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Hora de llegada estimada</p>
-                            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 mb-3">
-                                <input type="time" value={etaTime} onChange={e => setEtaTime(e.target.value)} className="w-full text-2xl font-mono text-center text-white bg-transparent focus:outline-none"/>
-                            </div>
-                            <button onClick={async () => { if (!etaTime) return; setLoading(true); try { await onLateArrival(shift, etaTime); onClose(); } finally { setLoading(false); } }} disabled={!etaTime || loading} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"><Clock size={15}/>{loading ? 'Guardando...' : 'Confirmar llegada tarde'}</button>
-                            <button onClick={() => setView('decision')} className="w-full py-2 text-slate-400 text-xs mt-2 hover:text-slate-300">&#8592; Volver</button>
-                        </div>
-                    )}
-                </div>
+                        <button onClick={async () => { if (!etaTime) return; setLoading(true); await onLateArrival?.(shift, etaTime); setLoading(false); onClose(); }} disabled={loading || !etaTime} className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors">
+                            {loading ? 'Registrando...' : 'Confirmar llegada tarde'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
 
-const RRHHVacancyModal = ({ isOpen, onClose, shift, onSendToPlanning, onOpenCoverage, onOpenWA }: any) => {
+const RRHHVacancyModal = ({ isOpen, onClose, shift, onCoverageProtocol, onSendToPlanning }: any) => {
     if (!isOpen || !shift) return null;
-    const isUrgent = !!shift.isRRHHUrgent;
     const initials = (shift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
-    const anticipacionH = shift.rrhhAnticipacionMinutes != null ? Math.round(shift.rrhhAnticipacionMinutes / 60) : null;
-    const absenceTypeLabel = shift.absenceType || 'Novedad RRHH';
-    const cargadaHace = anticipacionH !== null ? `cargada hace ${anticipacionH}hs` : 'novedad RRHH';
     const hiStart = shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
     const hiEnd   = shift.endDateObj   ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
-    const createdAtStr = shift.absenceCreatedAt ? (() => { try { return new Date(shift.absenceCreatedAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); } catch { return ''; } })() : '';
-    const minutesUntil = shift.shiftDateObj ? Math.max(0, Math.round((new Date(shift.shiftDateObj).getTime() - Date.now()) / 60000)) : null;
-    const timeUntilStr = minutesUntil !== null ? (minutesUntil >= 60 ? `${Math.floor(minutesUntil/60)} h ${minutesUntil%60} min` : `${minutesUntil} min`) : null;
+    const isVirtual = shift.isVirtual;
     return (
-        <div className="fixed inset-0 z-[9000] bg-black/70 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" style={{background:'#0f0f1a'}}>
-                <div className={`${isUrgent ? 'bg-orange-500' : 'bg-blue-600'} p-4 flex items-center gap-3`}>
+        <div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                {/* Header */}
+                <div className={`p-4 flex items-center gap-3 ${isVirtual ? 'bg-rose-600' : 'bg-blue-600'}`}>
                     <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                        <span className="text-white font-black text-sm">{initials}</span>
+                        {isVirtual ? <AlertTriangle size={18} className="text-white"/> : <span className="text-white font-black text-sm">{initials}</span>}
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-white font-bold text-base leading-tight truncate">{shift.employeeName}</p>
-                        <p className="text-white/80 text-xs mt-0.5">Novedad RRHH &mdash; {cargadaHace}</p>
+                        <p className="text-white/70 text-[10px] font-bold uppercase">Vacante · {isVirtual ? 'Sin planificación' : 'Novedad RRHH'}</p>
+                        <p className="text-white font-bold text-base leading-tight truncate">{shift.employeeName || `VACANTE: ${shift.positionName}`}</p>
+                        <p className="text-white/80 text-xs mt-0.5">{shift.objectiveName} · {hiStart}–{hiEnd}</p>
                     </div>
                     <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
                 </div>
-                <div className="flex gap-1.5 px-4 py-3 flex-wrap">
-                    {shift.objectiveName && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><MapPin size={9}/>{shift.objectiveName}</span>}
-                    {shift.positionName  && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Shield size={9}/>{shift.positionName}</span>}
-                    {hiStart && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}&ndash;{hiEnd}</span>}
+                {/* Chips */}
+                <div className={`px-4 py-2 flex flex-wrap gap-1.5 border-b ${isVirtual ? 'bg-rose-50 border-rose-100' : 'bg-blue-50 border-blue-100'}`}>
+                    {shift.positionName  && <span className={`flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border bg-white ${isVirtual ? 'text-rose-700 border-rose-200' : 'text-blue-700 border-blue-200'}`}><Shield size={9}/>{shift.positionName}</span>}
+                    {hiStart && hiEnd     && <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}–{hiEnd}</span>}
                 </div>
-                <div className="px-4 pb-5 space-y-3">
-                    <div className="bg-orange-950/40 border border-orange-900/40 rounded-xl p-3">
-                        <p className="text-orange-300/70 text-[9px] font-bold uppercase tracking-widest mb-1.5">Motivo registrado en RRHH</p>
-                        <p className="text-white font-bold text-base">{absenceTypeLabel}</p>
-                        {createdAtStr && <p className="text-slate-400 text-xs mt-1">Cargado por: empleado &middot; {createdAtStr} hs</p>}
-                        {timeUntilStr && <p className="text-orange-400 text-xs font-bold mt-0.5">Turno inicia en: {timeUntilStr}</p>}
-                    </div>
-                    <div className="bg-slate-800/60 rounded-xl p-3">
-                        <p className="text-slate-300 text-[10px] font-bold uppercase tracking-widest mb-1.5">{isUrgent ? 'Planning no disponible' : 'Turno planificado'}</p>
-                        <p className="text-slate-400 text-xs leading-relaxed">{isUrgent ? 'Novedad cargada con menos de 12hs de anticipacion. Operaciones debe resolver la cobertura.' : 'Novedad cargada con mas de 12hs de anticipacion. Planificacion puede reasignar el turno.'}</p>
-                    </div>
-                    {isUrgent
-                        ? <button onClick={() => { onClose(); onOpenCoverage(shift); }} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><Siren size={15}/>Activar protocolo de cobertura</button>
-                        : <button onClick={() => { onClose(); onSendToPlanning(shift); }} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><CornerUpLeft size={15}/>Enviar a planificacion</button>
-                    }
+
+                <div className="p-4 space-y-3">
+                    {/* Info card */}
+                    {!isVirtual ? (
+                        <div className="border border-amber-200 rounded-xl p-3 bg-amber-50">
+                            <p className="text-[10px] font-black text-amber-700 uppercase mb-1">Motivo registrado en RRHH</p>
+                            <p className="text-xs text-amber-800 font-medium">{shift.novedadRRHH || 'Novedad registrada — ver detalle en RRHH'}</p>
+                        </div>
+                    ) : (
+                        <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
+                            <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Planning no disponible</p>
+                            <p className="text-xs text-slate-600">No hay turno planificado para este puesto en este horario.</p>
+                        </div>
+                    )}
+                    {/* CTA */}
+                    <button onClick={() => { onCoverageProtocol?.(shift); onClose(); }} className="w-full flex items-center justify-center gap-2 py-3 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-xl transition-colors shadow-sm">
+                        <Radio size={15}/>Activar protocolo de cobertura
+                    </button>
+                    {!isVirtual && (
+                        <button onClick={() => { onSendToPlanning?.(shift); onClose(); }} className="w-full flex items-center justify-center gap-2 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-bold rounded-xl transition-colors">
+                            <CornerUpLeft size={14}/>Enviar a planificación
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -1303,7 +1314,7 @@ export default function TacticalMapView() {
                                                 </div>
                                                 <div className="flex gap-1 shrink-0">
                                                     <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600" title="Dar presente (tarde)"><PlayCircle size={11}/></button>
-                                                    <button onClick={() => { setNotifPanelOpen(false); setAttendanceData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100" title="Marcar ausente"><AlertTriangle size={11}/></button>
+                                                    {s.isLateUnnotified && <button onClick={() => { setNotifPanelOpen(false); setAbsenceDecisionData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-100 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-200" title="Decidir"><AlertTriangle size={11}/></button>}
                                                 </div>
                                             </div>
                                         );
@@ -1311,40 +1322,46 @@ export default function TacticalMapView() {
                                 </div>
                             )}
 
+                            {/* Novedades urgentes */}
                             {urgentNovedades.length > 0 && (
                                 <div className="border-b border-slate-200">
-                                    <div className="px-3 py-1.5 bg-amber-50 flex items-center gap-1.5">
-                                        <AlertTriangle size={10} className="text-amber-600 shrink-0"/>
-                                        <span className="text-[9px] font-black text-amber-700 uppercase flex-1">Novedades urgentes</span>
-                                        <span className="text-[9px] font-bold text-amber-500">{urgentNovedades.length}</span>
+                                    <div className="px-3 py-1.5 bg-red-50 flex items-center gap-1.5">
+                                        <BellRing size={10} className="text-red-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-red-700 uppercase flex-1">Novedades urgentes</span>
+                                        <span className="text-[9px] font-bold text-red-500">{urgentNovedades.length}</span>
                                     </div>
                                     {urgentNovedades.map(renderNovedad)}
                                 </div>
                             )}
 
-                            {otherNovedades.length > 0 && (
+                            {/* Novedades PROT */}
+                            {protNovedades.length > 0 && (
                                 <div className="border-b border-slate-200">
-                                    {otherNovedades.map(renderNovedad)}
+                                    <div className="px-3 py-1.5 bg-orange-50 flex items-center gap-1.5">
+                                        <Shield size={10} className="text-orange-600 shrink-0"/>
+                                        <span className="text-[9px] font-black text-orange-700 uppercase flex-1">Protocolos activos</span>
+                                        <span className="text-[9px] font-bold text-orange-500">{protNovedades.length}</span>
+                                    </div>
+                                    {protNovedades.map(renderNovedad)}
                                 </div>
                             )}
 
-                            {protNovedades.length > 0 && (
+                            {/* Otras novedades */}
+                            {otherNovedades.length > 0 && (
                                 <div>
-                                    <button onClick={() => setShowProtAlerts(v => !v)}
-                                        className="w-full px-3 py-2 flex items-center gap-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-                                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">
-                                            Protocolos de cobertura automáticos ({protNovedades.length})
-                                        </span>
-                                        <span className="text-[9px] text-slate-400">{showProtAlerts ? '▲ ocultar' : '▼ ver'}</span>
-                                    </button>
-                                    {showProtAlerts && protNovedades.map(renderNovedad)}
+                                    <div className="px-3 py-1.5 bg-slate-50 flex items-center gap-1.5">
+                                        <CheckCircle size={10} className="text-slate-500 shrink-0"/>
+                                        <span className="text-[9px] font-black text-slate-500 uppercase flex-1">Otras novedades</span>
+                                        <span className="text-[9px] font-bold text-slate-400">{otherNovedades.length}</span>
+                                    </div>
+                                    {otherNovedades.map(renderNovedad)}
                                 </div>
                             )}
 
                             {totalAlerts === 0 && (
                                 <div className="p-6 text-center">
-                                    <CheckCircle size={28} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
-                                    <p className="text-sm font-bold text-slate-400">Sin alertas pendientes</p>
+                                    <CheckCircle size={24} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
+                                    <p className="text-xs font-bold text-slate-400">Sin alertas pendientes</p>
                                 </div>
                             )}
                         </div>
@@ -1353,18 +1370,41 @@ export default function TacticalMapView() {
             })()}
             </div>
 
-            {detailNovedad && (
-                <NovedadDetailPopupMap
-                    novedad={detailNovedad}
-                    onClose={() => setDetailNovedad(null)}
-                    onAtender={handleAtenderNovedad}
-                />
-            )}
-
-            <AttendanceModal isOpen={attendanceData.isOpen} onClose={()=>setAttendanceData({isOpen:false, shift:null})} shift={attendanceData.shift} onMarkAbsent={handleMarkAbsent} />
-            <HandoverModal isOpen={handoverData.isOpen} onClose={()=>setHandoverData({isOpen:false, shift:null})} incomingShift={handoverData.shift} logic={logic} />
-            <InterruptModal isOpen={interruptData.isOpen} onClose={()=>setInterruptData({isOpen:false, shift:null})} shift={interruptData.shift} logic={logic} onVacancyCreated={handleVacancyCreated} />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={()=>setCoverageData({isOpen:false, shift:null})} absenceShift={coverageData.shift} logic={logic} onAudit={async (action, details, extra) => await registrarBitacora(action, details, extra)} />
+            {/* ── Modales ── */}
+            <CheckOutModal
+                isOpen={checkoutData.isOpen}
+                onClose={() => setCheckoutData({isOpen:false, shift:null})}
+                onConfirm={(nov: string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); setCheckoutData({isOpen:false, shift:null}); }}
+                employeeName={checkoutData.shift?.employeeName}
+                shift={checkoutData.shift}
+            />
+            <AttendanceModal
+                isOpen={attendanceData.isOpen}
+                onClose={() => setAttendanceData({isOpen:false, shift:null})}
+                shift={attendanceData.shift}
+                onMarkAbsent={handleMarkAbsent}
+            />
+            <HandoverModal
+                isOpen={handoverData.isOpen}
+                onClose={() => setHandoverData({isOpen:false, shift:null})}
+                incomingShift={handoverData.shift}
+                logic={logic}
+                recentlyRelievedIds={recentlyRelievedRef.current}
+                onRelieved={(id: string) => { recentlyRelievedRef.current.add(id); setHandoverData({isOpen:false, shift:null}); }}
+            />
+            <InterruptModal
+                isOpen={interruptData.isOpen}
+                onClose={() => setInterruptData({isOpen:false, shift:null})}
+                shift={interruptData.shift}
+                logic={logic}
+                onVacancyCreated={handleVacancyCreated}
+            />
+            <CoverageModal
+                isOpen={coverageData.isOpen}
+                onClose={() => setCoverageData({isOpen:false, shift:null})}
+                absenceShift={coverageData.shift}
+                logic={logic}
+            />
             <WorkedDayOffModal
                 isOpen={workedFrancoData.isOpen}
                 onClose={() => setWorkedFrancoData({ isOpen: false, shift: null })}
@@ -1384,13 +1424,10 @@ export default function TacticalMapView() {
                 isOpen={rrhhVacancyData.isOpen}
                 onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
                 shift={rrhhVacancyData.shift}
+                onCoverageProtocol={(s:any) => setCoverageData({isOpen:true, shift:s})}
                 onSendToPlanning={handleReportPlanning}
-                onOpenCoverage={(s:any) => setCoverageData({isOpen:true, shift:s})}
-                onOpenWA={handleOpenWAMap}
             />
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen:false}))} ctx={waData.ctx}/>
-            <CheckOutModal isOpen={checkoutData.isOpen} onClose={() => setCheckoutData({isOpen:false, shift:null})} onConfirm={(nov:string|null) => { if (checkoutData.shift?.id) logic.handleAction('CHECKOUT', checkoutData.shift.id, nov); }} employeeName={checkoutData.shift?.employeeName} />
-            <RetentionModal isOpen={false} onClose={()=>{}} retainedShift={null} />
         </div>
     );
 }
