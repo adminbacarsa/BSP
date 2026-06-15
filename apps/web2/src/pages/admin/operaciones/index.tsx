@@ -86,11 +86,11 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const activeGuards = logic.processedData
         .filter((s: any) => {
             if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
-            if (s.isRetention) return true;                                    // retenido â†’ siempre candidato
+            if (s.isRetention) return true;                                    // retenido → siempre candidato
             const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
             return minutesUntilEnd <= 15;                                      // â‰¤15 min para terminar
         })
-        .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: mÃ¡s tiempo â†’ primero
+        .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: mÃ¡s tiempo → primero
 
     const sla = (logic.servicesSLA || []).find((s: any) => s.objectiveId === incomingShift.objectiveId);
     const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(incomingShift.positionName));
@@ -212,7 +212,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             const batch = writeBatch(db);
             // Regla de liquidaciÃ³n: realStartTime = hora planificada (no la real de llegada)
             // El guardia siempre cobra desde su hora planificada, llegue antes o despuÃ©s.
-            // ExcepciÃ³n: adelanto por cobertura (isEarlyStart) â†’ usa adjustedStartTime del operador.
+            // ExcepciÃ³n: adelanto por cobertura (isEarlyStart) → usa adjustedStartTime del operador.
             const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
                 ? incomingShift.shiftDateObj
                 : toDate(incomingShift.shiftDateObj);
@@ -256,8 +256,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 const nowDate = new Date();
                 const isEarlyRelevo = prevEnd && prevEnd > nowDate;
                 const outgoingRealEnd = isEarlyRelevo
-                    ? Timestamp.fromDate(prevEnd!)   // hora programada â†’ horas completas
-                    : serverTimestamp();              // ya pasÃ³ el horario â†’ hora real
+                    ? Timestamp.fromDate(prevEnd!)   // hora programada → horas completas
+                    : serverTimestamp();              // ya pasÃ³ el horario → hora real
                 batch.update(doc(db, 'turnos', prevShiftId), {
                     realEndTime: outgoingRealEnd,
                     isCompleted: true,
@@ -2359,7 +2359,7 @@ export default function OperacionesPage() {
         if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificarÃ¡ a RRHH y Planificación.`)) return;
         try {
             const batch = writeBatch(db);
-            // Marca el turno con aviso â†’ el planificador muestra barra Ã¡mbar
+            // Marca el turno con aviso → el planificador muestra barra Ã¡mbar
             if (shift.id && !shift.isVirtual) {
                 batch.update(doc(db, 'turnos', shift.id), {
                     plannedNovedad:     'AVISO',
@@ -2894,7 +2894,7 @@ export default function OperacionesPage() {
                                             <div key={a.id} className="flex items-center gap-2 bg-white border border-amber-100 rounded-lg px-2 py-1">
                                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${typeColor}`}>{typeShort}</span>
                                                 <span className="text-[10px] font-bold text-slate-700 flex-1 truncate">{a.employeeName || 'â€”'}</span>
-                                                <span className="text-[9px] text-slate-400 font-mono shrink-0">{fmtD(a.startDate)}â†’{fmtD(a.endDate)}</span>
+                                                <span className="text-[9px] text-slate-400 font-mono shrink-0">{fmtD(a.startDate)}→{fmtD(a.endDate)}</span>
                                             </div>
                                         );
                                     })}
