@@ -564,8 +564,8 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                     {Number.isFinite(item.distance) && item.distance > 0.05
-                        ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km Â· ~{item.eta}min</span>
-                        : !Number.isFinite(item.distance) && <span className="text-[10px] text-slate-300 italic">Sin ubicaciÃ³n</span>
+                        ? <span className="text-[10px] text-slate-400 flex items-center gap-0.5"><Navigation size={8}/>{item.distance.toFixed(1)}km · ~{item.eta}min</span>
+                        : !Number.isFinite(item.distance) && <span className="text-[10px] text-slate-300 italic">Sin ubicación</span>
                     }
                     {item.shiftDateObj && !item.isFranco && (
                         <span className="text-[10px] text-indigo-500 font-medium">
@@ -644,7 +644,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         return 0;
     };
 
-    // Helper de restricciones: igual que PlanificaciÃ³n â€” no mostrar guardias vetados
+    // Helper de restricciones: igual que Planificación â€” no mostrar guardias vetados
     const isRestricted = (e: any): boolean => {
         if ((e.restriccionesObjetivo || []).some((r: any) => r.objectiveId === absenceShift.objectiveId)) return true;
         if ((e.restriccionesCliente  || []).some((r: any) => r.clientId    === absenceShift.clientId))   return true;
@@ -875,19 +875,19 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                         </span>
                     </div>
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
-                        <CoverageSection num="1" title="RetenciÃ³n Â· Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
+                        <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
                             empty="No hay guardias presentes en este objetivo."
                             items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="2" title="Adelanto Â· PrÃ³ximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
-                            empty="No hay turno prÃ³ximo planificado."
+                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
+                            empty="No hay turno próximo planificado."
                             items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="3" title="Retenes Â· Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
+                        <CoverageSection num="3" title="Retenes · Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
                             empty="No hay retenes disponibles."
                             items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="4" title="Francos Â· DÃ­a libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
+                        <CoverageSection num="4" title="Francos · Día libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
                             empty="No hay francos disponibles hoy."
                             items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
                         />
@@ -917,6 +917,22 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                                                     description: noCoverageNotes || `Protocolo agotado — ${absenceShift.positionName} en ${absenceShift.objectiveName} queda sin cobertura.`,
                                                     createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
                                                 }, tenantId(absenceShift)));
+                                                // Crear doc sintético en turnos para que el hook no regenere la vacante
+                                                if (absenceShift.objectiveId && absenceShift.positionName) {
+                                                    const startTs = absenceShift.shiftDateObj instanceof Date ? absenceShift.shiftDateObj : new Date(absenceShift.shiftDateObj);
+                                                    const endTs   = absenceShift.endDateObj   instanceof Date ? absenceShift.endDateObj   : new Date(absenceShift.endDateObj);
+                                                    try {
+                                                        await addDoc(collection(db, 'turnos'), stampEmpresaId({
+                                                            origin: 'SIN_COBERTURA', status: 'SIN_COBERTURA',
+                                                            employeeId: 'VACANTE', employeeName: 'SIN COBERTURA',
+                                                            isReported: true, resolvedBy: 'OPERACIONES',
+                                                            objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '',
+                                                            positionName: absenceShift.positionName, clientId: absenceShift.clientId || null,
+                                                            startTime: Timestamp.fromDate(startTs), endTime: Timestamp.fromDate(endTs),
+                                                            createdAt: serverTimestamp(),
+                                                        }, tenantId(absenceShift)));
+                                                    } catch(e) { /* non-critical */ }
+                                                }
                                                 toast.info(`Puesto ${absenceShift.positionName} registrado sin cobertura.`);
                                                 onClose();
                                             } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -1058,72 +1074,68 @@ const AbsenceDecisionModal = ({ isOpen, onClose, shift, onDeclareAbsent, onLateA
     const [view, setView] = React.useState<'decision' | 'late'>('decision');
     const [etaTime, setEtaTime] = React.useState('');
     const [loading, setLoading] = React.useState(false);
-
     useEffect(() => { if (isOpen) { setView('decision'); setEtaTime(''); setLoading(false); } }, [isOpen]);
-
     if (!isOpen || !shift) return null;
     const initials = (shift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
     const minutesLate = Math.round(shift.minutesPastStart ?? 0);
-
-    const handleConfirmLate = async () => {
-        if (!etaTime) return;
-        setLoading(true);
-        try { await onLateArrival(shift, etaTime); onClose(); }
-        finally { setLoading(false); }
-    };
-
+    const hiStart = shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const hiEnd   = shift.endDateObj   ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const preMsg  = waMensaje.tardanza(shift.employeeName || '', shift.objectiveName || '', hiStart);
     return (
-        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
-                <div className="p-4 bg-amber-500 flex justify-between items-start">
-                    <div>
-                        <p className="text-amber-100 text-[10px] font-bold uppercase tracking-widest mb-0.5">No se presentó · T+{minutesLate}min</p>
-                        <p className="text-white font-bold text-base leading-tight">{shift.objectiveName || '—'}</p>
-                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                            {shift.positionName && <span className="bg-amber-600/60 text-amber-100 text-[10px] px-2 py-0.5 rounded">{shift.positionName}</span>}
-                            <span className="bg-amber-600/60 text-amber-100 text-[10px] px-2 py-0.5 rounded font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
-                        </div>
+        <div className="fixed inset-0 z-[9000] bg-black/70 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" style={{background:'#0f0f1a'}}>
+                <div className="bg-orange-500 p-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-orange-300/30 flex items-center justify-center shrink-0">
+                        <span className="text-white font-black text-sm">{initials}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-white font-bold text-base leading-tight truncate">{shift.employeeName}</p>
+                        <p className="text-orange-100 text-xs flex items-center gap-1 mt-0.5"><Clock size={11}/>{minutesLate} min sin check-in</p>
                     </div>
                     <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
                 </div>
-                <div className="p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-                            <span className="text-amber-700 font-bold text-base">{initials}</span>
+                <div className="flex gap-1.5 px-4 py-3 flex-wrap">
+                    {shift.objectiveName && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><MapPin size={9}/>{shift.objectiveName}</span>}
+                    {shift.positionName  && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Shield size={9}/>{shift.positionName}</span>}
+                    {hiStart && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}&ndash;{hiEnd}</span>}
+                </div>
+                <div className="px-4 pb-5 space-y-4">
+                    <div>
+                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Contactar</p>
+                        <div className="bg-slate-800/60 rounded-xl p-3 flex items-center justify-between gap-3 mb-2">
+                            <div className="min-w-0">
+                                <p className="text-white font-bold text-sm truncate">{shift.phone || 'Sin telefono'}</p>
+                                <p className="text-slate-400 text-[10px] mt-0.5">Celular registrado</p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                                <button onClick={() => onOpenWA(shift)} disabled={!shift.phone} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${shift.phone ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-700 opacity-50 cursor-not-allowed'}`}><MessageCircle size={16} className="text-white"/></button>
+                                {shift.phone ? <a href={`tel:${shift.phone}`} className="w-10 h-10 rounded-xl bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors"><Phone size={16} className="text-white"/></a> : <div className="w-10 h-10 rounded-xl bg-slate-700 opacity-50 flex items-center justify-center"><Phone size={16} className="text-slate-500"/></div>}
+                            </div>
                         </div>
+                        <div className="bg-green-900/25 border border-green-800/40 rounded-xl p-3">
+                            <p className="text-green-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1.5"><MessageCircle size={9}/>Mensaje pre-armado</p>
+                            <p className="text-green-100 text-xs leading-relaxed">{preMsg}</p>
+                        </div>
+                    </div>
+                    {view === 'decision' && (
                         <div>
-                            <p className="font-bold text-slate-900 text-sm">{shift.employeeName}</p>
-                            <p className="text-xs text-amber-600 font-semibold mt-0.5">Lleva {minutesLate} min de retraso</p>
+                            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Decision</p>
+                            <div className="space-y-2">
+                                <button onClick={() => setView('late')} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><Clock size={15}/>Llegada tarde &mdash; esta en camino</button>
+                                <button onClick={async () => { setLoading(true); try { await onDeclareAbsent(shift); onClose(); } finally { setLoading(false); } }} disabled={loading} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700 disabled:opacity-60"><UserX size={15}/>{loading ? 'Registrando...' : 'Declarar ausente — activar cobertura'}</button>
+                            </div>
                         </div>
-                    </div>
-                    <div className="flex gap-2 mb-4">
-                        <button onClick={() => onOpenWA(shift)} disabled={!shift.phone} className={`flex-1 flex items-center justify-center gap-1.5 py-2 border rounded-xl text-xs font-bold transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'}`}>
-                            <MessageCircle size={13}/>WhatsApp
-                        </button>
-                        {shift.phone
-                            ? <a href={`tel:${shift.phone}`} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"><Phone size={13}/>{shift.phone}</a>
-                            : <div className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-300 border border-slate-200 rounded-xl text-xs font-bold"><Phone size={13}/>Sin teléfono</div>
-                        }
-                    </div>
-                    {view === 'decision' && (<>
-                        <button onClick={() => setView('late')} className="w-full py-3.5 bg-amber-500 text-white font-black rounded-xl hover:bg-amber-600 transition-colors text-sm mb-2.5 flex items-center justify-center gap-2">
-                            <Clock size={16}/>LLEGADA TARDE
-                        </button>
-                        <button onClick={async () => { setLoading(true); try { await onDeclareAbsent(shift); onClose(); } finally { setLoading(false); } }} disabled={loading} className="w-full py-3.5 bg-rose-600 text-white font-black rounded-xl hover:bg-rose-700 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-60">
-                            <UserX size={16}/>{loading ? 'Registrando...' : 'DECLARAR AUSENTE'}
-                        </button>
-                        <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-2">Cancelar</button>
-                    </>)}
-                    {view === 'late' && (<>
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
-                            <p className="text-xs text-amber-800 font-semibold mb-2">¿A qué hora llega?</p>
-                            <input type="time" value={etaTime} onChange={e => setEtaTime(e.target.value)} className="w-full text-lg font-mono text-center border border-amber-300 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+                    )}
+                    {view === 'late' && (
+                        <div>
+                            <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Hora de llegada estimada</p>
+                            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 mb-3">
+                                <input type="time" value={etaTime} onChange={e => setEtaTime(e.target.value)} className="w-full text-2xl font-mono text-center text-white bg-transparent focus:outline-none"/>
+                            </div>
+                            <button onClick={async () => { if (!etaTime) return; setLoading(true); try { await onLateArrival(shift, etaTime); onClose(); } finally { setLoading(false); } }} disabled={!etaTime || loading} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"><Clock size={15}/>{loading ? 'Guardando...' : 'Confirmar llegada tarde'}</button>
+                            <button onClick={() => setView('decision')} className="w-full py-2 text-slate-400 text-xs mt-2 hover:text-slate-300">&#8592; Volver</button>
                         </div>
-                        <button onClick={handleConfirmLate} disabled={!etaTime || loading} className="w-full py-3.5 bg-amber-500 text-white font-black rounded-xl hover:bg-amber-600 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50">
-                            <Clock size={16}/>{loading ? 'Guardando...' : 'CONFIRMAR LLEGADA TARDE'}
-                        </button>
-                        <button onClick={() => setView('decision')} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-2">&#8592; Volver</button>
-                    </>)}
+                    )}
                 </div>
             </div>
         </div>
@@ -1136,67 +1148,45 @@ const RRHHVacancyModal = ({ isOpen, onClose, shift, onSendToPlanning, onOpenCove
     const initials = (shift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
     const anticipacionH = shift.rrhhAnticipacionMinutes != null ? Math.round(shift.rrhhAnticipacionMinutes / 60) : null;
     const absenceTypeLabel = shift.absenceType || 'Novedad RRHH';
-    const createdAtStr = shift.absenceCreatedAt ? (() => { try { const d = new Date(shift.absenceCreatedAt); return d.toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch { return shift.absenceCreatedAt; } })() : '—';
-    const headerBg = isUrgent ? 'bg-orange-500' : 'bg-blue-600';
-    const chipBg   = isUrgent ? 'bg-orange-600/60 text-orange-100' : 'bg-blue-700/60 text-blue-100';
-    const tagBg    = isUrgent ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-blue-50 text-blue-700 border-blue-200';
-    const label    = isUrgent ? 'Novedad urgente RRHH' : 'Novedad planificada RRHH';
-
+    const cargadaHace = anticipacionH !== null ? `cargada hace ${anticipacionH}hs` : 'novedad RRHH';
+    const hiStart = shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const hiEnd   = shift.endDateObj   ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '';
+    const createdAtStr = shift.absenceCreatedAt ? (() => { try { return new Date(shift.absenceCreatedAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}); } catch { return ''; } })() : '';
+    const minutesUntil = shift.shiftDateObj ? Math.max(0, Math.round((new Date(shift.shiftDateObj).getTime() - Date.now()) / 60000)) : null;
+    const timeUntilStr = minutesUntil !== null ? (minutesUntil >= 60 ? `${Math.floor(minutesUntil/60)} h ${minutesUntil%60} min` : `${minutesUntil} min`) : null;
     return (
-        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
-                <div className={`p-4 ${headerBg} flex justify-between items-start`}>
-                    <div>
-                        <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest mb-0.5">{label}</p>
-                        <p className="text-white font-bold text-base leading-tight">{shift.objectiveName || '—'}</p>
-                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                            {shift.positionName && <span className={`text-[10px] px-2 py-0.5 rounded ${chipBg}`}>{shift.positionName}</span>}
-                            <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${chipBg}`}>{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
-                        </div>
+        <div className="fixed inset-0 z-[9000] bg-black/70 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" style={{background:'#0f0f1a'}}>
+                <div className={`${isUrgent ? 'bg-orange-500' : 'bg-blue-600'} p-4 flex items-center gap-3`}>
+                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                        <span className="text-white font-black text-sm">{initials}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-white font-bold text-base leading-tight truncate">{shift.employeeName}</p>
+                        <p className="text-white/80 text-xs mt-0.5">Novedad RRHH &mdash; {cargadaHace}</p>
                     </div>
                     <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
                 </div>
-                <div className="p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${isUrgent ? 'bg-orange-100' : 'bg-blue-100'}`}>
-                            <span className={`font-bold text-base ${isUrgent ? 'text-orange-700' : 'text-blue-700'}`}>{initials}</span>
-                        </div>
-                        <div>
-                            <p className="font-bold text-slate-900 text-sm">{shift.employeeName}</p>
-                            <p className={`text-xs font-semibold mt-0.5 ${isUrgent ? 'text-orange-600' : 'text-blue-600'}`}>{absenceTypeLabel}</p>
-                        </div>
+                <div className="flex gap-1.5 px-4 py-3 flex-wrap">
+                    {shift.objectiveName && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><MapPin size={9}/>{shift.objectiveName}</span>}
+                    {shift.positionName  && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Shield size={9}/>{shift.positionName}</span>}
+                    {hiStart && <span className="flex items-center gap-1 bg-slate-800 text-slate-200 text-[10px] font-semibold px-2.5 py-1 rounded-full"><Clock size={9}/>{hiStart}&ndash;{hiEnd}</span>}
+                </div>
+                <div className="px-4 pb-5 space-y-3">
+                    <div className="bg-orange-950/40 border border-orange-900/40 rounded-xl p-3">
+                        <p className="text-orange-300/70 text-[9px] font-bold uppercase tracking-widest mb-1.5">Motivo registrado en RRHH</p>
+                        <p className="text-white font-bold text-base">{absenceTypeLabel}</p>
+                        {createdAtStr && <p className="text-slate-400 text-xs mt-1">Cargado por: empleado &middot; {createdAtStr} hs</p>}
+                        {timeUntilStr && <p className="text-orange-400 text-xs font-bold mt-0.5">Turno inicia en: {timeUntilStr}</p>}
                     </div>
-                    <div className={`border rounded-xl p-3 mb-4 text-xs ${tagBg}`}>
-                        <div className="flex justify-between mb-1">
-                            <span className="font-semibold">Declarada el</span>
-                            <span className="font-mono">{createdAtStr}</span>
-                        </div>
-                        {anticipacionH !== null && (
-                            <div className="flex justify-between">
-                                <span className="font-semibold">Anticipación</span>
-                                <span className="font-bold">{anticipacionH}h {isUrgent ? '— menos de 12h ⚠' : '— más de 12h ✓'}</span>
-                            </div>
-                        )}
+                    <div className="bg-slate-800/60 rounded-xl p-3">
+                        <p className="text-slate-300 text-[10px] font-bold uppercase tracking-widest mb-1.5">{isUrgent ? 'Planning no disponible' : 'Turno planificado'}</p>
+                        <p className="text-slate-400 text-xs leading-relaxed">{isUrgent ? 'Novedad cargada con menos de 12hs de anticipacion. Operaciones debe resolver la cobertura.' : 'Novedad cargada con mas de 12hs de anticipacion. Planificacion puede reasignar el turno.'}</p>
                     </div>
-                    <div className="flex gap-2 mb-4">
-                        <button onClick={() => onOpenWA(shift)} disabled={!shift.phone} className={`flex-1 flex items-center justify-center gap-1.5 py-2 border rounded-xl text-xs font-bold transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'}`}>
-                            <MessageCircle size={13}/>WhatsApp
-                        </button>
-                        {shift.phone
-                            ? <a href={`tel:${shift.phone}`} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"><Phone size={13}/>{shift.phone}</a>
-                            : <div className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-300 border border-slate-200 rounded-xl text-xs font-bold"><Phone size={13}/>Sin teléfono</div>
-                        }
-                    </div>
-                    {isUrgent ? (
-                        <button onClick={() => { onClose(); onOpenCoverage(shift); }} className="w-full py-3.5 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition-colors text-sm flex items-center justify-center gap-2">
-                            <Siren size={16}/>PROTOCOLO DE COBERTURA
-                        </button>
-                    ) : (
-                        <button onClick={() => { onClose(); onSendToPlanning(shift); }} className="w-full py-3.5 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition-colors text-sm flex items-center justify-center gap-2">
-                            <CornerUpLeft size={16}/>ENVIAR A PLANIFICACIÓN
-                        </button>
-                    )}
-                    <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-2">Cerrar</button>
+                    {isUrgent
+                        ? <button onClick={() => { onClose(); onOpenCoverage(shift); }} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><Siren size={15}/>Activar protocolo de cobertura</button>
+                        : <button onClick={() => { onClose(); onSendToPlanning(shift); }} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors border border-slate-700"><CornerUpLeft size={15}/>Enviar a planificacion</button>
+                    }
                 </div>
             </div>
         </div>
@@ -1367,7 +1357,7 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                 {/* Footer: acciÃ³n + auto-cierre */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s Â· hover para pausar
+                        Cerrando en {Math.ceil(remaining / 1000)}s · hover para pausar
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
@@ -1406,7 +1396,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         !!shift.isReten ||
         (diff >= -15 && diff <= 120)
     );
-    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`Â¿CONFIRMAR NOTIFICACIÃ“N?\nSe enviarÃ¡ alerta a PlanificaciÃ³n.`)) onReportPlanning(shift); };
+    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`Â¿CONFIRMAR NOTIFICACIÃ“N?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
     const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
 
@@ -2259,7 +2249,7 @@ export default function OperacionesPage() {
                 }, shiftEmpresaId));
             }
 
-            // 3. Notificar a RRHH y PlanificaciÃ³n vÃ­a novedades
+            // 3. Notificar a RRHH y Planificación vÃ­a novedades
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type:         'AUSENCIA_OPERATIVA',
                 title:        'Ausencia confirmada desde Operaciones',
@@ -2278,7 +2268,7 @@ export default function OperacionesPage() {
             setCoverageData({isOpen:true, shift: shift});
             const msg = alreadyAutoAbsent
                 ? `Ausencia de ${shift.employeeName} confirmada (ya detectada automÃ¡ticamente).`
-                : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y PlanificaciÃ³n.`;
+                : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y Planificación.`;
             toast.success(msg);
         } catch (e: any) {
             toast.error('Error al marcar ausencia: ' + (e?.message || e?.code || String(e)));
@@ -2355,7 +2345,7 @@ export default function OperacionesPage() {
         }
     };
     const handleNovedadAbsence = async (shift: any) => {
-        if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificarÃ¡ a RRHH y PlanificaciÃ³n.`)) return;
+        if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificarÃ¡ a RRHH y Planificación.`)) return;
         try {
             const batch = writeBatch(db);
             // Marca el turno con aviso â†’ el planificador muestra barra Ã¡mbar
@@ -2384,7 +2374,7 @@ export default function OperacionesPage() {
                 createdAt: serverTimestamp(),
                 reportedBy: 'OPERACIONES',
             }, String(shift.empresaId || empresaId || '').trim()));
-            toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a PlanificaciÃ³n.`);
+            toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a Planificación.`);
         } catch (e: any) {
             toast.error('Error al registrar novedad: ' + (e?.message || e?.code || String(e)));
         }
@@ -2548,25 +2538,21 @@ export default function OperacionesPage() {
     if (!logic.isReady) return (
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
-            <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 select-none" style={{ gap: '28px' }}>
-                {/* Logo + tÃ­tulo */}
-                <div className="flex flex-col items-center gap-3">
-                    <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
-                        <Radio size={32} className="text-cyan-400" style={{ animation: 'pulse 1.8s ease-in-out infinite' }}/>
+            <div className="min-h-screen flex items-center justify-center bg-slate-950 select-none p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-5 w-full max-w-xs">
+                    <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                        <Radio size={28} className="text-cyan-400" style={{ animation: 'pulse 1.8s ease-in-out infinite' }}/>
                     </div>
                     <div className="text-center">
-                        <p className="text-white text-xl font-black tracking-tight">Centro de Control</p>
-                        <p className="text-slate-500 text-xs mt-0.5 font-medium uppercase tracking-widest">COSP Operaciones</p>
+                        <p className="text-white text-lg font-black tracking-tight">Centro de Control</p>
+                        <p className="text-slate-500 text-[10px] mt-0.5 font-medium uppercase tracking-widest">COSP Operaciones</p>
                     </div>
+                    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-500 rounded-full" style={{ animation: 'ccLoadBar 1.6s ease-in-out infinite alternate' }}/>
+                    </div>
+                    <p className="text-slate-500 text-xs font-medium">Sincronizando datos en tiempo real...</p>
+                    <style>{`@keyframes ccLoadBar { from { width: 15%; } to { width: 85%; } }`}</style>
                 </div>
-                {/* Barra de progreso animada */}
-                <div className="w-48 h-1 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-cyan-500 rounded-full" style={{ width: '60%', animation: 'ccLoadBar 1.6s ease-in-out infinite alternate' }}/>
-                </div>
-                <p className="text-slate-500 text-xs font-medium">Sincronizando datos en tiempo realâ€¦</p>
-                <style>{`
-                    @keyframes ccLoadBar { from { width: 15%; } to { width: 85%; } }
-                `}</style>
             </div>
         </DashboardLayout>
     );
