@@ -2561,7 +2561,7 @@ export default function OperacionesPage() {
         { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
     ];
 
-    if (!logic.isStable) return (
+    if (!(logic.isStable ?? logic.isReady)) return (
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <div className="min-h-screen flex items-center justify-center select-none p-4">
