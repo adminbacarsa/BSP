@@ -34,6 +34,7 @@ const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) r
 const formatTimeSimple = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Cordoba' }).toUpperCase(); } catch (e) { return '--/--'; } };
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
+const fmt24h = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const isSameDay = (d1: any, d2: any) => { if (!d1 || !d2) return false; return toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA'); };
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => { if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity; const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180); const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; };
 const estimateEta = (dist: number) => Math.round((dist / 30) * 60);
@@ -82,13 +83,27 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     // Candidatos a relevar:
     // 1. Guardias en retenciÃ³n (siempre â€” llevan tiempo extra esperando)
     // 2. Guardias a â‰¤15 min de terminar su turno (estÃ¡n por salir)
+    // Filtro de duración: solo guardias con turno compatible (±90 min) al del entrante
     // Ordenados por FIFO: quien lleva mÃ¡s minutos trabajados se va primero
+    const incomingDurMin = (() => {
+        const iS = toDate(incomingShift.shiftDateObj).getTime();
+        let iE = toDate(incomingShift.endDateObj).getTime();
+        if (iE <= iS) iE += 86400000;
+        return (iE - iS) / 60000;
+    })();
+
     const activeGuards = logic.processedData
         .filter((s: any) => {
             if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
-            if (s.isRetention) return true;                                    // retenido → siempre candidato
+            // Filtro duración compatible (±90 min)
+            const sStart = toDate(s.shiftDateObj).getTime();
+            let sEnd = toDate(s.endDateObj).getTime();
+            if (sEnd <= sStart) sEnd += 86400000;
+            const sDurMin = (sEnd - sStart) / 60000;
+            if (Math.abs(sDurMin - incomingDurMin) > 90) return false;
+            if (s.isRetention) return true;
             const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
-            return minutesUntilEnd <= 15;                                      // â‰¤15 min para terminar
+            return minutesUntilEnd <= 15;
         })
         .sort((a: any, b: any) => (b.totalMinutesWorked ?? 0) - (a.totalMinutesWorked ?? 0)); // FIFO: mÃ¡s tiempo → primero
 
@@ -416,7 +431,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                                                         {s.isRetention && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-orange-500 text-white">RETENIDO</span>}
                                                         {isOver12h && !s.isRetention && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-red-100 text-red-700">+12h</span>}
                                                     </div>
-                                                    <span className="text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)} · {hoursWorked}h trabajadas</span>
+                                                    <span className="text-[10px] text-slate-400">Salida: {fmt24h(s.endDateObj)} · {hoursWorked}h trabajadas</span>
                                                 </div>
                                             </div>
                                             <span className="text-[10px] font-black bg-indigo-600 text-white px-3 py-1.5 rounded-lg group-hover:bg-indigo-700 transition-colors shrink-0">RELEVAR</span>
@@ -3412,12 +3427,12 @@ export default function OperacionesPage() {
                 <DebugPanel
                     onClose={() => setShowDebugPanel(false)}
                     processedData={logic.processedData}
+                    se
                     servicesSLA={logic.servicesSLA || []}
-                    publishStatusMap={logic.publishStatusMap}
+                    publishStatusMap={logic.publishStatusMap || {}}
                     rawShifts={logic.rawShifts}
                 />
             )}
-
         </DashboardLayout>
     );
 }
