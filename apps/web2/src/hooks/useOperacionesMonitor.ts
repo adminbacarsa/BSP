@@ -451,6 +451,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 // Esto evita el problema de los huecos partidos.
                 
                 if (relevantDefinitions.length > 0) {
+                    // Gap 5: origen de la vacante por slot
+                    const slotVacancyOrigin = allPosShifts.some((s: any) => s.hasRRHHNovedad)
+                        ? 'RRHH_NOVEDAD'
+                        : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence)
+                            ? 'ABSENCE'
+                            : 'NO_PLANNING';
                     relevantDefinitions.forEach((slot: any) => {
                         const start = createDateFromTime(slot.startTime, now);
                         let end = createDateFromTime(slot.endTime, now);
@@ -469,6 +475,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                 virtualVacancies.push({
                                     id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    vacancyOrigin: slotVacancyOrigin,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId,
                                     positionName: pos.name,
@@ -499,14 +506,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     // Sin turnos NI francos → el puesto realmente no opera hoy
                     if (allPosShifts.length === 0 && posFrancoShifts.length === 0) return;
 
-                    // Para avgHPerGuard: preferir allPosShifts (más exacto), fallback a francos
-                    const refShiftsForCalc = allPosShifts.length > 0 ? allPosShifts : posFrancoShifts;
                     const guardQty = pos.quantity || 1;
-                    const totalPlannedH = refShiftsForCalc.reduce((a: number, s: any) => a + (s.duration || 0), 0);
-                    const avgHPerGuard = totalPlannedH / guardQty;
 
-                    // ─── MODO 24H (3×8h o 2×12h) ─────────────────────────────────────────
-                    if (avgHPerGuard >= 20) {
+                    // ─── MODO 24H: usa coverageType del SLA (Gap 4) ───────────────────────
+                    if (pos.coverageType === '24hs') {
                         // Detectar brechas en la jornada completa (comportamiento original correcto)
                         const coveringShifts = posShifts.filter((s: any) => s.countsForCoverage);
                         const coveredHours = coveringShifts.reduce((acc: number, s: any) => acc + s.duration, 0);
@@ -519,9 +522,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                 let bestName = "COBERTURA";
                                 if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
 
+                                const gap24Origin = allPosShifts.some((s: any) => s.hasRRHHNovedad) ? 'RRHH_NOVEDAD'
+                                    : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence) ? 'ABSENCE' : 'NO_PLANNING';
                                 virtualVacancies.push({
                                     id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    vacancyOrigin: gap24Origin,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
                                     employeeName: `VACANTE: ${bestName}`,
@@ -560,9 +566,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             for (let i = 0; i < deficit; i++) {
                                 const startMs = refShift.shiftDateObj instanceof Date ? refShift.shiftDateObj.getTime() : Date.now();
                                 const shiftId = refShift.id || `${startMs}`;
+                                const custOrigin = refShift.hasRRHHNovedad ? 'RRHH_NOVEDAD' : 'ABSENCE';
                                 virtualVacancies.push({
                                     id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    vacancyOrigin: custOrigin,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
                                     employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
@@ -579,6 +587,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             virtualVacancies.push({
                                 id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}`,
                                 isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                vacancyOrigin: 'NO_PLANNING',
                                 clientName: objInfo.clientName, clientId: objInfo.clientId,
                                 objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
                                 employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
