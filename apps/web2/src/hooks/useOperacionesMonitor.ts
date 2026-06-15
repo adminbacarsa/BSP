@@ -119,7 +119,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [operatorInfo, setOperatorInfo] = useState<{ name: string; startTime: Date | null }>({ name: 'Operador', startTime: null });
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
     // isReady: true cuando los 3 listeners críticos (turnos, empleados, objetivos) recibieron su primer snapshot
+    // isStable: true cuando processedData no cambió por 700ms después de isReady (evita ver actualizaciones intermedias)
     const [isReady, setIsReady] = useState(false);
+    const [isStable, setIsStable] = useState(false);
+    const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyFlags = useRef({ shifts: false, employees: false, objectives: false });
     const checkReady = () => {
         if (readyFlags.current.shifts && readyFlags.current.employees && readyFlags.current.objectives) {
@@ -920,6 +923,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
            }
     }, [processedData, empresaId, migracionCompleta, now]);
 
+    // isStable: debounce 700ms sobre processedData después de isReady
+    // Evita que el usuario vea actualizaciones intermedias al cargar
+    useEffect(() => {
+        if (!isReady) return;
+        if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
+        stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
+        return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
+    }, [processedData, isReady]);
+
     return {
         processedData,
         listData,
@@ -938,6 +950,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         employees,
         rawShifts,
         isReady,
+        isStable,
         servicesSLA,
         now,
     };
