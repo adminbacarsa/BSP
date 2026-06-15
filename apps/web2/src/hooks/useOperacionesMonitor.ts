@@ -924,7 +924,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [processedData, empresaId, migracionCompleta, now]);
 
     // isStable: debounce 700ms sobre processedData después de isReady
-    // Evita que el usuario vea actualizaciones intermedias al cargar
+    // Fallback: forza isStable=true a los 4s para evitar que quede bloqueado
+    useEffect(() => {
+        if (!isReady) return;
+        const fallback = setTimeout(() => setIsStable(true), 4000);
+        return () => clearTimeout(fallback);
+    }, [isReady]);
+
     useEffect(() => {
         if (!isReady) return;
         if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
