@@ -348,7 +348,35 @@ export default function EmployeesPage() {
       const objRow = allObjectives.find(o => o.id === objectiveId || o.docId === objectiveId);
       const clientId = objRow?.clientId || '';
       const objectiveName = objRow?.name || (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
+      const absenceCreatedAt = new Date().toISOString();
       const batch = writeBatch(db);
+
+      // ── Marcar turnos originales planificados del empleado en el rango ────────
+      // Para cada día del período buscamos turnos reales (no NOVEDAD) del empleado
+      // y los marcamos con hasNovedad:true + isAbsent:true para que Operaciones
+      // pueda detectarlos y calcular la anticipación (≥12h → Planning, <12h → Ops).
+      const rangeStartTs = Timestamp.fromDate(new Date(sY, sM - 1, sD, 0, 0, 0));
+      const rangeEndTs   = Timestamp.fromDate(new Date(eY, eM - 1, eD, 23, 59, 59));
+      const originalTurnosSnap = await getDocs(query(
+        collection(db, 'turnos'),
+        where('employeeId', '==', data.employeeId),
+        where('startTime', '>=', rangeStartTs),
+        where('startTime', '<=', rangeEndTs),
+      ));
+      originalTurnosSnap.forEach(docSnap => {
+        const t = docSnap.data();
+        // Solo marcar turnos reales planificados — no tocar NOVEDADs ni ausencias ya marcadas
+        if (t.type === 'NOVEDAD' || t.hasNovedad || t.isAbsent || t.isFranco) return;
+        batch.update(docSnap.ref, {
+          hasNovedad: true,
+          isAbsent: true,
+          absenceId,
+          absenceType: data.type,
+          absenceCreatedAt,
+        });
+      });
+
+      // ── Crear turnos NOVEDAD en el planificador (comportamiento existente) ────
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
         const isPeriodOnly = code === 'V';

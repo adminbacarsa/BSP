@@ -334,15 +334,28 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 ? (shift.realStartTime?.seconds ? new Date(shift.realStartTime.seconds * 1000) : shift.shiftDateObj)
                 : null;
             
-            const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart <= 15 && minutesUntilStart > -5;
-            const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && minutesUntilStart > 15;
+            // ── Novedad RRHH: turno marcado por replicarAusenciaEnPlanificador ─────
+            // absenceCreatedAt es ISO string guardado en el turno original al momento de
+            // cargar la novedad en RRHH. Calculamos la anticipación respecto al inicio del turno.
+            const hasRRHHNovedad = !!shift.hasNovedad && !!shift.absenceId && !shift.isFranco && shift.type !== 'NOVEDAD';
+            const rrhhAnticipacionMinutes: number | null = (() => {
+                if (!hasRRHHNovedad || !shift.absenceCreatedAt || !shift.shiftDateObj) return null;
+                const createdAt = new Date(shift.absenceCreatedAt).getTime();
+                return Math.round((shift.shiftDateObj.getTime() - createdAt) / 60000);
+            })();
+            // ≥720 min (12hs) → Planning puede actuar; <720 → Operaciones debe resolver
+            const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
+            const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
+
+            const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
+            const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
-            // Guardia tardanza: ventana T+5 → T+30
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 5 && minutesPastStart <= 60;
+            // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
+            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
+            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
             const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
-            // Potencial ausencia: T+60 sin confirmar presencia
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && minutesPastStart > 60;
+            // Potencial ausencia: T+60 sin confirmar presencia (fallback administrativo)
+            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 60;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -352,7 +365,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
             const countsForCoverage = !isAutoNotification && (
-                (isValidEmployee && !isAbsent && !isPotentialAbsence) ||
+                (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee)
             );
 
@@ -365,6 +378,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
+                hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
             };
         }).filter(Boolean);
@@ -661,9 +675,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
         switch (viewTab) {
             case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
-            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
-            case 'PLAN':       return hoy.filter((s:any) => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
+            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco);
+            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad);
+            case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
             case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
             case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention);
             case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
@@ -676,7 +690,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (s.isCompleted && !s.isRetention) return false;
             if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, plan: hoy.filter(s => s.isFuture && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad).length, plan: hoy.filter(s => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, rrhh_urgente: hoy.filter(s => s.isRRHHUrgent && !s.isFranco).length, rrhh_planificado: hoy.filter(s => s.isRRHHPlanned && !s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
@@ -868,24 +882,26 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (alertedVacancyIds.current.has(alertKey)) continue;
             alertedVacancyIds.current.add(alertKey);
             getDocs(query(collection(db, 'novedades'), where('shiftId', '==', s.id), where('type', '==', 'RETENCION_LARGA'), limit(1)))
-                .then(async snap => {
+                .then(snap => {
                     if (!snap.empty) return;
-                    const shiftEmpresaId = String(s.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'RETENCION_LARGA', status: 'PENDIENTE',
+                    addDoc(collection(db, 'novedades'), stampEmpresaId({
+                        type: 'RETENCION_LARGA',
                         shiftId: s.id,
-                        objectiveId: s.objectiveId, objectiveName: s.objectiveName || '',
-                        clientId: s.clientId || null,
-                        positionName: s.positionName || '',
-                        employeeName: s.employeeName || '',
-                        description: `Guardia ${s.employeeName || ''} lleva más de 2h de retención en ${s.objectiveName || ''}. Verificar relevo.`,
+                        employeeId: s.employeeId,
+                        employeeName: s.employeeName,
+                        objectiveId: s.objectiveId,
+                        objectiveName: s.objectiveName,
+                        positionName: s.positionName,
+                        minutesOvertime,
+                        status: 'pending',
+                        title: 'Retención prolongada',
+                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime / 60 * 10) / 10}h de retención en ${s.objectiveName || '—'}`,
                         createdAt: serverTimestamp(),
-                        source: 'SYSTEM_SCHEDULER',
-                    }, shiftEmpresaId));
-                })
-                .catch(e => console.warn('[retentionAlert]', e));
+                        reportedBy: 'SISTEMA',
+                    }, empresaId)).catch(e => console.warn('[novedadRetencionLarga]', e));
+                }).catch(e => console.warn('[checkNovedadRetencionLarga]', e));
         }
-    }, [processedData, now, empresaId, migracionCompleta]);
+    }, [processedData, empresaId, migracionCompleta, now]);
 
     return {
         processedData,
@@ -901,7 +917,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         recentLogs,
         publishStatusMap,
         operatorInfo,
-        isCompact, setIsCompact, employees, rawShifts,
+        isCompact, setIsCompact,
+        employees,
+        rawShifts,
         isReady,
+        servicesSLA,
     };
-};
+}
