@@ -1013,6 +1013,82 @@ const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => {
         </div>
     );
 };
+const AbsenceDecisionModal = ({ isOpen, onClose, shift, onDeclareAbsent, onLateArrival, onOpenWA }: any) => {
+    const [view, setView] = React.useState<'decision' | 'late'>('decision');
+    const [etaTime, setEtaTime] = React.useState('');
+    const [loading, setLoading] = React.useState(false);
+
+    useEffect(() => { if (isOpen) { setView('decision'); setEtaTime(''); setLoading(false); } }, [isOpen]);
+
+    if (!isOpen || !shift) return null;
+    const initials = (shift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
+    const minutesLate = Math.round(shift.minutesPastStart ?? 0);
+
+    const handleConfirmLate = async () => {
+        if (!etaTime) return;
+        setLoading(true);
+        try { await onLateArrival(shift, etaTime); onClose(); }
+        finally { setLoading(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                <div className="p-4 bg-amber-500 flex justify-between items-start">
+                    <div>
+                        <p className="text-amber-100 text-[10px] font-bold uppercase tracking-widest mb-0.5">No se presentó · T+{minutesLate}min</p>
+                        <p className="text-white font-bold text-base leading-tight">{shift.objectiveName || '—'}</p>
+                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                            {shift.positionName && <span className="bg-amber-600/60 text-amber-100 text-[10px] px-2 py-0.5 rounded">{shift.positionName}</span>}
+                            <span className="bg-amber-600/60 text-amber-100 text-[10px] px-2 py-0.5 rounded font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
+                </div>
+                <div className="p-5">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                            <span className="text-amber-700 font-bold text-base">{initials}</span>
+                        </div>
+                        <div>
+                            <p className="font-bold text-slate-900 text-sm">{shift.employeeName}</p>
+                            <p className="text-xs text-amber-600 font-semibold mt-0.5">Lleva {minutesLate} min de retraso</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-2 mb-4">
+                        <button onClick={() => onOpenWA(shift)} disabled={!shift.phone} className={`flex-1 flex items-center justify-center gap-1.5 py-2 border rounded-xl text-xs font-bold transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'}`}>
+                            <MessageCircle size={13}/>WhatsApp
+                        </button>
+                        {shift.phone
+                            ? <a href={`tel:${shift.phone}`} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"><Phone size={13}/>{shift.phone}</a>
+                            : <div className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-50 text-slate-300 border border-slate-200 rounded-xl text-xs font-bold"><Phone size={13}/>Sin teléfono</div>
+                        }
+                    </div>
+                    {view === 'decision' && (<>
+                        <button onClick={() => setView('late')} className="w-full py-3.5 bg-amber-500 text-white font-black rounded-xl hover:bg-amber-600 transition-colors text-sm mb-2.5 flex items-center justify-center gap-2">
+                            <Clock size={16}/>LLEGADA TARDE
+                        </button>
+                        <button onClick={async () => { setLoading(true); try { await onDeclareAbsent(shift); onClose(); } finally { setLoading(false); } }} disabled={loading} className="w-full py-3.5 bg-rose-600 text-white font-black rounded-xl hover:bg-rose-700 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-60">
+                            <UserX size={16}/>{loading ? 'Registrando...' : 'DECLARAR AUSENTE'}
+                        </button>
+                        <button onClick={onClose} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-2">Cancelar</button>
+                    </>)}
+                    {view === 'late' && (<>
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+                            <p className="text-xs text-amber-800 font-semibold mb-2">¿A qué hora llega?</p>
+                            <input type="time" value={etaTime} onChange={e => setEtaTime(e.target.value)} className="w-full text-lg font-mono text-center border border-amber-300 rounded-lg p-2 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+                        </div>
+                        <button onClick={handleConfirmLate} disabled={!etaTime || loading} className="w-full py-3.5 bg-amber-500 text-white font-black rounded-xl hover:bg-amber-600 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                            <Clock size={16}/>{loading ? 'Guardando...' : 'CONFIRMAR LLEGADA TARDE'}
+                        </button>
+                        <button onClick={() => setView('decision')} className="w-full py-2 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-2">&#8592; Volver</button>
+                    </>)}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => {
     if (!isOpen || !shift) return null;
     const initials = (shift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
@@ -1192,7 +1268,7 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
     );
 };
 
-const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, isCompact, isAutoMode, onRevertAbsence }: any) => {
+const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
     if (shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
@@ -1330,6 +1406,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                         <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors"><PlayCircle size={11}/>DAR PRESENTE</button>
                     )}
+                    {viewTab === 'NO_LLEGO' && shift.isLateUnnotified && (
+                        <button onClick={() => onOpenAbsenceDecision(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 text-white rounded-lg text-[10px] font-bold hover:bg-amber-600 transition-colors"><AlertTriangle size={11}/>DECIDIR</button>
+                    )}
                     {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<>
                         <button onClick={() => onOpenCheckout(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:bg-purple-700 transition-colors"><LogOut size={11}/>SALIDA</button>
                         <button onClick={() => onOpenInterrupt(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] font-bold hover:bg-red-100 transition-colors"><Siren size={11}/>BAJA</button>
@@ -1353,7 +1432,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
 };
 
-const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, isAutoMode, isPublished }: any) => {
+const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, isAutoMode, isPublished }: any) => {
     const [expanded, setExpanded] = useState(true);
     return (
         <div className={`bg-white rounded-xl border shadow-sm overflow-hidden mb-3 ${isPublished === false ? 'border-amber-300' : 'border-slate-300'}`}>
@@ -1378,7 +1457,7 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
                             onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
                             onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
                             onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
-                            onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA}/>
+                            onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision}/>
                     ))}
                 </div>
             )}
@@ -1481,6 +1560,7 @@ export default function OperacionesPage() {
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     const [isGrouped, setIsGrouped] = useState(true);
     const [viewMode, setViewMode] = useState<'objetivos' | 'lista'>('objetivos'); // default: vista por objetivo
@@ -2101,6 +2181,58 @@ export default function OperacionesPage() {
             }, empresaId, migracionCompleta);
             toast.success(`Ausencia de ${shift.employeeName} revertida.`);
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    };
+    const handleDeclareAbsentT5 = async (shift: any) => {
+        const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+        const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
+        const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
+        const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
+        await updateDocForEmpresa('turnos', shift.id, {
+            status: 'ABSENT', isAbsent: true,
+            absenceType: 'MANUAL_OPS',
+            absenceConfirmedBy: 'OPERACIONES',
+            absenceConfirmedAt: serverTimestamp(),
+        }, empresaId, migracionCompleta);
+        await addDoc(collection(db, 'ausencias'), stampEmpresaId({
+            employeeId: shift.employeeId, employeeName: shift.employeeName,
+            clientId: shift.clientId || null, type: 'NO_PRESENTACION',
+            startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
+            status: 'Pendiente',
+            reason: `No presentación en turno — ${shift.objectiveName} (${shift.positionName})`,
+            hasCertificate: false, createdAt: serverTimestamp(),
+            origin: 'OPERACIONES', shiftId: shift.id,
+        }, shiftEmpresaId));
+        if (shift.employeeId) {
+            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                userId: shift.employeeId, type: 'AUSENCIA_DECLARADA',
+                title: 'Ausencia registrada',
+                read: false,
+                body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`,
+                objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp(),
+            }, shiftEmpresaId));
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+            type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5',
+            status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName,
+            clientId: shift.clientId || null, objectiveId: shift.objectiveId || null,
+            shiftId: shift.id, objectiveName: shift.objectiveName || '',
+            positionName: shift.positionName || '',
+            description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${formatTimeRange(shift.shiftDateObj, shift.endDateObj)})`,
+            createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+        }, shiftEmpresaId));
+        setCoverageData({ isOpen: true, shift });
+        toast.success(`Ausencia de ${shift.employeeName} registrada. Iniciando protocolo de cobertura.`);
+    };
+    const handleLateArrival = async (shift: any, etaTime: string) => {
+        try {
+            await updateDocForEmpresa('turnos', shift.id, {
+                lateArrivalAt: serverTimestamp(),
+                lateETA: etaTime,
+            }, empresaId, migracionCompleta);
+            toast.info(`Llegada tarde de ${shift.employeeName} registrada. ETA: ${etaTime}`);
+        } catch (e: any) {
+            toast.error('Error: ' + (e?.message || String(e)));
+        }
     };
     const handleNovedadAbsence = async (shift: any) => {
         if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificarÃ¡ a RRHH y PlanificaciÃ³n.`)) return;
@@ -2775,8 +2907,8 @@ export default function OperacionesPage() {
                         {viewMode === 'lista' && (
                         <div className="p-3 space-y-2">
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categorÃ­a</div> :
-                            isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} isPublished={isPublished}/>; })) :
-                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onRevertAbsence={handleRevertAbsence}/>))
+                            isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} isPublished={isPublished}/>; })) :
+                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
                         }
                         </div>
                         )}
@@ -3130,6 +3262,14 @@ export default function OperacionesPage() {
                 isOpen={workedFrancoData.isOpen}
                 onClose={() => setWorkedFrancoData({isOpen:false, shift:null})}
                 shift={workedFrancoData.shift}
+            />
+            <AbsenceDecisionModal
+                isOpen={absenceDecisionData.isOpen}
+                onClose={() => setAbsenceDecisionData({isOpen:false, shift:null})}
+                shift={absenceDecisionData.shift}
+                onDeclareAbsent={handleDeclareAbsentT5}
+                onLateArrival={handleLateArrival}
+                onOpenWA={handleOpenWA}
             />
             <WAComposeModal
                 isOpen={waData.isOpen}

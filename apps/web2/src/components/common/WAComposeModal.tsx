@@ -32,6 +32,7 @@ export function WAComposeModal({ isOpen, onClose, ctx }: Props) {
       { id: 'cobertura',  label: 'Solicitar cobertura urgente',  build: () => waMensaje.cobertura(employeeName, objectiveName, horaInicio, horaFin) },
       { id: 'adelanto',   label: 'Pedir adelanto de ingreso',    build: () => waMensaje.adelanto(employeeName, objectiveName, horaInicio) },
       { id: 'intercambio',label: 'Solicitar intercambio',        build: () => waMensaje.intercambio(employeeName, objectiveName) },
+      { id: 'tardanza',   label: 'Consultar llegada tarde',      build: () => waMensaje.tardanza(employeeName, objectiveName, horaInicio) },
     ] : []),
     ...(fecha && objectiveName && horaInicio && horaFin ? [
       { id: 'recordatorio', label: 'Recordatorio de turno',      build: () => waMensaje.turnoRecordatorio(employeeName, objectiveName, fecha, horaInicio, horaFin) },

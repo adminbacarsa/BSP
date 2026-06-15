@@ -48,4 +48,7 @@ export const waMensaje = {
 
   bienvenida: (nombre: string) =>
     `Hola ${nombre} 👋, te contacta *Operaciones Crono*. ¿Cómo estás?`,
+
+  tardanza: (nombre: string, objetivo: string, horaInicio: string) =>
+    `Hola ${nombre} 👋, te contacta *Operaciones Crono*.\n\nTu turno en *${objetivo}* comenzó a las *${horaInicio}*. ¿Estás en camino?\n\n¿A qué hora llegás? Confirmá a la brevedad. Gracias.`,
 };
