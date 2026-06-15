@@ -70,7 +70,62 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
             onClose();
         } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
     };
-    return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${status==='LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"> {status==='LATE' ? <Clock size={20}/> : <UserCheck size={20}/>} {status==='LATE' ? 'Llegada Tarde' : 'Ingreso A Tiempo'} </h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 space-y-1"> <div className="flex items-center gap-2"> <MapPin size={13} className="text-indigo-500 shrink-0"/> <span className="text-xs font-black text-slate-800 truncate">{incomingShift.objectiveName || '—'}</span> {incomingShift.clientName && <span className="text-[10px] text-slate-400 truncate">· {incomingShift.clientName}</span>} </div> <div className="flex items-center gap-2 pl-5"> <span className="text-[10px] font-bold text-indigo-600">{incomingShift.positionName || '—'}</span> <span className="text-slate-300">·</span> <span className="text-[10px] font-mono text-slate-600">{formatTimeSimple(incomingShift.shiftDateObj)} - {formatTimeSimple(incomingShift.endDateObj)}</span> </div> </div> <p className="text-sm text-slate-600 mb-4"> El guardia <b>{incomingShift.employeeName}</b> está listo para ingresar. {status==='LATE' && <span className="block mt-1 text-amber-600 font-bold">⚠️ Retraso de {Math.round(diffMin)} minutos.</span>} </p> {activeGuards.length > 0 ? ( <div className="space-y-2 mb-4"> <p className="text-xs font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p> {activeGuards.map((s:any) => ( <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group"> <div className="text-left"> <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span> <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span> </div> <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span> </button> ))} </div> ) : ( <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-4"> <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p> </div> )} <button onClick={() => handleConfirm(null)} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors"> {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : 'CONFIRMAR INGRESO'} </button> </div> </div> </div> );
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+                <div className={`p-4 text-white flex justify-between items-start ${status === 'LATE' ? 'bg-amber-500' : 'bg-emerald-600'}`}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
+                            {(incomingShift.employeeName || '?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                            <p className="font-black text-base leading-tight">{incomingShift.employeeName}</p>
+                            <p className="text-xs font-semibold opacity-80 mt-0.5">
+                                {status === 'LATE' ? `Llegada tarde · ${Math.round(diffMin)} min de retraso` : 'Ingreso a tiempo'}
+                            </p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
+                </div>
+                <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
+                        <MapPin size={9}/> {incomingShift.objectiveName || '—'}
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                        <Shield size={9}/> {incomingShift.positionName || '—'}
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                        <Clock size={9}/> {formatTimeSimple(incomingShift.shiftDateObj)}–{formatTimeSimple(incomingShift.endDateObj)}
+                    </span>
+                </div>
+                <div className="px-4 pb-5">
+                    {activeGuards.length > 0 && (
+                        <div className="space-y-2 mb-3">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
+                            {activeGuards.map((s:any) => (
+                                <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
+                                    <div className="text-left">
+                                        <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
+                                        <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
+                                    </div>
+                                    <span className="text-[10px] font-bold bg-slate-100 px-2 py-1 rounded text-slate-600 group-hover:bg-slate-800 group-hover:text-white transition-colors">RELEVAR</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {activeGuards.length === 0 && (
+                        <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-3">
+                            <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
+                        </div>
+                    )}
+                    <button onClick={() => handleConfirm(null)}
+                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                        {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : (status === 'LATE' ? 'CONFIRMAR LLEGADA TARDE' : 'CONFIRMAR INGRESO')}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
@@ -90,7 +145,51 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
         const newRef = await addDoc(collection(db, 'turnos'), stampEmpresaId({ clientId: shift.clientId, clientName: shift.clientName, objectiveId: shift.objectiveId, objectiveName: shift.objectiveName, positionName: shift.positionName, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false, origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
         onVacancyCreated({ ...shift, id: newRef.id, isUnassigned: true });
     };
-    return ( <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4"> <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden"> <div className={`p-4 text-white flex justify-between items-center ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}> <h3 className="font-black uppercase flex items-center gap-2"><Siren size={20}/> Baja Anticipada</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="p-6"> <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}> <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}> {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`} </h4> <p className="text-xs text-slate-500"> {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'} </p> </div> {isAlone ? ( <button onClick={handleProtocol} className="w-full py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 animate-pulse shadow-lg shadow-purple-200"> INICIAR PROTOCOLO DE COBERTURA </button> ) : ( <button onClick={handleLog} className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 shadow-lg shadow-emerald-200"> REGISTRAR NOVEDAD (CUBIERTO) </button> )} </div> </div> </div> );
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden">
+                <div className={`p-4 text-white flex justify-between items-start ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
+                            {(shift.employeeName || '?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                            <p className="font-black text-base leading-tight">{shift.employeeName}</p>
+                            <p className="text-xs font-semibold opacity-80 mt-0.5">Baja Anticipada</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
+                </div>
+                <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
+                        <MapPin size={9}/> {shift.objectiveName || '—'}
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                        <Shield size={9}/> {shift.positionName || '—'}
+                    </span>
+                </div>
+                <div className="p-4">
+                    <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}>
+                        <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}>
+                            {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                            {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'}
+                        </p>
+                    </div>
+                    {isAlone ? (
+                        <button onClick={handleProtocol} className="w-full py-3.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors animate-pulse shadow-lg shadow-purple-200">
+                            INICIAR PROTOCOLO DE COBERTURA
+                        </button>
+                    ) : (
+                        <button onClick={handleLog} className="w-full py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200">
+                            REGISTRAR NOVEDAD (CUBIERTO)
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const CoverageSection = ({ num, title, colorClass, badgeClass, items, empty }: any) => (
@@ -296,16 +395,24 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         <>
             <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
                 <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                    <div className="p-4 bg-rose-600 text-white flex justify-between items-center shrink-0">
-                        <h3 className="font-black uppercase text-sm flex items-center gap-2"><Siren size={18}/> Protocolo de Cobertura</h3>
-                        <button onClick={onClose} className="bg-white/20 p-1 rounded-lg hover:bg-white/30"><X size={18}/></button>
+                    <div className="p-4 bg-rose-600 text-white flex justify-between items-start shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
+                                {(absenceShift.employeeName || 'V')[0].toUpperCase()}
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold opacity-70 uppercase">Protocolo de Cobertura</p>
+                                <p className="font-black text-base leading-tight">{absenceShift.employeeName || 'Vacante'}</p>
+                                <p className="text-xs font-semibold opacity-80 mt-0.5">{absenceShift.objectiveName} · {hiStart}–{hiEnd}</p>
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 transition-colors shrink-0"><X size={18}/></button>
+                    </div>
+                    <div className="px-4 py-2 flex flex-wrap gap-1.5 bg-rose-50 border-b border-rose-100 shrink-0">
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-white border border-rose-200 px-2.5 py-1 rounded-full"><Shield size={9}/> {absenceShift.positionName || '—'}</span>
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-full"><Clock size={9}/> {hiStart}–{hiEnd}</span>
                     </div>
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
-                        <div className="bg-rose-50 p-3 rounded-xl border border-rose-100 text-xs">
-                            <span className="font-black text-rose-800">{absenceShift.objectiveName}</span>
-                            <span className="text-rose-600"> · {absenceShift.positionName} · {hiStart}–{hiEnd}</span>
-                            {absenceShift.employeeName && <span className="block text-rose-500 mt-0.5">Ausente: {absenceShift.employeeName}</span>}
-                        </div>
                         <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
                             empty="No hay guardias presentes en este objetivo."
                             items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA} objectiveId={absenceShift.objectiveId}/>)}
