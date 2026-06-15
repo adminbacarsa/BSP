@@ -614,6 +614,41 @@ const RRHHVacancyModal = ({ isOpen, onClose, shift, onSendToPlanning, onOpenCove
 };
 
 const WorkedDayOffModal = (props: any) => <WorkedDayOffModalPro {...props} />;
+const RetentionModal = ({ isOpen, onClose, retainedShift }: any) => {
+    if (!isOpen || !retainedShift) return null;
+    const initials = (retainedShift.employeeName || '?').split(' ').filter(Boolean).slice(0,2).map((w:string)=>w[0]).join('').toUpperCase();
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                <div className="p-4 bg-orange-600 flex justify-between items-start">
+                    <div>
+                        <p className="text-orange-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Guardia retenido</p>
+                        <p className="text-white font-bold text-base leading-tight">{retainedShift.objectiveName || '—'}</p>
+                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                            {retainedShift.positionName && <span className="bg-orange-700/60 text-orange-100 text-[10px] px-2 py-0.5 rounded">{retainedShift.positionName}</span>}
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
+                </div>
+                <div className="p-5">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                            <span className="text-orange-700 font-bold text-base">{initials}</span>
+                        </div>
+                        <div>
+                            <p className="font-bold text-slate-900 text-sm">{retainedShift.employeeName}</p>
+                            <p className="text-xs text-orange-600 font-semibold mt-0.5">En retención — turno extendido</p>
+                        </div>
+                    </div>
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-4 text-xs text-orange-800">
+                        El guardia permanece en el puesto más allá de su horario planificado hasta que llegue el relevo.
+                    </div>
+                    <button onClick={onClose} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-900 transition-colors text-sm">Entendido</button>
+                </div>
+            </div>
+        </div>
+    );
+};
 const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName, shift }: any) => {
     const [novedad, setNovedad] = React.useState('');
     const [showNovedad, setShowNovedad] = React.useState(false);
