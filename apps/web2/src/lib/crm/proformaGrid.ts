@@ -213,8 +213,8 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const realStart = toDateSafe(t.realStartTime);
     const realEnd = toDateSafe(t.realEndTime);
 
-    const start = useExecuted ? (realStart || plannedStart) : plannedStart;
-    const end = useExecuted ? (realEnd || plannedEnd) : plannedEnd;
+    const start = useExecuted ? realStart : plannedStart;
+    const end = useExecuted ? realEnd : plannedEnd;
     if (!start || !end) continue;
     if (start < opts.start || start > opts.end) continue;
 
@@ -245,7 +245,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
       totalNight: 0,
     };
 
-    let hrs = calcPlanificadorShiftHours(t);
+    let hrs = useExecuted && start && end ? getDurationHours(start, end) : calcPlanificadorShiftHours(t);
     if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 
     const cell = cellFromShift(dateKey, code, start, end, hrs);
