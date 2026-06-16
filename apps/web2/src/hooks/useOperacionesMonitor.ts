@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
@@ -84,6 +84,26 @@ const normalizePosMatch = (n: unknown): string => {
     s = s.normalize('NFD').replace(/[̀-ͯ]/g, ''); // strip diacríticos
     s = s.replace(/^puesto\s+/, '');                         // strip prefijo "puesto "
     return s;
+};
+
+/**
+ * Auto-cierre atómico via Firestore transaction.
+ * Si otro browser ya completó el turno, cancela silenciosamente (devuelve false).
+ */
+const autoCloseShiftTx = async (
+    shiftId: string,
+    fields: Record<string, unknown>,
+    empresaId: string,
+): Promise<boolean> => {
+    const ref = doc(db, 'turnos', shiftId);
+    let didWrite = false;
+    await runTransaction(db, async (t) => {
+        const snap = await t.get(ref);
+        if (!snap.exists() || snap.data()?.isCompleted === true) return; // ya cerrado
+        t.update(ref, { ...fields, empresaId: empresaId || undefined });
+        didWrite = true;
+    });
+    return didWrite;
 };
 
 const getPositionCapacity = (servicesSLA: any[], objectiveId: string, positionName: string): number => {
@@ -824,12 +844,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 ).length;
                 if (coverageCount >= capacity) {
                     alertedVacancyIds.current.add(autoEndKey);
-                    updateDocForEmpresa('turnos', s.id, {
+                    autoCloseShiftTx(s.id, {
                         status: 'COMPLETED', isCompleted: true, isPresent: false,
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
                         completionReason: 'AUTO_COVERAGE_COMPLETE',
-                    }, empresaId, migracionCompleta).then(() => {
-                        toast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
+                    }, empresaId).then(ok => {
+                        if (ok) toast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoEndKey);
                         console.warn('[autoEndRetention]', e);
@@ -870,12 +890,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 });
                 if (!hasScheduledRelevo) {
                     alertedVacancyIds.current.add(autoShiftEndKey);
-                    updateDocForEmpresa('turnos', s.id, {
+                    autoCloseShiftTx(s.id, {
                         status: 'COMPLETED', isCompleted: true, isPresent: false,
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
                         completionReason: isCFRetention ? 'AUTO_END_CF_RETENTION_TIMEOUT' : 'AUTO_SHIFT_END',
-                    }, empresaId, migracionCompleta).then(() => {
-                        toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                    }, empresaId).then(ok => {
+                        if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoShiftEndKey);
                         console.warn('[autoEndShift]', e);
@@ -891,12 +911,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const autoTimeKey = `${s.id}_AUTO_END_OVERTIME`;
             if (minutesOvertime > 360 && !alertedVacancyIds.current.has(autoTimeKey)) {
                 alertedVacancyIds.current.add(autoTimeKey);
-                updateDocForEmpresa('turnos', s.id, {
+                autoCloseShiftTx(s.id, {
                     status: 'COMPLETED', isCompleted: true, isPresent: false,
                     completedAt: serverTimestamp(), completedBy: 'Sistema',
                     completionReason: 'AUTO_OVERTIME_LIMIT',
-                }, empresaId, migracionCompleta).then(() => {
-                    toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
+                }, empresaId).then(ok => {
+                    if (ok) toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
                 }).catch(e => {
                     alertedVacancyIds.current.delete(autoTimeKey);
                     console.warn('[autoEndRetentionTime]', e);
