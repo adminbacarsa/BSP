@@ -1340,9 +1340,10 @@ export default function CRMPage() {
           }
         }
 
-        if (realStart && realEnd && realStart >= start && realStart <= end) {
-          if (isWorkingCode(code)) {
-            let hrs = getDurationHours(realStart, realEnd);
+        if (realStart && realStart >= start && realStart <= end) {
+          const execEnd = realEnd || plannedEnd;
+          if (isWorkingCode(code) && execEnd) {
+            let hrs = getDurationHours(realStart, execEnd);
             if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
             if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
             executed.total += hrs;
