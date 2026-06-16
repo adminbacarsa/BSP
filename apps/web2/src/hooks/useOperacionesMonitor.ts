@@ -342,7 +342,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             let retentionMinutes = 0;
             // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
             const isRetentionByTime  = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
-            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true;
+            // isRetentionByField: solo mostrar RECARGO si el turno ya terminó O si el operador
+            // lo retuvo manualmente Y el turno ya pasó. Si el turno aún está vigente, el badge
+            // se mostrará como "ATENCIÓN" pero no como retención activa hasta que pase el endTime.
+            const shiftEnded = shift.endDateObj ? currentTime > shift.endDateObj : false;
+            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true && shiftEnded;
+            const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
             const isRetention = isRetentionByTime || isRetentionByField;
             if (isRetentionByTime) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
@@ -402,7 +407,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 phone,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
-                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isFranco, isImminent, isFuture,
+                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
@@ -710,11 +715,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
         switch (viewTab) {
             case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco);
+            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco);
             case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad);
             case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
-            case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention);
-            case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention);
+            case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention);
+            case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention); // isPendingRetention va en PRIORIDAD, no aquí
             case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
             case 'AUSENTES':   return hoy.filter((s:any) => s.isAbsent || s.isPotentialAbsence);
             case 'FRANCOS':    return hoy.filter((s:any) => s.isFranco);
