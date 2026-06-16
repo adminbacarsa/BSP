@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -237,7 +237,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const key = o.id || o.objectiveId;
             if (key) objMap.set(key, { clientName: o.clientName, name: o.name, clientId: o.clientId });
         });
-        const activeSlaMap = new Set(servicesSLA.map(s => s.objectiveId));
+        // Filtrar SLAs por empresa usando clientId como fallback para docs legacy sin empresaId
+        const clientIds = new Set(objectives.map((o: any) => o.clientId).filter(Boolean));
+        const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
+        const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
 
         const realShifts = rawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
@@ -389,7 +392,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const virtualVacancies: any[] = [];
         const dayCode = getDayCode(now);
 
-        servicesSLA.forEach(sla => {
+        filteredSLA.forEach(sla => {
             const objInfo = objMap.get(sla.objectiveId);
             if (!objInfo || !sla.positions) return;
 
@@ -624,7 +627,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 return;
             }
             // b) Cobertura (plan + presentes) suficiente
-            const cap = getPositionCapacity(servicesSLA, s.objectiveId, s.positionName);
+            const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
@@ -659,7 +662,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
-            const cap = getPositionCapacity(servicesSLA, v.objectiveId, v.positionName);
+            const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
                 !cover.isFranco &&  // franco no cubre — está de descanso
