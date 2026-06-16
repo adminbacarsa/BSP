@@ -2320,10 +2320,17 @@ export const detectarAusencias = functions
               const retData = retDoc.data();
               // Marcar como en retenciÃ³n si no lo estÃ¡ ya
               if (!retData.isRetention) {
+                // Si el guardia a retener aún tiene turno activo, el timer de 2h debe arrancar
+                // desde su hora de fin planificada (no desde ahora), para que el auto-cierre
+                // se dispare correctamente a los 2h DESPUÉS de que termine su propio turno.
+                const retEndMs = retData.endTime?.toMillis?.() ?? 0;
+                const retentionAt = retEndMs > nowMs
+                  ? admin.firestore.Timestamp.fromMillis(retEndMs)
+                  : now;
                 await retDoc.ref.update({
                   isRetention:     true,
                   retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
-                  autoRetentionAt: now,
+                  autoRetentionAt: retentionAt,
                 });
                 // Push al guardia retenido
                 const retTokens = await getEmployeeTokens(db, retData.employeeId);
