@@ -1805,9 +1805,27 @@ export const autoCompletarTurnos = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
-      // Nunca tocar retenciones ni interrupciones
-      if (shift.isRetention === true) continue;
       if ((shift.status || '') === 'INTERRUPTED') continue;
+
+      // Retenciones automáticas (autoRetentionAt existe): cerrar si llevan >2h sin cambio
+      // Retenciones manuales del operador (sin autoRetentionAt): nunca tocar
+      if (shift.isRetention === true) {
+        const autoRetentionMs = shift.autoRetentionAt?.toMillis?.() ?? 0;
+        if (!autoRetentionMs) continue; // retención manual → saltar
+        const minutesInRetention = (now.toMillis() - autoRetentionMs) / 60000;
+        if (minutesInRetention < 120) continue; // <2h → esperar más
+        // >2h en retención automática sin relevo → auto-cerrar
+        completeBatch.update(docSnap.ref, {
+          status: 'COMPLETED',
+          isCompleted: true,
+          isPresent: false,
+          completedAt: now,
+          completedBy: 'Sistema',
+          completionReason: 'AUTO_END_CF_RETENTION_TIMEOUT',
+        });
+        completed++;
+        continue;
+      }
 
       const endTimeMs: number = shift.endTime?.toMillis?.() ?? 0;
       if (!endTimeMs) continue;
