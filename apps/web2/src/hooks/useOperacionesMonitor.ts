@@ -844,16 +844,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // 2. isRetentionByField=true por CF (autoRetentionAt existe): cerrar a los 60 min
             //    Si la retención fue puesta por operador (sin autoRetentionAt) → NO tocar
             const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
-            const autoRetentionMs = s.autoRetentionAt?.seconds ? s.autoRetentionAt.seconds * 1000 : 0;
-            const minutesInAutoRetention = autoRetentionMs > 0 ? (nowMs - autoRetentionMs) / 60000 : 0;
-            const isCFRetention = s.isRetentionByField && autoRetentionMs > 0;
+            // isCFRetention: retenido por la CF (autoRetentionAt existe → retentionMinutes > 0)
+            // vs retención manual del operador (isRetentionByField pero retentionMinutes == 0)
+            const isCFRetention = s.isRetentionByField && (s.retentionMinutes ?? 0) > 0;
             const shouldAutoClose =
                 (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 720) ||
-                (isCFRetention && minutesInAutoRetention >= 60 && minutesInAutoRetention < 720);
+                (isCFRetention && (s.retentionMinutes ?? 0) >= 60 && (s.retentionMinutes ?? 0) < 720);
 
             if (shouldAutoClose && !alertedVacancyIds.current.has(autoShiftEndKey)) {
                 // Hay relevo planificado que todavía no llegó? (solo aplica en los primeros 60 min)
-                const hasScheduledRelevo = minutesOvertime < 60 && !isCFRetention && processedData.some((other: any) => {
+                const hasScheduledRelevo = !isCFRetention && minutesOvertime < 60 && processedData.some((other: any) => {
                     const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
                     return (
                         other.id !== s.id &&
