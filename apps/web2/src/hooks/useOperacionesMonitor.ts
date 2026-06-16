@@ -971,17 +971,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         }
     }, [processedData, empresaId]);
 
-    // isStable: evitar parpadeos — esperar 700ms sin cambios en processedData
+    // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
+    // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.
     useEffect(() => {
         if (!isReady) return;
         if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
-        setIsStable(false);
         stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
         return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
     }, [processedData, isReady]);
 
-
-    // isStable: debounce 700ms sobre processedData después de isReady
     // Fallback: forza isStable=true a los 4s para evitar que quede bloqueado
     useEffect(() => {
         if (!isReady) return;
