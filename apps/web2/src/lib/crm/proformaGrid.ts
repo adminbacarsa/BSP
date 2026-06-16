@@ -245,7 +245,8 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
       totalNight: 0,
     };
 
-    let hrs = useExecuted && start && end ? getDurationHours(start, end) : calcPlanificadorShiftHours(t);
+    let hrs = calcPlanificadorShiftHours(t);
+    if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
     if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 
     const cell = cellFromShift(dateKey, code, start, end, hrs);
