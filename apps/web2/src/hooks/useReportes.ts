@@ -339,7 +339,7 @@ export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
 export function mapAbsenceStatusLabel(status?: string | null): string {
     const s = String(status || '').trim();
     if (!s) return 'A verificar';
-    if (s === 'En verificaciÃ³n' || s === 'Pendiente') return 'A verificar';
+    if (s === 'En verificación' || s === 'Pendiente') return 'A verificar';
     if (s === 'Justificada' || s === 'Autorizada') return 'Justificada';
     if (s === 'Injustificada' || s === 'Rechazada') return 'Injustificada';
     return s;
@@ -1216,7 +1216,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             };
 
             if (rawShifts.length === 0) {
-                toast.info("No se encontraron turnos vÃ¡lidos en este rango.");
+                toast.info("No se encontraron turnos válidos en este rango.");
             }
 
             // 3. Procesamiento por Empleado (excluir vacantes/desconocidos)
@@ -1294,7 +1294,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const filterLbl = publishFilter === 'all' ? 'todos (incl. borrador)'
                     : publishFilter === 'unpublished' ? 'solo borrador'
                     : 'solo publicados';
-                toast.success(`${empCount} empleado(s) Â· ${shiftCount} turnos Â· ${filterLbl}`);
+                toast.success(`${empCount} empleado(s) · ${shiftCount} turnos · ${filterLbl}`);
             }
 
             // 4. Procesamiento por Objetivo

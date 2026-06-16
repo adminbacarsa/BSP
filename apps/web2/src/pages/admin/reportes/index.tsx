@@ -483,7 +483,7 @@ export default function ReportsPage() {
                                                                             const isEarlyStartShift = s.isEarlyStart === true;
                                                                             const isRetentionShift  = s.isRetention === true || (s.retentionMinutes ?? 0) > 0;
                                                                             // Solo usar start/end planificado si existe un timestamp válido (>0)
-                                                                            const hasValidPlan = (startSec ?? 0) > 0 && (endSec ?? 0) > 0;
+                                                                            const hasValidPlan = (s.startTime?.seconds ?? 0) > 0 && (s.endTime?.seconds ?? 0) > 0;
                                                                             const rStart = rStartRaw && hasValidPlan && !isEarlyStartShift ? start : rStartRaw;
                                                                             const rEnd   = rEndRaw
                                                                                 ? (hasValidPlan
