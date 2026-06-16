@@ -124,7 +124,8 @@ type DetailModalKind =
   | 'contratos_vencer'
   | 'servicios_riesgo'
   | 'empleados_sin_turno'
-  | 'concentracion_riesgo';
+  | 'concentracion_riesgo'
+  | 'licencias';
 
 interface TurnoDetalleRow {
   client: string;
@@ -153,6 +154,7 @@ function DashboardDetailModal({
   serviciosEnRiesgo,
   empleadosSinTurnoDetalle,
   topClientes,
+  licencias,
   counts,
 }: {
   kind: DetailModalKind;
@@ -164,6 +166,7 @@ function DashboardDetailModal({
   serviciosEnRiesgo: RiesgoRow[];
   empleadosSinTurnoDetalle: string[];
   topClientes: ClientHrs[];
+  licencias: LicenciaRow[];
   counts: { vacantes: number; novedades: number; ausentes: number; sinTurno: number };
 }) {
   const config: Record<DetailModalKind, { title: string; href: string; hrefLabel: string }> = {
@@ -174,6 +177,7 @@ function DashboardDetailModal({
     servicios_riesgo: { title: 'Servicios con cobertura baja', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
     empleados_sin_turno: { title: 'Empleados sin turno este mes', href: '/admin/planificacion', hrefLabel: 'Ir a Planificación' },
     concentracion_riesgo: { title: 'Concentración de horas por cliente', href: '/admin/crm', hrefLabel: 'Ir a Clientes y Objetivos' },
+    licencias: { title: 'Licencias activas hoy', href: '/admin/empleados', hrefLabel: 'Ir a Personal' },
   };
   const { title, href, hrefLabel } = config[kind];
 
@@ -297,6 +301,29 @@ function DashboardDetailModal({
               <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{fmt(c.hrs)} hs SLA del mes</p>
             </div>
             <span className="text-sm font-black shrink-0" style={{ color: 'var(--company-primary,#6366f1)' }}>{c.pct}%</span>
+          </li>
+        ))}
+      </ul>
+    );
+  } else if (kind === 'licencias') {
+    body = licencias.length === 0 ? (
+      <p className="text-sm font-medium py-4" style={{ color: 'var(--txt3)' }}>Sin licencias activas hoy.</p>
+    ) : (
+      <ul className="divide-y rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+        {licencias.map((lic, i) => (
+          <li key={i} className="px-4 py-3 flex items-center justify-between gap-3" style={{ backgroundColor: 'var(--surf)' }}>
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-black text-[11px] shrink-0">
+                {lic.empName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{lic.empName}</p>
+                <p className="text-[10px]" style={{ color: 'var(--txt3)' }}>{lic.from} → {lic.to}</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap shrink-0">
+              {lic.reason}
+            </span>
           </li>
         ))}
       </ul>
@@ -1343,7 +1370,7 @@ function AdminDashboard() {
                 alert={empleadosSinTurno > 0}
                 progress={totalEmployees > 0 ? (empleadosSinTurno / totalEmployees) * 100 : undefined}
                 noData={totalEmployees === 0}
-                href="/admin/empleados"
+                onClick={empleadosSinTurno > 0 ? () => setDetailModal('empleados_sin_turno') : undefined}
               />
               <KpiCard
                 title="Tasa Ausentismo 30d"
@@ -1359,6 +1386,7 @@ function AdminDashboard() {
                 icon={Calendar} color="#8b5cf6"
                 subtext={licencias.length > 0 ? licencias.map(l => l.reason).filter((v,i,a) => a.indexOf(v)===i).join(' · ') : 'Sin licencias hoy'}
                 noData={false}
+                onClick={licencias.length > 0 ? () => setDetailModal('licencias') : undefined}
               />
             </div>
 
@@ -1635,6 +1663,7 @@ function AdminDashboard() {
           serviciosEnRiesgo={serviciosEnRiesgo}
           empleadosSinTurnoDetalle={empleadosSinTurnoDetalle}
           topClientes={topClientes}
+          licencias={licencias}
           counts={{ vacantes: vacantesHoy, novedades: novedadesHoy, ausentes: ausentesHoy, sinTurno: empleadosSinTurno }}
         />,
         document.body,
