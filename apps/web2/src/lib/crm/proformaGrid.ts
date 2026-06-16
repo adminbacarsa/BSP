@@ -214,7 +214,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const realEnd = toDateSafe(t.realEndTime);
 
     const start = useExecuted ? realStart : plannedStart;
-    const end = useExecuted ? realEnd : plannedEnd;
+    const end = useExecuted ? (realEnd || plannedEnd) : plannedEnd;
     if (!start || !end) continue;
     if (start < opts.start || start > opts.end) continue;
 
