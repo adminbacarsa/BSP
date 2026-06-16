@@ -1421,9 +1421,11 @@ export default function CRMPage() {
         objectives: grids,
       });
 
+      const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
+      const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
       setProformaTotals({
         planned: Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion)),
-        executed: Math.round(executed.total),
+        executed: modeIsExecuted ? gridTotal : Math.round(executed.total),
         loading: false,
       });
     } catch (e) {
