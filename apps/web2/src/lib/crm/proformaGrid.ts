@@ -329,4 +329,6 @@ export function buildPeriodLabel(start: Date, end: Date): string {
   return `${getDateKeyInTimezone(start)} — ${getDateKeyInTimezone(end)}`;
 }
 
-export { shortDayHeader, listDatesInRange, getDateKeyInTimezone };
+export {  getDateKeyInTimezone,
+  shortDayHeader,
+};

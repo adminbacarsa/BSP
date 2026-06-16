@@ -3320,7 +3320,7 @@ export default function CRMPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setNewClientOpen(false)} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-500 font-black text-[10px] uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
-              <button onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase disabled:opacity-60 transition-colors">
+              <button onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-black text-[10px] uppercase hover:bg-indigo-700 transition-colors disabled:opacity-40">
                 {savingNewClient ? 'Creando...' : 'Crear Cliente'}
               </button>
             </div>

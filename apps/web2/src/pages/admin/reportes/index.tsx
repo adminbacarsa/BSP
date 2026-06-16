@@ -1886,4 +1886,3 @@ export default function ReportsPage() {
         </DashboardLayout>
     );
 }
- 

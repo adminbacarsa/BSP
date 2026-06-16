@@ -388,20 +388,3 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
         </div>
     );
 };
-                                                </table>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-
-                    {filtered.length === 0 && (
-                        <div className="text-center text-slate-400 py-8 text-sm">No se encontraron objetivos matching.</div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};

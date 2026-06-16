@@ -3494,6 +3494,4 @@ export default function OperacionesPage() {
             )}
         </DashboardLayout>
     );
-};
-
-export default OperacionesPage;
+}

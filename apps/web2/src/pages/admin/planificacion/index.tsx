@@ -9387,6 +9387,7 @@ export default function PlanificacionPage() {
                                                 ))}
                                                 {dayGaps.length > 3 && (
                                                     <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
+                                      
                                                 )}
                                             </div>
                                         );
@@ -9398,19 +9399,7 @@ export default function PlanificacionPage() {
                 </>,
                 document.body,
             )}
-
-            {showAjustarCronoModal && (
-                <AjustarCronoOperativoModal
-                    open={showAjustarCronoModal}
-                    onClose={() => setShowAjustarCronoModal(false)}
-                    empresaId={empresaId}
-                    objetivoInicial={selectedObjective ? { id: selectedObjective, nombre: selectedObjectiveData?.name ?? selectedObjective } : undefined}
-                    gridSnapshot={{ shiftsMap, pendingChanges }}
-                />
-            )}
-
             </div>
-
         </DashboardLayout>
     );
 }

@@ -980,23 +980,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
     }, [processedData, isReady]);
 
-    return {
-        rawShifts, processedData, listData, stats,
-        employees, servicesSLA, filteredObjectives, uniqueClients,
-        viewTab, setViewTab, selectedClientId, setSelectedClientId,
-        filterText, setFilterText, isCompact, setIsCompact,
-        publishStatusMap, recentLogs,
-        isReady, isStable,
-        handleAction,
-    };
-};
- ${Math.round(minutesOvertime / 60 * 10) / 10}h de retención en ${s.objectiveName || '—'}`,
-                        createdAt: serverTimestamp(),
-                        reportedBy: 'SISTEMA',
-                    }, empresaId)).catch(e => console.warn('[novedadRetencionLarga]', e));
-                }).catch(e => console.warn('[checkNovedadRetencionLarga]', e));
-           }
-    }, [processedData, empresaId, migracionCompleta, now]);
 
     // isStable: debounce 700ms sobre processedData después de isReady
     // Fallback: forza isStable=true a los 4s para evitar que quede bloqueado
@@ -1006,33 +989,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         return () => clearTimeout(fallback);
     }, [isReady]);
 
-    useEffect(() => {
-        if (!isReady) return;
-        if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
-        stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
-        return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
-    }, [processedData, isReady]);
-
     return {
-        processedData,
-        listData,
-        stats,
-        viewTab, setViewTab,
-        filterText, setFilterText,
-        selectedClientId, setSelectedClientId,
+        rawShifts, processedData, listData, stats,
+        employees, servicesSLA, filteredObjectives, uniqueClients,
+        objectives, operatorInfo, now,
+        viewTab, setViewTab, selectedClientId, setSelectedClientId,
+        filterText, setFilterText, isCompact, setIsCompact,
+        publishStatusMap, recentLogs,
+        isReady, isStable,
         handleAction,
-        uniqueClients,
-        objectives,
-        filteredObjectives,
-        recentLogs,
-        publishStatusMap,
-        operatorInfo,
-        isCompact, setIsCompact,
-        employees,
-        rawShifts,
-        isReady,
-        isStable,
-        servicesSLA,
-        now,
     };
-}
+};
