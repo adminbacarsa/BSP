@@ -90,15 +90,22 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
     // Análisis SLA por objetivo
     const slaAnalysis = useMemo(() => {
         const result: Record<string, any[]> = {};
+        const todayStr = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+        const isTodayShift = (s: any) => {
+            if (!s.shiftDateObj) return false;
+            return s.shiftDateObj.toLocaleDateString('en-CA') === todayStr;
+        };
         servicesSLA.forEach(sla => {
             if (!sla.positions) return;
             const objShifts = processedData.filter((s: any) => s.objectiveId === sla.objectiveId);
             result[sla.objectiveId] = sla.positions.map((pos: any) => {
                 const targetPosName = normPos(pos.name);
                 const allPosShifts = objShifts.filter((s: any) => normPos(s.positionName) === targetPosName);
-                const activePosShifts = allPosShifts.filter((s: any) => s.countsForCoverage);
-                const absentShifts = allPosShifts.filter((s: any) => s.isAbsent || s.isPotentialAbsence);
-                const vacantShifts = allPosShifts.filter((s: any) => s.isUnassigned);
+                // Cubierto HOY: solo turnos del día de hoy que cuentan para cobertura
+                const todayPosShifts = allPosShifts.filter((s: any) => isTodayShift(s));
+                const activePosShifts = todayPosShifts.filter((s: any) => s.countsForCoverage);
+                const absentShifts = todayPosShifts.filter((s: any) => s.isAbsent || s.isPotentialAbsence);
+                const vacantShifts = todayPosShifts.filter((s: any) => s.isUnassigned);
                 const required = pos.quantity || 1;
                 const covered = activePosShifts.length;
                 const deficit = Math.max(0, required - covered);
@@ -313,9 +320,13 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                                 <div className="mt-1.5 flex flex-wrap gap-1">
                                                                     {pos.shifts.map((s: any, j: number) => {
                                                                         const st = getStatus(s);
+                                                                        const dateLabel = s.shiftDateObj instanceof Date && !isNaN(s.shiftDateObj.getTime())
+                                                                            ? `${s.shiftDateObj.getDate()}/${s.shiftDateObj.getMonth()+1}`
+                                                                            : '?';
                                                                         return (
                                                                             <span key={j} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[st]}`}>
                                                                                 {s.employeeName?.replace('VACANTE: ','VAC: ')}
+                                                                                <span className="opacity-50 font-mono">{dateLabel}</span>
                                                                                 <span className="opacity-60">{fmtTime(s.shiftDateObj)}-{fmtTime(s.endDateObj)}</span>
                                                                                 <span className="font-bold">[{STATUS_LABEL[st]}]</span>
                                                                                 {!s.countsForCoverage && st !== 'vacant' && <span className="bg-black/20 px-0.5 rounded">¬cov</span>}
@@ -339,6 +350,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                         <tr className="bg-slate-100 text-slate-600">
                                                             <th className="px-2 py-1 text-left border border-slate-200">Empleado</th>
                                                             <th className="px-2 py-1 text-left border border-slate-200">Puesto</th>
+                                                            <th className="px-2 py-1 text-left border border-slate-200">Fecha</th>
                                                             <th className="px-2 py-1 text-left border border-slate-200">Horario</th>
                                                             <th className="px-2 py-1 text-left border border-slate-200">Estado</th>
                                                             <th className="px-2 py-1 text-left border border-slate-200">countsForCov</th>
@@ -353,6 +365,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                                 <tr key={j} className="border-b border-slate-100 hover:bg-slate-50">
                                                                     <td className="px-2 py-1 border border-slate-100 font-medium">{s.employeeName || '—'}</td>
                                                                     <td className="px-2 py-1 border border-slate-100">{s.positionName || <span className="text-red-600 font-bold">VACÍO</span>}</td>
+                                                                    <td className="px-2 py-1 border border-slate-100 font-mono text-slate-500">{s.shiftDateObj instanceof Date ? `${s.shiftDateObj.getDate()}/${s.shiftDateObj.getMonth()+1}` : '?'}</td>
                                                                     <td className="px-2 py-1 border border-slate-100 font-mono">{fmtTime(s.shiftDateObj)}–{fmtTime(s.endDateObj)}</td>
                                                                     <td className="px-2 py-1 border border-slate-100">
                                                                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[st]}`}>{STATUS_LABEL[st]}</span>
