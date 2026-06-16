@@ -442,8 +442,9 @@ function AdminDashboard() {
   // ── SEMÁFORO (derivado)
   const semaforo = useMemo((): 'verde' | 'amarillo' | 'rojo' | 'gris' => {
     if (!hasPlanificacion) return 'gris';
-    const cumplimientoReal = plannedHrsMonth > 0 ? (realHoursMonth / plannedHrsMonth) * 100 : 100;
-    if (coveragePct < 90 || vacantesHoy > 3 || cumplimientoReal < 85) return 'rojo';
+    // Solo penalizar por cumplimiento real si hay timestamps de check-in registrados
+    const cumplimientoReal = (plannedHrsMonth > 0 && realHoursMonth > 0) ? (realHoursMonth / plannedHrsMonth) * 100 : 100;
+    if (coveragePct < 90 || vacantesHoy > 3 || (realHoursMonth > 0 && cumplimientoReal < 85)) return 'rojo';
     if (coveragePct < 95 || vacantesHoy > 0 || serviciosEnRiesgo.length > 0 || serviciosPorVencer.filter(s => s.dias <= 15).length > 0) return 'amarillo';
     return 'verde';
   }, [hasPlanificacion, coveragePct, vacantesHoy, serviciosEnRiesgo, serviciosPorVencer, realHoursMonth, plannedHrsMonth]);
@@ -679,7 +680,7 @@ function AdminDashboard() {
       const presentesSet = new Set<string>(), enServicioActivoSet = new Set<string>();
       const vacantesDetalleList: TurnoDetalleRow[] = [];
       const ausentesDetalleList: TurnoDetalleRow[] = [];
-      let vacantes = 0, absent = 0, novedadesShiftFlag = 0, totalTurnos = 0;
+      let vacantes = 0, absent = 0, novedadesShiftFlag = 0, totalTurnos = 0, serviceShiftsCount = 0;
 
       turnosSnap.forEach(doc => {
         const s = doc.data();
@@ -700,7 +701,10 @@ function AdminDashboard() {
         }
         const code = (s.code || s.type || '').toString().toUpperCase();
         if (code === 'F') francoGuards.add(s.employeeId);
-        if (!NON_SERVICE_TODAY.has(code)) activeGuards.add(s.employeeId);
+        if (!NON_SERVICE_TODAY.has(code)) {
+          activeGuards.add(s.employeeId);
+          serviceShiftsCount++;
+        }
         if (s.status === 'ABSENT' || s.isAbsent === true) {
           absent++;
           ausentesDetalleList.push({
@@ -876,7 +880,10 @@ function AdminDashboard() {
         novedadesDetalle: novedadesDetalleList,
         empleadosSinTurnoDetalle: empleadosSinTurnoDetalleList,
         hasPlanificacion: hasPlan,
-        coveragePct: hasPlan && totalTurnos > 0 ? ((totalTurnos - vacantes - absent) / totalTurnos) * 100 : 0,
+        // Denominador = turnos de servicio real + vacantes (excluye F, FF, V, L, A, E, etc.)
+        coveragePct: hasPlan && (serviceShiftsCount + vacantes) > 0
+          ? ((serviceShiftsCount - absent) / (serviceShiftsCount + vacantes)) * 100
+          : 0,
         avgHrsVigilador: totalEmp > 0 ? Math.round(totalSlaH / totalEmp) : 0,
         vigiladoresConTurno: totalEmp,
         licencias: licRows.slice(0, 8),
@@ -907,7 +914,7 @@ function AdminDashboard() {
   };
 
   // ── DERIVADOS
-  const normalHrs = Math.max(0, slaTotalHrs - slaNightHrs - slaHolidayHrs);
+  const normalHrs = Math.max(0, slaTotalHrs - slaNightHrs - slaHolidayHrs - slaWeekendHrs);
   const cumplimientoRealPct = plannedHrsMonth > 0 ? Math.min(100, (realHoursMonth / plannedHrsMonth) * 100) : 0;
   const brechaPct = plannedHrsMonth > 0 ? Math.max(0, ((plannedHrsMonth - realHoursMonth) / plannedHrsMonth) * 100) : 0;
 
@@ -1088,7 +1095,11 @@ function AdminDashboard() {
                 noData={!hasPlanificacion} href="/admin/operaciones"/>
               <KpiCard title="Presentes" value={presentesHoy}
                 icon={UserCheck} color="#10b981"
-                subtext={hasPlanificacion ? `de ${enServicioHoy} planificados` : 'Sin plan'}
+                subtext={hasPlanificacion
+                  ? (enServicioActivo > 0
+                      ? `${enServicioActivo} activos ahora · ${enServicioHoy} planificados`
+                      : `de ${enServicioHoy} planificados`)
+                  : 'Sin plan'}
                 progress={hasPlanificacion && enServicioHoy > 0 ? (presentesHoy / enServicioHoy) * 100 : undefined}
                 noData={!hasPlanificacion}/>
               <KpiCard title="Ausentes" value={ausentesHoy}
@@ -1351,6 +1362,30 @@ function AdminDashboard() {
               />
             </div>
 
+            {/* ══ DISTRIBUCIÓN PERSONAL POR OBJETIVO ═══════════════════════ */}
+            {distChart.length > 0 && (
+              <div className="mb-6 rounded-xl border p-5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Users size={16} style={{ color: 'var(--company-primary,#6366f1)' }}/>
+                  <h3 className="font-black text-sm" style={{ color: 'var(--txt)' }}>Distribución de Personal por Objetivo</h3>
+                  <span className="text-[10px]" style={{ color: 'var(--txt3)' }}>— empleados activos asignados</span>
+                </div>
+                <div style={{ minHeight: 160 }}>
+                  <ResponsiveContainer width="100%" height={Math.max(120, distChart.length * 34)}>
+                    <BarChart data={distChart} layout="vertical" margin={{ left: 10, right: 40, top: 4, bottom: 4 }}>
+                      <XAxis type="number" hide domain={[0, 'dataMax']}/>
+                      <YAxis dataKey="name" type="category" width={140}
+                        tick={{ fontSize: 10, fontWeight: 600, fill: '#6b7280' }} axisLine={false} tickLine={false}/>
+                      <Tooltip cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                        contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--surf)', color: 'var(--txt)', boxShadow: 'none' }}/>
+                      <Bar dataKey="value" fill="var(--company-primary,#6366f1)" radius={[0, 6, 6, 0]} barSize={18}
+                        label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: 'var(--company-primary,#6366f1)' }}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* ══ BLOQUE 7: HORAS SLA ═══════════════════════════════════════ */}
             <SectionLabel label="Horas SLA — Mes Actual" />
             {slaTotalHrs === 0 ? (
@@ -1361,13 +1396,15 @@ function AdminDashboard() {
               const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
               const hsPorDia = slaTotalHrs / daysInMonth;
               const hsPorEmp = totalEmployees > 0 ? slaTotalHrs / totalEmployees : 0;
-              const nightPct = slaTotalHrs > 0 ? Math.round((slaNightHrs   / slaTotalHrs) * 100) : 0;
-              const holPct   = slaTotalHrs > 0 ? Math.round((slaHolidayHrs / slaTotalHrs) * 100) : 0;
-              const dayPct   = Math.max(0, 100 - nightPct - holPct);
+              const nightPct  = slaTotalHrs > 0 ? Math.round((slaNightHrs    / slaTotalHrs) * 100) : 0;
+              const holPct    = slaTotalHrs > 0 ? Math.round((slaHolidayHrs  / slaTotalHrs) * 100) : 0;
+              const wkndPct   = slaTotalHrs > 0 ? Math.round((slaWeekendHrs  / slaTotalHrs) * 100) : 0;
+              const dayPct    = Math.max(0, 100 - nightPct - holPct - wkndPct);
               const slaSegments = [
-                { label: 'Diurnas',       value: normalHrs,     pct: dayPct,   color: '#f97316' },
-                { label: 'Nocturnas',     value: slaNightHrs,   pct: nightPct, color: '#a855f7' },
-                { label: 'Plus Feriados', value: slaHolidayHrs, pct: holPct,   color: '#10b981' },
+                { label: 'Diurnas',         value: normalHrs,     pct: dayPct,   color: '#f97316' },
+                { label: 'Nocturnas',       value: slaNightHrs,   pct: nightPct, color: '#a855f7' },
+                { label: 'Plus Feriados',   value: slaHolidayHrs, pct: holPct,   color: '#10b981' },
+                { label: 'Fin de semana',   value: slaWeekendHrs, pct: wkndPct,  color: '#0ea5e9' },
               ].filter(s => s.value > 0);
               return (
                 <div className="mb-6 space-y-3">
