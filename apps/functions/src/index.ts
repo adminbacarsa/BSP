@@ -1811,10 +1811,19 @@ export const autoCompletarTurnos = functions
       // Retenciones manuales del operador (sin autoRetentionAt): nunca tocar
       if (shift.isRetention === true) {
         const autoRetentionMs = shift.autoRetentionAt?.toMillis?.() ?? 0;
-        if (!autoRetentionMs) continue; // retención manual → saltar
-        const minutesInRetention = (now.toMillis() - autoRetentionMs) / 60000;
-        if (minutesInRetention < 120) continue; // <2h → esperar más
-        // >2h en retención automática sin relevo → auto-cerrar
+        if (!autoRetentionMs) {
+          // Retención manual del operador (sin autoRetentionAt).
+          // Usar endTime como referencia: si el turno lleva >6h vencido → cerrar.
+          const endMs2 = shift.endTime?.toMillis?.() ?? 0;
+          if (!endMs2) continue;
+          const minutesSinceEnd = (nowMs - endMs2) / 60000;
+          if (minutesSinceEnd < 360) continue; // <6h → respetar decisión del operador
+          // >6h sin resolver → auto-cerrar igual que timeout de CF
+        } else {
+          const minutesInRetention = (nowMs - autoRetentionMs) / 60000;
+          if (minutesInRetention < 120) continue; // <2h → esperar más
+        }
+        // >2h de retención automática o >6h de retención manual → auto-cerrar
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
@@ -1892,11 +1901,11 @@ export const autoCompletarTurnos = functions
 
       } else if (relievePending) {
         // CASO B: Relevo programado pero no llegÃ³ â†’ retener al guardia + push + novedad
-        // Poner en retenciÃ³n formal si no lo estÃ¡ ya
-        if (!shift.isRetention) {
+        // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
+        if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentÃ³`,
+            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || ‘relevo’} no se presentÃ³`,
             autoRetentionAt: now,
           });
         }
@@ -1944,10 +1953,10 @@ export const autoCompletarTurnos = functions
       } else if (relieveAbsent) {
         // CASO B2: El relevo fue convocado (retÃ©n) pero no se presentÃ³ y fue marcado ausente
         // â†’ RetenciÃ³n forzada + push + novedad
-        if (!shift.isRetention) {
+        if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentÃ³`,
+            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || ‘relevo’} no se presentÃ³`,
             autoRetentionAt: now,
           });
         }
@@ -2015,7 +2024,7 @@ export const autoCompletarTurnos = functions
 
         if (requiresContinuousCoverage) {
           // CASO C2: Puesto 24HS sin relevo → retener al guardia + push
-          if (!shift.isRetention) {
+          if (!shift.isRetention || !shift.autoRetentionAt) {
             completeBatch.update(docSnap.ref, {
               isRetention: true,
               retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
