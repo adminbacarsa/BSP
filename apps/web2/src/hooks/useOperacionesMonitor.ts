@@ -838,15 +838,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (!endMs) continue;
             const minutesOvertime = (nowMs - endMs) / 60000;
 
-            // ── AUTO-FIN TURNO (sin retención manual) ──────────────────────────────
-            // Cierra automáticamente turnos que finalizaron y no fueron retenidos
-            // explícitamente por operaciones (isRetentionByField = false).
-            // Regla: si hay relevo planificado → esperar hasta 60 min; después de 60 min
-            //        sin que el relevo se presente → cerrar de todas formas.
+            // ── AUTO-FIN TURNO ─────────────────────────────────────────────────────
+            // Dos caminos:
+            // 1. isRetentionByField=false (solo por tiempo): esperar relevo 60 min → cerrar
+            // 2. isRetentionByField=true por CF (autoRetentionAt existe): cerrar a los 60 min
+            //    Si la retención fue puesta por operador (sin autoRetentionAt) → NO tocar
             const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
-            if (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 720 && !alertedVacancyIds.current.has(autoShiftEndKey)) {
-                // Hay relevo planificado que todavía no llegó?
-                const hasScheduledRelevo = minutesOvertime < 60 && processedData.some((other: any) => {
+            const autoRetentionMs = s.autoRetentionAt?.seconds ? s.autoRetentionAt.seconds * 1000 : 0;
+            const minutesInAutoRetention = autoRetentionMs > 0 ? (nowMs - autoRetentionMs) / 60000 : 0;
+            const isCFRetention = s.isRetentionByField && autoRetentionMs > 0;
+            const shouldAutoClose =
+                (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 720) ||
+                (isCFRetention && minutesInAutoRetention >= 60 && minutesInAutoRetention < 720);
+
+            if (shouldAutoClose && !alertedVacancyIds.current.has(autoShiftEndKey)) {
+                // Hay relevo planificado que todavía no llegó? (solo aplica en los primeros 60 min)
+                const hasScheduledRelevo = minutesOvertime < 60 && !isCFRetention && processedData.some((other: any) => {
                     const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
                     return (
                         other.id !== s.id &&
@@ -863,7 +870,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     updateDocForEmpresa('turnos', s.id, {
                         status: 'COMPLETED', isCompleted: true, isPresent: false,
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
-                        completionReason: minutesOvertime >= 60 ? 'AUTO_SHIFT_END_NO_RELIEF' : 'AUTO_SHIFT_END',
+                        completionReason: isCFRetention ? 'AUTO_END_CF_RETENTION_TIMEOUT' : 'AUTO_SHIFT_END',
                     }, empresaId, migracionCompleta).then(() => {
                         toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
