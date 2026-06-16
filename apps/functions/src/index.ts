@@ -319,7 +319,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         await employeeService.deleteEmployee(payload.uid);
         return { success: true, message: 'Empleado eliminado.' };
 
-      // ðŸ›‘ NUEVO: IMPORTACIÓN MASIVA
+      // ðŸ›' NUEVO: IMPORTACIÓN MASIVA
       case 'IMPORT_EMPLOYEES':
         if (!payload.rows || !Array.isArray(payload.rows)) {
              throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
@@ -502,7 +502,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
   const db = admin.firestore();
   const results: Record<string, { ok: boolean; latencyMs?: number; detail?: string }> = {};
 
-  // â”€â”€ Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Firestore â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const t0 = Date.now();
   try {
     const snap = await db.collection('empresas').limit(1).get();
@@ -511,7 +511,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
   }
 
-  // â”€â”€ Gemini API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Gemini API â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const geminiKey = process.env.GEMINI_API_KEY || '';
   if (!geminiKey) {
     results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
@@ -528,7 +528,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // â”€â”€ Gmail SMTP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Gmail SMTP â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const gmailUser = process.env.GMAIL_USER || '';
   const gmailPass = process.env.GMAIL_PASS || '';
   if (!gmailUser || !gmailPass) {
@@ -545,7 +545,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // â”€â”€ Google Drive â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Google Drive â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
   if (!driveFolderId) {
     results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
@@ -564,7 +564,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // â”€â”€ FCM (Push Notifications) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ FCM (Push Notifications) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   try {
     const tokSnap = await db.collection('device_tokens').limit(1).get();
     results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? 'â‰¥1' : '0'}` };
@@ -572,7 +572,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     results.fcm = { ok: false, detail: e.message };
   }
 
-  // â”€â”€ Scheduled jobs — Ãºltima ejecuciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Scheduled jobs — Ãºltima ejecuciÃ³n â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
   const jobStatus: Record<string, string> = {};
   for (const job of scheduledJobs) {
@@ -591,7 +591,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
   }
   results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
 
-  // â”€â”€ Conteos de datos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Conteos de datos â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   try {
     const [empSnap, sysSnap, empActivos] = await Promise.all([
       db.collection('empresas').get(),
@@ -606,7 +606,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     results.data = { ok: false, detail: e.message };
   }
 
-  // â”€â”€ Entorno â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â"€â"€ Entorno â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
   results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'ProducciÃ³n (Firebase)' };
 
@@ -986,7 +986,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
         console.warn('[requestCheckIn] No se pudo crear novedad:', (e as Error)?.message);
     }
 
-    // â”€â”€ AUTO-RELEVO: buscar y relevar al guardia presente en el mismo puesto â”€â”€
+    // â"€â"€ AUTO-RELEVO: buscar y relevar al guardia presente en el mismo puesto â"€â"€
     try {
         const objectiveId  = shiftData.objectiveId  || '';
         const positionName = (shiftData.positionName || '').trim().toLowerCase();
@@ -1580,7 +1580,7 @@ function buildClientPortalEmailHtml(resetLink: string, clientName: string): stri
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
               <tr>
                 <td style="background:#4f46e5;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ‘A</a>
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ'A</a>
                 </td>
               </tr>
             </table>
@@ -1905,7 +1905,7 @@ export const autoCompletarTurnos = functions
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || ‘relevo’} no se presentó`,
+            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
             autoRetentionAt: now,
           });
         }
@@ -1956,7 +1956,7 @@ export const autoCompletarTurnos = functions
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || ‘relevo’} no se presentó`,
+            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
             autoRetentionAt: now,
           });
         }
@@ -2139,7 +2139,7 @@ export const detectarAusencias = functions
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
-    // â”€â”€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
     // Los guardias marcan a T-15, asÃ­ que T+0 sin check-in = ya estÃ¡ retrasado
     const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
@@ -2205,7 +2205,7 @@ export const detectarAusencias = functions
       }
     }
 
-    // â”€â”€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     // Ventana: turnos que empezaron entre hace 8h y hace 30min
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo   = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
@@ -2249,7 +2249,7 @@ export const detectarAusencias = functions
 
       const elapsedMin = (nowMs - startMs) / 60000;
 
-      // â”€â”€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â”€â”€
+      // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
       // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
       if (elapsedMin >= 60) {
         // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
