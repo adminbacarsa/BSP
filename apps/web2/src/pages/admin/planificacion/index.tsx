@@ -495,6 +495,9 @@ export default function PlanificacionPage() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
+    // allShiftIds[empId_dateKey] = array de TODOS los doc IDs para esa clave.
+    // shiftsMap solo guarda el último (sobrescribe), pero necesitamos borrar TODOS al guardar.
+    const [allShiftIds, setAllShiftIds] = useState<Record<string, string[]>>({});
     const [absencesMap, setAbsencesMap] = useState<Record<string, any>>({});
     const [clients, setClients] = useState<any[]>([]);
     const [agreements, setAgreements] = useState<any[]>([]);
@@ -2274,12 +2277,17 @@ export default function PlanificacionPage() {
         const turnosQ = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
         const unsubS = onSnapshot(turnosQ, snap => {
             const map: any = {};
+            const allIds: Record<string, string[]> = {};
             snap.docs.forEach(d => {
                 const data = d.data();
                 if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
                 if (data.startTime?.seconds) {
                     const dateKey = getDateKey(data.startTime);
                     const key = `${data.employeeId}_${dateKey}`;
+                    // Rastrear TODOS los doc IDs para esta clave (puede haber duplicados en Firestore)
+                    if (!allIds[key]) allIds[key] = [];
+                    allIds[key].push(d.id);
+                    // shiftsMap solo guarda el último (comportamiento original)
                     map[key] = {
                         id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
                         startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
@@ -2298,6 +2306,7 @@ export default function PlanificacionPage() {
                 }
             });
             setShiftsMap(map);
+            setAllShiftIds(allIds);
         }, (e) => { console.error('[plan] turnos error:', e); toast.error(`Error cargando turnos: ${e.code || e.message}`); });
 
         // Actividad Reciente (audit_logs) - sin índices compuestos: traemos últimos N y filtramos en memoria.
@@ -2855,12 +2864,16 @@ export default function PlanificacionPage() {
                                 ? `${change.name || change.code} — ${empName} el ${dateStr}`
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
+                    // Borrar TODOS los documentos existentes para este empId+fecha (evita docs huérfanos duplicados)
+                    const allExistingIds = allShiftIds[key] ?? (existing?.id ? [existing.id] : []);
+                    const deleteAllExisting = () => allExistingIds.forEach(docId => batch.delete(doc(db, 'turnos', docId)));
+
                     if (change.isDeleted) {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
-                        if (existing?.id) batch.delete(doc(db, 'turnos', existing.id));
+                        deleteAllExisting();
                     } else {
-                        if (existing?.id) batch.delete(doc(db, 'turnos', existing.id));
+                        deleteAllExisting();
 
                         if (existing) {
                             if ((existing.code === 'F' || existing.isFranco) && change.code !== 'F') {
