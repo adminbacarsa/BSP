@@ -1,4 +1,4 @@
-import './bootstrap-env';
+﻿﻿import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -74,7 +74,7 @@ const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
 
 
 // =========================================================
-// 1. GESTIÃ“N DE USUARIOS (AUTH)
+// 1. GESTIÓN DE USUARIOS (AUTH)
 // =========================================================
 export const createUser = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
@@ -138,7 +138,7 @@ export const scheduleShift = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 3. GESTIÃ“N DE TURNOS (EDITAR / ELIMINAR / REPLICAR)
+// 3. GESTIÓN DE TURNOS (EDITAR / ELIMINAR / REPLICAR)
 // =========================================================
 export const manageShifts = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -219,7 +219,7 @@ export const auditShift = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 5. GESTIÃ“N DE DATOS BÃSICOS
+// 5. GESTIÓN DE DATOS BÃSICOS
 // =========================================================
 export const manageData = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -245,7 +245,7 @@ export const manageData = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 6. GESTIÃ“N DE JERARQUÃA COMERCIAL
+// 6. GESTIÓN DE JERARQUÃA COMERCIAL
 // =========================================================
 export const manageHierarchy = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -288,7 +288,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 7. GESTIÃ“N DE EMPLEADOS (RRHH) - (INCLUYE REPORTE DE CARGA Y IMPORTACIÃ“N)
+// 7. GESTIÓN DE EMPLEADOS (RRHH) - (INCLUYE REPORTE DE CARGA Y IMPORTACIÓN)
 // =========================================================
 export const manageEmployees = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -319,7 +319,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         await employeeService.deleteEmployee(payload.uid);
         return { success: true, message: 'Empleado eliminado.' };
 
-      // ðŸ›‘ NUEVO: IMPORTACIÃ“N MASIVA
+      // ðŸ›‘ NUEVO: IMPORTACIÓN MASIVA
       case 'IMPORT_EMPLOYEES':
         if (!payload.rows || !Array.isArray(payload.rows)) {
              throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
@@ -338,7 +338,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 8. GESTIÃ“N DE USUARIOS DEL SISTEMA (ADMINS)
+// 8. GESTIÓN DE USUARIOS DEL SISTEMA (ADMINS)
 // =========================================================
 export const manageSystemUsers = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -376,7 +376,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
 });
 
 // =========================================================
-// 9. GESTIÃ“N DE NOVEDADES (AUSENCIAS)
+// 9. GESTIÓN DE NOVEDADES (AUSENCIAS)
 // =========================================================
 export const manageAbsences = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -414,7 +414,7 @@ export const manageAbsences = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 10. GESTIÃ“N DE PATRONES DE SERVICIO (AUTOMATIZACIÃ“N)
+// 10. GESTIÓN DE PATRONES DE SERVICIO (AUTOMATIZACIÓN)
 // =========================================================
 export const managePatterns = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -459,7 +459,7 @@ export const managePatterns = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 11. GESTIÃ“N DE CONVENIOS (NUEVO)
+// 11. GESTIÓN DE CONVENIOS (NUEVO)
 // =========================================================
 export const manageAgreements = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
@@ -491,7 +491,7 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
 });
 
 // =========================================================
-// 12. DIAGNÃ“STICO DE SISTEMA (HEALTH CHECK)
+// 12. DIAGNÓSTICO DE SISTEMA (HEALTH CHECK)
 // =========================================================
 
 export const platformHealthCheck = functions.https.onCall(async (_data, context) => {
@@ -572,7 +572,7 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     results.fcm = { ok: false, detail: e.message };
   }
 
-  // â”€â”€ Scheduled jobs â€” Ãºltima ejecuciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Scheduled jobs — Ãºltima ejecuciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
   const jobStatus: Record<string, string> = {};
   for (const job of scheduledJobs) {
@@ -646,7 +646,7 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
 
 // =========================================================
 // 12b. ASISTENTE VIRTUAL (Gemini vÃ­a Functions)
-// ProducciÃ³n: Secret Manager â€” `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
+// ProducciÃ³n: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
 // misma llamable sin runWith para que cargue GEMINI desde apps/functions/.env (bootstrap-env.ts).
 // =========================================================
 async function chatPlatformAssistantHandler(
@@ -1043,8 +1043,8 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
                 const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
                 const outgoingRealEnd = isEarlyRelevo
-                    ? outData.endTime                                  // hora programada â†’ horas completas
-                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasÃ³ â†’ hora real
+                    ? outData.endTime                                  // hora programada → horas completas
+                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasÃ³ → hora real
 
                 // 1. Completar el turno del guardia saliente
                 await outDoc.ref.update({
@@ -1071,7 +1071,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                     employeeName:          incomingName,
                     relievedEmployeeId:    outEmpId,
                     relievedEmployeeName:  outName,
-                    description:           `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' â€” ' + outPosName : ''}`,
+                    description:           `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
                     createdAt:             admin.firestore.FieldValue.serverTimestamp(),
                     autoProcessed:         true,
                     source:                'AUTO_RELEVO',
@@ -1095,7 +1095,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 });
                 const tokens = Array.from(tokenSet);
 
-                const notifTitle = 'âœ… Turno finalizado â€” relevado';
+                const notifTitle = 'âœ… Turno finalizado — relevado';
                 const notifBody  = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
 
                 // Guardar en user_notifications (siempre, aunque no haya token)
@@ -1311,7 +1311,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('invalid-argument', 'Se requiere al menos un empleado.');
   }
 
-  // Credenciales SMTP â€” definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
+  // Credenciales SMTP — definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
   const gmailUser = process.env.GMAIL_USER || '';
   const gmailPass = process.env.GMAIL_PASS || '';
 
@@ -1383,7 +1383,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         }
       }
 
-      // Generar token de activaciÃ³n (UUID, expira 48h) â€” Ãºnico link para crear contraseÃ±a + activar dispositivo
+      // Generar token de activaciÃ³n (UUID, expira 48h) — Ãºnico link para crear contraseÃ±a + activar dispositivo
       const crypto = await import('crypto');
       const activationToken = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
@@ -1397,7 +1397,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       });
       const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
 
-      // Enviar email â€” solo se marca como enviado si el envÃ­o fue exitoso
+      // Enviar email — solo se marca como enviado si el envÃ­o fue exitoso
       await transporter.sendMail({
         from: `"${empresaNombre}" <${gmailUser}>`,
         to: email,
@@ -1441,7 +1441,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 });
 
 // =========================================================
-// 14. ACTIVACIÃ“N DE DISPOSITIVO (device binding vÃ­a email)
+// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vÃ­a email)
 // =========================================================
 
 export const activateDevice = functions.https.onCall(async (data, context) => {
@@ -1478,7 +1478,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   // Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-  // Guardar dispositivo verificado â€” doc ID = uid (un dispositivo por usuario)
+  // Guardar dispositivo verificado — doc ID = uid (un dispositivo por usuario)
   const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
   await deviceRef.set({
     uid: context.auth.uid,
@@ -1494,7 +1494,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 15. ACTIVACIÃ“N COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
+// 15. ACTIVACIÓN COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
 // =========================================================
 
 export const activateAndSetPassword = functions.https.onCall(async (data, _context) => {
@@ -1743,7 +1743,7 @@ export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 
 // =========================================================
-// Payroll API (HTTP) â€” para sistemas de liquidaciÃ³n externos
+// Payroll API (HTTP) — para sistemas de liquidaciÃ³n externos
 // =========================================================
 export { payrollApi } from './payroll-api/handler';
 
@@ -1774,9 +1774,9 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
 // 15. AUTO-COMPLETAR TURNOS (SCHEDULED - cada 5 minutos)
 // =========================================================
 // LÃ³gica:
-//   A) Turno tiene relevo ya PRESENTE â†’ cerrar (el handover no lo cerrÃ³, safety net)
-//   B) Turno tiene relevo pero NO llegÃ³ â†’ NO cerrar, crear novedad de AUSENCIA_RELEVO
-//   C) Turno sin relevo programado â†’ cerrar directamente al vencimiento
+//   A) Turno tiene relevo ya PRESENTE → cerrar (el handover no lo cerrÃ³, safety net)
+//   B) Turno tiene relevo pero NO llegÃ³ → NO cerrar, crear novedad de AUSENCIA_RELEVO
+//   C) Turno sin relevo programado → cerrar directamente al vencimiento
 export const autoCompletarTurnos = functions
   .region('us-central1')
   .pubsub.schedule('every 5 minutes')
@@ -1861,7 +1861,7 @@ export const autoCompletarTurnos = functions
         return s === 'PRESENT' || s === 'COMPLETED';
       });
       // Solo contar como relevo pendiente un turno con empleado REAL asignado.
-      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos â€”
+      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos —
       // si se cuentan, el turno saliente nunca se cierra y queda como retenido indefinidamente.
       const relievePending = relieveDocs.find(d => {
         const data = d.data();
@@ -1871,14 +1871,14 @@ export const autoCompletarTurnos = functions
         return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
       });
 
-      // Relevo ausente: retÃ©n convocado que no se presentÃ³ (status ABSENT)
+      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
       const relieveAbsent = relieveDocs.find(d => {
         const data = d.data();
         return data.isAbsent === true || data.status === 'ABSENT';
       });
 
       if (relievePresent) {
-        // CASO A: El relevo ya estÃ¡ presente â€” safety net, cerrar el turno saliente
+        // CASO A: El relevo ya estÃ¡ presente — safety net, cerrar el turno saliente
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
@@ -1894,18 +1894,18 @@ export const autoCompletarTurnos = functions
           actorUid: 'SYSTEM',
           module: 'OPERACIONES',
           shiftId: docSnap.id,
-          details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
+          details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
           timestamp: now,
         });
         completed++;
 
       } else if (relievePending) {
-        // CASO B: Relevo programado pero no llegÃ³ â†’ retener al guardia + push + novedad
+        // CASO B: Relevo programado pero no llegÃ³ → retener al guardia + push + novedad
         // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || ‘relevo’} no se presentÃ³`,
+            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || ‘relevo’} no se presentó`,
             autoRetentionAt: now,
           });
         }
@@ -1915,14 +1915,14 @@ export const autoCompletarTurnos = functions
           await admin.messaging().sendEachForMulticast({
             tokens: retTokensB,
             notification: {
-              title: 'â° Quedaste en retenciÃ³n',
-              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+              title: '⏰ Quedaste en retención',
+              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
               fcmOptions: { link: '/empleado/dashboard' },
             },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B error:', e));
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
         }
         // Novedad para operaciones (una sola vez)
         const existingB = await db.collection('novedades')
@@ -1943,7 +1943,7 @@ export const autoCompletarTurnos = functions
             employeeName: shift.employeeName || '',
             reliefEmployeeName: relievePending.data().employeeName || '',
             positionName: shift.positionName || '',
-            description: `â° RETENCIÃ“N: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
+            description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -1951,12 +1951,12 @@ export const autoCompletarTurnos = functions
         }
 
       } else if (relieveAbsent) {
-        // CASO B2: El relevo fue convocado (retÃ©n) pero no se presentÃ³ y fue marcado ausente
-        // â†’ RetenciÃ³n forzada + push + novedad
+        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
+        // → Retención forzada + push + novedad
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || ‘relevo’} no se presentÃ³`,
+            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || ‘relevo’} no se presentó`,
             autoRetentionAt: now,
           });
         }
@@ -1966,14 +1966,14 @@ export const autoCompletarTurnos = functions
           await admin.messaging().sendEachForMulticast({
             tokens: retTokensB2,
             notification: {
-              title: 'â° Quedaste en retenciÃ³n',
-              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+              title: '⏰ Quedaste en retención',
+              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
               fcmOptions: { link: '/empleado/dashboard' },
             },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B2 error:', e));
+          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
         }
         const existing = await db.collection('novedades')
           .where('shiftId', '==', docSnap.id)
@@ -1991,7 +1991,7 @@ export const autoCompletarTurnos = functions
             empresaId: shiftEmpresaId(shift) || null,
             employeeName: shift.employeeName || '',
             positionName: shift.positionName || '',
-            description: `âš ï¸ RETENCIÃ“N FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
+            description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -2140,7 +2140,7 @@ export const detectarAusencias = functions
     const nowMs = now.toMillis();
 
     // â”€â”€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Turnos que acaban de iniciar (0-10 min) sin check-in â†’ avisar al guardia saliente
+    // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
     // Los guardias marcan a T-15, asÃ­ que T+0 sin check-in = ya estÃ¡ retrasado
     const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
     const earlyTo   = admin.firestore.Timestamp.fromMillis(nowMs);
@@ -2227,7 +2227,7 @@ export const detectarAusencias = functions
       if (shift.draft === true) continue;              // borrador no publicado
       if (SKIP_STATUSES.has(shift.status || '')) continue;
       if (shift.isPresent === true || shift.isCompleted === true) continue;
-      if (shift.isUnassigned === true) continue;         // vacante â†’ no es ausencia
+      if (shift.isUnassigned === true) continue;         // vacante → no es ausencia
       if (shift.isReportedToPlanning === true) continue; // ya gestionado
       if (SKIP_CODES.has((shift.code || '').toUpperCase())) continue;
       if (!shift.employeeId || shift.employeeId === 'VACANTE') continue;
@@ -2244,12 +2244,12 @@ export const detectarAusencias = functions
         const empId = shiftEmpresaId(shift);
         const docIds = planificacionEstadoLookupDocIds(empId, shift.objectiveId, chkYear, chkMonth);
         const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
-        if (!planDocs.some(s => s.exists)) continue; // cronograma no publicado â†’ no generar ausencia
+        if (!planDocs.some(s => s.exists)) continue; // cronograma no publicado → no generar ausencia
       }
 
       const elapsedMin = (nowMs - startMs) / 60000;
 
-      // â”€â”€ AUSENTE: T+30 sin marcar presente â†’ ausencia automÃ¡tica AA â”€â”€
+      // â”€â”€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â”€â”€
       // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
       if (elapsedMin >= 60) {
         // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
@@ -2281,14 +2281,14 @@ export const detectarAusencias = functions
         }
         // Guardia con aviso de llegada tarde: no marcar ausente automÃ¡ticamente
         if (shift.lateArrivalAt) continue;
-        // Caso 2: operador registrÃ³ aviso anticipado â†’ no marcar AA
+        // Caso 2: operador registrÃ³ aviso anticipado → no marcar AA
         if (shift.notifiedAbsent === true) continue;
-        // Retenes no se auto-detectan como ausentes â€” son convocados urgentes
+        // Retenes no se auto-detectan como ausentes — son convocados urgentes
         if (shift.isReten === true || shift.origin === 'RETEN') continue;
         // Fix timezone: no marcar AA si el turno termina en el futuro LEJANO
         // (evita marcar turnos nocturnos 11 PM - 7 AM a las pocas horas de iniciados)
         const endMs = shift.endTime?.toMillis?.() ?? 0;
-        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h â†’ saltear
+        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h → saltear
 
         // 1. Marcar ABSENT AA
         await docSnap.ref.update({
@@ -2299,7 +2299,7 @@ export const detectarAusencias = functions
           absenceDetectedBy: 'SYSTEM_SCHEDULER',
         });
 
-        // 2. RetenciÃ³n automÃ¡tica: si hay un guardia presente en el mismo puesto, retenerlo
+        // 2. Retención automÃ¡tica: si hay un guardia presente en el mismo puesto, retenerlo
         const objectiveId   = shift.objectiveId   || '';
         const positionName  = (shift.positionName || '').trim().toLowerCase();
         const empId         = shiftEmpresaId(shift);
@@ -2322,7 +2322,7 @@ export const detectarAusencias = functions
               if (!retData.isRetention) {
                 await retDoc.ref.update({
                   isRetention:     true,
-                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentÃ³`,
+                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
                   autoRetentionAt: now,
                 });
                 // Push al guardia retenido
@@ -2331,14 +2331,14 @@ export const detectarAusencias = functions
                   await admin.messaging().sendEachForMulticast({
                     tokens: retTokens,
                     notification: {
-                      title: 'â° Quedaste en retenciÃ³n',
-                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© en el puesto hasta aviso de Operaciones.`,
+                      title: '⏰ Quedaste en retención',
+                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
                     },
                     webpush: {
                       notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                       fcmOptions: { link: '/empleado/dashboard' },
                     },
-                  }).catch(e => console.warn('[detectarAusencias] Push retenciÃ³n error:', e));
+                  }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
                 }
                 // Novedad para operaciones
                 await db.collection('novedades').add({
@@ -2352,7 +2352,7 @@ export const detectarAusencias = functions
                   employeeName:         retData.employeeName || '',
                   absentEmployeeId:     shift.employeeId,
                   absentEmployeeName:   shift.employeeName  || '',
-                  description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente â€” ${shift.objectiveName} Â· ${shift.positionName} â€” por ausencia de ${shift.employeeName}`,
+                  description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente — ${shift.objectiveName} Â· ${shift.positionName} — por ausencia de ${shift.employeeName}`,
                   createdAt: now,
                   source: 'SYSTEM_SCHEDULER',
                 });
@@ -2373,12 +2373,12 @@ export const detectarAusencias = functions
             await admin.messaging().sendEachForMulticast({
               tokens,
               notification: {
-                title: 'âš ï¸ Ausencia registrada',
+                title: '⚠️ Ausencia registrada',
                 body: `No se registrÃ³ tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
               },
               webpush: {
                 notification: {
-                  title: 'âš ï¸ Ausencia registrada',
+                  title: '⚠️ Ausencia registrada',
                   body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). IngresÃ¡ al portal si estÃ¡s presente.`,
                   icon: '/icons/icon-192x192.png',
                   requireInteraction: true,
@@ -2459,7 +2459,7 @@ export const detectarAusencias = functions
             clientId: shift.clientId || null,
             empresaId: shiftEmpresaId(shift) || null,
             positionName: shift.positionName || '',
-            description: `${shift.employeeName || 'Empleado'} no se presentÃ³ al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
+            description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
             createdAt: now,
             source: 'SYSTEM_SCHEDULER',
           });
@@ -2472,7 +2472,7 @@ export const detectarAusencias = functions
           actorUid: 'SYSTEM',
           module: 'OPERACIONES',
           shiftId: docSnap.id,
-          details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
+          details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
           timestamp: now,
         });
 
