@@ -734,10 +734,25 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
+                const shift = processedData.find((s: any) => s.id === shiftId);
                 await updateDocForEmpresa('turnos', shiftId, {
                     status: 'COMPLETED', isCompleted: true, isPresent: false,
                     realEndTime: serverTimestamp(), checkoutNote: payload || null,
                 }, empresaId, migracionCompleta);
+                // Bitácora
+                const actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action: 'CHECKOUT',
+                    module: 'OPERACIONES',
+                    actorName: actor,
+                    timestamp: serverTimestamp(),
+                    employeeId: shift?.employeeId,
+                    employeeName: shift?.employeeName,
+                    objectiveId: shift?.objectiveId,
+                    objectiveName: shift?.objectiveName,
+                    shiftId,
+                    details: `${shift?.employeeName || 'Guardia'} finalizó turno en ${shift?.objectiveName || ''}${payload ? ` — ${payload}` : ''}.`,
+                }, String(shift?.empresaId || empresaId || '').trim())).catch(() => {});
             }
         } catch (e: any) { toast.error('Error: ' + e.message); }
     };
@@ -947,7 +962,35 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         minutesOvertime,
                         status: 'pending',
                         title: 'Retención prolongada',
-                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime / 60 * 10) / 10}h de retención en ${s.objectiveName || '—'}`,
+                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min retenido en ${s.objectiveName || 'su puesto'}.`,
+                        createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
+                    }, String(s.empresaId || empresaId || '').trim()))
+                    .catch(e => console.warn('[retentionLarga]', e));
+                })
+                .catch(e => console.warn('[retentionLarga:check]', e));
+        }
+    }, [processedData, empresaId]);
+
+    // isStable: evitar parpadeos — esperar 700ms sin cambios en processedData
+    useEffect(() => {
+        if (!isReady) return;
+        if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
+        setIsStable(false);
+        stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
+        return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
+    }, [processedData, isReady]);
+
+    return {
+        rawShifts, processedData, listData, stats,
+        employees, servicesSLA, filteredObjectives, uniqueClients,
+        viewTab, setViewTab, selectedClientId, setSelectedClientId,
+        filterText, setFilterText, isCompact, setIsCompact,
+        publishStatusMap, recentLogs,
+        isReady, isStable,
+        handleAction,
+    };
+};
+ ${Math.round(minutesOvertime / 60 * 10) / 10}h de retención en ${s.objectiveName || '—'}`,
                         createdAt: serverTimestamp(),
                         reportedBy: 'SISTEMA',
                     }, empresaId)).catch(e => console.warn('[novedadRetencionLarga]', e));

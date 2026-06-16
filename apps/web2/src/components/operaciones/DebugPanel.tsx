@@ -370,13 +370,24 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                                     <td className="px-2 py-1 border border-slate-100">
                                                                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_COLORS[st]}`}>{STATUS_LABEL[st]}</span>
                                                                     </td>
-                                                                    <td className="px-2 py-1 border border-slate-100 text-center">{s.countsForCoverage ? <span className="text-green-600">✓</span> : <span className="text-red-500">✗</span>}</td>
-                                                                    <td className="px-2 py-1 border border-slate-100 text-slate-500">{s.origin || '—'}</td>
-                                                                    <td className="px-2 py-1 border border-slate-100 text-center">{s.isVirtual ? <span className="text-purple-600">V</span> : '—'}</td>
+                                                                    <td className="px-2 py-1 border border-slate-100 text-center">{s.isVirtual ? <span className="text-amber-600 font-bold">✓ virtual</span> : '—'}</td>
                                                                 </tr>
                                                             );
                                                         })}
                                                     </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+};
                                                 </table>
                                             </div>
                                         </div>

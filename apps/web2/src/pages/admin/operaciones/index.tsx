@@ -1867,6 +1867,33 @@ export default function OperacionesPage() {
         return false;
     };
 
+    const handleDismissAllByType = async (type: string) => {
+        const toAtend = pendingNovedades.filter((n: any) => n.type === type);
+        if (!toAtend.length) return;
+        const auth = getAuth();
+        const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        try {
+            const batch = writeBatch(db);
+            toAtend.forEach((n: any) => {
+                batch.update(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA',
+                    atendidaAt: serverTimestamp(),
+                    atendidaPor: actorName,
+                    atendidaPorUid: auth.currentUser?.uid || null,
+                });
+            });
+            await batch.commit();
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'DESCARTAR_NOVEDADES_TIPO',
+                module: 'OPERACIONES',
+                actorName,
+                timestamp: serverTimestamp(),
+                details: `Descartó ${toAtend.length} novedades tipo ${type}.`,
+            }, empresaId)).catch(() => {});
+            toast.success(`${toAtend.length} novedades descartadas`);
+        } catch(e) { toast.error('Error al descartar novedades'); }
+    };
+
     const handleAtenderNovedad = async (novedad: any) => {
         try {
             const auth = getAuth();
@@ -1877,6 +1904,15 @@ export default function OperacionesPage() {
                 atendidaPor: actorName,
                 atendidaPorUid: auth.currentUser?.uid || null,
             });
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'ATENDER_NOVEDAD',
+                module: 'OPERACIONES',
+                actorName,
+                timestamp: serverTimestamp(),
+                objectiveId: novedad.objectiveId,
+                objectiveName: novedad.objectiveName,
+                details: `Atendió novedad: ${novedad.type}${novedad.description ? ` — ${novedad.description}` : ''}.`,
+            }, String(novedad.empresaId || empresaId || '').trim())).catch(() => {});
 
             if (novedad.type === 'VACANTE_A_PLANIFICACION') {
                 // Ya fue auto-devuelta, solo informar
@@ -3135,40 +3171,70 @@ export default function OperacionesPage() {
                               <CheckCircle size={24} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
                               <p className="text-xs font-bold text-slate-400">Sin novedades pendientes</p>
                             </div>
-                          ) : pendingNovedades.map((n: any) => {
-                            const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
-                            const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
-                            const isRetencion = n.type === 'RETENCION_LARGA';
-                            const isRelevo = n.type === 'POSICION_SIN_RELEVO';
-                            const isAbsence = n.type === 'AUSENCIA_AUTO' || n.type === 'AUSENCIA_OPERATIVA';
-                            const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
-                            const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO';
-                            const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
-                            const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC' : isConvocado ? 'CONV' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                            const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                            const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                            return (
-                              <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
-                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-12 text-center shrink-0 ${typeBg}`}>{typeLabel}</span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                    {n.employeeName && n.objectiveName
-                                      ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                      : n.objectiveName || n.employeeName || n.type}
-                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
-                                  </p>
-                                  <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                          ) : (() => {
+                            const NOV_TYPE_META: Record<string, { label: string; bg: string; border: string }> = {
+                              AUSENCIA_CORTO_PLAZO:        { label: 'URGENTE', bg: 'bg-red-600 text-white animate-pulse', border: 'border-l-red-600' },
+                              AVISO_AUSENCIA_ANTICIPADA:   { label: 'ANTIC',   bg: 'bg-amber-100 text-amber-800',          border: 'border-l-amber-400' },
+                              CONVOCATORIA_RETEN:          { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',        border: 'border-l-indigo-500' },
+                              FRANCO_TRABAJADO:            { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',        border: 'border-l-indigo-500' },
+                              VACANTE_PROTOCOLO_COBERTURA: { label: 'PROT',    bg: 'bg-orange-100 text-orange-700',        border: 'border-l-orange-500' },
+                              AUSENCIA_AUTO:               { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',            border: 'border-l-rose-500' },
+                              AUSENCIA_OPERATIVA:          { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',            border: 'border-l-rose-500' },
+                              POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',          border: 'border-l-amber-500' },
+                              RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',        border: 'border-l-orange-600' },
+                            };
+                            const getMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
+                            const groups: { type: string; items: any[] }[] = [];
+                            const seen = new Map<string, any[]>();
+                            pendingNovedades.forEach((n: any) => {
+                              if (!seen.has(n.type)) { seen.set(n.type, []); groups.push({ type: n.type, items: seen.get(n.type)! }); }
+                              seen.get(n.type)!.push(n);
+                            });
+                            return groups.map(({ type, items }) => {
+                              const meta = getMeta(type);
+                              return (
+                                <div key={type}>
+                                  <div className="px-3 py-1 flex items-center gap-2 bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${meta.bg}`}>{meta.label}</span>
+                                    <span className="text-[9px] font-bold text-slate-500 flex-1 truncate">{type.replace(/_/g,' ')}</span>
+                                    <span className="text-[9px] text-slate-400 font-mono">{items.length}</span>
+                                    {items.length > 1 && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleDismissAllByType(type); }}
+                                        className="text-[9px] font-bold text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors shrink-0"
+                                        title={`Descartar todas (${items.length})`}
+                                      >
+                                        ✕ todas
+                                      </button>
+                                    )}
+                                  </div>
+                                  {items.map((n: any) => {
+                                    const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                    return (
+                                      <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                            {n.employeeName && n.objectiveName
+                                              ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                              : n.objectiveName || n.employeeName || n.type}
+                                            {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                          </p>
+                                          <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                                        </div>
+                                        <span className="text-[9px] text-slate-400 font-mono shrink-0">
+                                          {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
+                                        </span>
+                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
+                                          className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title="Atender">
+                                          <CheckCircle size={11}/>
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                                <span className="text-[9px] text-slate-400 font-mono shrink-0">
-                                  {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
-                                </span>
-                                <button onClick={() => handleAtenderNovedad(n)}
-                                  className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title="Atender">
-                                  <CheckCircle size={11}/>
-                                </button>
-                              </div>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                           {recentAtendidas.length > 0 && (
                             <div className="border-t border-slate-100 bg-slate-50/80">
                               <p className="px-3 py-1 text-[9px] font-black uppercase text-slate-400">Atendidas recientes</p>
@@ -3383,6 +3449,7 @@ export default function OperacionesPage() {
                 onClose={() => setInterruptData({isOpen:false, shift:null})}
                 shift={interruptData.shift}
                 logic={logic}
+           
                 onVacancyCreated={handleVacancyCreated}
             />
             <CoverageModal
@@ -3390,11 +3457,6 @@ export default function OperacionesPage() {
                 onClose={() => setCoverageData({isOpen:false, shift:null})}
                 absenceShift={coverageData.shift}
                 logic={logic}
-            />
-            <WorkedDayOffModal
-                isOpen={workedFrancoData.isOpen}
-                onClose={() => setWorkedFrancoData({isOpen:false, shift:null})}
-                shift={workedFrancoData.shift}
             />
             <AbsenceDecisionModal
                 isOpen={absenceDecisionData.isOpen}
@@ -3408,32 +3470,30 @@ export default function OperacionesPage() {
                 isOpen={rrhhVacancyData.isOpen}
                 onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
                 shift={rrhhVacancyData.shift}
+                onCoverageProtocol={(s: any) => setCoverageData({isOpen:true, shift:s})}
                 onSendToPlanning={handleReportPlanning}
-                onOpenCoverage={(s:any) => setCoverageData({isOpen:true, shift:s})}
-                onOpenWA={handleOpenWA}
+            />
+            <WorkedDayOffModal
+                isOpen={workedFrancoData.isOpen}
+                onClose={() => setWorkedFrancoData({isOpen:false, shift:null})}
+                shift={workedFrancoData.shift}
             />
             <WAComposeModal
                 isOpen={waData.isOpen}
                 onClose={() => setWaData(d => ({...d, isOpen: false}))}
                 ctx={waData.ctx}
             />
-            {detailNovedad && (
-                <NovedadDetailPopup
-                    novedad={detailNovedad}
-                    onClose={() => setDetailNovedad(null)}
-                    onAtender={handleAtenderNovedad}
-                />
-            )}
             {showDebugPanel && (
                 <DebugPanel
-                    onClose={() => setShowDebugPanel(false)}
                     processedData={logic.processedData}
-                    se
-                    servicesSLA={logic.servicesSLA || []}
-                    publishStatusMap={logic.publishStatusMap || {}}
-                    rawShifts={logic.rawShifts}
+                    servicesSLA={logic.servicesSLA}
+                    publishStatusMap={logic.publishStatusMap}
+                    rawShifts={logic.rawShifts as any}
+                    onClose={() => setShowDebugPanel(false)}
                 />
             )}
         </DashboardLayout>
     );
-}
+};
+
+export default OperacionesPage;
