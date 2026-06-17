@@ -170,6 +170,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
     // SUSCRIPCIONES
     useEffect(() => {
+        if (!empresaId) return; // esperar a que cargue el contexto de empresa
         const auth = getAuth();
         if (auth.currentUser) setOperatorInfo({ name: auth.currentUser.email?.split('@')[0] || 'Op', startTime: new Date() });
         const unsubs: Function[] = [];
@@ -224,6 +225,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [empresaId, migracionCompleta, scopeEmpresa, refreshKey]);
 
     useEffect(() => {
+        if (!empresaId) return; // esperar a que cargue el contexto de empresa
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
         const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
         const turnosBase = query(
@@ -1010,10 +1012,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         rawShifts, processedData, listData, stats,
         employees, servicesSLA, filteredObjectives, uniqueClients,
         objectives, operatorInfo, now,
-        viewTab, setViewTab, selectedClientId, setSelectedClientId,
-        filterText, setFilterText, isCompact, setIsCompact,
-        publishStatusMap, recentLogs,
-        isReady, isStable,
+        viewTab, setViewTab, selectedClientId, setSelectedClientId,        filterText, setFilterText, isCompact, setIsCompact,
+        publishStatusMap, recentLogs, isReady, isStable,
         handleAction,
     };
 };

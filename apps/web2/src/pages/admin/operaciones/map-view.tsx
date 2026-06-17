@@ -45,12 +45,24 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 };
 
 // --- MODALES (INTEGRADOS) ---
-const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
+const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelievedIds, onRelieved }: any) => {
     if (!isOpen || !incomingShift) return null;
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
-    // Los retenes se convocan reactivamente — no aplica tardanza basada en el inicio del slot
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
-    const activeGuards = logic.processedData.filter((s:any) => s.objectiveId === incomingShift.objectiveId && s.positionName === incomingShift.positionName && (s.isPresent || s.status === 'COMPLETED') && s.id !== incomingShift.id && toDate(s.endDateObj).getTime() <= (start.getTime() + 3600000));
+    const activeGuards = logic.processedData.filter((s:any) => {
+        if (s.objectiveId !== incomingShift.objectiveId) return false;
+        if (s.positionName !== incomingShift.positionName) return false;
+        if (!(s.isPresent || s.status === 'COMPLETED') || s.isCompleted) return false;
+        if (s.id === incomingShift.id) return false;
+        if (recentlyRelievedIds?.has?.(s.id)) return false;
+        // Guardias retenidos: solo los cuyo turno terminó ≤45 min antes del turno entrante
+        if (s.isRetention) {
+            const scheduledEnd = toDate(s.endDateObj).getTime();
+            return scheduledEnd >= start.getTime() - 45 * 60000;
+        }
+        const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
+        return minutesUntilEnd <= 15;
+    });
     const handleConfirm = async (prevShiftId: string | null) => {
         try {
             const batch = writeBatch(db);
@@ -68,7 +80,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic }: any) => {
                 }
             });
             toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
-            onClose();
+            if (prevShiftId && onRelieved) onRelieved(prevShiftId);
+            else onClose();
         } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
     };
     return (
@@ -866,6 +879,7 @@ export default function TacticalMapView() {
     // Nombre del operador actual (para marcar enGestion)
     const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {
+        if (!empresaId) return; // esperar a que cargue el contexto de empresa
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));
         const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
         const q = scopeEmpresa
@@ -939,6 +953,29 @@ export default function TacticalMapView() {
                 enGestionAt: serverTimestamp(),
             });
         } catch (e) { /* silencioso */ }
+    };
+
+    const handleDismissAllByType = async (type: string) => {
+        const toAtend = pendingNovedades.filter((n: any) => n.type === type);
+        if (!toAtend.length) return;
+        const auth = getAuth();
+        const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        try {
+            const batch = writeBatch(db);
+            toAtend.forEach((n: any) => {
+                batch.update(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA', atendidaAt: serverTimestamp(),
+                    atendidaPor: actorName, atendidaPorUid: auth.currentUser?.uid || null,
+                });
+            });
+            await batch.commit();
+            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'DESCARTAR_NOVEDADES_TIPO', module: 'OPERACIONES', actorName,
+                timestamp: serverTimestamp(),
+                details: `Descartó ${toAtend.length} novedades tipo ${type}.`,
+            }, empresaId)).catch(() => {});
+            toast.success(`${toAtend.length} novedades descartadas`);
+        } catch { toast.error('Error al descartar novedades'); }
     };
 
     const handleAtenderNovedad = async (novedad: any) => {
@@ -1195,54 +1232,84 @@ export default function TacticalMapView() {
                 );
                 const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
 
+                const NOV_TYPE_META: Record<string, { label: string; bg: string; border: string }> = {
+                    AUSENCIA_CORTO_PLAZO:        { label: 'URGENTE', bg: 'bg-red-600 text-white animate-pulse', border: 'border-l-red-600' },
+                    AVISO_AUSENCIA_ANTICIPADA:   { label: 'ANTIC',   bg: 'bg-amber-100 text-amber-800',         border: 'border-l-amber-400' },
+                    CONVOCATORIA_RETEN:          { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',       border: 'border-l-indigo-500' },
+                    FRANCO_TRABAJADO:            { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',       border: 'border-l-indigo-500' },
+                    VACANTE_PROTOCOLO_COBERTURA: { label: 'PROT',    bg: 'bg-orange-100 text-orange-700',       border: 'border-l-orange-500' },
+                    AUSENCIA_AUTO:               { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',           border: 'border-l-rose-500' },
+                    AUSENCIA_OPERATIVA:          { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',           border: 'border-l-rose-500' },
+                    POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',         border: 'border-l-amber-500' },
+                    RELEVO_NO_PRESENTADO:        { label: 'REL',     bg: 'bg-amber-100 text-amber-700',         border: 'border-l-amber-500' },
+                    RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
+                    RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
+                    RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
+                };
+                const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
+
                 const renderNovedad = (n: any) => {
                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
-                    const isAbsence = n.type === 'AUSENCIA_AUTO';
-                    const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
-                    const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
-                    const isRetencion = n.type === 'RETENCION_LARGA';
-                    const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
-                    const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
-                    const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-400' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                    const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                    const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                    const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isProto ? 'bg-orange-500 hover:bg-orange-600' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
-                    const ActionIcon = isCortoplazo ? Siren : isAnticipada ? BellRing : isProto ? Users : isAbsence ? UserX : isRelevo ? Clock : isRetencion ? Clock : CheckCircle;
+                    const meta = getNovMeta(n.type);
                     return (
                         <div key={n.id}
                             onClick={() => setDetailNovedad(n)}
-                            className={`px-3 py-2 flex items-start gap-2.5 border-l-4 ${leftBorder} border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-pointer`}>
-                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded w-14 text-center shrink-0 mt-0.5 ${typeBg}`}>{typeLabel}</span>
+                            className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-pointer`}>
                             <div className="flex-1 min-w-0">
-                                <p className="text-[11px] font-bold text-slate-800 leading-snug">
-                                    {n.employeeName || n.objectiveName || n.type}
+                                <p className="text-[11px] font-bold text-slate-800 leading-snug truncate">
+                                    {n.employeeName && n.objectiveName
+                                        ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                        : n.objectiveName || n.employeeName || n.type}
+                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
                                 </p>
-                                {(n.objectiveName && n.employeeName) && (
-                                    <p className="text-[10px] text-indigo-600 font-medium leading-tight mt-0.5">{n.objectiveName}{n.positionName ? ` · ${n.positionName}` : ''}</p>
-                                )}
-                                {n.description && (
-                                    <p className="text-[9px] text-slate-400 leading-tight mt-0.5 line-clamp-1">{n.description}</p>
-                                )}
+                                <p className="text-[9px] text-slate-400 leading-tight truncate">{n.description || '-'}</p>
                             </div>
-                            <div className="flex flex-col items-end gap-1 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0">
                                 <span className="text-[9px] text-slate-400 font-mono">
                                     {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
                                 </span>
-                                <div className="flex gap-1">
-                                    {n.employeePhone && (
-                                        <button onClick={(e) => { e.stopPropagation(); openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||'')); }}
-                                            className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100">
-                                            <MessageCircle size={10}/>
-                                        </button>
-                                    )}
-                                    <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                        className={`p-1.5 text-white rounded-lg transition-colors ${actionBg}`} title="Atender">
-                                        <ActionIcon size={10}/>
+                                {n.employeePhone && (
+                                    <button onClick={(e) => { e.stopPropagation(); openWhatsApp(n.employeePhone, waMensaje.bienvenida(n.employeeName||'')); }}
+                                        className="p-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100">
+                                        <MessageCircle size={10}/>
                                     </button>
-                                </div>
+                                )}
+                                <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
+                                    className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atender">
+                                    <CheckCircle size={10}/>
+                                </button>
                             </div>
                         </div>
                     );
+                };
+
+                const renderNovedasGrouped = (items: any[]) => {
+                    const groups: { type: string; items: any[] }[] = [];
+                    const seen = new Map<string, any[]>();
+                    items.forEach((n: any) => {
+                        if (!seen.has(n.type)) { seen.set(n.type, []); groups.push({ type: n.type, items: seen.get(n.type)! }); }
+                        seen.get(n.type)!.push(n);
+                    });
+                    return groups.map(({ type, items: groupItems }) => {
+                        const meta = getNovMeta(type);
+                        return (
+                            <div key={type}>
+                                <div className="px-3 py-1 flex items-center gap-2 bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${meta.bg}`}>{meta.label}</span>
+                                    <span className="text-[9px] font-bold text-slate-500 flex-1 truncate">{type.replace(/_/g,' ')}</span>
+                                    <span className="text-[9px] text-slate-400 font-mono">{groupItems.length}</span>
+                                    {groupItems.length > 1 && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleDismissAllByType(type); }}
+                                            className="text-[9px] font-bold text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors shrink-0"
+                                            title={`Descartar todas (${groupItems.length})`}
+                                        >✕ todas</button>
+                                    )}
+                                </div>
+                                {groupItems.map(renderNovedad)}
+                            </div>
+                        );
+                    });
                 };
 
                 return !notifPanelOpen ? (
@@ -1332,7 +1399,7 @@ export default function TacticalMapView() {
                                         <span className="text-[9px] font-black text-red-700 uppercase flex-1">Novedades urgentes</span>
                                         <span className="text-[9px] font-bold text-red-500">{urgentNovedades.length}</span>
                                     </div>
-                                    {urgentNovedades.map(renderNovedad)}
+                                    {renderNovedasGrouped(urgentNovedades)}
                                 </div>
                             )}
 
@@ -1344,7 +1411,7 @@ export default function TacticalMapView() {
                                         <span className="text-[9px] font-black text-orange-700 uppercase flex-1">Protocolos activos</span>
                                         <span className="text-[9px] font-bold text-orange-500">{protNovedades.length}</span>
                                     </div>
-                                    {protNovedades.map(renderNovedad)}
+                                    {renderNovedasGrouped(protNovedades)}
                                 </div>
                             )}
 
@@ -1356,7 +1423,7 @@ export default function TacticalMapView() {
                                         <span className="text-[9px] font-black text-slate-500 uppercase flex-1">Otras novedades</span>
                                         <span className="text-[9px] font-bold text-slate-400">{otherNovedades.length}</span>
                                     </div>
-                                    {otherNovedades.map(renderNovedad)}
+                                    {renderNovedasGrouped(otherNovedades)}
                                 </div>
                             )}
 
@@ -1409,7 +1476,7 @@ export default function TacticalMapView() {
             />
             <WorkedDayOffModal
                 isOpen={workedFrancoData.isOpen}
-                onClose={() => setWorkedFrancoData({ isOpen: false, shift: null })}
+                onClose={() => setWorkedFrancoData({isOpen:false, shift:null})}
                 shift={workedFrancoData.shift}
                 availableShifts={logic.processedData}
                 referenceDate={logic.now}
@@ -1427,9 +1494,30 @@ export default function TacticalMapView() {
                 onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
                 shift={rrhhVacancyData.shift}
                 onCoverageProtocol={(s:any) => setCoverageData({isOpen:true, shift:s})}
-                onSendToPlanning={handleReportPlanning}
+                onSendToPlanning={(s:any) => { logic.handleAction('SEND_TO_PLANNING', s.id, null); setRrhhVacancyData({isOpen:false, shift:null}); }}
             />
-            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData(d => ({...d, isOpen:false}))} ctx={waData.ctx}/>
+            <WAComposeModal
+                isOpen={waData.isOpen}
+                onClose={() => setWaData({isOpen:false, ctx:{employeeName:'', phone:''}})}
+                ctx={waData.ctx}
+            />
+            {detailNovedad && (
+                <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setDetailNovedad(null)}>
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-black text-slate-500 uppercase">{detailNovedad.type?.replace(/_/g,' ')}</span>
+                            <button onClick={() => setDetailNovedad(null)} className="p-1 hover:bg-slate-100 rounded-lg"><X size={14}/></button>
+                        </div>
+                        <p className="font-bold text-slate-800 text-sm mb-1">{detailNovedad.employeeName || detailNovedad.objectiveName || '-'}</p>
+                        {detailNovedad.objectiveName && detailNovedad.employeeName && <p className="text-xs text-indigo-600 mb-1">{detailNovedad.objectiveName}{detailNovedad.positionName ? ` · ${detailNovedad.positionName}` : ''}</p>}
+                        {detailNovedad.description && <p className="text-xs text-slate-500 mb-3">{detailNovedad.description}</p>}
+                        <button onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
+                            className="w-full py-2.5 bg-slate-800 text-white text-xs font-bold rounded-xl hover:bg-slate-900 transition-colors">
+                            Atender novedad
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
