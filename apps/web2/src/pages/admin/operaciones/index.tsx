@@ -101,7 +101,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             if (sEnd <= sStart) sEnd += 86400000;
             const sDurMin = (sEnd - sStart) / 60000;
             if (Math.abs(sDurMin - incomingDurMin) > 90) return false;
-            if (s.isRetention) return true;
+            if (s.isRetention) {
+                // Solo retenidos cuyo turno terminó a ≤45 min antes del turno entrante.
+                // Evita mostrar guardias retenidos de franjas horarias anteriores.
+                const scheduledEnd = toDate(s.endDateObj).getTime();
+                return scheduledEnd >= start.getTime() - 45 * 60000;
+            }
             const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
             return minutesUntilEnd <= 15;
         })
@@ -1555,10 +1560,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
                             return shiftEnded
                                 ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
-                                : <div className="flex gap-1.5">
-                                    <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde"><UserCheck size={11}/>LLEGÓ TARDE</button>
-                                    <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>
-                                  </div>;
+                                : <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>;
                           })()
                         : <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>CONFIRMAR AUSENCIA</button>
                     )}
