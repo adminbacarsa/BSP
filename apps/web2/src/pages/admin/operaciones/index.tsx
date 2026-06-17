@@ -287,22 +287,22 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 });
             }
             await batch.commit();
-            // Confirmar que el write llegó al servidor antes de cerrar el modal.
-            // Con persistentLocalCache el commit resuelve localmente (IndexedDB) aunque
-            // no haya llegado al servidor. Si hay problema de red en el celular, el cron
-            // detectarAusencias corre y marca ausente antes de que llegue el update.
-            // waitForPendingWrites espera confirmación del servidor (max 8s).
-            await Promise.race([
+
+            // Cerrar el modal inmediatamente — el write ya está en IndexedDB local.
+            if (prevShiftId) onRelieved?.(prevShiftId);
+            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
+            onClose();
+
+            // Background: verificar sync con servidor (no bloquea UI)
+            Promise.race([
                 waitForPendingWrites(db),
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('âš ï¸ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
                 }
-            });
+            }).catch(() => {});
 
-            // Registrar como relevado para evitar que aparezca en siguientes modales (race condition)
-            if (prevShiftId) onRelieved?.(prevShiftId);
 
             // â"€â"€ Audit log: presente / llegada tarde / relevo â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             {
@@ -342,8 +342,6 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 }
             }
 
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
-            onClose();
         } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
     };
 

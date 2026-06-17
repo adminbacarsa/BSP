@@ -170,7 +170,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
     // SUSCRIPCIONES
     useEffect(() => {
-        if (!empresaId) return; // esperar a que cargue el contexto de empresa
+        if (!empresaId || empresa === null) return; // esperar a que cargue el doc de empresa (migracionCompleta puede cambiar)
         const auth = getAuth();
         if (auth.currentUser) setOperatorInfo({ name: auth.currentUser.email?.split('@')[0] || 'Op', startTime: new Date() });
         const unsubs: Function[] = [];
@@ -222,10 +222,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 .map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details })));
         }));
         return () => { unsubs.forEach(u => u()); };
-    }, [empresaId, migracionCompleta, scopeEmpresa, refreshKey]);
+    }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
 
     useEffect(() => {
-        if (!empresaId) return; // esperar a que cargue el contexto de empresa
+        if (!empresaId || empresa === null) return; // esperar a que cargue el doc de empresa
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
         const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
         const turnosBase = query(
@@ -243,7 +243,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setRefreshKey(k => k + 1);
         });
         return () => unsub();
-    }, [empresaId, migracionCompleta, scopeEmpresa, refreshKey]);
+    }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
     const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);

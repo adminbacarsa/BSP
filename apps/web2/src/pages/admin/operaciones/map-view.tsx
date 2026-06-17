@@ -71,17 +71,21 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                 batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' });
             }
             await batch.commit();
-            await Promise.race([
+
+            // Cerrar inmediatamente — write ya en IndexedDB local
+            if (prevShiftId && onRelieved) onRelieved(prevShiftId);
+            else onClose();
+            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
+
+            // Background: sync check (no bloquea UI)
+            Promise.race([
                 waitForPendingWrites(db),
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
             ]).catch(err => {
                 if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado antes de cerrar.');
+                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
                 }
-            });
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
-            if (prevShiftId && onRelieved) onRelieved(prevShiftId);
-            else onClose();
+            }).catch(() => {});
         } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
     };
     return (
@@ -879,7 +883,7 @@ export default function TacticalMapView() {
     // Nombre del operador actual (para marcar enGestion)
     const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {
-        if (!empresaId) return; // esperar a que cargue el contexto de empresa
+        if (!empresaId || empresa === null) return; // esperar a que cargue el doc de empresa (migracionCompleta puede cambiar)
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));
         const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
         const q = scopeEmpresa
@@ -895,7 +899,7 @@ export default function TacticalMapView() {
             }
         );
         return () => unsub();
-    }, [empresaId, migracionCompleta, refreshKey]);
+    }, [empresaId, empresa, migracionCompleta, refreshKey]);
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const prevPendingCount = useRef(0);
     useEffect(() => {
