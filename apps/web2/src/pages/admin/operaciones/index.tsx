@@ -9,7 +9,7 @@ import {
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
-    FileText
+    FileText, Volume2, VolumeX
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -1718,6 +1718,51 @@ export default function OperacionesPage() {
     const [bitacoraFiltroTipo, setBitacoraFiltroTipo] = useState<string>('');
     const [bitacoraFiltroGuardia, setBitacoraFiltroGuardia] = useState(false);
     const bitacoraLastOpenRef = useRef<number>(Date.now());
+    // ── Alertas sonoras ──────────────────────────────────────────────────────────
+    const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+        try { return localStorage.getItem('ops_sound_enabled') !== 'false'; } catch { return true; }
+    });
+    const audioCtxRef = useRef<AudioContext | null>(null);
+    const prevPendingCountRef = useRef<number>(-1);
+    const getAudioCtx = () => {
+        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        return audioCtxRef.current;
+    };
+    const playAlertSound = (urgent: boolean) => {
+        try {
+            const ctx = getAudioCtx();
+            if (ctx.state === 'suspended') ctx.resume();
+            const now = ctx.currentTime;
+            const gain = ctx.createGain();
+            gain.connect(ctx.destination);
+            if (urgent) {
+                // Dos tonos cortos descendentes — más notorio
+                [[880, 0, 0.12], [660, 0.15, 0.12], [880, 0.32, 0.12], [660, 0.47, 0.12]].forEach(([freq, start, dur]) => {
+                    const osc = ctx.createOscillator();
+                    const g2 = ctx.createGain();
+                    osc.type = 'square'; osc.frequency.value = freq as number;
+                    g2.gain.setValueAtTime(0.18, now + (start as number));
+                    g2.gain.exponentialRampToValueAtTime(0.001, now + (start as number) + (dur as number));
+                    osc.connect(g2); g2.connect(ctx.destination);
+                    osc.start(now + (start as number)); osc.stop(now + (start as number) + (dur as number));
+                });
+            } else {
+                // Un tono suave
+                const osc = ctx.createOscillator();
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.type = 'sine'; osc.frequency.setValueAtTime(660, now);
+                osc.frequency.linearRampToValueAtTime(880, now + 0.15);
+                osc.connect(gain); osc.start(now); osc.stop(now + 0.3);
+            }
+        } catch { /* Safari sin permiso */ }
+    };
+    const toggleSound = () => {
+        const next = !soundEnabled;
+        setSoundEnabled(next);
+        try { localStorage.setItem('ops_sound_enabled', String(next)); } catch {}
+        if (next) playAlertSound(false); // preview al activar
+    };
     const [cierreGuardiaOpen, setCierreGuardiaOpen] = useState(false);
     const [cierreObs, setCierreObs] = useState('');
     const [cierreLoading, setCierreLoading] = useState(false);
@@ -2126,9 +2171,13 @@ export default function OperacionesPage() {
         const fmt24 = (d: any) => { try { return toDate(d).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', hour12: false, timeZone: tz }); } catch { return '--:--'; } };
         const fmtDT = (d: Date) => d.toLocaleString('es-AR', { timeZone: tz, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12: false });
         const fmtDateLong = (d: Date) => d.toLocaleDateString('es-AR', { timeZone: tz, weekday:'long', day:'2-digit', month:'long', year:'numeric' });
-        const operatorName = session.activeSession?.operatorName || 'Sistema Automático';
-        const guardStart   = session.activeSession?.startTime ? fmtDT(session.activeSession.startTime) : 'No registrado';
+        // Sanitizar texto para jsPDF: remover emojis y caracteres no-latin que corrompan el PDF
+        const sanitize = (s: string) => (s || '').replace(/[^ -ÿ]/g, '').replace(/\s+/g, ' ').trim();
+        const operatorName = session.activeSession?.operatorName || session.mySession?.operatorName || 'Sistema Automatico';
+        const guardStart   = session.activeSession?.startTime ? fmtDT(session.activeSession.startTime)
+                           : session.mySession?.startTime    ? fmtDT(session.mySession.startTime) : 'No registrado';
         const reportTime   = fmtDT(now);
+        const empresaNombre = empresa?.name || empresaId || 'Centro de Operaciones';
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
 
@@ -2180,7 +2229,7 @@ export default function OperacionesPage() {
         pdf.setFontSize(28); pdf.setFont('helvetica', 'bold');
         pdf.text('INFORME DE GUARDIA', pageW / 2, 50, { align: 'center' });
         pdf.setFontSize(13); pdf.setFont('helvetica', 'normal');
-        pdf.text('Centro de Operaciones de Seguridad Privada', pageW / 2, 62, { align: 'center' });
+        pdf.text(sanitize(empresaNombre), pageW / 2, 62, { align: 'center' });
         pdf.setFontSize(10);
         pdf.text(fmtDateLong(now).toUpperCase(), pageW / 2, 76, { align: 'center' });
 
@@ -2281,10 +2330,10 @@ export default function OperacionesPage() {
         const logRows = pdfOpsLogs
             .map((log:any) => [
                 fmt24(log.time),
-                (log.action||'LOG').replace('MANUAL_',''),
-                log.formattedActor||'Sistema',
-                log.targetEmployee||'-',
-                log.fullDetail||log.details||'-',
+                sanitize((log.action||'LOG').replace('MANUAL_','')),
+                sanitize(log.formattedActor||'Sistema'),
+                sanitize(log.targetEmployee||'-'),
+                sanitize(log.fullDetail||log.details||'-'),
             ]);
         autoTable(pdf, {
             head: [['Hora','Evento','Operador','Guardia / Objetivo','Detalle']],
@@ -2305,12 +2354,28 @@ export default function OperacionesPage() {
             VACANTE_NO_CUBIERTA:'SIN CUBRIR', BAJA_CUBIERTA:'BAJA CUBIERTA',
             RETENCION_LARGA:'RETENCIÓN', POSICION_SIN_RELEVO:'SIN RELEVO',
         } as any)[t] || t;
-        const pendientesAlerts = empNovedades.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida'&&n.type!=='VACANTE_A_PLANIFICACION');
-        const atendidasAlerts  = empNovedades.filter((n:any)=>n.status==='ATENDIDA'||n.status==='atendida');
+        // Filtrar alertas al día del informe (inicio del día local)
+        const todayStartMs = new Date(now.toLocaleDateString('es-AR', { timeZone: tz }) + 'T00:00:00-03:00').getTime();
+        const alertsToday  = empNovedades.filter((n:any) => {
+            if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            const tsMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
+            return tsMs >= todayStartMs;
+        });
+        // Deduplicar: misma clave tipo+objetivo+posicion+hora-redondeada-a-5min
+        const seenAlertKeys = new Set<string>();
+        const dedupedAlerts = alertsToday.filter((n: any) => {
+            const tsMin = n.createdAt?.seconds ? Math.floor(n.createdAt.seconds / 300) : 0; // redondear a 5 min
+            const key = `${n.type}|${n.objectiveId||''}|${n.positionName||''}|${n.employeeId||''}|${tsMin}`;
+            if (seenAlertKeys.has(key)) return false;
+            seenAlertKeys.add(key);
+            return true;
+        });
+        const pendientesAlerts = dedupedAlerts.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida');
+        const atendidasAlerts  = dedupedAlerts.filter((n:any)=>n.status==='ATENDIDA'||n.status==='atendida');
         const alertRows = [...pendientesAlerts, ...atendidasAlerts].map((n:any) => {
             const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds*1000).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}) : '--';
             const st = (n.status==='ATENDIDA'||n.status==='atendida') ? 'ATENDIDA' : 'PENDIENTE';
-            return [ts, alertTypeLabel(n.type), n.objectiveName||'-', n.positionName||'-', n.description||'-', st];
+            return [ts, alertTypeLabel(n.type), sanitize(n.objectiveName||'-'), sanitize(n.positionName||'-'), sanitize(n.description||'-'), st];
         });
         autoTable(pdf, {
             head: [['Hora','Tipo','Objetivo','Posición','Descripción','Estado']],
@@ -3740,25 +3805,22 @@ export default function OperacionesPage() {
                             {/* Observaciones */}
                             <div className="px-5 py-4">
                                 <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Observaciones del operador</label>
-                                <textarea
-                                    value={cierreObs}
-                                    onChange={e => setCierreObs(e.target.value)}
-                                    placeholder="Sin novedad al cierre..."
-                                    rows={3}
-                                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-slate-400"
+                               <textarea
+                                    className="w-full border border-slate-200 rounded-xl p-3 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-slate-300"
+                                    rows={3} placeholder="Novedades adicionales, observaciones del turno..."
+                                    value={cierreObs} onChange={e => setCierreObs(e.target.value)}
                                 />
-                                <div className="flex gap-2 mt-3">
-                                    <button onClick={() => setCierreGuardiaOpen(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors">Cancelar</button>
-                                    <button onClick={handleCierreGuardia} disabled={cierreLoading}
-                                        className="flex-1 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-900 transition-colors disabled:opacity-50">
-                                        {cierreLoading ? 'Guardando...' : 'Confirmar cierre'}
-                                    </button>
-                                </div>
+                            </div>
+                            {/* Botones */}
+                            <div className="px-5 py-4 flex gap-3">
+                                <button onClick={() => setCierreGuardiaOpen(false)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50">Cancelar</button>
+                                <button onClick={handleCierreGuardia} disabled={cierreLoading} className="flex-2 py-3 px-6 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-700 disabled:opacity-50">
+                                    {cierreLoading ? 'Guardando...' : 'Guardar Informe'}
+                                </button>
                             </div>
                         </div>
                     </div>
-                );
-            })()}
+            )})()}
         </DashboardLayout>
     );
 }
