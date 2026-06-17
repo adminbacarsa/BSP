@@ -2049,6 +2049,19 @@ export default function OperacionesPage() {
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
 
+    // ── Alertas sonoras: disparar cuando llegan novedades nuevas
+    useEffect(() => {
+        if (!soundEnabled) { prevPendingCountRef.current = pendingNovedades.length; return; }
+        if (prevPendingCountRef.current < 0) { prevPendingCountRef.current = pendingNovedades.length; return; }
+        if (pendingNovedades.length > prevPendingCountRef.current) {
+            const hasUrgent = pendingNovedades.some((n: any) =>
+                ['VACANTE_PROTOCOLO_COBERTURA', 'VACANTE_NO_CUBIERTA'].includes(n.type)
+            );
+            playAlertSound(hasUrgent);
+        }
+        prevPendingCountRef.current = pendingNovedades.length;
+    }, [pendingNovedades.length, soundEnabled]);
+
     // â"€â"€ Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
     const autoExpiredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
@@ -3330,6 +3343,15 @@ export default function OperacionesPage() {
                                 <FileText size={10}/>CIERRE
                               </button>
                             )}
+                            <button onClick={toggleSound}
+                              className={`p-1 rounded-lg transition-colors ${
+                                soundEnabled
+                                  ? 'bg-blue-100 hover:bg-blue-200 text-blue-600'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-400'
+                              }`}
+                              title={soundEnabled ? 'Silenciar alertas' : 'Activar alertas sonoras'}>
+                              {soundEnabled ? <Volume2 size={11}/> : <VolumeX size={11}/>}
+                            </button>
                             <button onClick={generateDailyReport} className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg" title="Exportar PDF">
                               <Printer size={11}/>
                             </button>
@@ -3791,7 +3813,7 @@ export default function OperacionesPage() {
                             {/* Novedades pendientes */}
                             {pendingNovedades.length > 0 && (
                             <div className="px-5 py-3 border-b border-slate-100">
-                                <p className="text-[10px] font-black uppercase text-rose-500 mb-2">Novedades pendientes al cierre</p>
+                                <p className="text-[10px] font-black uppercase text-rose-500 mb-2">⚠ Novedades pendientes al cierre</p>
                                 <div className="space-y-1 max-h-24 overflow-y-auto">
                                     {pendingNovedades.map((n:any) => (
                                         <div key={n.id} className="flex items-center gap-2 text-[9px]">
@@ -3805,22 +3827,25 @@ export default function OperacionesPage() {
                             {/* Observaciones */}
                             <div className="px-5 py-4">
                                 <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Observaciones del operador</label>
-                               <textarea
-                                    className="w-full border border-slate-200 rounded-xl p-3 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-slate-300"
-                                    rows={3} placeholder="Novedades adicionales, observaciones del turno..."
-                                    value={cierreObs} onChange={e => setCierreObs(e.target.value)}
+                                <textarea
+                                    value={cierreObs}
+                                    onChange={e => setCierreObs(e.target.value)}
+                                    placeholder="Sin novedad al cierre..."
+                                    rows={3}
+                                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-slate-400"
                                 />
-                            </div>
-                            {/* Botones */}
-                            <div className="px-5 py-4 flex gap-3">
-                                <button onClick={() => setCierreGuardiaOpen(false)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50">Cancelar</button>
-                                <button onClick={handleCierreGuardia} disabled={cierreLoading} className="flex-2 py-3 px-6 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-700 disabled:opacity-50">
-                                    {cierreLoading ? 'Guardando...' : 'Guardar Informe'}
-                                </button>
+                                <div className="flex gap-2 mt-3">
+                                    <button onClick={() => setCierreGuardiaOpen(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors">Cancelar</button>
+                                    <button onClick={handleCierreGuardia} disabled={cierreLoading}
+                                        className="flex-1 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-900 transition-colors disabled:opacity-50">
+                                        {cierreLoading ? 'Guardando...' : 'Confirmar cierre'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-            )})()}
+                );
+            })()}
         </DashboardLayout>
     );
 }
