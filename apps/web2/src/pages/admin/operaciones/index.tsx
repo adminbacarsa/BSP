@@ -8,7 +8,8 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
+    FileText
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -1712,6 +1713,14 @@ export default function OperacionesPage() {
     const [expandedObjectiveId, setExpandedObjectiveId] = useState<string | null>(null);
     const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
+    const [bitacoraExpanded, setBitacoraExpanded] = useState<string | null>(null);
+    const [bitacoraFiltroObj, setBitacoraFiltroObj] = useState<string>('');
+    const [bitacoraFiltroTipo, setBitacoraFiltroTipo] = useState<string>('');
+    const [bitacoraFiltroGuardia, setBitacoraFiltroGuardia] = useState(false);
+    const bitacoraLastOpenRef = useRef<number>(Date.now());
+    const [cierreGuardiaOpen, setCierreGuardiaOpen] = useState(false);
+    const [cierreObs, setCierreObs] = useState('');
+    const [cierreLoading, setCierreLoading] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
@@ -2037,15 +2046,61 @@ export default function OperacionesPage() {
         });
     }, [empNovedades, logic.processedData]);
 
+    const ACTION_LABELS: Record<string, string> = {
+        CHECKIN: 'Ingreso', CHECK_IN: 'Ingreso', GUARDIA_INICIADA: 'Guardia iniciada',
+        CHECKOUT: 'Salida', CHECK_OUT: 'Salida', GUARDIA_FINALIZADA: 'Guardia cerrada',
+        HANDOVER: 'Ingreso (relevo)', PRESENTE: 'Presente', ENTRADA: 'Entrada',
+        MARK_ABSENT: 'Ausencia declarada', AUSENTE: 'Ausencia', ATTENDANCE: 'Asistencia',
+        MANUAL_ATTENDANCE: 'Asistencia manual',
+        COVERAGE: 'Cobertura', COBERTURA_RELEVO: 'Cobertura relevo',
+        INTERRUPT: 'Baja anticipada', BAJA_SERVICIO: 'Baja anticipada',
+        RETENCION: 'Retención', EXTENSION_TURNO: 'Extensión turno',
+        CONVOCATORIA_RETEN: 'Retén convocado', ADELANTO_TURNO: 'Adelanto turno',
+        FRANCO_TRABAJADO: 'Franco trabajado', INTERCAMBIO_TURNO: 'Intercambio turno',
+        WORKED_FRANCO: 'Franco trabajado',
+        REPORT_PLANNING: 'Devuelto a planificación', VACANCY: 'Vacante',
+        REPORTE: 'Reporte', LLEGADA_TARDE: 'Llegada tarde',
+        AUSENCIA_AUTO: 'Ausencia automática', NOVEDADES: 'Novedad',
+        VACANTE_PROTOCOLO_COBERTURA: 'Protocolo cobertura',
+    };
+    const ACTION_DOT: Record<string, string> = {
+        CHECKIN: 'bg-emerald-500', CHECK_IN: 'bg-emerald-500', GUARDIA_INICIADA: 'bg-indigo-500',
+        CHECKOUT: 'bg-purple-500', CHECK_OUT: 'bg-purple-500', GUARDIA_FINALIZADA: 'bg-indigo-400',
+        HANDOVER: 'bg-emerald-400', PRESENTE: 'bg-emerald-400',
+        MARK_ABSENT: 'bg-rose-500', AUSENTE: 'bg-rose-500', ATTENDANCE: 'bg-amber-500',
+        COVERAGE: 'bg-orange-500', COBERTURA_RELEVO: 'bg-orange-500',
+        INTERRUPT: 'bg-red-600', BAJA_SERVICIO: 'bg-red-600',
+        RETENCION: 'bg-orange-400', EXTENSION_TURNO: 'bg-orange-400',
+        CONVOCATORIA_RETEN: 'bg-orange-500', ADELANTO_TURNO: 'bg-orange-300',
+        FRANCO_TRABAJADO: 'bg-sky-400', WORKED_FRANCO: 'bg-sky-400',
+        REPORT_PLANNING: 'bg-slate-500', LLEGADA_TARDE: 'bg-amber-400',
+    };
     const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY','LLEGADA_TARDE','ADELANTO_TURNO','CONVOCATORIA_RETEN','FRANCO_TRABAJADO','BAJA_SERVICIO','INTERCAMBIO_TURNO','GUARDIA_INICIADA','GUARDIA_FINALIZADA','COBERTURA_RELEVO','EXTENSION_TURNO']);
     const filteredBitacora = useMemo(() => {
-        const logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
-        if (bitacoraTab === 'reciente') return logs.slice(0, 20);
+        let logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
+        if (bitacoraFiltroGuardia && session.mySession?.startTime) {
+            const guardStart = session.mySession.startTime.getTime();
+            logs = logs.filter((l: any) => l.time && l.time.getTime() >= guardStart);
+        }
+        if (bitacoraFiltroObj) {
+            logs = logs.filter((l: any) => l.objectiveId === bitacoraFiltroObj || l.objectiveName === bitacoraFiltroObj);
+        }
+        if (bitacoraFiltroTipo) {
+            logs = logs.filter((l: any) => {
+                const a = (l.action || '').toUpperCase();
+                if (bitacoraFiltroTipo === 'ingresos') return a.includes('CHECK') || a === 'HANDOVER' || a === 'PRESENTE' || a === 'ENTRADA';
+                if (bitacoraFiltroTipo === 'ausencias') return a.includes('ABSENT') || a === 'AUSENTE' || a === 'ATTENDANCE';
+                if (bitacoraFiltroTipo === 'coberturas') return a.includes('COVERAGE') || a === 'RETENCION' || a === 'CONVOCATORIA_RETEN' || a === 'FRANCO_TRABAJADO' || a === 'ADELANTO_TURNO';
+                if (bitacoraFiltroTipo === 'sistema') return a.includes('GUARDIA') || a === 'REPORT_PLANNING' || a === 'VACANCY';
+                return true;
+            });
+        }
+        if (bitacoraTab === 'reciente') return logs.slice(0, 50);
         return logs.filter((l: any) => {
             const a = (l.action || '').toUpperCase();
             return OPS_ACTIONS.has(a) || a.includes('CHECK') || a.includes('GUARD') || a.includes('TURNO') || a.includes('SHIFT') || a.includes('ABSENT') || a.includes('HANDOVER') || a.includes('COVERAGE') || a.includes('FRANCO') || a.includes('INTERRUPT');
         });
-    }, [logic.recentLogs, bitacoraTab]);
+    }, [logic.recentLogs, bitacoraTab, bitacoraFiltroGuardia, bitacoraFiltroObj, bitacoraFiltroTipo, session.mySession]);
 
     const mapWindowRef = useRef<Window | null>(null);
     const handleUndockMap = () => {
@@ -2452,6 +2507,49 @@ export default function OperacionesPage() {
             toast.info(`Aviso de ausencia de ${shift.employeeName} registrado. Notificado a Planificación.`);
         } catch (e: any) {
             toast.error('Error al registrar novedad: ' + (e?.message || e?.code || String(e)));
+        }
+    };
+    const handleCierreGuardia = async () => {
+        if (!session.mySession) return;
+        setCierreLoading(true);
+        try {
+            const guardStart = session.mySession.startTime;
+            const now = new Date();
+            const logsDeGuardia = logic.recentLogs.filter((l: any) => l.time && l.time.getTime() >= guardStart.getTime());
+            const resumen = {
+                ingresos: logsDeGuardia.filter((l:any) => ['CHECKIN','CHECK_IN','HANDOVER','PRESENTE'].includes((l.action||'').toUpperCase())).length,
+                salidas: logsDeGuardia.filter((l:any) => ['CHECKOUT','CHECK_OUT'].includes((l.action||'').toUpperCase())).length,
+                ausencias: logsDeGuardia.filter((l:any) => ['MARK_ABSENT','AUSENTE','ATTENDANCE'].includes((l.action||'').toUpperCase())).length,
+                coberturas: logsDeGuardia.filter((l:any) => ['COVERAGE','COBERTURA_RELEVO'].includes((l.action||'').toUpperCase())).length,
+                retenes: logsDeGuardia.filter((l:any) => ['CONVOCATORIA_RETEN','ADELANTO_TURNO','FRANCO_TRABAJADO'].includes((l.action||'').toUpperCase())).length,
+                bajas: logsDeGuardia.filter((l:any) => ['INTERRUPT','BAJA_SERVICIO'].includes((l.action||'').toUpperCase())).length,
+            };
+            const { addDoc: _addDoc, collection: col } = await import('firebase/firestore');
+            await _addDoc(col(db, 'informes_guardia'), stampEmpresaId({
+                operatorId: session.mySession.operatorId,
+                operatorName: session.mySession.operatorName || getAuth().currentUser?.displayName || 'Operador',
+                guardiaStart: Timestamp.fromDate(guardStart),
+                guardiaEnd: Timestamp.fromDate(now),
+                observaciones: cierreObs,
+                resumen,
+                totalEventos: logsDeGuardia.length,
+                novedadesPendientes: pendingNovedades.length,
+                createdAt: serverTimestamp(),
+            }, String(empresaId).trim()));
+            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                action: 'GUARDIA_CERRADA',
+                module: 'OPERACIONES',
+                actorName: session.mySession.operatorName || getAuth().currentUser?.displayName || 'Operador',
+                timestamp: serverTimestamp(),
+                details: `Cierre de guardia. ${resumen.ingresos} ingresos, ${resumen.ausencias} ausencias, ${resumen.coberturas} coberturas. Novedades pendientes: ${pendingNovedades.length}.`,
+            }, String(empresaId).trim()));
+            toast.success('Informe de cierre guardado');
+            setCierreGuardiaOpen(false);
+            setCierreObs('');
+        } catch(e: any) {
+            toast.error('Error al guardar informe: ' + (e?.message || String(e)));
+        } finally {
+            setCierreLoading(false);
         }
     };
     const handleReportPlanning = async (shift: any) => {
@@ -3101,78 +3199,135 @@ export default function OperacionesPage() {
 
                     </div>
 
-                    {/* â"€â"€ BITÁCORA collapsible â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
-                    <div className={`border-t border-slate-200 bg-white flex flex-col shrink-0 transition-all duration-200 ${bitacoraOpen ? 'h-80' : ''}`}>
-                      {/* Header — always visible, click to toggle */}
-                      <div className="px-3 py-1.5 flex items-center gap-1 bg-slate-50 cursor-pointer select-none"
-                           onClick={() => setBitacoraOpen(v => !v)}>
+                    {/* ── BITÁCORA collapsible ─────────────────────── */}
+                    <div className={`border-t border-slate-200 bg-white flex flex-col shrink-0 transition-all duration-200 ${bitacoraOpen ? 'h-96' : ''}`}>
+                      {/* Header */}
+                      <div className="px-3 py-1.5 flex items-center gap-1.5 bg-slate-50 cursor-pointer select-none"
+                           onClick={() => { setBitacoraOpen(v => { if (!v) bitacoraLastOpenRef.current = Date.now(); return !v; }); }}>
                         <ClipboardList size={12} className="text-slate-400 shrink-0"/>
                         <span className="text-[9px] font-black text-slate-500 uppercase flex-1">Bitácora</span>
-                        {!bitacoraOpen && filteredBitacora.length > 0 && (
-                          <span className="text-[9px] text-slate-400 mr-1">{filteredBitacora.length} eventos</span>
+                        {!bitacoraOpen && logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length > 0 && (
+                          <span className="text-[9px] text-slate-400 mr-1">{logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length} eventos</span>
                         )}
                         {!bitacoraOpen && pendingNovedades.length > 0 && (
                           <span className="text-[9px] font-black bg-rose-500 text-white px-1.5 rounded-full animate-pulse mr-1">{pendingNovedades.length}</span>
                         )}
                         {bitacoraOpen ? <ChevronDown size={12} className="text-slate-400"/> : <ChevronRight size={12} className="text-slate-400"/>}
                       </div>
-                      {/* Content — only when open */}
                       {bitacoraOpen && (<>
-                        <div className="px-2 py-1 border-b border-slate-100 flex items-center gap-1 bg-slate-50" onClick={e => e.stopPropagation()}>
+                        {/* Tabs */}
+                        <div className="px-2 py-1 border-b border-slate-100 flex items-center gap-1 bg-slate-50 flex-wrap" onClick={e => e.stopPropagation()}>
                           {([
-                            { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length, urgent: false },
-                            { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return a.includes('CHECK')||a.includes('ABSENT')||a.includes('HANDOVER')||a.includes('COVERAGE')||a.includes('FRANCO')||a.includes('INTERRUPT')||a.includes('GUARD')||a.includes('TURNO'); }).length, urgent: false },
+                            { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length },
+                            { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return OPS_ACTIONS.has(a); }).length },
                             { id:'alertas' as const,     label:'Novedades',   count: pendingNovedades.length, urgent: pendingNovedades.length > 0 },
                           ]).map(t => (
                             <button key={t.id} onClick={() => setBitacoraTab(t.id)}
-                              className={`relative flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
                                 ${bitacoraTab===t.id
-                                  ? (t.urgent ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white')
-                                  : (t.urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
+                                  ? ((t as any).urgent ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white')
+                                  : ((t as any).urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
                               {t.id === 'alertas' && <Siren size={10}/>}
                               {t.label}
-                              <span className={`text-[9px] font-black px-1 rounded-full
-                                ${bitacoraTab===t.id ? 'bg-white/20' : t.urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>
-                                {t.count}
-                              </span>
+                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : (t as any).urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
                             </button>
                           ))}
-                          <button onClick={generateDailyReport} className="ml-auto p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg" title="Exportar PDF">
-                            <Printer size={11}/>
-                          </button>
+                          <div className="ml-auto flex items-center gap-1">
+                            {/* Filtro Mi Guardia */}
+                            {session.mySession && bitacoraTab !== 'alertas' && (
+                              <button onClick={() => setBitacoraFiltroGuardia(v => !v)}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors ${bitacoraFiltroGuardia ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                title="Solo eventos de mi guardia">
+                                <Shield size={10}/>MI GUARDIA
+                              </button>
+                            )}
+                            {/* Filtro tipo */}
+                            {bitacoraTab !== 'alertas' && (
+                              <select value={bitacoraFiltroTipo} onChange={e => setBitacoraFiltroTipo(e.target.value)}
+                                className="text-[9px] font-bold border border-slate-200 rounded-lg px-1.5 py-1 bg-white text-slate-600 cursor-pointer" onClick={e => e.stopPropagation()}>
+                                <option value="">Todo</option>
+                                <option value="ingresos">Ingresos</option>
+                                <option value="ausencias">Ausencias</option>
+                                <option value="coberturas">Coberturas</option>
+                                <option value="sistema">Sistema</option>
+                              </select>
+                            )}
+                            {/* Filtro objetivo */}
+                            {bitacoraTab !== 'alertas' && logic.filteredObjectives?.length > 1 && (
+                              <select value={bitacoraFiltroObj} onChange={e => setBitacoraFiltroObj(e.target.value)}
+                                className="text-[9px] font-bold border border-slate-200 rounded-lg px-1.5 py-1 bg-white text-slate-600 max-w-[90px] cursor-pointer truncate" onClick={e => e.stopPropagation()}>
+                                <option value="">Todos obj.</option>
+                                {logic.filteredObjectives.map((o:any) => <option key={o.id||o.objectiveId} value={o.id||o.objectiveId}>{o.name}</option>)}
+                              </select>
+                            )}
+                            {/* Cierre de guardia */}
+                            {session.mySession && (
+                              <button onClick={e => { e.stopPropagation(); setCierreGuardiaOpen(true); }}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase bg-slate-700 text-white hover:bg-slate-800 transition-colors" title="Informe de cierre de guardia">
+                                <FileText size={10}/>CIERRE
+                              </button>
+                            )}
+                            <button onClick={generateDailyReport} className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg" title="Exportar PDF">
+                              <Printer size={11}/>
+                            </button>
+                          </div>
                         </div>
-                        {/* â"€â"€ Tab Actividad / Operaciones â"€â"€ */}
+
+                        {/* ── Tab Actividad / Operaciones ── */}
                         {bitacoraTab !== 'alertas' && (
-                        <div className="flex-1 overflow-y-auto">
+                        <div className="flex-1 overflow-y-auto" onClick={e => e.stopPropagation()}>
                           <table className="w-full text-[10px] text-left">
-                            <thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0">
+                            <thead className="bg-slate-50 text-slate-400 uppercase font-bold sticky top-0 z-10">
                               <tr>
                                 <th className="px-3 py-1 w-14">Hora</th>
-                                <th className="px-2 py-1 w-28">Evento</th>
+                                <th className="px-2 py-1 w-32">Evento</th>
                                 <th className="px-2 py-1 w-24">Actor</th>
                                 <th className="px-2 py-1">Detalle</th>
+                                <th className="px-2 py-1 w-6"/>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                               {filteredBitacora.length === 0 ? (
-                                <tr><td colSpan={4} className="px-3 py-4 text-center text-slate-300 text-[10px]">Sin registros en esta sección</td></tr>
+                                <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-300 text-[10px]">Sin registros</td></tr>
                               ) : filteredBitacora.map((log: any) => {
                                 const action = (log.action || '').toUpperCase();
-                                const isOp = action.includes('CHECK') || action.includes('ABSENT') || action.includes('HANDOVER') || action.includes('FRANCO');
-                                const isAlert = action.includes('ABSENT') || action.includes('VACANTE') || action.includes('INTERRUPT');
-                                const dotColor = isAlert ? 'bg-rose-400' : isOp ? 'bg-emerald-400' : 'bg-indigo-400';
+                                const label = ACTION_LABELS[action] || action.replace(/_/g,' ').replace('MANUAL ','');
+                                const dot = ACTION_DOT[action] || 'bg-indigo-400';
+                                const isNew = log.time && log.time.getTime() > bitacoraLastOpenRef.current;
+                                const isExp = bitacoraExpanded === log.id;
                                 return (
-                                  <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
-                                    <td className="px-3 py-1.5 font-mono text-slate-400 text-[9px]">{formatTimeSimple(log.time)}</td>
-                                    <td className="px-2 py-1.5">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`}/>
-                                        <span className="font-bold text-slate-700 uppercase text-[9px] truncate">{(log.action||'').replace('MANUAL_','')}</span>
-                                      </div>
-                                    </td>
-                                    <td className="px-2 py-1.5 text-slate-500 truncate max-w-[80px] text-[9px]">{log.formattedActor}</td>
-                                    <td className="px-2 py-1.5 text-slate-400 truncate max-w-[160px] text-[9px]">{log.fullDetail}</td>
-                                  </tr>
+                                  <React.Fragment key={log.id}>
+                                    <tr className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${isNew ? 'bg-indigo-50/60' : ''}`}
+                                        onClick={() => setBitacoraExpanded(isExp ? null : log.id)}>
+                                      <td className="px-3 py-1.5 font-mono text-slate-400 text-[9px] shrink-0">
+                                        {isNew && <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1 align-middle"/>}
+                                        {formatTimeSimple(log.time)}
+                                      </td>
+                                      <td className="px-2 py-1.5">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`}/>
+                                          <span className="font-bold text-slate-700 text-[9px] truncate">{label}</span>
+                                        </div>
+                                      </td>
+                                      <td className="px-2 py-1.5 text-slate-500 truncate max-w-[80px] text-[9px]">{log.formattedActor}</td>
+                                      <td className="px-2 py-1.5 text-slate-400 truncate max-w-[160px] text-[9px]">{log.fullDetail}</td>
+                                      <td className="px-2 py-1.5 text-slate-300">{isExp ? <ChevronDown size={10}/> : <ChevronRight size={10}/>}</td>
+                                    </tr>
+                                    {isExp && (
+                                      <tr className="bg-slate-50">
+                                        <td colSpan={5} className="px-4 py-2.5">
+                                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px]">
+                                            {log.employeeName && <div><span className="text-slate-400 font-bold uppercase">Empleado:</span> <span className="text-slate-700">{log.employeeName}</span></div>}
+                                            {log.objectiveName && <div><span className="text-slate-400 font-bold uppercase">Objetivo:</span> <span className="text-slate-700">{log.objectiveName}</span></div>}
+                                            {log.shiftId && <div><span className="text-slate-400 font-bold uppercase">Turno ID:</span> <span className="font-mono text-slate-500">{log.shiftId.slice(0,12)}...</span></div>}
+                                            {log.module && <div><span className="text-slate-400 font-bold uppercase">Módulo:</span> <span className="text-slate-700">{log.module}</span></div>}
+                                            {log.fullDetail && <div className="col-span-2"><span className="text-slate-400 font-bold uppercase">Detalle:</span> <span className="text-slate-600">{log.fullDetail}</span></div>}
+                                            <div className="col-span-2 text-slate-300 font-mono">{log.time?.toLocaleString('es-AR', { timeZone: 'America/Argentina/Cordoba' })}</div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
                                 );
                               })}
                             </tbody>
@@ -3180,7 +3335,7 @@ export default function OperacionesPage() {
                         </div>
                         )}
 
-                        {/* â"€â"€ Tab Novedades (inline, siempre accesible) â"€â"€ */}
+                        {/* ── Tab Novedades ── */}
                         {bitacoraTab === 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           {pendingNovedades.length === 0 ? (
@@ -3216,11 +3371,8 @@ export default function OperacionesPage() {
                                     <span className="text-[9px] font-bold text-slate-500 flex-1 truncate">{type.replace(/_/g,' ')}</span>
                                     <span className="text-[9px] text-slate-400 font-mono">{items.length}</span>
                                     {items.length > 1 && (
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleDismissAllByType(type); }}
-                                        className="text-[9px] font-bold text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors shrink-0"
-                                        title={`Descartar todas (${items.length})`}
-                                      >
+                                      <button onClick={(e) => { e.stopPropagation(); handleDismissAllByType(type); }}
+                                        className="text-[9px] font-bold text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors shrink-0">
                                         ✕ todas
                                       </button>
                                     )}
@@ -3498,6 +3650,117 @@ export default function OperacionesPage() {
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData({isOpen:false,ctx:{employeeName:'',phone:''}})} ctx={waData.ctx}/>
             {showDebugPanel && (<DebugPanel processedData={logic.processedData} servicesSLA={logic.servicesSLA} publishStatusMap={logic.publishStatusMap} rawShifts={logic.rawShifts as any} onClose={() => setShowDebugPanel(false)}/>)}
+            {/* ── MODAL CIERRE DE GUARDIA ── */}
+            {cierreGuardiaOpen && session.mySession && (() => {
+                const guardStart = session.mySession!.startTime;
+                const logsGuardia = logic.recentLogs.filter((l:any) => l.time && l.time.getTime() >= guardStart.getTime());
+                const resumen = {
+                    ingresos: logsGuardia.filter((l:any) => ['CHECKIN','CHECK_IN','HANDOVER','PRESENTE'].includes((l.action||'').toUpperCase())).length,
+                    salidas: logsGuardia.filter((l:any) => ['CHECKOUT','CHECK_OUT'].includes((l.action||'').toUpperCase())).length,
+                    ausencias: logsGuardia.filter((l:any) => ['MARK_ABSENT','AUSENTE','ATTENDANCE'].includes((l.action||'').toUpperCase())).length,
+                    coberturas: logsGuardia.filter((l:any) => ['COVERAGE','COBERTURA_RELEVO'].includes((l.action||'').toUpperCase())).length,
+                    retenes: logsGuardia.filter((l:any) => ['CONVOCATORIA_RETEN','ADELANTO_TURNO','FRANCO_TRABAJADO'].includes((l.action||'').toUpperCase())).length,
+                    bajas: logsGuardia.filter((l:any) => ['INTERRUPT','BAJA_SERVICIO'].includes((l.action||'').toUpperCase())).length,
+                };
+                const fmtHora = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'});
+                const fmtFecha = (d: Date) => d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'America/Argentina/Cordoba'});
+                return (
+                    <div className="fixed inset-0 bg-black/60 z-[2000] flex items-center justify-center p-4" onClick={() => setCierreGuardiaOpen(false)}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                            {/* Header */}
+                            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center shrink-0">
+                                    <FileText size={16} className="text-white"/>
+                                </div>
+                                <div className="flex-1">
+                                    <h2 className="font-black text-slate-800 text-sm">Informe de Cierre de Guardia</h2>
+                                    <p className="text-[10px] text-slate-400">{session.mySession!.operatorName || 'Operador'} · {fmtFecha(guardStart)} · {fmtHora(guardStart)} → ahora</p>
+                                </div>
+                                <button onClick={() => setCierreGuardiaOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={14}/></button>
+                            </div>
+                            {/* Resumen */}
+                            <div className="px-5 py-4 border-b border-slate-100">
+                                <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Resumen de la guardia</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { label: 'Ingresos',   value: resumen.ingresos,   color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                                        { label: 'Salidas',    value: resumen.salidas,    color: 'bg-purple-50 text-purple-700 border-purple-200' },
+                                        { label: 'Ausencias',  value: resumen.ausencias,  color: 'bg-rose-50 text-rose-700 border-rose-200' },
+                                        { label: 'Coberturas', value: resumen.coberturas, color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                                        { label: 'Retenes',    value: resumen.retenes,    color: 'bg-sky-50 text-sky-700 border-sky-200' },
+                                        { label: 'Bajas',      value: resumen.bajas,      color: 'bg-red-50 text-red-700 border-red-200' },
+                                    ].map(s => (
+                                        <div key={s.label} className={`rounded-xl border px-3 py-2 text-center ${s.color}`}>
+                                            <div className="text-xl font-black">{s.value}</div>
+                                            <div className="text-[9px] font-bold uppercase">{s.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="mt-2 flex gap-2 text-[9px] text-slate-400">
+                                    <span>{logsGuardia.length} eventos totales</span>
+                                    {pendingNovedades.length > 0 && <span className="text-rose-500 font-bold">· {pendingNovedades.length} novedades pendientes al cierre</span>}
+                                </div>
+                            </div>
+                            {/* Cronología */}
+                            <div className="px-5 py-3 border-b border-slate-100">
+                                <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Cronología ({logsGuardia.length} eventos)</p>
+                                <div className="max-h-48 overflow-y-auto space-y-0.5">
+                                    {logsGuardia.length === 0 ? (
+                                        <p className="text-[10px] text-slate-300 py-2">Sin eventos registrados en esta guardia</p>
+                                    ) : logsGuardia.map((l:any) => {
+                                        const act = (l.action||'').toUpperCase();
+                                        const lbl = ACTION_LABELS[act] || act.replace(/_/g,' ');
+                                        const dot = ACTION_DOT[act] || 'bg-indigo-400';
+                                        return (
+                                            <div key={l.id} className="flex items-start gap-2 text-[9px] py-0.5">
+                                                <span className="font-mono text-slate-400 shrink-0 w-10 mt-0.5">{l.time ? l.time.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
+                                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${dot}`}/>
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="font-bold text-slate-700">{lbl}</span>
+                                                    {l.employeeName && <span className="text-slate-400"> · {l.employeeName}</span>}
+                                                    {l.fullDetail && <div className="text-slate-400 truncate">{l.fullDetail}</div>}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            {/* Novedades pendientes */}
+                            {pendingNovedades.length > 0 && (
+                            <div className="px-5 py-3 border-b border-slate-100">
+                                <p className="text-[10px] font-black uppercase text-rose-500 mb-2">Novedades pendientes al cierre</p>
+                                <div className="space-y-1 max-h-24 overflow-y-auto">
+                                    {pendingNovedades.map((n:any) => (
+                                        <div key={n.id} className="flex items-center gap-2 text-[9px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"/>
+                                            <span className="text-slate-600 truncate">{n.objectiveName || n.employeeName || n.type} {n.positionName ? `· ${n.positionName}` : ''}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            )}
+                            {/* Observaciones */}
+                            <div className="px-5 py-4">
+                                <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Observaciones del operador</label>
+                                <textarea
+                                    value={cierreObs}
+                                    onChange={e => setCierreObs(e.target.value)}
+                                    placeholder="Sin novedad al cierre..."
+                                    rows={3}
+                                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-slate-400"
+                                />
+                                <div className="flex gap-2 mt-3">
+                                    <button onClick={() => setCierreGuardiaOpen(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors">Cancelar</button>
+                                    <button onClick={handleCierreGuardia} disabled={cierreLoading}
+                                        className="flex-1 py-2.5 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-900 transition-colors disabled:opacity-50">
+                                        {cierreLoading ? 'Guardando...' : 'Confirmar cierre'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </DashboardLayout>
     );
 }

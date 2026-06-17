@@ -216,10 +216,26 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setPublishStatusMap(map);
         }));
         const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
-        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(200)), (snap) => {
             setRecentLogs(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => ({ id: d.id, ...d.data(), formattedActor: d.data().actorName, time: getSafeDate(d.data().timestamp), fullDetail: d.data().details })));
+                .map(d => {
+                    const data = d.data();
+                    return {
+                        id: d.id,
+                        ...data,
+                        formattedActor: data.actorName,
+                        time: getSafeDate(data.timestamp),
+                        fullDetail: data.details,
+                        objectiveId: data.objectiveId || '',
+                        objectiveName: data.objectiveName || '',
+                        employeeId: data.employeeId || '',
+                        employeeName: data.employeeName || '',
+                        shiftId: data.shiftId || '',
+                        module: data.module || 'OPERACIONES',
+                        actorUid: data.actorUid || data.uid || '',
+                    };
+                }));
         }));
         return () => { unsubs.forEach(u => u()); };
     }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
@@ -1023,12 +1039,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
         viewTab, setViewTab,
-        stats,
-        listData,
+        stats, listData,
         uniqueClients, selectedClientId, setSelectedClientId,
         filteredObjectives,
         employees,
         servicesSLA,
         rawShifts,
+        // aliases para compatibilidad con map-view y auditoria
+        objectives,
+        now,
     };
 };

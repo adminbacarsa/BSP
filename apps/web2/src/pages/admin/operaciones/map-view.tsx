@@ -1524,7 +1524,6 @@ export default function TacticalMapView() {
                     </div>
                 </div>
             )}
-            <WAComposeModal isOpen={localWa.isOpen} onClose={() => setLocalWa((d: any) => ({...d, isOpen: false}))} ctx={localWa.ctx}/>
         </div>
     );
 }
