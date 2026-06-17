@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
@@ -753,6 +753,25 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     shiftId,
                     details: `${shift?.employeeName || 'Guardia'} finalizó turno en ${shift?.objectiveName || ''}${payload ? ` — ${payload}` : ''}.`,
                 }, String(shift?.empresaId || empresaId || '').trim())).catch(() => {});
+                // Auto-descartar novedades de retención/recargo del turno finalizado
+                getDocs(query(
+                    collection(db, 'novedades'),
+                    where('shiftId', '==', shiftId),
+                    where('status', '==', 'pending'),
+                    limit(20)
+                )).then(snap => {
+                    if (snap.empty) return;
+                    const AUTO_DISMISS_TYPES = ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'];
+                    const toUpdate = snap.docs.filter(d => AUTO_DISMISS_TYPES.includes(d.data().type));
+                    if (!toUpdate.length) return;
+                    const batch = writeBatch(db);
+                    toUpdate.forEach(d => batch.update(d.ref, {
+                        status: 'ATENDIDA',
+                        atendidaAt: serverTimestamp(),
+                        atendidaPor: 'AUTO_CHECKOUT',
+                    }));
+                    batch.commit().catch(() => {});
+                }).catch(() => {});
             }
         } catch (e: any) { toast.error('Error: ' + e.message); }
     };

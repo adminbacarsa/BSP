@@ -112,7 +112,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
     const mustRelevar = activeGuards.length >= positionCapacity;
 
-    // â”€â”€ INTERCAMBIO DE TURNOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ INTERCAMBIO DE TURNOS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     // Cuando Guard A llega tarde (>60 min) y su turno fue cubierto por Guard B,
     // Guard A puede tomar el próximo turno de Guard B como compensación.
     const handleIntercambio = async () => {
@@ -164,14 +164,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: incomingShift.employeeId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ”„ Intercambio de turno',
+                title: 'ðŸ"„ Intercambio de turno',
                 body: `Cubrís el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: coveringEmpId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ”„ Intercambio de turno',
+                title: 'ðŸ"„ Intercambio de turno',
                 body: `${incomingShift.employeeName} tomó tu turno de ${guardBNextShift.objectiveName}. Tu turno de la mañana queda registrado.`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
@@ -204,7 +204,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
             if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
 
-            // â”€â”€ Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) â”€â”€
+            // â"€â"€ Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) â"€â"€
             const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
             let aaDoc: any = null;
             let aaHorario = '';
@@ -223,7 +223,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 }
             }
 
-            // â”€â”€ Construir y commitear el batch (sin lecturas async intercaladas) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â"€â"€ Construir y commitear el batch (sin lecturas async intercaladas) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             const batch = writeBatch(db);
             // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
             // El guardia siempre cobra desde su hora planificada, llegue antes o después.
@@ -299,7 +299,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             // Registrar como relevado para evitar que aparezca en siguientes modales (race condition)
             if (prevShiftId) onRelieved?.(prevShiftId);
 
-            // â”€â”€ Audit log: presente / llegada tarde / relevo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // â"€â"€ Audit log: presente / llegada tarde / relevo â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             {
                 const _tenantId = String(incomingShift.empresaId || empresaId || '').trim();
                 const _actor    = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
@@ -1256,7 +1256,7 @@ const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
-// â”€â”€ Popup de detalle de novedad â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Popup de detalle de novedad â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',         bg: 'bg-red-600',    text: 'text-white',     border: 'border-red-500' },
@@ -1442,7 +1442,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
     else if (shift.isAbsent)         badge = shift.operacionallyCovered
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">âœ“ cubierto</span></span>
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">âœ" cubierto</span></span>
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
@@ -1490,7 +1490,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         </div>
     );
 
-    // â”€â”€ Vista expandida â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Vista expandida â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     return (
         <div className={`relative rounded-xl border border-slate-200 mb-2 shadow-sm overflow-hidden transition-all ${rowBg}`}>
             <div className={`h-1 w-full ${accentColor}`}/>
@@ -1987,7 +1987,7 @@ export default function OperacionesPage() {
         prevPendingCount.current = pendingNovedades.length;
     }, [pendingNovedades.length]);
 
-    // â”€â”€ Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
+    // â"€â"€ Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
     const autoExpiredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         const nowMs = Date.now();
@@ -2067,7 +2067,7 @@ export default function OperacionesPage() {
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
 
-        // â”€â”€ Helpers de sección â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // â"€â"€ Helpers de sección â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
         const sectionHeader = (title: string, r: number, g: number, b: number) => {
             pdf.addPage();
             pdf.setFillColor(r, g, b);
@@ -2510,7 +2510,7 @@ export default function OperacionesPage() {
         }
     }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
-    // â”€â”€ COBERTURA POR OBJETIVO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ COBERTURA POR OBJETIVO â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const coverageByObjective = useMemo(() => {
         const now = new Date();
         const map: Record<string, {name:string; client:string; total:number; active:number; absent:number; vacant:number; objectiveId:string}> = {};
@@ -2541,7 +2541,7 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
-    // â”€â”€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â”€â”€
+    // â"€â"€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â"€â"€
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
@@ -2626,7 +2626,7 @@ export default function OperacionesPage() {
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
             
-            {/* â”€â”€ Banda Estado del Día â”€â”€ */}
+            {/* â"€â"€ Banda Estado del Día â"€â"€ */}
             {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
                 const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                 const cubiertos = logic.stats.activos + logic.stats.retenidos;
@@ -2697,7 +2697,7 @@ export default function OperacionesPage() {
                 );
             })()}
 
-            {/* â”€â”€ GRID COBERTURA POR OBJETIVO (colapsable) â”€â”€ */}
+            {/* â"€â"€ GRID COBERTURA POR OBJETIVO (colapsable) â"€â"€ */}
             {coverageByObjective.length > 0 && (
                 <div className="mx-2 mb-2">
                     <button onClick={() => setShowCoverageGrid(v => !v)}
@@ -2908,7 +2908,7 @@ export default function OperacionesPage() {
                         </div>
                     </div>
 
-                    {/* â”€â”€ Panel ausencias autorizadas hoy â”€â”€ */}
+                    {/* â"€â"€ Panel ausencias autorizadas hoy â"€â"€ */}
                     {authorizedAbsences.length > 0 && (
                         <div className="px-3 py-1.5 border-b border-amber-100 bg-amber-50/60 shrink-0">
                             <button
@@ -3084,7 +3084,7 @@ export default function OperacionesPage() {
 
                     </div>
 
-                    {/* â”€â”€ BITÁCORA collapsible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                    {/* â"€â"€ BITÁCORA collapsible â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
                     <div className={`border-t border-slate-200 bg-white flex flex-col shrink-0 transition-all duration-200 ${bitacoraOpen ? 'h-80' : ''}`}>
                       {/* Header — always visible, click to toggle */}
                       <div className="px-3 py-1.5 flex items-center gap-1 bg-slate-50 cursor-pointer select-none"
@@ -3124,7 +3124,7 @@ export default function OperacionesPage() {
                             <Printer size={11}/>
                           </button>
                         </div>
-                        {/* â”€â”€ Tab Actividad / Operaciones â”€â”€ */}
+                        {/* â"€â"€ Tab Actividad / Operaciones â"€â"€ */}
                         {bitacoraTab !== 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           <table className="w-full text-[10px] text-left">
@@ -3163,7 +3163,7 @@ export default function OperacionesPage() {
                         </div>
                         )}
 
-                        {/* â”€â”€ Tab Novedades (inline, siempre accesible) â”€â”€ */}
+                        {/* â"€â"€ Tab Novedades (inline, siempre accesible) â"€â"€ */}
                         {bitacoraTab === 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
                           {pendingNovedades.length === 0 ? (
@@ -3255,7 +3255,7 @@ export default function OperacionesPage() {
                     </div>
                 </div>
 
-                {/* â”€â”€ PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa â”€â”€ */}
+                {/* â"€â"€ PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa â"€â"€ */}
                 {!isExternalMap && (
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
@@ -3293,7 +3293,7 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* â”€â”€ Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) â”€â”€ */}
+                        {/* â"€â"€ Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) â"€â"€ */}
                         {priorityShiftsPanel.length > 0 && (() => {
                             const priorityShifts = priorityShiftsPanel;
                             return (
@@ -3362,13 +3362,6 @@ export default function OperacionesPage() {
                             );
                         })()}
 
-                        {/* â”€â”€ Columnas header novedades â”€â”€ */}
-                        <div className="px-3 py-1 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase">
-                            <span className="w-14 shrink-0">Tipo</span>
-                            <span className="flex-1">Objetivo / Posición</span>
-                            <span className="w-10 text-right">Hora</span>
-                            <span className="w-16 text-center">Acción</span>
-                        </div>
                         <div className="flex-1 overflow-y-auto">
                             {pendingNovedades.length === 0 ? (
                                 <div className="p-4 text-center">
@@ -3379,39 +3372,70 @@ export default function OperacionesPage() {
                                             : 'Sin alertas pendientes'}
                                     </p>
                                 </div>
-                            ) : pendingNovedades.map((n: any) => {
-                                const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
-                                const isAbsence = n.type === 'AUSENCIA_AUTO';
-                                const isRelevo = n.type === 'RELEVO_NO_PRESENTADO' || n.type === 'POSICION_SIN_RELEVO';
-                                const isProto = n.type === 'VACANTE_PROTOCOLO_COBERTURA';
-                                const isRetencion = n.type === 'RETENCION_LARGA';
-                                const isCortoplazo = n.type === 'AUSENCIA_CORTO_PLAZO';
-                                const isAnticipada = n.type === 'AVISO_AUSENCIA_ANTICIPADA';
-
-                                const isAdelanto = n.type === 'ADELANTO_TURNO';
-                                const isConvocado = n.type === 'CONVOCATORIA_RETEN' || n.type === 'FRANCO_TRABAJADO' || n.type === 'RETENCION';
-
-                                const leftBorder = isCortoplazo ? 'border-l-red-600' : isAnticipada ? 'border-l-amber-400' : isAdelanto || isConvocado ? 'border-l-indigo-500' : isAbsence ? 'border-l-rose-500' : isRelevo ? 'border-l-amber-500' : isProto ? 'border-l-orange-500' : isRetencion ? 'border-l-orange-600' : 'border-l-slate-300';
-                                const typeLabel = isCortoplazo ? 'URGENTE' : isAnticipada ? 'ANTIC.' : isAdelanto ? 'ADEL.' : isConvocado ? 'CONV.' : isProto ? 'PROT' : isAbsence ? 'AUS' : isRelevo ? 'REL' : isRetencion ? 'REC' : 'NOV';
-                                const typeBg = isCortoplazo ? 'bg-red-600 text-white animate-pulse' : isAnticipada ? 'bg-amber-100 text-amber-800' : isAdelanto || isConvocado ? 'bg-indigo-100 text-indigo-700' : isProto ? 'bg-orange-100 text-orange-700' : isAbsence ? 'bg-rose-100 text-rose-700' : isRelevo ? 'bg-amber-100 text-amber-700' : isRetencion ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600';
-                                const actionBg = isCortoplazo ? 'bg-red-600 hover:bg-red-700' : isAnticipada ? 'bg-amber-600 hover:bg-amber-700' : isAdelanto || isConvocado ? 'bg-indigo-600 hover:bg-indigo-700' : isProto ? 'bg-orange-600 hover:bg-orange-700' : isAbsence ? 'bg-rose-600 hover:bg-rose-700' : isRelevo ? 'bg-amber-600 hover:bg-amber-700' : isRetencion ? 'bg-orange-700 hover:bg-orange-800' : 'bg-slate-700 hover:bg-slate-800';
-                                return (
-                                    <div key={n.id} className={`flex items-center gap-2 px-3 py-1.5 border-l-4 ${leftBorder} bg-white border-b border-slate-50 hover:bg-slate-50/50 transition-colors`}>
-                                        <span className={`text-[9px] font-black px-1 py-0.5 rounded shrink-0 w-14 text-center ${typeBg}`}>{typeLabel}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                {n.employeeName && n.objectiveName
-                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                                    : n.objectiveName || n.employeeName || n.type}
-                                            </p>
-                                            <p className="text-[9px] text-slate-400 truncate leading-tight">{n.positionName || n.description || ''}</p>
+                            ) : (() => {
+                                const NOV_META: Record<string, { label: string; bg: string; border: string; actionBg: string }> = {
+                                    AUSENCIA_CORTO_PLAZO:        { label: 'URGENTE', bg: 'bg-red-600 text-white animate-pulse',   border: 'border-l-red-600',    actionBg: 'bg-red-600 hover:bg-red-700' },
+                                    AVISO_AUSENCIA_ANTICIPADA:   { label: 'ANTIC',   bg: 'bg-amber-100 text-amber-800',             border: 'border-l-amber-400',  actionBg: 'bg-amber-600 hover:bg-amber-700' },
+                                    CONVOCATORIA_RETEN:          { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',           border: 'border-l-indigo-500', actionBg: 'bg-indigo-600 hover:bg-indigo-700' },
+                                    FRANCO_TRABAJADO:            { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',           border: 'border-l-indigo-500', actionBg: 'bg-indigo-600 hover:bg-indigo-700' },
+                                    RETENCION:                   { label: 'CONV',    bg: 'bg-indigo-100 text-indigo-700',           border: 'border-l-indigo-500', actionBg: 'bg-indigo-600 hover:bg-indigo-700' },
+                                    ADELANTO_TURNO:              { label: 'ADEL',    bg: 'bg-indigo-100 text-indigo-700',           border: 'border-l-indigo-500', actionBg: 'bg-indigo-600 hover:bg-indigo-700' },
+                                    VACANTE_PROTOCOLO_COBERTURA: { label: 'PROT',    bg: 'bg-orange-100 text-orange-700',           border: 'border-l-orange-500', actionBg: 'bg-orange-600 hover:bg-orange-700' },
+                                    AUSENCIA_AUTO:               { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',               border: 'border-l-rose-500',   actionBg: 'bg-rose-600 hover:bg-rose-700' },
+                                    AUSENCIA_OPERATIVA:          { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',               border: 'border-l-rose-500',   actionBg: 'bg-rose-600 hover:bg-rose-700' },
+                                    POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',             border: 'border-l-amber-500',  actionBg: 'bg-amber-600 hover:bg-amber-700' },
+                                    RELEVO_NO_PRESENTADO:        { label: 'REL',     bg: 'bg-amber-100 text-amber-700',             border: 'border-l-amber-500',  actionBg: 'bg-amber-600 hover:bg-amber-700' },
+                                    RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
+                                    RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
+                                    RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
+                                };
+                                const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
+                                // Agrupar por tipo
+                                const groups: { type: string; items: any[] }[] = [];
+                                const seen = new Map<string, any[]>();
+                                pendingNovedades.forEach((n: any) => {
+                                    if (!seen.has(n.type)) { seen.set(n.type, []); groups.push({ type: n.type, items: seen.get(n.type)! }); }
+                                    seen.get(n.type)!.push(n);
+                                });
+                                return groups.map(({ type, items }) => {
+                                    const meta = getMeta(type);
+                                    return (
+                                        <div key={type}>
+                                            {/* Header del grupo con botón "✕ todas" */}
+                                            <div className="px-3 py-1 flex items-center gap-2 bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
+                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${meta.bg}`}>{meta.label}</span>
+                                                <span className="text-[9px] font-bold text-slate-500 flex-1 truncate">{type.replace(/_/g,' ')}</span>
+                                                <span className="text-[9px] text-slate-400 font-mono shrink-0">{items.length}</span>
+                                                {items.length > 1 && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDismissAllByType(type); }}
+                                                        className="text-[9px] font-bold text-slate-400 hover:text-red-600 px-1.5 py-0.5 rounded hover:bg-red-50 transition-colors shrink-0"
+                                                        title={`Descartar todas (${items.length})`}
+                                                    >✕ todas</button>
+                                                )}
+                                            </div>
+                                            {items.map((n: any) => {
+                                                const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                                return (
+                                                    <div key={n.id} className={`flex items-center gap-2 px-3 py-1.5 border-l-4 ${meta.border} bg-white border-b border-slate-50 hover:bg-slate-50/50 transition-colors`}>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
+                                                                {n.employeeName && n.objectiveName
+                                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                                                    : n.objectiveName || n.employeeName || n.type}
+                                                            </p>
+                                                            <p className="text-[9px] text-slate-400 truncate leading-tight">{n.positionName || n.description || ''}</p>
+                                                        </div>
+                                                        <span className="text-[9px] font-mono text-slate-500 w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
+                                                        <button onClick={() => { setNotifPanelOpen(false); setDetailNovedad(n); }}
+                                                            className={`text-[9px] font-black text-white px-2 py-1 rounded-lg w-16 text-center shrink-0 transition-colors ${meta.actionBg}`}>VER</button>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        <span className="text-[9px] font-mono text-slate-500 w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
-                                        <button onClick={() => { setNotifPanelOpen(false); setDetailNovedad(n); }}
-                                            className={`text-[9px] font-black text-white px-2 py-1 rounded-lg w-16 text-center shrink-0 transition-colors ${actionBg}`}>VER</button>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                });
+                            })()}
                         </div>
                     </div>
                     );
@@ -3449,49 +3473,14 @@ export default function OperacionesPage() {
                 onClose={() => setInterruptData({isOpen:false, shift:null})}
                 shift={interruptData.shift}
                 logic={logic}
-           
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageModal
-                isOpen={coverageData.isOpen}
-                onClose={() => setCoverageData({isOpen:false, shift:null})}
-                absenceShift={coverageData.shift}
-                logic={logic}
-            />
-            <AbsenceDecisionModal
-                isOpen={absenceDecisionData.isOpen}
-                onClose={() => setAbsenceDecisionData({isOpen:false, shift:null})}
-                shift={absenceDecisionData.shift}
-                onDeclareAbsent={handleDeclareAbsentT5}
-                onLateArrival={handleLateArrival}
-                onOpenWA={handleOpenWA}
-            />
-            <RRHHVacancyModal
-                isOpen={rrhhVacancyData.isOpen}
-                onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
-                shift={rrhhVacancyData.shift}
-                onCoverageProtocol={(s: any) => setCoverageData({isOpen:true, shift:s})}
-                onSendToPlanning={handleReportPlanning}
-            />
-            <WorkedDayOffModal
-                isOpen={workedFrancoData.isOpen}
-                onClose={() => setWorkedFrancoData({isOpen:false, shift:null})}
-                shift={workedFrancoData.shift}
-            />
-            <WAComposeModal
-                isOpen={waData.isOpen}
-                onClose={() => setWaData(d => ({...d, isOpen: false}))}
-                ctx={waData.ctx}
-            />
-            {showDebugPanel && (
-                <DebugPanel
-                    processedData={logic.processedData}
-                    servicesSLA={logic.servicesSLA}
-                    publishStatusMap={logic.publishStatusMap}
-                    rawShifts={logic.rawShifts as any}
-                    onClose={() => setShowDebugPanel(false)}
-                />
-            )}
+            <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic}/>
+            <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
+            <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({isOpen:true,shift:s})} onSendToPlanning={handleReportPlanning}/>
+            <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
+            <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData({isOpen:false,ctx:{employeeName:'',phone:''}})} ctx={waData.ctx}/>
+            {showDebugPanel && (<DebugPanel processedData={logic.processedData} servicesSLA={logic.servicesSLA} publishStatusMap={logic.publishStatusMap} rawShifts={logic.rawShifts as any} onClose={() => setShowDebugPanel(false)}/>)}
         </DashboardLayout>
     );
 }
