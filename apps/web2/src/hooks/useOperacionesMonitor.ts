@@ -1034,7 +1034,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, []);
 
     return {
-        processedData, empNovedades, pendingNovedades, publishStatusMap,
+        processedData, publishStatusMap,
         recentLogs, isReady, isStable,
         filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
