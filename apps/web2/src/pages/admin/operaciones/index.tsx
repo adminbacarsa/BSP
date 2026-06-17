@@ -2012,22 +2012,20 @@ export default function OperacionesPage() {
             if (n.status === 'ATENDIDA') return false;
             if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
             if (autoExpiredRef.current.has(n.id)) return false;
-            // PROTOCOLO no tiene endTime; usamos shiftStart + 120 min
+            // Usamos shiftStart si existe; fallback a createdAt para alertas pre-fix sin shiftStart
             const shiftStartMs = n.shiftStart?.seconds
                 ? n.shiftStart.seconds * 1000
                 : n.endTime?.seconds
                     ? n.endTime.seconds * 1000
                     : n.shiftEnd?.seconds
                         ? n.shiftEnd.seconds * 1000
-                        : null;
+                        : n.createdAt?.seconds
+                            ? n.createdAt.seconds * 1000
+                            : null;
             const t120 = shiftStartMs ? shiftStartMs + 120 * 60000 : null;
+            // T+120 es absoluto — se cierra independientemente de si la vacante sigue activa
             if (!t120 || nowMs < t120) return false;
-            const stillActive = logic.processedData.some((s: any) =>
-                s.isVirtual && s.isOperationalVacancy &&
-                s.objectiveId === n.objectiveId &&
-                (s.positionName || '').trim().toLowerCase() === (n.positionName || '').trim().toLowerCase()
-            );
-            return !stillActive;
+            return true;
         });
         if (expired.length === 0) return;
         expired.forEach(async (n: any) => {
@@ -2044,7 +2042,7 @@ export default function OperacionesPage() {
                 console.warn('[auto-expire] Error cerrando novedad vencida', e);
             }
         });
-    }, [empNovedades, logic.processedData]);
+    }, [empNovedades]);
 
     const ACTION_LABELS: Record<string, string> = {
         CHECKIN: 'Ingreso', CHECK_IN: 'Ingreso', GUARDIA_INICIADA: 'Guardia iniciada',

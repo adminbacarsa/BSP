@@ -1045,7 +1045,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         employees,
         servicesSLA,
         rawShifts,
-        // aliases para compatibilidad con map-view y auditoria
         objectives,
         now,
     };

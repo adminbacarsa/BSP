@@ -915,23 +915,20 @@ export default function TacticalMapView() {
             if (n.status === 'ATENDIDA') return false;
             if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
             if (autoExpiredRef.current.has(n.id)) return false;
-            // PROTOCOLO no tiene endTime; usamos shiftStart + 120 min
+            // Usamos shiftStart si existe; fallback a createdAt para alertas pre-fix sin shiftStart
             const shiftStartMs = n.shiftStart?.seconds
                 ? n.shiftStart.seconds * 1000
                 : n.endTime?.seconds
                     ? n.endTime.seconds * 1000
                     : n.shiftEnd?.seconds
                         ? n.shiftEnd.seconds * 1000
-                        : null;
+                        : n.createdAt?.seconds
+                            ? n.createdAt.seconds * 1000
+                            : null;
             const t120 = shiftStartMs ? shiftStartMs + 120 * 60000 : null;
+            // T+120 es absoluto — se cierra independientemente de si la vacante sigue activa
             if (!t120 || nowMs < t120) return false;
-            // No hay vacante activa en processedData para ese objetivo/puesto → slot definitivamente no cubierto
-            const stillActive = logic.processedData.some((s: any) =>
-                s.isVirtual && s.isOperationalVacancy &&
-                s.objectiveId === n.objectiveId &&
-                (s.positionName || '').trim().toLowerCase() === (n.positionName || '').trim().toLowerCase()
-            );
-            return !stillActive;
+            return true;
         });
         if (expired.length === 0) return;
         expired.forEach(async (n: any) => {
@@ -948,7 +945,7 @@ export default function TacticalMapView() {
                 console.warn('[auto-expire] Error cerrando novedad vencida', e);
             }
         });
-    }, [empNovedades, logic.processedData]);
+    }, [empNovedades]);
 
     // Marcar novedad como "en gestión" para que control center no la muestre como alerta activa
     const handleTomarGestion = async (novedad: any) => {
