@@ -841,31 +841,41 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             }
 
             // ── PASO 2: alerta PROTOCOLO para el operador (solo ≤60 min) ────
-            // Una vez que el turno está próximo a iniciarse (o ya inició), se crea
-            // una alerta visible para que el operador tome acción de CUBRIR.
+            // Solo cuando el turno ya inició o está por iniciar (minutesUntil <= 0 = ya empezó).
+            // Se crea UNA SOLA alerta con ID determinístico. Después de T+120 se auto-cierra.
             if (minutesUntil > 60) continue;
             const protKey = `${v.id}_VACANTE_PROTOCOLO_COBERTURA`;
             if (alertedVacancyIds.current.has(protKey)) continue;
-            alertedVacancyIds.current.add(protKey);
-            // ID determinístico para PROTOCOLO — setDoc es idempotente:
-            // si dos operadores abren simultáneamente, el segundo setDoc
-            // sobreescribe con los mismos datos (sin duplicados en novedades).
+            alertedVacancyIds.current.add(protKey); // marcar para no re-procesar en esta sesión
+
             const protSafeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
             const protRef = doc(db, 'novedades', `autodev_prot_${protSafeId}`);
-            const desc = minutesUntil <= 0
-                ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
-                : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
             const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
-            setDoc(protRef, stampEmpresaId({
-                type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
-                virtualVacancyId: v.id,
-                objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
-                clientId: v.clientId || null, positionName: v.positionName || '',
-                description: desc,
-                minutesUntilStart: Math.round(minutesUntil),
-                createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-            }, shiftEmpresaId), { merge: true })
-                .catch(e => console.warn('[autoAlertVacante:prot]', e));
+
+            // Verificar si ya existe y fue ATENDIDA — no recrear (fix: setDoc con merge:true overwriteaba status)
+            getDoc(protRef).then(snap => {
+                if (snap.exists() && (snap.data()?.status === 'ATENDIDA' || snap.data()?.status === 'atendida')) {
+                    return; // ya fue atendida, no sobreescribir
+                }
+                const desc = minutesUntil <= 0
+                    ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
+                    : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
+                const shiftStart = v.shiftDateObj instanceof Date ? Timestamp.fromDate(v.shiftDateObj) : null;
+                setDoc(protRef, stampEmpresaId({
+                    type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
+                    virtualVacancyId: v.id,
+                    objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
+                    clientId: v.clientId || null, positionName: v.positionName || '',
+                    ...(shiftStart ? { shiftStart } : {}),
+                    description: desc,
+                    minutesUntilStart: Math.round(minutesUntil),
+                    createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
+                }, shiftEmpresaId), { merge: false })
+                    .catch(e => console.warn('[autoAlertVacante:prot]', e));
+            }).catch(() => {
+                // Si falla getDoc, no crear para evitar recrear novedades atendidas
+                alertedVacancyIds.current.delete(protKey);
+            });
         }
 
         // ── RETENCIÓN LARGA (>2h retenido) ──────────────────────────────
@@ -1001,19 +1011,24 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
     }, [processedData, isReady]);
 
-    // Fallback: forza isStable=true a los 4s para evitar que quede bloqueado
+    // Fallback: fuerza isStable(true) si despues de 3 seg el monitor no se inicio.
     useEffect(() => {
-        if (!isReady) return;
-        const fallback = setTimeout(() => setIsStable(true), 4000);
-        return () => clearTimeout(fallback);
-    }, [isReady]);
+        const t = setTimeout(() => setIsStable(true), 3000);
+        return () => clearTimeout(t);
+    }, []);
 
     return {
-        rawShifts, processedData, listData, stats,
-        employees, servicesSLA, filteredObjectives, uniqueClients,
-        objectives, operatorInfo, now,
-        viewTab, setViewTab, selectedClientId, setSelectedClientId,        filterText, setFilterText, isCompact, setIsCompact,
-        publishStatusMap, recentLogs, isReady, isStable,
+        processedData, empNovedades, pendingNovedades, publishStatusMap,
+        recentLogs, isReady, isStable,
+        filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
+        viewTab, setViewTab,
+        stats,
+        listData,
+        uniqueClients, selectedClientId, setSelectedClientId,
+        filteredObjectives,
+        employees,
+        servicesSLA,
+        rawShifts,
     };
 };

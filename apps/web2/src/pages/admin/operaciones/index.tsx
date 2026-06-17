@@ -1425,9 +1425,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         !!shift.isReten ||
         (diff >= -15 && diff <= 120)
     );
-    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`Â¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
+    const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
     const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
+    // Devolver a planificación: solo vacantes NO originadas por ausencia, dentro de las 12h previas al inicio
+    const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
+    const canReturn = canCover && shift.vacancyOrigin !== 'ABSENCE' && hoursUntilStart <= 12;
 
     let name = shift.isUnassigned ? (shift.employeeName || 'VACANTE') : (shift.employeeName || 'Desconocido');
     if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '');
@@ -1468,7 +1471,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             </div>
             <div className="flex gap-1 shrink-0">
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
-                {canCover && viewTab === 'VACANTES' && (<><button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button><button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button></>)}
+                {canCover && viewTab === 'VACANTES' && (<button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>)}
+                {canReturn && viewTab === 'VACANTES' && (<button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>)}
                 {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
@@ -1524,10 +1528,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {/* Fila 3: botones con texto */}
                 <div className="flex gap-1.5 flex-wrap pl-10">
                     {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}><MessageCircle size={11}/>WA</button>)}
-                    {canCover && viewTab === 'VACANTES' && (<>
+                    {canCover && viewTab === 'VACANTES' && (
                         <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>
+                    )}
+                    {canReturn && viewTab === 'VACANTES' && (
                         <button onClick={handleReport} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 text-white rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"><CornerUpLeft size={11}/>DEVOLVER</button>
-                    </>)}
+                    )}
                     {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
                     {viewTab === 'PLAN' && (<>
                         {!shift.hasRRHHNovedad && <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><PlayCircle size={11}/>DAR PRESENTE</button>}
@@ -1997,12 +2003,16 @@ export default function OperacionesPage() {
             if (n.status === 'ATENDIDA') return false;
             if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
             if (autoExpiredRef.current.has(n.id)) return false;
-            const slotEnd = n.endTime?.seconds
-                ? n.endTime.seconds * 1000
-                : n.shiftEnd?.seconds
-                    ? n.shiftEnd.seconds * 1000
-                    : null;
-            if (!slotEnd || slotEnd > nowMs) return false;
+            // PROTOCOLO no tiene endTime; usamos shiftStart + 120 min
+            const shiftStartMs = n.shiftStart?.seconds
+                ? n.shiftStart.seconds * 1000
+                : n.endTime?.seconds
+                    ? n.endTime.seconds * 1000
+                    : n.shiftEnd?.seconds
+                        ? n.shiftEnd.seconds * 1000
+                        : null;
+            const t120 = shiftStartMs ? shiftStartMs + 120 * 60000 : null;
+            if (!t120 || nowMs < t120) return false;
             const stillActive = logic.processedData.some((s: any) =>
                 s.isVirtual && s.isOperationalVacancy &&
                 s.objectiveId === n.objectiveId &&
@@ -2445,6 +2455,11 @@ export default function OperacionesPage() {
         }
     };
     const handleReportPlanning = async (shift: any) => {
+        // Vacantes por ausencia no se devuelven a planificación
+        if (shift.vacancyOrigin === 'ABSENCE') {
+            toast.error('Las vacantes por ausencia no se devuelven a planificación. Cubrirlas desde el tab VACANTES.');
+            return;
+        }
         try {
             let targetId = shift.id;
             if (shift.isVirtual || shift.id.startsWith('SLA_GAP') || shift.id.startsWith('V124_')) {

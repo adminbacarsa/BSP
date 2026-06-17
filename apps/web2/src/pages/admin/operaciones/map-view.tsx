@@ -915,13 +915,16 @@ export default function TacticalMapView() {
             if (n.status === 'ATENDIDA') return false;
             if (n.type !== 'VACANTE_PROTOCOLO_COBERTURA') return false;
             if (autoExpiredRef.current.has(n.id)) return false;
-            // El slot ya terminó
-            const slotEnd = n.endTime?.seconds
-                ? n.endTime.seconds * 1000
-                : n.shiftEnd?.seconds
-                    ? n.shiftEnd.seconds * 1000
-                    : null;
-            if (!slotEnd || slotEnd > nowMs) return false;
+            // PROTOCOLO no tiene endTime; usamos shiftStart + 120 min
+            const shiftStartMs = n.shiftStart?.seconds
+                ? n.shiftStart.seconds * 1000
+                : n.endTime?.seconds
+                    ? n.endTime.seconds * 1000
+                    : n.shiftEnd?.seconds
+                        ? n.shiftEnd.seconds * 1000
+                        : null;
+            const t120 = shiftStartMs ? shiftStartMs + 120 * 60000 : null;
+            if (!t120 || nowMs < t120) return false;
             // No hay vacante activa en processedData para ese objetivo/puesto → slot definitivamente no cubierto
             const stillActive = logic.processedData.some((s: any) =>
                 s.isVirtual && s.isOperationalVacancy &&
@@ -1516,12 +1519,12 @@ export default function TacticalMapView() {
                         {detailNovedad.objectiveName && detailNovedad.employeeName && <p className="text-xs text-indigo-600 mb-1">{detailNovedad.objectiveName}{detailNovedad.positionName ? ` · ${detailNovedad.positionName}` : ''}</p>}
                         {detailNovedad.description && <p className="text-xs text-slate-500 mb-3">{detailNovedad.description}</p>}
                         <button onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
-                            className="w-full py-2.5 bg-slate-800 text-white text-xs font-bold rounded-xl hover:bg-slate-900 transition-colors">
-                            Atender novedad
-                        </button>
+                            
+                            className="w-full py-2.5 bg-slate-800 text-white text-xs font-bold rounded-xl hover:bg-slate-900 transition-colors">Cerrar</button>
                     </div>
                 </div>
             )}
+            <WAComposeModal isOpen={localWa.isOpen} onClose={() => setLocalWa((d: any) => ({...d, isOpen: false}))} ctx={localWa.ctx}/>
         </div>
     );
 }
