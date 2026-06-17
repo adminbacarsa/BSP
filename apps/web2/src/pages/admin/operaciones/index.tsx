@@ -477,6 +477,17 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             await updateDocForEmpresa('turnos', shift.id, { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
             const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
+            // Bitácora
+            {
+                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action: 'BAJA_CUBIERTA', module: 'OPERACIONES', actorName: _actor,
+                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
+                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName, shiftId: shift.id,
+                    details: `${shift.employeeName} – baja anticipada (puesto cubierto) en ${shift.objectiveName || ''}.`,
+                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
+            }
             toast.success("Baja registrada. Puesto cubierto.");
             onClose();
         } catch (e: any) { toast.error('Error al registrar baja: ' + (e?.message || e?.code || String(e))); }
@@ -498,6 +509,17 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             if (endTs) vacancyPayload.endTime = endTs;
             const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
             onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
+            // Bitácora
+            {
+                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action: 'BAJA_PROTOCOLO', module: 'OPERACIONES', actorName: _actor,
+                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
+                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName, shiftId: shift.id,
+                    details: `${shift.employeeName} – baja anticipada (protocolo vacante) en ${shift.objectiveName || ''}.`,
+                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
+            }
         } catch (e: any) { toast.error('Error al iniciar protocolo: ' + (e?.message || e?.code || String(e))); }
     };
     return (
@@ -2118,6 +2140,9 @@ export default function OperacionesPage() {
         REPORTE: 'Reporte', LLEGADA_TARDE: 'Llegada tarde',
         AUSENCIA_AUTO: 'Ausencia automática', NOVEDADES: 'Novedad',
         VACANTE_PROTOCOLO_COBERTURA: 'Protocolo cobertura',
+        ATENDER_NOVEDAD: 'Novedad atendida', GUARDIA_CERRADA: 'Guardia cerrada',
+        DESCARTAR_NOVEDADES_TIPO: 'Novedades descartadas',
+        BAJA_CUBIERTA: 'Baja (cubierta)', BAJA_PROTOCOLO: 'Baja (protocolo)',
     };
     const ACTION_DOT: Record<string, string> = {
         CHECKIN: 'bg-emerald-500', CHECK_IN: 'bg-emerald-500', GUARDIA_INICIADA: 'bg-indigo-500',
@@ -2475,6 +2500,17 @@ export default function OperacionesPage() {
             const msg = alreadyAutoAbsent
                 ? `Ausencia de ${shift.employeeName} confirmada (ya detectada automáticamente).`
                 : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y Planificación.`;
+            // Bitácora
+            {
+                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action: 'MARK_ABSENT', module: 'OPERACIONES', actorName: _actor,
+                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
+                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName, shiftId: shift.id,
+                    details: `${shift.employeeName} marcado ausente en ${shift.objectiveName || ''}.`,
+                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
+            }
             toast.success(msg);
         } catch (e: any) {
             toast.error('Error al marcar ausencia: ' + (e?.message || e?.code || String(e)));

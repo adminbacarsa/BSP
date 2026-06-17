@@ -1,4 +1,5 @@
 
+import Link from 'next/link';
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import EmployeeLegajoForm from '@/components/admin/employees/EmployeeLegajoForm';
@@ -17,7 +18,7 @@ import {
   Search, Plus, Edit2, Trash2, MapPin,
   FileBadge, UserCheck, UserX, Send, KeyRound,
   CheckSquare, Square, CheckCircle2, Clock, AlertCircle,
-  Loader2, Mail, ShieldCheck, LayoutGrid, List
+  Loader2, Mail, ShieldCheck, LayoutGrid, List, ExternalLink
 } from 'lucide-react';
 
 type ListViewMode = 'cards' | 'table';
@@ -342,6 +343,12 @@ export default function EmployeesPage() {
           {isSending ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
         </button>
       )}
+      <Link href={`/admin/empleados/${emp.id}`}
+        className="p-1.5 rounded-lg text-indigo-500 hover:bg-indigo-50 transition-colors"
+        title="Ver perfil completo"
+      >
+        <ExternalLink size={13} />
+      </Link>
       <button
         onClick={() => openEdit(emp)}
         disabled={loadingEdit}
