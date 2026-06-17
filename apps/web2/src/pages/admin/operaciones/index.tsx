@@ -1482,9 +1482,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         return shiftEnded
                             ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>
                             : <div className="flex gap-1">
-                                <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Guardia llegó tarde — dar presente"><UserCheck size={12}/></button>
-                                <button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Protocolo cobertura"><Siren size={12}/></button>
-                                <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>
+                                <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>
+                                <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>
                               </div>;
                       })()
                     : <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Confirmar ausencia"><AlertTriangle size={12}/></button>
@@ -1558,7 +1557,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
                             return shiftEnded
                                 ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
-                                : <button onClick={() => onOpenCoverage(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-[10px] font-bold hover:bg-rose-700 transition-colors"><Siren size={11}/>CUBRIR</button>;
+                                : <div className="flex gap-1.5 items-center">
+                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>
+                                    <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia"><XCircle size={11}/></button>
+                                  </div>;
                           })()
                         : <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>CONFIRMAR AUSENCIA</button>
                     )}
