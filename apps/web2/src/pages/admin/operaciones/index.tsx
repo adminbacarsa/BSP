@@ -2406,9 +2406,11 @@ export default function OperacionesPage() {
         const coveredObjs    = new Set(todayShifts.filter((s:any)=>s.isPresent||s.isCompleted).map((s:any)=>s.objectiveId).filter(Boolean));
         const totalPlanHrs   = todayShifts.filter((s:any)=>!s.isUnassigned).reduce((a:number,s:any)=>{ try{ return a+Math.max(0,(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); }catch{return a;} },0);
         const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a;} return a; },0);
-        const totalOpShifts  = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        // Denominador: turnos planificados del día (excl. vacantes sin asignar)
+        const plannedShifts  = todayShifts.filter((s:any) => !s.isUnassigned).length;
+        const totalOpShifts  = plannedShifts || (logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes);
         const coveredShifts  = completedToday.length + activeNow.length + retainedNow.length;
-        const coveragePct    = totalOpShifts > 0 ? Math.round((coveredShifts / totalOpShifts) * 100) : 0;
+        const coveragePct    = totalOpShifts > 0 ? Math.min(100, Math.round((coveredShifts / totalOpShifts) * 100)) : 0;
         const punctualCount  = completedToday.filter((s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return true; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000<=5; }).length;
         const punctualPct    = completedToday.length > 0 ? Math.round((punctualCount/completedToday.length)*100) : 100;
         const hasIncidents   = (absentToday.length + vacantToday.length) > 0;
@@ -2416,7 +2418,8 @@ export default function OperacionesPage() {
 
         // ── Alertas deduplicadas ─────────────────────────────────────────────
         const noiseTypes = new Set(['RECARGO_12H','RETENCION_DETECTADA','RETENCION_LARGA','RETENCIÓN','RETENCION']);
-        const todayStartMs = new Date(now.toLocaleDateString('es-AR',{timeZone:tz})+' 00:00:00').getTime();
+        const todayIso = now.toLocaleDateString('en-CA', {timeZone: tz}); // YYYY-MM-DD
+        const todayStartMs = new Date(todayIso + 'T00:00:00-03:00').getTime();
         const alertsToday  = empNovedades.filter((n:any) => {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
             const tsMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
@@ -2539,7 +2542,7 @@ export default function OperacionesPage() {
                 ['Vacantes sin cubrir',      String(logic.stats.vacantes), 'Ausencias registradas',    String(absentToday.length)],
                 ['Objetivos con cobertura',  `${coveredObjs.size} / ${distinctObjs.size}`,'% Turnos cubiertos',`${coveragePct}%`],
                 ['Horas planificadas',       `${totalPlanHrs.toFixed(1)} hs`,'Horas ejecutadas (compl.)',`${totalRealHrs.toFixed(1)} hs`],
-                ['Indice de puntualidad',    `${punctualPct}%`,            'Alertas deduplicadas',     String(dedupedAlerts.length)],
+                ['Indice de puntualidad',    `${punctualPct}%`,            'Alertas registradas',      String(dedupedAlerts.length)],
                 ['Alertas pendientes',       String(pendingNovedades.length),'Estado de guardia',       statusLabel],
             ],
             startY: y2,
