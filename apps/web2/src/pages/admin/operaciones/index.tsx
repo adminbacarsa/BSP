@@ -9,7 +9,7 @@ import {
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
-    FileText, Volume2, VolumeX, RefreshCw
+    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -1506,7 +1506,7 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
                         <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
                         <button onClick={handleConfirm} disabled={!selected || loading}
                             className="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
-                            {loading ? <Loader2 size={14} className="animate-spin"/> : <AlarmClock size={14}/>} Confirmar
+                            {loading ? <Loader2 size={14} className="animate-spin"/> : <Timer size={14}/>} Confirmar
                         </button>
                     </div>
                 </div>
@@ -1594,7 +1594,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                     <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
                 )}
-                {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenManualRetention?.(shift)} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors" title="Retención manual"><AlarmClock size={12}/></button><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
+                {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenManualRetention?.(shift)} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors" title="Retención manual"><Timer size={12}/></button><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
                     ? (() => {
                         const endMs = shift.endDateObj?.getTime?.() ?? 0;
