@@ -21,7 +21,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
         await addDoc(collection(db, 'audit_logs'), data);
     } catch (e) { console.error('Error registrando bitácora', e); toast.error('No se pudo registrar en bitácora.'); }
 };
-import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft } from 'lucide-react';
+import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
@@ -1052,6 +1052,7 @@ export default function TacticalMapView() {
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [manualRetentionData, setManualRetentionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [rrhhVacancyData, setRrhhVacancyData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{isOpen: boolean, ctx: any}>({isOpen: false, ctx: {employeeName:'', phone:''}});
@@ -1377,7 +1378,8 @@ export default function TacticalMapView() {
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
-                                                {s.isRetention ? (<>
+                                                {s.isPresent ? (<>
+                                                    <button onClick={() => { setNotifPanelOpen(false); setManualRetentionData({isOpen:true, shift:s}); }} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100" title="Retención manual"><Timer size={11}/></button>
                                                     <button onClick={() => { setNotifPanelOpen(false); setCheckoutData({isOpen:true, shift:s}); }} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><LogOut size={11}/></button>
                                                     <button onClick={() => { setNotifPanelOpen(false); setInterruptData({isOpen:true, shift:s}); }} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100"><Siren size={11}/></button>
                                                 </>) : (<>
@@ -1509,6 +1511,7 @@ export default function TacticalMapView() {
                 availableShifts={logic.processedData}
                 referenceDate={logic.now}
             />
+            <ManualRetentionModal isOpen={manualRetentionData.isOpen} onClose={() => setManualRetentionData({isOpen:false,shift:null})} shift={manualRetentionData.shift}/>
             <AbsenceDecisionModal
                 isOpen={absenceDecisionData.isOpen}
                 onClose={() => setAbsenceDecisionData({isOpen:false, shift:null})}
