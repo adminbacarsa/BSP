@@ -2406,9 +2406,15 @@ export default function OperacionesPage() {
         const coveredObjs    = new Set(todayShifts.filter((s:any)=>s.isPresent||s.isCompleted).map((s:any)=>s.objectiveId).filter(Boolean));
         const totalPlanHrs   = todayShifts.filter((s:any)=>!s.isUnassigned).reduce((a:number,s:any)=>{ try{ return a+Math.max(0,(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); }catch{return a;} },0);
         const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a;} return a; },0);
-        // Denominador: turnos planificados del día (excl. vacantes sin asignar)
-        const plannedShifts  = todayShifts.filter((s:any) => !s.isUnassigned).length;
+        // Denominador: turnos operativos del día (excl. vacantes, francos y virtuales)
+        const operationalShifts = todayShifts.filter((s:any) => !s.isUnassigned && !s.isFranco && !s.isVirtual);
+        const plannedShifts  = operationalShifts.length;
         const totalOpShifts  = plannedShifts || (logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes);
+        // DEBUG audit — ver en consola del navegador al generar el PDF
+        console.group('[PDF] Auditoría turnos planificados');
+        console.log('Total todayShifts:', todayShifts.length, '| Sin asignar:', vacantToday.length, '| Francos:', todayShifts.filter((s:any)=>s.isFranco).length, '| Virtuales:', todayShifts.filter((s:any)=>s.isVirtual).length, '| OPERACIONALES:', plannedShifts);
+        operationalShifts.forEach((s:any) => console.log(' -', s.employeeName||'?', '|', s.objectiveName||s.objectiveId||'?', '|', s.positionName||'?', '| status:', s.status||'?', '| isPresent:', s.isPresent, '| isCompleted:', s.isCompleted, '| isAbsent:', s.isAbsent));
+        console.groupEnd();
         const coveredShifts  = completedToday.length + activeNow.length + retainedNow.length;
         const coveragePct    = totalOpShifts > 0 ? Math.min(100, Math.round((coveredShifts / totalOpShifts) * 100)) : 0;
         const punctualCount  = completedToday.filter((s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return true; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000<=5; }).length;
