@@ -649,9 +649,17 @@ export default function EmployeesPage() {
           // Respetar el ciclo de liquidación del empleado (ej: día 26 → abr/26 a may/25)
           const { start: firstDay, end: lastDay } = getCycleDates(currentDate, cycleStartDay);
 
-          const qTurnos = query(collection(db, 'turnos'), where('employeeId', '==', empId), where('startTime', '>=', Timestamp.fromDate(firstDay)), where('startTime', '<=', Timestamp.fromDate(lastDay)));
+          const qTurnos = query(collection(db, 'turnos'), where('employeeId', '==', empId));
           const turnosSnap = await getDocs(qTurnos);
-          const sortedDocs = turnosSnap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a:any, b:any) => a.startTime.seconds - b.startTime.seconds);
+          const firstMs = firstDay.getTime();
+          const lastMs  = lastDay.getTime();
+          const sortedDocs = turnosSnap.docs
+              .map(d => ({ ...d.data(), id: d.id }))
+              .filter((d: any) => {
+                  const ts = d.startTime?.seconds ? d.startTime.seconds * 1000 : null;
+                  return ts !== null && ts >= firstMs && ts <= lastMs;
+              })
+              .sort((a: any, b: any) => a.startTime.seconds - b.startTime.seconds);
           
           const qAusencias = query(collection(db, 'ausencias'), where('employeeId', '==', empId));
           const ausenciasSnap = await getDocs(qAusencias);
