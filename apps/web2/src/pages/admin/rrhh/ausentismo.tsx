@@ -223,10 +223,25 @@ export default function AusentismoDashboard() {
     });
   }, [absences, periods]);
 
+  const normalizeAbsenceType = (t: string): string => {
+    if (!t) return 'Sin tipo';
+    // fix encoding artifacts (e.g. "No PresentaciÃ³n" → "No Presentación")
+    const fixed = t.replace(/Ã³/g, 'ó').replace(/Ã©/g, 'é').replace(/Ã¡/g, 'á').replace(/Ã­/g, 'í').replace(/Ãº/g, 'ú').replace(/Ã±/g, 'ñ').trim();
+    // unify case variants: "No Presentacion" / "NO_PRESENTACION" → "No Presentación"
+    const lower = fixed.toLowerCase().replace(/_/g, ' ');
+    if (lower === 'no presentacion' || lower === 'no presentación') return 'No Presentación';
+    if (lower === 'llegada tarde' || lower === 'tardanza') return 'Llegada Tarde';
+    if (lower === 'injustificada' || lower === 'ausencia injustificada') return 'Injustificada';
+    if (lower === 'enfermedad' || lower === 'art') return 'Enfermedad';
+    if (lower === 'vacaciones') return 'Vacaciones';
+    if (lower === 'licencia') return 'Licencia';
+    return fixed;
+  };
+
   const pieData = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const a of periodAbsences) {
-      const t = a.type || 'Sin tipo';
+      const t = normalizeAbsenceType(a.type);
       counts[t] = (counts[t] ?? 0) + 1;
     }
     return Object.entries(counts)
@@ -238,9 +253,15 @@ export default function AusentismoDashboard() {
     const map: Record<string, { name: string; count: number; types: Record<string, number> }> = {};
     for (const a of periodAbsences) {
       const key = a.employeeId;
-      if (!map[key]) map[key] = { name: a.employeeName || key, count: 0, types: {} };
+      if (!map[key]) {
+        const emp = employees.find(e => e.id === key);
+        const resolved = a.employeeName
+          || (emp ? `${emp.lastName || ''} ${emp.firstName || ''}`.trim() : '')
+          || '—';
+        map[key] = { name: resolved, count: 0, types: {} };
+      }
       map[key].count++;
-      const t = a.type || 'Sin tipo';
+      const t = normalizeAbsenceType(a.type);
       map[key].types[t] = (map[key].types[t] ?? 0) + 1;
     }
     return Object.values(map)
@@ -251,7 +272,7 @@ export default function AusentismoDashboard() {
         count: e.count,
         topType: Object.entries(e.types).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—',
       }));
-  }, [periodAbsences]);
+  }, [periodAbsences, employees]);
 
   return (
     <DashboardLayout>
