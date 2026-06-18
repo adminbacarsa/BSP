@@ -1939,97 +1939,266 @@ export default function EmployeesPage() {
 
             {/* DASHBOARD GENERAL */}
             {activeTab === 'dashboard' && (
-                <div className="flex-1 overflow-y-auto space-y-4 pb-6">
-                    {/* Plantilla */}
+                <div className="flex-1 overflow-y-auto pb-6 space-y-4">
+
+                    {/* ── Fila 1: KPIs principales ── */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        {[
-                            { label: 'ACTIVOS', value: dashboardStats.activos, icon: UserCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                            { label: 'ALTAS DEL MES', value: dashboardStats.altas, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
-                            { label: 'BAJAS DEL MES', value: dashboardStats.bajas, icon: UserX, color: 'text-rose-600', bg: 'bg-rose-50' },
-                            { label: 'SIN PORTAL', value: dashboardStats.sinPortal, icon: KeyRound, color: 'text-amber-600', bg: 'bg-amber-50' },
-                        ].map(s => (
-                            <div key={s.label} className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1">
-                                <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center mb-1`}>
-                                    <s.icon size={16} className={s.color}/>
+                        {/* Nómina total */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1 col-span-1">
+                            <div className="flex items-center justify-between mb-1">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+                                    <Users size={16} className="text-indigo-600"/>
                                 </div>
-                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{s.label}</p>
-                                <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+                                <span className="text-[9px] font-black uppercase tracking-wide text-slate-300 bg-slate-50 px-2 py-0.5 rounded-full">Nómina</span>
                             </div>
-                        ))}
+                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">TOTAL PLANTILLA</p>
+                            <p className="text-3xl font-black text-indigo-600 leading-none">{globalHRStats.total}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                <span className="text-emerald-600 font-bold">{globalHRStats.activeCount} activos</span>
+                                {globalHRStats.inactiveCount > 0 && <span className="text-slate-400"> · {globalHRStats.inactiveCount} bajas</span>}
+                            </p>
+                        </div>
+
+                        {/* % Activos */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1">
+                            <div className="flex items-center justify-between mb-1">
+                                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
+                                    <UserCheck size={16} className="text-emerald-600"/>
+                                </div>
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${globalHRStats.activePct >= 90 ? 'bg-emerald-50 text-emerald-600' : globalHRStats.activePct >= 70 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'}`}>{globalHRStats.activePct}%</span>
+                            </div>
+                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">ACTIVOS</p>
+                            <p className="text-3xl font-black text-emerald-600 leading-none">{globalHRStats.activeCount}</p>
+                            <div className="mt-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${globalHRStats.activePct}%` }}/>
+                            </div>
+                        </div>
+
+                        {/* Ausentismo */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1">
+                            <div className="flex items-center justify-between mb-1">
+                                <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center">
+                                    <TrendingDown size={16} className="text-rose-500"/>
+                                </div>
+                                <Link href="/admin/rrhh/ausentismo" className="text-[9px] font-bold text-indigo-500 hover:underline flex items-center gap-0.5">
+                                    Detalle <ExternalLink size={9}/>
+                                </Link>
+                            </div>
+                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">AUSENTISMO HOY</p>
+                            <p className={`text-3xl font-black leading-none ${globalHRStats.ausentismoPct > 10 ? 'text-rose-600' : globalHRStats.ausentismoPct > 5 ? 'text-amber-500' : 'text-slate-700'}`}>{globalHRStats.ausentismoPct}%</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{globalHRStats.absActive} ausente{globalHRStats.absActive !== 1 ? 's' : ''} hoy</p>
+                        </div>
+
+                        {/* Portal / Coords */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1">
+                            <div className="flex items-center justify-between mb-1">
+                                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                                    <ShieldCheckIcon size={16} className="text-blue-600"/>
+                                </div>
+                            </div>
+                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">PORTAL ACTIVO</p>
+                            <p className="text-3xl font-black text-blue-600 leading-none">{globalHRStats.withPortal}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                                {globalHRStats.withEmail} con email
+                                {globalHRStats.withoutCoords > 0 && <span className="text-amber-500"> · {globalHRStats.withoutCoords} sin coords</span>}
+                            </p>
+                        </div>
                     </div>
 
-                    {/* Ausentismo mini */}
-                    <div className="bg-white rounded-xl border border-slate-100 p-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                                <TrendingDown size={16} className="text-slate-500"/>
-                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Ausentismo del período</h3>
-                            </div>
-                            <Link href="/admin/rrhh/ausentismo" className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1">
-                                Ver detalle completo <ExternalLink size={11}/>
-                            </Link>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            {[
-                                { label: 'TASA', value: `${dashboardStats.tasaAusentismo}%`, color: 'text-slate-800' },
-                                { label: 'AUSENCIAS', value: dashboardStats.ausencias, color: 'text-slate-800' },
-                                { label: 'INJUSTIFICADAS', value: dashboardStats.injustificadas, color: dashboardStats.injustificadas > 0 ? 'text-rose-600' : 'text-slate-800' },
-                                { label: 'SIN CERTIFICADO', value: dashboardStats.sinCertificado, color: dashboardStats.sinCertificado > 0 ? 'text-amber-600' : 'text-slate-800' },
-                            ].map(s => (
-                                <div key={s.label} className="bg-slate-50 rounded-lg p-3">
-                                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-1">{s.label}</p>
-                                    <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                    {/* ── Fila 2: Antigüedad + Distribución por objetivo ── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
-                    {/* Alertas */}
-                    {(dashboardStats.sinEmail > 0 || dashboardStats.sinPortal > 0) && (
-                        <div className="bg-white rounded-xl border border-amber-100 p-4">
-                            <div className="flex items-center gap-2 mb-3">
-                                <BellRing size={16} className="text-amber-500"/>
-                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Alertas de plantilla</h3>
+                        {/* Antigüedad */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Award size={15} className="text-indigo-500"/>
+                                    <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Antigüedad de plantilla</h3>
+                                </div>
+                                <div className="flex gap-2 text-[10px] text-slate-400">
+                                    {globalHRStats.avgSeniority > 0 && <span className="font-bold text-indigo-600">Prom. {globalHRStats.avgSeniority} años</span>}
+                                    {globalHRStats.avgAge > 0 && <span>· {globalHRStats.avgAge} edad</span>}
+                                </div>
                             </div>
                             <div className="space-y-2">
-                                {dashboardStats.sinEmail > 0 && (
-                                    <div className="flex items-center justify-between bg-amber-50 rounded-lg px-3 py-2">
-                                        <div className="flex items-center gap-2 text-[12px] text-amber-800">
-                                            <Mail size={13}/> <span><b>{dashboardStats.sinEmail}</b> empleado{dashboardStats.sinEmail > 1 ? 's' : ''} sin email registrado</span>
+                                {([['< 1 año', globalHRStats.senBuckets['<1']], ['1 a 3 años', globalHRStats.senBuckets['1-3']], ['3 a 5 años', globalHRStats.senBuckets['3-5']], ['5+ años', globalHRStats.senBuckets['5+']]] as [string, number][]).map(([label, count], i) => {
+                                    const pct = globalHRStats.activeCount > 0 ? Math.round((count / globalHRStats.activeCount) * 100) : 0;
+                                    return (
+                                        <div key={label} className="flex items-center gap-2">
+                                            <span className="text-[10px] font-bold text-slate-500 w-16 shrink-0">{label}</span>
+                                            <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}/>
+                                            </div>
+                                            <span className="text-[10px] font-black text-slate-700 w-6 text-right">{count}</span>
                                         </div>
-                                        <button onClick={() => { setActiveTab('legajos'); }} className="text-[10px] font-bold text-amber-700 hover:underline">Ver legajos →</button>
-                                    </div>
-                                )}
-                                {dashboardStats.sinPortal > 0 && (
-                                    <div className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
-                                        <div className="flex items-center gap-2 text-[12px] text-blue-800">
-                                            <KeyRound size={13}/> <span><b>{dashboardStats.sinPortal}</b> empleado{dashboardStats.sinPortal > 1 ? 's' : ''} con email pero sin acceso al portal</span>
-                                        </div>
-                                        <button onClick={() => { setActiveTab('legajos'); }} className="text-[10px] font-bold text-blue-700 hover:underline">Ver legajos →</button>
-                                    </div>
-                                )}
+                                    );
+                                })}
                             </div>
                         </div>
-                    )}
 
-                    {/* Accesos rápidos */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {[
-                            { label: 'Legajos', desc: `${dashboardStats.activos} empleados activos`, icon: Users, tab: 'legajos' as const, color: 'bg-indigo-50 text-indigo-600' },
-                            { label: 'Novedades', desc: 'Ausencias y licencias', icon: AlertTriangle, tab: 'ausencias' as const, color: 'bg-rose-50 text-rose-600' },
-                            { label: 'Correcciones', desc: 'Ajuste de horas y turnos', icon: ClipboardEdit, tab: 'correcciones' as const, color: 'bg-slate-50 text-slate-600' },
-                        ].map(s => (
-                            <button key={s.label} onClick={() => setActiveTab(s.tab)}
-                                className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-3 hover:shadow-sm transition-all text-left">
-                                <div className={`w-9 h-9 rounded-lg ${s.color} flex items-center justify-center shrink-0`}>
-                                    <s.icon size={16}/>
+                        {/* Distribución por objetivo */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Target size={15} className="text-emerald-500"/>
+                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Distribución por objetivo</h3>
+                            </div>
+                            {Object.keys(globalHRStats.objCounts).length === 0 ? (
+                                <p className="text-[11px] text-slate-400 text-center py-4">Sin datos de objetivo asignado</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {Object.entries(globalHRStats.objCounts)
+                                        .sort((a, b) => b[1] - a[1])
+                                        .slice(0, 5)
+                                        .map(([name, count], i) => {
+                                            const pct = globalHRStats.activeCount > 0 ? Math.round((count / globalHRStats.activeCount) * 100) : 0;
+                                            return (
+                                                <div key={name} className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold text-slate-500 truncate flex-1 min-w-0">{name}</span>
+                                                    <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                                                        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}/>
+                                                    </div>
+                                                    <span className="text-[10px] font-black text-slate-700 w-5 text-right shrink-0">{count}</span>
+                                                </div>
+                                            );
+                                        })
+                                    }
                                 </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ── Fila 3: Novedades recientes + Próximos feriados ── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                        {/* Novedades recientes */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <AlertTriangle size={15} className="text-rose-500"/>
+                                    <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Novedades recientes</h3>
+                                </div>
+                                <button onClick={() => setActiveTab('ausencias')} className="text-[10px] font-bold text-indigo-500 hover:underline">Ver todas →</button>
+                            </div>
+                            {globalHRStats.recentAbsences.length === 0 ? (
+                                <p className="text-[11px] text-slate-400 text-center py-4">Sin novedades recientes</p>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    {globalHRStats.recentAbsences.map((ab: any, i: number) => {
+                                        const emp = employees.find(e => e.id === ab.employeeId);
+                                        return (
+                                            <div key={ab.id || i} className="flex items-center gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                                                <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                                                    <span className="text-[9px] font-black text-indigo-600">{emp?.nombre?.[0] || '?'}</span>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[11px] font-bold text-slate-700 truncate">{emp?.nombre || ab.employeeId}</p>
+                                                    <p className="text-[10px] text-slate-400">{ab.type || 'Ausencia'} · {String(ab.startDate).slice(0, 10)}</p>
+                                                </div>
+                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${ab.type === 'AA' ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500'}`}>{ab.type || '—'}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Próximos feriados */}
+                        <div className="bg-white rounded-xl border border-slate-100 p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Calendar size={15} className="text-amber-500"/>
+                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Próximos feriados</h3>
+                            </div>
+                            {globalHRStats.upcomingHolidays.length === 0 ? (
+                                <p className="text-[11px] text-slate-400 text-center py-4">Sin feriados próximos cargados</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {globalHRStats.upcomingHolidays.map((h: any, i: number) => {
+                                        const d = new Date(h.date + 'T00:00:00');
+                                        const diff = Math.round((d.getTime() - new Date().setHours(0,0,0,0)) / (1000*60*60*24));
+                                        return (
+                                            <div key={h.id || i} className="flex items-center gap-3 py-1.5 border-b border-slate-50 last:border-0">
+                                                <div className="w-10 text-center shrink-0">
+                                                    <p className="text-[18px] font-black text-slate-700 leading-none">{d.getDate()}</p>
+                                                    <p className="text-[9px] font-bold text-slate-400 uppercase">{d.toLocaleString('es-AR', { month: 'short' })}</p>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[11px] font-bold text-slate-700 truncate">{h.name}</p>
+                                                    <p className="text-[10px] text-slate-400">{diff === 0 ? 'Hoy' : diff === 1 ? 'Mañana' : `En ${diff} días`}</p>
+                                                </div>
+                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${h.type === 'inamovible' ? 'bg-rose-50 text-rose-500' : 'bg-amber-50 text-amber-600'}`}>{h.type === 'inamovible' ? 'INAM.' : 'TRASLA.'}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ── Fila 4: Alertas de plantilla + Accesos rápidos ── */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Alertas */}
+                        {(dashboardStats.sinEmail > 0 || dashboardStats.sinPortal > 0 || globalHRStats.withoutCoords > 0) ? (
+                            <div className="bg-white rounded-xl border border-amber-100 p-4">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <BellRing size={15} className="text-amber-500"/>
+                                    <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Alertas de plantilla</h3>
+                                </div>
+                                <div className="space-y-1.5">
+                                    {dashboardStats.sinEmail > 0 && (
+                                        <div className="flex items-center justify-between bg-amber-50 rounded-lg px-3 py-2">
+                                            <div className="flex items-center gap-2 text-[11px] text-amber-800">
+                                                <Mail size={12}/> <span><b>{dashboardStats.sinEmail}</b> sin email</span>
+                                            </div>
+                                            <button onClick={() => setActiveTab('legajos')} className="text-[10px] font-bold text-amber-700 hover:underline">Ver →</button>
+                                        </div>
+                                    )}
+                                    {dashboardStats.sinPortal > 0 && (
+                                        <div className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
+                                            <div className="flex items-center gap-2 text-[11px] text-blue-800">
+                                                <KeyRound size={12}/> <span><b>{dashboardStats.sinPortal}</b> sin acceso al portal</span>
+                                            </div>
+                                            <button onClick={() => setActiveTab('legajos')} className="text-[10px] font-bold text-blue-700 hover:underline">Ver →</button>
+                                        </div>
+                                    )}
+                                    {globalHRStats.withoutCoords > 0 && (
+                                        <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                                            <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                                                <MapPin size={12}/> <span><b>{globalHRStats.withoutCoords}</b> sin coordenadas GPS</span>
+                                            </div>
+                                            <button onClick={() => setActiveTab('legajos')} className="text-[10px] font-bold text-slate-600 hover:underline">Ver →</button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4 flex items-center gap-3">
+                                <CheckCircle2 size={20} className="text-emerald-500 shrink-0"/>
                                 <div>
-                                    <p className="text-[12px] font-black text-slate-700">{s.label}</p>
-                                    <p className="text-[10px] text-slate-400">{s.desc}</p>
+                                    <p className="text-[12px] font-black text-emerald-700">Plantilla completa</p>
+                                    <p className="text-[10px] text-emerald-600">Todos los empleados tienen email, portal y coordenadas.</p>
                                 </div>
-                            </button>
-                        ))}
+                            </div>
+                        )}
+
+                        {/* Accesos rápidos */}
+                        <div className="grid grid-cols-3 gap-2">
+                            {[
+                                { label: 'Legajos', desc: `${globalHRStats.activeCount} activos`, icon: Users, tab: 'legajos' as const, color: 'bg-indigo-50 text-indigo-600' },
+                                { label: 'Novedades', desc: 'Ausencias y lic.', icon: AlertTriangle, tab: 'ausencias' as const, color: 'bg-rose-50 text-rose-600' },
+                                { label: 'Correcciones', desc: 'Ajuste de horas', icon: ClipboardEdit, tab: 'correcciones' as const, color: 'bg-slate-50 text-slate-600' },
+                            ].map(s => (
+                                <button key={s.label} onClick={() => setActiveTab(s.tab)}
+                                    className="bg-white border border-slate-100 rounded-xl p-3 flex flex-col items-center gap-2 hover:shadow-sm transition-all text-center">
+                                    <div className={`w-9 h-9 rounded-lg ${s.color} flex items-center justify-center`}>
+                                        <s.icon size={16}/>
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-black text-slate-700">{s.label}</p>
+                                        <p className="text-[9px] text-slate-400">{s.desc}</p>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             )}
@@ -2487,188 +2656,13 @@ export default function EmployeesPage() {
                                 </div>
                             </div>
                         ) : (
-                            /* ===== GLOBAL HR DASHBOARD ===== */
-                            <div className="h-full overflow-y-auto custom-scrollbar p-5 space-y-4 animate-in fade-in">
-
-                              {/* ── ROW 1: KPI primarios ─────────────────────────── */}
-                              <div className="grid grid-cols-3 gap-3">
-                                {/* Nómina total */}
-                                <div className="bg-indigo-600 rounded-xl p-4 text-white flex flex-col justify-between min-h-[90px]">
-                                  <Users size={16} className="opacity-50"/>
-                                  <div>
-                                    <p className="text-3xl font-black leading-none">{globalHRStats.total}</p>
-                                    <p className="text-[9px] font-black uppercase opacity-70 mt-0.5">Nómina Total</p>
-                                    <p className="text-[9px] opacity-50 mt-0.5">{globalHRStats.activeCount} activos · {globalHRStats.inactiveCount} bajas</p>
-                                  </div>
-                                </div>
-                                {/* % Activos */}
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col justify-between min-h-[90px]">
-                                  <div className="flex items-center justify-between">
-                                    <UserCheck size={14} className="text-emerald-500"/>
-                                    <span className="text-[9px] font-black uppercase text-slate-400">Activos</span>
-                                  </div>
-                                  <div>
-                                    <p className="text-3xl font-black text-emerald-600 leading-none">{globalHRStats.activePct}%</p>
-                                    <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full mt-2">
-                                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${globalHRStats.activePct}%` }}/>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* Ausentismo */}
-                                <div className={`rounded-xl p-4 flex flex-col justify-between min-h-[90px] border ${globalHRStats.ausentismoPct >= 10 ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-700'}`}>
-                                  <div className="flex items-center justify-between">
-                                    <AlertTriangle size={14} className={globalHRStats.ausentismoPct >= 10 ? 'text-rose-500' : 'text-amber-500'}/>
-                                    <span className="text-[9px] font-black uppercase text-slate-400">Ausentismo</span>
-                                  </div>
-                                  <div>
-                                    <p className={`text-3xl font-black leading-none ${globalHRStats.ausentismoPct >= 10 ? 'text-rose-600' : 'text-amber-600'}`}>{globalHRStats.ausentismoPct}%</p>
-                                    <p className="text-[9px] text-slate-400 mt-0.5">{globalHRStats.absActive} ausentes hoy</p>
-                                  </div>
-                                </div>
-                                {/* Portal */}
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col justify-between min-h-[90px]">
-                                  <div className="flex items-center justify-between">
-                                    <ShieldCheckIcon size={14} className="text-violet-500"/>
-                                    <span className="text-[9px] font-black uppercase text-slate-400">Portal</span>
-                                  </div>
-                                  <div>
-                                    <p className="text-3xl font-black text-violet-600 leading-none">{globalHRStats.withPortal}</p>
-                                    <p className="text-[9px] text-slate-400 mt-0.5">de {globalHRStats.withEmail} con email</p>
-                                    {globalHRStats.withoutCoords > 0 && (
-                                      <p className="text-[9px] text-amber-500 font-bold mt-0.5">{globalHRStats.withoutCoords} sin coords</p>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Prom. Antigüedad */}
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col justify-between min-h-[90px]">
-                                  <div className="flex items-center justify-between">
-                                    <Award size={14} className="text-amber-500"/>
-                                    <span className="text-[9px] font-black uppercase text-slate-400">Prom. Antigüedad</span>
-                                  </div>
-                                  <div>
-                                    <p className="text-3xl font-black text-amber-600 leading-none">{globalHRStats.avgSeniority}<span className="text-lg"> años</span></p>
-                                    <p className="text-[9px] text-slate-400 mt-0.5">{globalHRStats.senBuckets['5+']} con +5 años · {globalHRStats.senBuckets['<1']} nuevos</p>
-                                  </div>
-                                </div>
-                                {/* Prom. Edad */}
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col justify-between min-h-[90px]">
-                                  <div className="flex items-center justify-between">
-                                    <TrendingUp size={14} className="text-sky-500"/>
-                                    <span className="text-[9px] font-black uppercase text-slate-400">Prom. Edad</span>
-                                  </div>
-                                  <div>
-                                    <p className="text-3xl font-black text-sky-600 leading-none">{globalHRStats.avgAge > 0 ? globalHRStats.avgAge : '—'}<span className="text-lg">{globalHRStats.avgAge > 0 ? ' años' : ''}</span></p>
-                                    <p className="text-[9px] text-slate-400 mt-0.5">{globalHRStats.ageCount > 0 ? `${globalHRStats.ageCount} con fecha de nac.` : 'Sin datos de edad'}</p>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* ── ROW 2: Antigüedad + Por Objetivo ─────────── */}
-                              <div className="grid grid-cols-2 gap-4">
-                                {/* Antigüedad */}
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl overflow-hidden">
-                                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 flex items-center gap-2">
-                                    <Award size={12} className="text-amber-500"/>
-                                    <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Antigüedad</span>
-                                  </div>
-                                  <div className="p-3 space-y-2">
-                                    {([['<1 año', globalHRStats.senBuckets['<1'], '#6366f1'],['1-3 años',globalHRStats.senBuckets['1-3'],'#10b981'],['3-5 años',globalHRStats.senBuckets['3-5'],'#f59e0b'],['5+ años',globalHRStats.senBuckets['5+'],'#ef4444']] as [string,number,string][]).map(([label, cnt, color]) => {
-                                      const pct = globalHRStats.activeCount > 0 ? Math.round((cnt/globalHRStats.activeCount)*100) : 0;
-                                      return (
-                                        <div key={label} className="flex items-center gap-2">
-                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }}/>
-                                          <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300 flex-1 uppercase">{label}</span>
-                                          <div className="w-20 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                            <div className="h-full rounded-full" style={{ width:`${pct}%`, background: color }}/>
-                                          </div>
-                                          <span className="text-[10px] font-black text-slate-700 dark:text-white w-6 text-right">{cnt}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                                {/* Por Objetivo */}
-                                {Object.keys(globalHRStats.objCounts).length > 0 ? (
-                                  <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl overflow-hidden">
-                                    <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 flex items-center gap-2">
-                                      <Target size={12} className="text-indigo-500"/>
-                                      <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Por Objetivo</span>
-                                    </div>
-                                    <div className="p-3 space-y-2">
-                                      {Object.entries(globalHRStats.objCounts).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([name,cnt],i)=>{
-                                        const pct = globalHRStats.activeCount > 0 ? Math.round((cnt/globalHRStats.activeCount)*100) : 0;
-                                        return (
-                                          <div key={name} className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CHART_COLORS[i%CHART_COLORS.length] }}/>
-                                            <span className="text-[10px] text-slate-600 dark:text-slate-400 flex-1 truncate font-bold">{name}</span>
-                                            <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                              <div className="h-full rounded-full" style={{ width:`${pct}%`, background: CHART_COLORS[i%CHART_COLORS.length] }}/>
-                                            </div>
-                                            <span className="text-[10px] font-black text-slate-700 dark:text-white w-4 text-right">{cnt}</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                ) : <div/>}
-                              </div>
-
-                              {/* ── ROW 3: Novedades recientes + Feriados próximos */}
-                              <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl overflow-hidden">
-                                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 flex items-center gap-2">
-                                    <Clock size={12} className="text-rose-500"/>
-                                    <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Novedades Recientes</span>
-                                  </div>
-                                  <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                                    {globalHRStats.recentAbsences.length === 0 ? (
-                                      <div className="p-6 text-center">
-                                        <CheckCircle size={22} className="mx-auto text-emerald-300 mb-1"/>
-                                        <p className="text-[10px] text-slate-400 font-bold">Sin novedades</p>
-                                      </div>
-                                    ) : globalHRStats.recentAbsences.map((a: any, i: number) => {
-                                      const empName = getAbsenceEmployeeName(a);
-                                      const typeColors: Record<string,string> = { 'Vacaciones':'bg-teal-100 text-teal-700','Enfermedad':'bg-rose-100 text-rose-700','ART':'bg-orange-100 text-orange-700','Injustificada':'bg-red-100 text-red-700','Licencia Esp.':'bg-violet-100 text-violet-700' };
-                                      const colorClass = typeColors[a.type] || Object.entries(typeColors).find(([k])=>a.type?.includes(k))?.[1] || 'bg-amber-100 text-amber-700';
-                                      return (
-                                        <div key={i} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                                          <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center font-black text-[11px] text-slate-600 dark:text-slate-300 shrink-0">{(empName?.[0]||'?').toUpperCase()}</div>
-                                          <div className="flex-1 min-w-0">
-                                            <p className="text-[11px] font-black text-slate-800 dark:text-white uppercase truncate">{empName}</p>
-                                            <p className="text-[9px] text-slate-400">{String(a.startDate).slice(0,10)} → {String(a.endDate).slice(0,10)}</p>
-                                          </div>
-                                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase shrink-0 ${colorClass}`}>{a.type}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div className="space-y-3">
-                                  {/* Próximos feriados */}
-                                  <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700 rounded-xl overflow-hidden">
-                                    <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 flex items-center gap-2">
-                                      <Calendar size={12} className="text-amber-500"/>
-                                      <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Próximos Feriados</span>
-                                    </div>
-                                    <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                                      {globalHRStats.upcomingHolidays.length === 0
-                                        ? <p className="px-4 py-3 text-[10px] text-slate-400 font-bold">Sin feriados próximos</p>
-                                        : globalHRStats.upcomingHolidays.map((h: any, i: number) => (
-                                          <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                                            <span className="text-[10px] font-black text-amber-600 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-lg shrink-0">{String(h.date).slice(5)}</span>
-                                            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">{h.name}</span>
-                                            <span className="text-[9px] text-slate-400 shrink-0">{h.type}</span>
-                                          </div>
-                                        ))}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <p className="text-center text-slate-300 dark:text-slate-600 text-[10px] font-medium">
-                                Seleccioná un empleado para ver su detalle individual y métricas del ciclo.
-                              </p>
+                            <div className="h-full flex flex-col items-center justify-center gap-3 text-slate-400">
+                                <Users size={36} className="text-slate-200"/>
+                                <p className="text-[13px] font-bold text-slate-400">Seleccioná un empleado para ver su detalle</p>
+                                <button onClick={() => setActiveTab('dashboard')} className="text-[11px] text-indigo-500 hover:underline flex items-center gap-1">
+                                    <BarChart2 size={12}/> Ver Dashboard General
+                                </button>
+                                {/*PLACEHOLDER_END*/}
                             </div>
                         )}
                     </div>
