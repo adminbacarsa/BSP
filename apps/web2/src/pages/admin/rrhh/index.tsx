@@ -659,6 +659,7 @@ export default function EmployeesPage() {
           
           ausenciasSnap.docs.forEach(doc => {
              const data = doc.data();
+             if (!data.startDate || !data.endDate) return;
              const [sY, sM, sD] = data.startDate.split('-').map(Number);
              const [eY, eM, eD] = data.endDate.split('-').map(Number);
              const start = new Date(sY, sM - 1, sD);
@@ -696,6 +697,7 @@ export default function EmployeesPage() {
               const rawCode = (d.code || '').trim().toUpperCase();
               if (d.type === 'NOVEDAD' || !isOperativeCodeRRHH(rawCode)) return;
 
+              if (!d.startTime?.toDate || !d.endTime?.toDate) return;
               const start = d.startTime.toDate();
               const end = d.endTime.toDate();
               let duration = (end.getTime() - start.getTime()) / 3600000;
