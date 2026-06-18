@@ -264,10 +264,13 @@ export default function EmpleadoPerfilPage() {
     const ausenciasCount = ausencias.length;
 
     const tardanzasCount =
+      // Fuente principal: turnos con isLate:true (registrado por operaciones)
+      turnos.filter((t: any) => t.isLate === true).length +
+      // Complemento: novedades de llegada tarde (legacy / otras fuentes)
       novedades.filter(
-        (n) => n.type === 'LLEGADA_TARDE_DETECTADA' || n.type === 'Llegada Tarde',
+        (n: any) => n.type === 'LLEGADA_TARDE' || n.type === 'LLEGADA_TARDE_DETECTADA' || n.type === 'Llegada Tarde',
       ).length +
-      ausencias.filter((a) => a.type === 'Llegada Tarde').length;
+      ausencias.filter((a: any) => a.type === 'Llegada Tarde').length;
 
     const presentes = turnos.filter((t) => t.isPresent === true).length;
     const ausentes = turnos.filter((t) => t.isAbsent === true).length;

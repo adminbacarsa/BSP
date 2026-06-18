@@ -695,7 +695,7 @@ export default function EmployeesPage() {
               }
           });
 
-          let hoursTotalOperativas = 0, totalNocturnas = 0, totalDiurnas = 0, totalPlanificado = 0, totalRealizado = 0, hoursOnFranco = 0, hoursOnHoliday = 0, totalFrancos = 0;
+          let hoursTotalOperativas = 0, totalNocturnas = 0, totalDiurnas = 0, totalPlanificado = 0, totalRealizado = 0, hoursOnFranco = 0, hoursOnHoliday = 0, totalFrancos = 0, tardanzasCount = 0;
           let objectivesMap = new Map();
           const monthHolidays: {[key: string]: boolean} = {}; holidays.forEach(h => { monthHolidays[h.date] = true; });
 
@@ -709,6 +709,7 @@ export default function EmployeesPage() {
               if (st.includes('cancel') || st.includes('delet')) return;
               const rawCode = (d.code || '').trim().toUpperCase();
               if (d.type === 'NOVEDAD' || !isOperativeCodeRRHH(rawCode)) return;
+              if (d.isLate === true) tardanzasCount++;
 
               if (!d.startTime?.toDate || !d.endTime?.toDate) return;
               const start = d.startTime.toDate();
@@ -783,6 +784,7 @@ export default function EmployeesPage() {
               vacationsCount: totalVacaciones,
               licensesCount: totalLicencias + totalEnfermedad,
               absencesCount: totalAusencias,
+              tardanzasCount,
               objectives: Array.from(objectivesMap.entries()).map(([name, hours]) => ({ name, hours })),
               shiftsCount: sortedDocs.filter((d:any) => isOperativeCodeRRHH((d.code||'').trim())).length,
               monthlyLimit: rule.maxHoursMonthly,
@@ -2271,6 +2273,7 @@ export default function EmployeesPage() {
                                                 { label:'Vacaciones', value:empStats.vacationsCount||0,  color:'text-teal-600',   bg:'bg-teal-50 dark:bg-teal-900/20',     border:'border-teal-100 dark:border-teal-800',   icon:<Activity size={12}/> },
                                                 { label:'Licencias',  value:empStats.licensesCount||0,   color:'text-violet-600', bg:'bg-violet-50 dark:bg-violet-900/20', border:'border-violet-100 dark:border-violet-800',icon:<FileText size={12}/> },
                                                 { label:'Ausencias',  value:empStats.absencesCount,      color:'text-rose-600',   bg:'bg-rose-50 dark:bg-rose-900/20',     border:'border-rose-100 dark:border-rose-800',   icon:<AlertOctagon size={12}/> },
+                                                { label:'Tardanzas',  value:empStats.tardanzasCount||0,  color:'text-amber-600',  bg:'bg-amber-50 dark:bg-amber-900/20',   border:'border-amber-100 dark:border-amber-800', icon:<Clock size={12}/> },
                                                 { label:'Francos',    value:empStats.francosCount,       color:'text-emerald-600',bg:'bg-emerald-50 dark:bg-emerald-900/20',border:'border-emerald-100 dark:border-emerald-800',icon:<Coffee size={12}/> },
                                               ].map((s,i) => (
                                                 <div key={i} className={`${s.bg} ${s.border} border rounded-xl p-3 flex flex-col items-center gap-1`}>
@@ -2928,6 +2931,7 @@ export default function EmployeesPage() {
                         <div className="border border-gray-300 p-4 min-h-[100px] text-sm">
                             {/* Ausencias */}
                             {empStats?.absencesCount > 0 && <p className="mb-2"><strong>Ausencias:</strong> {empStats.absencesCount} días.</p>}
+                            {(empStats?.tardanzasCount||0) > 0 && <p className="mb-2"><strong>Tardanzas:</strong> {empStats.tardanzasCount} registradas en el período.</p>}
                             {/* Observaciones extraidas de los turnos */}
                             {empStats?.reportData?.turnos?.filter((t:any) => t.extensionNote || t.entryNote)?.map((t:any, i:number) => (
                                 <p key={i} className="mb-1 text-xs text-gray-600">
