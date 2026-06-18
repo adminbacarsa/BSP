@@ -2085,13 +2085,15 @@ export default function EmployeesPage() {
                                 <div className="space-y-1.5">
                                     {globalHRStats.recentAbsences.map((ab: any, i: number) => {
                                         const emp = employees.find(e => e.id === ab.employeeId);
+                                        const displayName = emp?.nombre || ab.employeeName || '—';
+                                        const initial = displayName !== '—' ? displayName[0].toUpperCase() : '?';
                                         return (
                                             <div key={ab.id || i} className="flex items-center gap-2 py-1.5 border-b border-slate-50 last:border-0">
                                                 <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                                                    <span className="text-[9px] font-black text-indigo-600">{emp?.nombre?.[0] || '?'}</span>
+                                                    <span className="text-[9px] font-black text-indigo-600">{initial}</span>
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="text-[11px] font-bold text-slate-700 truncate">{emp?.nombre || ab.employeeId}</p>
+                                                    <p className="text-[11px] font-bold text-slate-700 truncate">{displayName}</p>
                                                     <p className="text-[10px] text-slate-400">{ab.type || 'Ausencia'} · {String(ab.startDate).slice(0, 10)}</p>
                                                 </div>
                                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${ab.type === 'AA' ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500'}`}>{ab.type || '—'}</span>
