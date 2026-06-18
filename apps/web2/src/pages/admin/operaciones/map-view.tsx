@@ -861,16 +861,40 @@ export default function TacticalMapView() {
     const logic = useOperacionesMonitor();
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
-    // Refresh key: reconecta listener al volver de background o recuperar red
+    // Refresh key: reconecta listener al volver de background, recuperar red, o cada 3 min
     const [refreshKey, setRefreshKey] = useState(0);
     useEffect(() => {
         const bump = () => setRefreshKey(k => k + 1);
         const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
         document.addEventListener('visibilitychange', onVisible);
         window.addEventListener('online', bump);
+        const periodicRefresh = setInterval(bump, 3 * 60 * 1000);
         return () => {
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('online', bump);
+            clearInterval(periodicRefresh);
+        };
+    }, []);
+
+    // BroadcastChannel: anunciar presencia a CC y escuchar solicitud de cierre
+    useEffect(() => {
+        if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+        const ch = new BroadcastChannel('crono_mapview_sync');
+        // Anunciar que map-view está abierto
+        ch.postMessage({ type: 'MAPVIEW_OPEN' });
+        // Heartbeat cada 5s para que CC detecte la ventana incluso si abrió antes
+        const hb = setInterval(() => ch.postMessage({ type: 'MAPVIEW_HEARTBEAT' }), 5000);
+        // Escuchar solicitud de cierre desde CC
+        ch.onmessage = (e) => {
+            if (e.data?.type === 'MAPVIEW_CLOSE_REQUEST') {
+                ch.postMessage({ type: 'MAPVIEW_CLOSED' });
+                window.close();
+            }
+        };
+        return () => {
+            ch.postMessage({ type: 'MAPVIEW_CLOSED' });
+            clearInterval(hb);
+            ch.close();
         };
     }, []);
     const pendingNovedades = useMemo(() =>
@@ -1509,15 +1533,28 @@ export default function TacticalMapView() {
                 <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setDetailNovedad(null)}>
                     <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-black text-slate-500 uppercase">{detailNovedad.type?.replace(/_/g,' ')}</span>
-                            <button onClick={() => setDetailNovedad(null)} className="p-1 hover:bg-slate-100 rounded-lg"><X size={14}/></button>
+                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+                                {(TYPE_META_MAP as any)[detailNovedad?.type]?.label || detailNovedad?.type}
+                            </span>
+                            <button onClick={() => setDetailNovedad(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                                <X size={16}/>
+                            </button>
                         </div>
-                        <p className="font-bold text-slate-800 text-sm mb-1">{detailNovedad.employeeName || detailNovedad.objectiveName || '-'}</p>
-                        {detailNovedad.objectiveName && detailNovedad.employeeName && <p className="text-xs text-indigo-600 mb-1">{detailNovedad.objectiveName}{detailNovedad.positionName ? ` · ${detailNovedad.positionName}` : ''}</p>}
-                        {detailNovedad.description && <p className="text-xs text-slate-500 mb-3">{detailNovedad.description}</p>}
-                        <button onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
-                            
-                            className="w-full py-2.5 bg-slate-800 text-white text-xs font-bold rounded-xl hover:bg-slate-900 transition-colors">Cerrar</button>
+                        {detailNovedad.employeeName && (
+                            <p className="font-bold text-slate-800 text-sm mb-1">{detailNovedad.employeeName}</p>
+                        )}
+                        {detailNovedad.objectiveName && (
+                            <p className="text-xs text-slate-500 mb-1">{detailNovedad.objectiveName}</p>
+                        )}
+                        {detailNovedad.description && (
+                            <p className="text-sm text-slate-600 mb-4 leading-relaxed">{detailNovedad.description}</p>
+                        )}
+                        <button
+                            onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
+                            className="w-full py-2.5 bg-slate-800 text-white text-sm font-bold rounded-xl hover:bg-slate-700 transition-colors"
+                        >
+                            ATENDER
+                        </button>
                     </div>
                 </div>
             )}

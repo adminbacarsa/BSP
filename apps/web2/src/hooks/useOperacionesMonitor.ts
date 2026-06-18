@@ -153,16 +153,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
-    // Contador que fuerza re-suscripción de listeners al volver de background o reconectar red
+    // Contador que fuerza re-suscripción de listeners al volver de background, reconectar red, o cada 3 min
     const [refreshKey, setRefreshKey] = useState(0);
     useEffect(() => {
         const bump = () => setRefreshKey(k => k + 1);
         const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
         document.addEventListener('visibilitychange', onVisible);
         window.addEventListener('online', bump);
+        const periodicRefresh = setInterval(bump, 3 * 60 * 1000);
         return () => {
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('online', bump);
+            clearInterval(periodicRefresh);
         };
     }, []);
 
@@ -1048,4 +1050,4 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         objectives,
         now,
     };
-};
+}

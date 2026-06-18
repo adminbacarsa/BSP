@@ -2228,6 +2228,22 @@ export default function OperacionesPage() {
     }, [logic.recentLogs, bitacoraTab, bitacoraFiltroGuardia, bitacoraFiltroObj, bitacoraFiltroTipo, session.mySession]);
 
     const mapWindowRef = useRef<Window | null>(null);
+    const mapViewChannelRef = useRef<BroadcastChannel | null>(null);
+    // BroadcastChannel: detectar map-view abierto en otra pestaña/ventana
+    useEffect(() => {
+        if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+        const ch = new BroadcastChannel('crono_mapview_sync');
+        mapViewChannelRef.current = ch;
+        ch.onmessage = (e) => {
+            if (e.data?.type === 'MAPVIEW_OPEN' || e.data?.type === 'MAPVIEW_HEARTBEAT') {
+                setIsExternalMap(true);
+            } else if (e.data?.type === 'MAPVIEW_CLOSED') {
+                setIsExternalMap(false);
+                mapWindowRef.current = null;
+            }
+        };
+        return () => { ch.close(); mapViewChannelRef.current = null; };
+    }, []);
     const handleUndockMap = () => {
         if (mapWindowRef.current && !mapWindowRef.current.closed) {
             mapWindowRef.current.focus();
@@ -2245,6 +2261,14 @@ export default function OperacionesPage() {
                 }
             }, 1000);
         }
+    };
+    const handleRestoreMap = () => {
+        // Enviar cierre a map-view vía BroadcastChannel
+        mapViewChannelRef.current?.postMessage({ type: 'MAPVIEW_CLOSE_REQUEST' });
+        // Si era popup, cerrarlo directamente
+        if (mapWindowRef.current && !mapWindowRef.current.closed) mapWindowRef.current.close();
+        mapWindowRef.current = null;
+        setIsExternalMap(false);
     };
     const generateDailyReport = () => {
         const pdf = new jsPDF();
@@ -3065,7 +3089,7 @@ export default function OperacionesPage() {
                                     </button>
                                 </div>
                                 {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
-                                {isExternalMap && <button onClick={() => setIsExternalMap(false)} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
+                                {isExternalMap && <button onClick={handleRestoreMap} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
                                 {isSuperAdmin && <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>}
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
