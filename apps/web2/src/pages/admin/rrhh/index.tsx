@@ -24,7 +24,7 @@ import {
     PieChart as PieChartIcon, TrendingUp, Clock, Target, MapPin, ExternalLink,
     UserCheck, UserX, TrendingDown, Award, ChevronDown, Phone, Home, Loader2,
     Send, KeyRound, CheckCircle2, Mail, ShieldCheck as ShieldCheckIcon, RefreshCw,
-    BellRing, MessageCircle, ClipboardEdit
+    BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff
 } from 'lucide-react';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import AusenciasTab from '@/components/admin/rrhh/AusenciasTab';
@@ -3407,108 +3407,95 @@ export default function EmployeesPage() {
                         autoFocus
                         className="w-full px-4 py-3 border dark:border-slate-600 rounded-xl text-center text-2xl font-black tracking-widest bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-400 mb-1"
                         value={authPinValue}
-                        onChange={e => { setAuthPinValue(e.target.value.replace(/\D/g, '')); setAuthPinError(''); }}
-                        placeholder="••••"
+                        onChange={e => { setAuthPinValue(e.target.value); setAuthPinError(''); }}
+                        onKeyDown={e => e.key === 'Enter' && handleAuthorizePinSubmit()}
                     />
-                    </form>
-                    {authPinError && <p className="text-[10px] font-bold text-rose-600 mb-3">{authPinError}</p>}
+                    {authPinError && <p className="text-rose-500 text-xs font-bold mt-1 mb-2 ml-1">{authPinError}</p>}
                     <div className="flex gap-3 mt-4">
-                        <button onClick={() => { setAuthPinModal(null); setAuthPinValue(''); setAuthPinError(''); }} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-xs uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
-                        <button onClick={handleAuthorizePinSubmit} disabled={authPinLoading || authPinValue.length < 4} className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-black text-xs uppercase transition-colors flex items-center justify-center gap-2">
-                            {authPinLoading ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle2 size={14}/>} Autorizar
+                        <button type="button" onClick={() => { setAuthPinModal(null); setAuthPinValue(''); setAuthPinError(''); }} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
+                        <button type="submit" disabled={authPinLoading} className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
+                            {authPinLoading ? <Loader2 size={15} className="animate-spin"/> : <KeyRound size={15}/>} Autorizar
+                        </button>
+                    </div>
+                    </form>
+                </div>
+            </div>
+        )}
+
+        {/* ── Modal contraseña portal empleado ── */}
+        {showPortalPwdModal && portalPwdEmp && (
+            <div className="fixed inset-0 z-[300] bg-black/60 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowPortalPwdModal(false); }}>
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-10 h-10 bg-violet-100 dark:bg-violet-900/40 rounded-xl flex items-center justify-center"><KeyRound size={18} className="text-violet-600 dark:text-violet-400"/></div>
+                        <div>
+                            <h3 className="font-black text-base text-slate-900 dark:text-white uppercase">Contraseña portal</h3>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase">{portalPwdEmp.lastName}, {portalPwdEmp.firstName}</p>
+                        </div>
+                    </div>
+
+                    {/* Modo auto / manual */}
+                    <div className="flex gap-2 mb-4">
+                        <button
+                            onClick={() => { setPortalPwdMode('auto'); setPortalPwdValue(generateRandomPassword()); setPortalPwdShow(false); }}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition-colors ${portalPwdMode === 'auto' ? 'bg-violet-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'}`}
+                        >Generar automático</button>
+                        <button
+                            onClick={() => { setPortalPwdMode('manual'); setPortalPwdValue(''); }}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition-colors ${portalPwdMode === 'manual' ? 'bg-violet-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'}`}
+                        >Ingresar manual</button>
+                    </div>
+
+                    {/* Campo contraseña */}
+                    <div className="mb-4">
+                        <label className={labelClass}>Contraseña</label>
+                        <div className="relative">
+                            <input
+                                type={portalPwdShow ? 'text' : 'password'}
+                                value={portalPwdValue}
+                                onChange={e => setPortalPwdValue(e.target.value)}
+                                readOnly={portalPwdMode === 'auto'}
+                                placeholder="Mínimo 6 caracteres"
+                                className={`${inputClass} pr-10 font-mono ${portalPwdMode === 'auto' ? 'bg-slate-50 dark:bg-slate-900' : ''}`}
+                            />
+                            <button type="button" onClick={() => setPortalPwdShow(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                {portalPwdShow ? <EyeOff size={16}/> : <Eye size={16}/>}
+                            </button>
+                        </div>
+                        {portalPwdMode === 'auto' && (
+                            <button onClick={() => setPortalPwdValue(generateRandomPassword())} className="mt-1 text-[10px] text-violet-600 hover:underline font-bold">↺ Nueva contraseña</button>
+                        )}
+                    </div>
+
+                    {/* Toggle bypass validación de dispositivo */}
+                    <div className="flex items-center justify-between mb-5 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
+                        <div>
+                            <p className="text-xs font-black text-amber-800 dark:text-amber-400">Omitir validación de dispositivo</p>
+                            <p className="text-[10px] text-amber-600 dark:text-amber-500">El empleado podrá acceder desde cualquier celular sin activar</p>
+                        </div>
+                        <button
+                            onClick={async () => {
+                                const newVal = !(portalPwdEmp.bypassDeviceCheck || false);
+                                try {
+                                    await updateDoc(doc(db, 'empleados', portalPwdEmp.id), { bypassDeviceCheck: newVal });
+                                    setPortalPwdEmp((e: any) => ({ ...e, bypassDeviceCheck: newVal }));
+                                } catch (err: any) { addToast('Error: ' + err.message, 'error'); }
+                            }}
+                            className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${portalPwdEmp.bypassDeviceCheck ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                        >
+                            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${portalPwdEmp.bypassDeviceCheck ? 'translate-x-5' : 'translate-x-0.5'}`}/>
+                        </button>
+                    </div>
+
+                    <div className="flex gap-3">
+                        <button onClick={() => setShowPortalPwdModal(false)} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
+                        <button onClick={handleConfirmPortalPassword} disabled={portalPwdSending || portalPwdValue.trim().length < 6} className="flex-1 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
+                            {portalPwdSending ? <Loader2 size={15} className="animate-spin"/> : <KeyRound size={15}/>} Confirmar
                         </button>
                     </div>
                 </div>
             </div>
         )}
-
-      {/* Modal: contraseña portal */}
-      {showPortalPwdModal && portalPwdEmp && createPortal(
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !portalPwdSending && setShowPortalPwdModal(false)}/>
-          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
-                  <ShieldCheckIcon size={18} className="text-violet-600 dark:text-violet-400"/>
-                </div>
-                <div>
-                  <h3 className="font-black text-slate-900 dark:text-white text-base">Contraseña portal</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{portalPwdEmp.lastName}, {portalPwdEmp.firstName}</p>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500">{portalPwdEmp.email}</p>
-                </div>
-              </div>
-              <button onClick={() => setShowPortalPwdModal(false)} disabled={portalPwdSending} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">
-                <X size={16}/>
-              </button>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setPortalPwdMode('auto'); setPortalPwdValue(generateRandomPassword()); }}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase border-2 transition-all ${
-                  portalPwdMode === 'auto' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'
-                }`}
-              >
-                Auto-generar
-              </button>
-              <button
-                onClick={() => { setPortalPwdMode('manual'); setPortalPwdValue(''); }}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase border-2 transition-all ${
-                  portalPwdMode === 'manual' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'
-                }`}
-              >
-                Manual
-              </button>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                {portalPwdMode === 'auto' ? 'Contraseña generada' : 'Ingresar contraseña'}
-              </label>
-              <div className="relative">
-                <input
-                  type={portalPwdShow ? 'text' : 'password'}
-                  value={portalPwdValue}
-                  onChange={e => setPortalPwdValue(e.target.value)}
-                  readOnly={portalPwdMode === 'auto'}
-                  placeholder={portalPwdMode === 'manual' ? 'Mínimo 6 caracteres...' : ''}
-                  className={`w-full pr-10 p-3 rounded-xl border font-mono text-sm dark:text-white focus:ring-2 focus:ring-violet-500 outline-none transition-all ${
-                    portalPwdMode === 'auto'
-                      ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-default'
-                      : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600'
-                  }`}
-                />
-                <button type="button" onClick={() => setPortalPwdShow(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-                  {portalPwdShow ? <CheckCircle2 size={14}/> : <KeyRound size={14}/>}
-                </button>
-              </div>
-              {portalPwdMode === 'auto' && (
-                <button onClick={() => setPortalPwdValue(generateRandomPassword())} className="self-start text-[11px] text-violet-500 hover:text-violet-700 font-bold flex items-center gap-1 mt-0.5">
-                  <RefreshCw size={10}/> Regenerar
-                </button>
-              )}
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-                La contraseña se establece inmediatamente. El empleado puede cambiarla desde el portal.
-              </p>
-            </div>
-            <div className="flex gap-3 pt-1">
-              <button onClick={() => setShowPortalPwdModal(false)} disabled={portalPwdSending} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-xs font-black uppercase text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all disabled:opacity-50">
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmPortalPassword}
-                disabled={portalPwdSending || !portalPwdValue || portalPwdValue.length < 6}
-                className="flex-1 py-2.5 rounded-xl text-xs font-black uppercase text-white bg-violet-600 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
-              >
-                {portalPwdSending
-                  ? <><Loader2 size={13} className="animate-spin"/> Guardando...</>
-                  : <><ShieldCheckIcon size={13}/> Confirmar</>
-                }
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </DashboardLayout>
   );
 }

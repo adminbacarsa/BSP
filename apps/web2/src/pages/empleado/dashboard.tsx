@@ -488,14 +488,33 @@ export default function EmployeeDashboard() {
   useEffect(() => {
     if (!user) return;
     const localDeviceId = typeof window !== 'undefined' ? localStorage.getItem('cosp_device_id') : null;
-    getDoc(doc(db, 'device_tokens', user.uid)).then(snap => {
-      if (!snap.exists()) { setDeviceVerified(false); return; }
-      const d = snap.data();
-      if (!d.verified) { setDeviceVerified(false); return; }
-      // Sin deviceId almacenado (activación anterior) → compatible hacia atrás
-      if (!d.deviceId) { setDeviceVerified(true); return; }
-      setDeviceVerified(d.deviceId === localDeviceId);
-    }).catch(() => setDeviceVerified(null));
+    // Verificar si el empleado tiene bypassDeviceCheck activo (para pruebas / acceso directo)
+    resolveEmpDocId().then(async (empDocId) => {
+      if (empDocId) {
+        const empSnap = await getDoc(doc(db, 'empleados', empDocId));
+        if (empSnap.exists() && empSnap.data()?.bypassDeviceCheck === true) {
+          setDeviceVerified(true);
+          return;
+        }
+      }
+      getDoc(doc(db, 'device_tokens', user.uid)).then(snap => {
+        if (!snap.exists()) { setDeviceVerified(false); return; }
+        const d = snap.data();
+        if (!d.verified) { setDeviceVerified(false); return; }
+        // Sin deviceId almacenado (activación anterior) → compatible hacia atrás
+        if (!d.deviceId) { setDeviceVerified(true); return; }
+        setDeviceVerified(d.deviceId === localDeviceId);
+      }).catch(() => setDeviceVerified(null));
+    }).catch(() => {
+      // Si falla resolver el doc, caer en el chequeo normal
+      getDoc(doc(db, 'device_tokens', user.uid)).then(snap => {
+        if (!snap.exists()) { setDeviceVerified(false); return; }
+        const d = snap.data();
+        if (!d.verified) { setDeviceVerified(false); return; }
+        if (!d.deviceId) { setDeviceVerified(true); return; }
+        setDeviceVerified(d.deviceId === localDeviceId);
+      }).catch(() => setDeviceVerified(null));
+    });
   }, [user?.uid]);
 
   useEffect(() => {
@@ -2673,7 +2692,7 @@ export default function EmployeeDashboard() {
           </button>
           <div className="px-4 py-6">
             {empDocIdSt && empProfile ? (
-              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly/>
+              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
