@@ -1567,13 +1567,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
     else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
-    else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
+    else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
+    else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
+    else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO AUTO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
-    else if (shift.isPresent && shift.manualRetentionType === 'open')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5 animate-pulse"><Timer size={8}/>RETENCIÓN</span>;
-    else if (shift.isPresent && shift.manualRetentionType === 'extended') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>RET +{shift.manualRetentionHours}h</span>;
-    else if (shift.isPresent)        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
+    else if (shift.isPresent)        badge =<span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
     else if (shift.isAbsent)         badge = shift.operacionallyCovered
@@ -1654,6 +1654,23 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {formatTimeRange(shift.shiftDateObj, shift.endDateObj)}
                     </span>
                 </div>
+                {/* Franja retención */}
+                {(shift.isRetention || shift.manualRetentionType) && (
+                    <div className="flex items-center gap-1.5 text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
+                        <Timer size={9} className="text-orange-500 shrink-0"/>
+                        {shift.manualRetentionType === 'extended' && <>
+                            Extensión manual +{shift.manualRetentionHours}h
+                            {shift.endDateObj && <span className="text-orange-500 font-normal ml-1">· corte {shift.endDateObj.toLocaleTimeString?.('es-AR',{hour:'2-digit',minute:'2-digit'})}</span>}
+                        </>}
+                        {shift.manualRetentionType === 'open' && <>
+                            Retención manual indefinida
+                            {shift.retentionUntil && <span className="text-orange-500 font-normal ml-1">· máx. {shift.retentionUntil.toDate?.()?.toLocaleTimeString?.('es-AR',{hour:'2-digit',minute:'2-digit'})}</span>}
+                        </>}
+                        {!shift.manualRetentionType && shift.isRetention && <>
+                            Recargo automático{shift.retentionMinutes > 0 && <span className="ml-1">· +{shift.retentionMinutes} min</span>}
+                        </>}
+                    </div>
+                )}
                 {/* Fila 3: botones con texto */}
                 <div className="flex gap-1.5 flex-wrap pl-10">
                     {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}><MessageCircle size={11}/>WA</button>)}
