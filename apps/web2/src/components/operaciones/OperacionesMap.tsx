@@ -83,7 +83,7 @@ const toMs = (d: any): number => {
     return 0;
 };
 
-const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover, onOpenInterrupt }: any) => {
+const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenManualRetention }: any) => {
     const [sortKey, setSortKey] = useState<'nombre' | 'horario' | 'puesto' | 'estado' | null>(null);
     const [sortDir, setSortDir] = useState<1 | -1>(1);
 
@@ -295,6 +295,7 @@ const OperacionesMap = ({
                             onOpenAttendance={onOpenAttendance}
                             onOpenHandover={onOpenHandover}
                             onOpenInterrupt={onOpenInterrupt}
+                            onOpenManualRetention={onOpenManualRetention}
                         />
                     </Popup>
                 </Marker>
