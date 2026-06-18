@@ -224,7 +224,7 @@ export default function EmployeesPage() {
   const canAdjust = authIsSuperAdmin || (rolePermissions['RRHH'] || []).includes('adjust');
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'legajos' | 'ausencias' | 'feriados' | 'convenios' | 'correcciones' | 'ausentismo'>('legajos');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'legajos' | 'ausencias' | 'feriados' | 'convenios' | 'correcciones'>('dashboard');
   const [view, setView] = useState<'list' | 'form'>('list');
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null); // Changed type to any to avoid strict interface blocking
   const [employees, setEmployees] = useState<any[]>([]); // Changed to any[]
@@ -456,6 +456,46 @@ export default function EmployeesPage() {
       return matchesTerm && matchesStatus && matchesObjective && matchesCoords;
     }));
   }, [searchTerm, employees, showInactive, filterObjective, allObjectives, filterNoCoords]);
+  const dashboardStats = useMemo(() => {
+    const y = currentDate.getFullYear(), m = currentDate.getMonth();
+    const monthStart = new Date(y, m, 1), monthEnd = new Date(y, m + 1, 0);
+    const toDate = (v: any): Date | null => {
+      if (!v) return null;
+      if (typeof v === 'string') return new Date(v + 'T00:00:00');
+      if (typeof v.toDate === 'function') return v.toDate();
+      if (v.seconds) return new Date(v.seconds * 1000);
+      return null;
+    };
+    const activos = employees.filter(e => e.status === 'activo' || e.status === 'active' || !e.status);
+    const bajas = employees.filter(e => {
+      if (e.status !== 'baja' && e.status !== 'inactive') return false;
+      const d = toDate(e.fechaBaja);
+      return d && d >= monthStart && d <= monthEnd;
+    });
+    const altas = employees.filter(e => {
+      const d = toDate(e.startDate);
+      return d && d >= monthStart && d <= monthEnd;
+    });
+    const sinEmail   = activos.filter(e => !e.email);
+    const sinPortal  = activos.filter(e => e.email && !(e as any).portalInvite?.sent);
+    // ausencias del mes actual
+    const ausMonth = absences.filter(a => {
+      const d = toDate(a.startDate);
+      return d && d >= monthStart && d <= monthEnd;
+    });
+    const injust = ausMonth.filter(a => {
+      const t = (a.type || '').toLowerCase();
+      return t.includes('injust') || t === 'aa' || t === 'no_presentacion' || t.includes('no presentaci');
+    });
+    const sinCert = ausMonth.filter(a => {
+      const t = (a.type || '').toLowerCase();
+      return (t.includes('enferm') || t === 'e') && !a.hasCertificate;
+    });
+    const workDays = 22;
+    const tasaAus = activos.length > 0 ? ((ausMonth.length / (activos.length * workDays)) * 100).toFixed(1) : '0.0';
+    return { activos: activos.length, bajas: bajas.length, altas: altas.length, sinEmail: sinEmail.length, sinPortal: sinPortal.length, ausencias: ausMonth.length, injustificadas: injust.length, sinCertificado: sinCert.length, tasaAusentismo: tasaAus };
+  }, [employees, absences, currentDate]);
+
   const absencePeriods = useMemo(() => {
     const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     const seen = new Set<string>();
@@ -1871,16 +1911,22 @@ export default function EmployeesPage() {
                 <div className="flex items-center gap-2">
                     <TabBar
                         tabs={[
+                            { id: 'dashboard',    label: 'Dashboard',    icon: BarChart2 },
                             { id: 'legajos',      label: 'Legajos',      icon: Users },
                             { id: 'ausencias',    label: 'Novedades',    icon: AlertTriangle },
                             { id: 'feriados',     label: 'Feriados',     icon: Calendar },
                             { id: 'convenios',    label: 'Convenios',    icon: Book },
                             { id: 'correcciones', label: 'Correcciones', icon: ClipboardEdit },
-                            { id: 'ausentismo',    label: 'Ausentismo',    icon: TrendingDown },
                         ]}
                         active={activeTab}
                         onChange={id => { setActiveTab(id as any); setView('list'); }}
                     />
+                    <Link href="/admin/rrhh/ausentismo"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase transition-all border"
+                        style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt3)' }}
+                    >
+                        <TrendingDown size={12}/> Ausentismo
+                    </Link>
                     <Link
                         href="/admin/empleados"
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase transition-all border"
@@ -1890,6 +1936,103 @@ export default function EmployeesPage() {
                     </Link>
                 </div>
             </header>
+
+            {/* DASHBOARD GENERAL */}
+            {activeTab === 'dashboard' && (
+                <div className="flex-1 overflow-y-auto space-y-4 pb-6">
+                    {/* Plantilla */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                            { label: 'ACTIVOS', value: dashboardStats.activos, icon: UserCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                            { label: 'ALTAS DEL MES', value: dashboardStats.altas, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
+                            { label: 'BAJAS DEL MES', value: dashboardStats.bajas, icon: UserX, color: 'text-rose-600', bg: 'bg-rose-50' },
+                            { label: 'SIN PORTAL', value: dashboardStats.sinPortal, icon: KeyRound, color: 'text-amber-600', bg: 'bg-amber-50' },
+                        ].map(s => (
+                            <div key={s.label} className="bg-white rounded-xl border border-slate-100 p-4 flex flex-col gap-1">
+                                <div className={`w-8 h-8 rounded-lg ${s.bg} flex items-center justify-center mb-1`}>
+                                    <s.icon size={16} className={s.color}/>
+                                </div>
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{s.label}</p>
+                                <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Ausentismo mini */}
+                    <div className="bg-white rounded-xl border border-slate-100 p-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <TrendingDown size={16} className="text-slate-500"/>
+                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Ausentismo del período</h3>
+                            </div>
+                            <Link href="/admin/rrhh/ausentismo" className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                                Ver detalle completo <ExternalLink size={11}/>
+                            </Link>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            {[
+                                { label: 'TASA', value: `${dashboardStats.tasaAusentismo}%`, color: 'text-slate-800' },
+                                { label: 'AUSENCIAS', value: dashboardStats.ausencias, color: 'text-slate-800' },
+                                { label: 'INJUSTIFICADAS', value: dashboardStats.injustificadas, color: dashboardStats.injustificadas > 0 ? 'text-rose-600' : 'text-slate-800' },
+                                { label: 'SIN CERTIFICADO', value: dashboardStats.sinCertificado, color: dashboardStats.sinCertificado > 0 ? 'text-amber-600' : 'text-slate-800' },
+                            ].map(s => (
+                                <div key={s.label} className="bg-slate-50 rounded-lg p-3">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-1">{s.label}</p>
+                                    <p className={`text-xl font-black ${s.color}`}>{s.value}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Alertas */}
+                    {(dashboardStats.sinEmail > 0 || dashboardStats.sinPortal > 0) && (
+                        <div className="bg-white rounded-xl border border-amber-100 p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <BellRing size={16} className="text-amber-500"/>
+                                <h3 className="text-[12px] font-black uppercase tracking-wide text-slate-700">Alertas de plantilla</h3>
+                            </div>
+                            <div className="space-y-2">
+                                {dashboardStats.sinEmail > 0 && (
+                                    <div className="flex items-center justify-between bg-amber-50 rounded-lg px-3 py-2">
+                                        <div className="flex items-center gap-2 text-[12px] text-amber-800">
+                                            <Mail size={13}/> <span><b>{dashboardStats.sinEmail}</b> empleado{dashboardStats.sinEmail > 1 ? 's' : ''} sin email registrado</span>
+                                        </div>
+                                        <button onClick={() => { setActiveTab('legajos'); }} className="text-[10px] font-bold text-amber-700 hover:underline">Ver legajos →</button>
+                                    </div>
+                                )}
+                                {dashboardStats.sinPortal > 0 && (
+                                    <div className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
+                                        <div className="flex items-center gap-2 text-[12px] text-blue-800">
+                                            <KeyRound size={13}/> <span><b>{dashboardStats.sinPortal}</b> empleado{dashboardStats.sinPortal > 1 ? 's' : ''} con email pero sin acceso al portal</span>
+                                        </div>
+                                        <button onClick={() => { setActiveTab('legajos'); }} className="text-[10px] font-bold text-blue-700 hover:underline">Ver legajos →</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Accesos rápidos */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {[
+                            { label: 'Legajos', desc: `${dashboardStats.activos} empleados activos`, icon: Users, tab: 'legajos' as const, color: 'bg-indigo-50 text-indigo-600' },
+                            { label: 'Novedades', desc: 'Ausencias y licencias', icon: AlertTriangle, tab: 'ausencias' as const, color: 'bg-rose-50 text-rose-600' },
+                            { label: 'Correcciones', desc: 'Ajuste de horas y turnos', icon: ClipboardEdit, tab: 'correcciones' as const, color: 'bg-slate-50 text-slate-600' },
+                        ].map(s => (
+                            <button key={s.label} onClick={() => setActiveTab(s.tab)}
+                                className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-3 hover:shadow-sm transition-all text-left">
+                                <div className={`w-9 h-9 rounded-lg ${s.color} flex items-center justify-center shrink-0`}>
+                                    <s.icon size={16}/>
+                                </div>
+                                <div>
+                                    <p className="text-[12px] font-black text-slate-700">{s.label}</p>
+                                    <p className="text-[10px] text-slate-400">{s.desc}</p>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* SECCIONES DEL DASHBOARD */}
             {activeTab === 'legajos' && view === 'list' && (
@@ -2707,16 +2850,6 @@ export default function EmployeesPage() {
             {activeTab === 'convenios' && (<div className="flex-1 flex gap-6 overflow-hidden"><div className="w-1/3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-y-auto"><h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-4 flex items-center gap-2">{isEditingAgreement ? <Edit2 size={18}/> : <Book size={18}/>} {isEditingAgreement ? 'Editar' : 'Nuevo'} Convenio</h3><div className="space-y-4"><div><label className={labelClass}>Nombre</label><input className={inputClass} value={agreementForm.name} onChange={e => setAgreementForm({...agreementForm, name: e.target.value})}/></div><div className="grid grid-cols-2 gap-4"><div><label className={labelClass}>Semanal (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursWeekly} onChange={e => setAgreementForm({...agreementForm, maxHoursWeekly: parseInt(e.target.value)})}/></div><div><label className={labelClass}>Mensual (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursMonthly} onChange={e => setAgreementForm({...agreementForm, maxHoursMonthly: parseInt(e.target.value)})}/></div></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Sábados &gt; 13hs</label><div className="flex gap-2"><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 0})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 0 ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>NORMAL</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 50})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 50 ? 'bg-emerald-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>50%</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 100})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 100 ? 'bg-rose-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>100%</button></div></div><div className="space-y-2"><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.paysDoubleOnFranco} onChange={e => setAgreementForm({...agreementForm, paysDoubleOnFranco: e.target.checked})}/><span className="text-xs font-bold dark:text-white">Paga Franco Trabajado 100%</span></div><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.holidayIsPlus} onChange={e => setAgreementForm({...agreementForm, holidayIsPlus: e.target.checked})}/><span className="text-xs font-bold dark:text-white text-emerald-600">Feriados se pagan como PLUS</span></div><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.sundayIs100} onChange={e => setAgreementForm({...agreementForm, sundayIs100: e.target.checked})}/><span className="text-xs font-bold dark:text-white">Domingos al 100%</span></div></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Categorías</label><div className="flex gap-2 mb-2"><input className="flex-1 p-2 bg-white dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Ej: Vigilador"/><button onClick={handleAddCategory} className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Plus size={14}/></button></div><div className="flex flex-wrap gap-2">{agreementForm.categories.map((c, idx) => (<span key={idx} className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg text-[10px] font-bold border dark:border-slate-600 flex items-center gap-1">{c} <button onClick={() => removeCategory(idx)} className="text-rose-500"><X size={10}/></button></span>))}</div></div><div className="flex gap-2">{isEditingAgreement && <button onClick={() => { setIsEditingAgreement(false); setAgreementForm(initialAgreement); }} className="px-4 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase">Cancelar</button>}<button onClick={handleSaveAgreement} className="flex-1 bg-amber-500 text-white py-3 rounded-xl font-black uppercase text-xs">Guardar</button></div></div></div><div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-auto custom-scrollbar"><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{agreements.map(a => (<div key={a.id} className="p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border dark:border-slate-700 relative group"><div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEditAgreement(a)} className="text-slate-300 hover:text-indigo-500"><Edit2 size={18}/></button><button onClick={() => handleDeleteAgreement(a.id!)} className="text-slate-300 hover:text-rose-500"><Trash2 size={18}/></button></div><h3 className="font-black text-slate-800 dark:text-white uppercase mb-2">{a.name}</h3><div className="space-y-1 text-xs text-slate-500"><p>Semanal: {a.maxHoursWeekly}hs | Mensual: {a.maxHoursMonthly}hs</p><p>Sábado &gt; 13hs: <span className="font-bold text-indigo-500">{a.saturdayRate === 0 ? 'Normal' : a.saturdayRate + '%'}</span></p><p className="flex gap-2 mt-2">{a.holidayIsPlus && <span className="bg-emerald-100 text-emerald-700 px-2 rounded-full text-[9px] font-bold">Feriado PLUS</span>}{a.paysDoubleOnFranco && <span className="bg-indigo-100 text-indigo-700 px-2 rounded-full text-[9px] font-bold">Franco 100%</span>}</p></div></div>))}</div></div></div>)}
             {activeTab === 'correcciones' && (
                 <CorreccionesTab employees={employees} canAdjust={canAdjust} />
-            )}
-            {activeTab === 'ausentismo' && (
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
-                    <TrendingDown size={40} className="text-slate-300"/>
-                    <p className="text-slate-500 font-bold">Dashboard de Ausentismo</p>
-                    <Link href="/admin/rrhh/ausentismo"
-                        className="px-4 py-2 bg-slate-800 text-white text-sm font-bold rounded-xl hover:bg-slate-900 transition-colors">
-                        Abrir Dashboard →
-                    </Link>
-                </div>
             )}
             {activeTab === 'ausencias' && (
                 <AusenciasTab
