@@ -9,7 +9,7 @@ import {
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
-    FileText, Volume2, VolumeX
+    FileText, Volume2, VolumeX, RefreshCw
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
@@ -1978,6 +1978,50 @@ export default function OperacionesPage() {
         } catch(e) { toast.error('Error al descartar novedades'); }
     };
 
+    // Limpia novedades duplicadas: para cada (type, shiftId) con >1 pending,
+    // marca todas menos la más reciente como ATENDIDA.
+    const cleanupDuplicateNovedades = async () => {
+        const auth = getAuth();
+        const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        // Agrupar por type+shiftId
+        const groups = new Map<string, any[]>();
+        pendingNovedades.forEach((n: any) => {
+            const key = `${n.type}__${n.shiftId || n.id}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(n);
+        });
+        const toDiscard: any[] = [];
+        groups.forEach((items) => {
+            if (items.length <= 1) return;
+            // Ordenar por createdAt desc — conservar el más reciente
+            const sorted = [...items].sort((a, b) => {
+                const ta = a.createdAt?.seconds ?? 0;
+                const tb = b.createdAt?.seconds ?? 0;
+                return tb - ta;
+            });
+            toDiscard.push(...sorted.slice(1)); // todos menos el primero (más reciente)
+        });
+        if (!toDiscard.length) { toast.info('No hay duplicados pendientes'); return; }
+        try {
+            // writeBatch acepta max 500 ops — chunk si hay muchos
+            const CHUNK = 400;
+            for (let i = 0; i < toDiscard.length; i += CHUNK) {
+                const batch = writeBatch(db);
+                toDiscard.slice(i, i + CHUNK).forEach((n: any) => {
+                    batch.update(doc(db, 'novedades', n.id), {
+                        status: 'ATENDIDA',
+                        atendidaAt: serverTimestamp(),
+                        atendidaPor: actorName,
+                        atendidaPorUid: auth.currentUser?.uid || null,
+                        autoCleanupDuplicate: true,
+                    });
+                });
+                await batch.commit();
+            }
+            toast.success(`${toDiscard.length} alertas duplicadas limpiadas`);
+        } catch (e: any) { toast.error('Error al limpiar: ' + e.message); }
+    };
+
     const handleAtenderNovedad = async (novedad: any) => {
         try {
             const auth = getAuth();
@@ -3579,6 +3623,11 @@ export default function OperacionesPage() {
                                 <Siren size={14} className="text-rose-400 shrink-0"/>
                                 <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
                                 {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
+                                {pendingNovedades.some((n: any) => pendingNovedades.filter((x: any) => x.type === n.type && x.shiftId === n.shiftId).length > 1) && (
+                                    <button onClick={cleanupDuplicateNovedades} title="Limpiar alertas duplicadas" className="p-1.5 hover:bg-amber-500/30 rounded-lg transition-colors text-amber-400" >
+                                        <RefreshCw size={12}/>
+                                    </button>
+                                )}
                                 <button onClick={() => setNotifPanelOpen(false)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
                             </div>
                         </div>

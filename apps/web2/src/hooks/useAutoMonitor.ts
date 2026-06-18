@@ -35,6 +35,9 @@ const createNovedad = (type: string, title: string, description: string, shiftDa
 export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperatorId, processedData }: AutoMonitorProps) => {
   const mountTime = useRef(Date.now());
   const processedIds = useRef(new Set<string>());
+  // Primera ejecución = baseline silencioso: marca el estado actual como ya visto
+  // para evitar toasts de eventos pre-existentes al abrir/recargar el navegador.
+  const isBaselineRef = useRef(true);
 
   // — Detecta ingresos desde el portal del empleado (status → 'InProgress') —
   useEffect(() => {
@@ -105,6 +108,9 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
 
     const check = async () => {
       const now = new Date();
+      // Baseline: primera llamada sólo popula processedIds, no tostea ni notifica
+      const isBaseline = isBaselineRef.current;
+      isBaselineRef.current = false;
 
       // Guardias tarde: T+5 a T+60 (ventana donde puede marcar llegada tarde)
       const lateGuards = processedData.filter(s => {
@@ -129,7 +135,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       }
 
       // Toast consolidado — un solo aviso para todos los tardíos del batch
-      if (lateGuards.length > 0) {
+      if (!isBaseline && lateGuards.length > 0) {
         if (lateGuards.length === 1) {
           const s = lateGuards[0];
           const msg = `${s.employeeName} — ${s.objectiveName}`;
@@ -193,26 +199,38 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         processedIds.current.add(`retention_${s.id}`);
         const msg = `${s.employeeName} lleva ${s.retentionMinutes}min de retención en ${s.objectiveName}`;
         if (isAutoMode) {
-          await createNovedad('RETENCION_DETECTADA', 'Recargo Automático Detectado', msg, s, empresaId);
+          // Dedup: no crear novedad si ya existe una RETENCION_DETECTADA para este turno
+          const existingReten = await getDocs(query(
+            collection(db, 'novedades'),
+            where('shiftId', '==', s.id),
+            where('type', '==', 'RETENCION_DETECTADA'),
+            limit(1)
+          ));
+          if (existingReten.empty) {
+            await createNovedad('RETENCION_DETECTADA', 'Recargo Automático Detectado', msg, s, empresaId);
+          }
         }
       }
-      if (retentions.length === 1) {
-        const s = retentions[0];
-        const msg = `${s.employeeName} lleva ${s.retentionMinutes}min en ${s.objectiveName}`;
-        toast.warning(`⏰ Recargo: ${msg}`, { duration: 10000 });
-        sendBrowserNotif('⏰ Guardia en Recargo', msg);
-      } else if (retentions.length > 1) {
-        toast.warning(`⏰ ${retentions.length} guardias en retención`, {
-          duration: 10000,
-          description: retentions.map(s => s.employeeName).slice(0, 3).join(', ') + (retentions.length > 3 ? '...' : ''),
-        });
-        sendBrowserNotif('⏰ Guardias en Retención', `${retentions.length} guardias superaron 30 min`);
+      if (!isBaseline) {
+        if (retentions.length === 1) {
+          const s = retentions[0];
+          const msg = `${s.employeeName} lleva ${s.retentionMinutes}min en ${s.objectiveName}`;
+          toast.warning(`⏰ Recargo: ${msg}`, { duration: 10000 });
+          sendBrowserNotif('⏰ Guardia en Recargo', msg);
+        } else if (retentions.length > 1) {
+          toast.warning(`⏰ ${retentions.length} guardias en retención`, {
+            duration: 10000,
+            description: retentions.map(s => s.employeeName).slice(0, 3).join(', ') + (retentions.length > 3 ? '...' : ''),
+          });
+          sendBrowserNotif('⏰ Guardias en Retención', `${retentions.length} guardias superaron 30 min`);
+        }
       }
 
       // ── Auto-finalización: turnos PRESENT cuyo endTime ya pasó ──
       const toComplete = processedData.filter(s => {
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
-        if (!(s.isPresent || s.status === 'PRESENT')) return false;        if (s.isFranco || s.isUnassigned) return false;
+        if (!(s.isPresent || s.status === 'PRESENT')) return false;
+        if (s.isFranco || s.isUnassigned) return false;
         // NUNCA auto-completar guardias en retención — su turno no termina hasta que llegue el relevo
         if (s.isRetention) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
@@ -241,11 +259,13 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
             console.error('[autoComplete] Error al finalizar turno:', s.id, e);
           }
         } else {
-          toast.info(`⏱️ Finalizar turno: ${msg}`, {
-            duration: 20000,
-            description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
-          });
-          sendBrowserNotif('⏱️ Turno a finalizar', msg);
+          if (!isBaseline) {
+            toast.info(`⏱️ Finalizar turno: ${msg}`, {
+              duration: 20000,
+              description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
+            });
+            sendBrowserNotif('⏱️ Turno a finalizar', msg);
+          }
         }
       }
 
@@ -259,13 +279,24 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         const hrs = ((s.totalMinutesWorked ?? 0) / 60).toFixed(1);
         const msg = `${s.employeeName} lleva ${hrs}h en ${s.objectiveName} — ${s.positionName}`;
         if (isAutoMode) {
-          await createNovedad('RECARGO_12H', 'Guardia más de 12h en servicio', msg, s, empresaId);
+          // Dedup: no crear novedad si ya existe una RECARGO_12H para este turno
+          const existingRecargo = await getDocs(query(
+            collection(db, 'novedades'),
+            where('shiftId', '==', s.id),
+            where('type', '==', 'RECARGO_12H'),
+            limit(1)
+          ));
+          if (existingRecargo.empty) {
+            await createNovedad('RECARGO_12H', 'Guardia más de 12h en servicio', msg, s, empresaId);
+          }
         }
-        toast.error(`🚨 +12h: ${msg}`, {
-          duration: 30000,
-          description: 'Relevar urgente. Riesgo laboral y de seguridad.',
-        });
-        sendBrowserNotif('🚨 Guardia +12h en servicio', msg);
+        if (!isBaseline) {
+          toast.error(`🚨 +12h: ${msg}`, {
+            duration: 30000,
+            description: 'Relevar urgente. Riesgo laboral y de seguridad.',
+          });
+          sendBrowserNotif('🚨 Guardia +12h en servicio', msg);
+        }
       }
     };
 
