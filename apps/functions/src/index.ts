@@ -3291,21 +3291,91 @@ export const cleanupSlaDevueltas = functions
     novedadesSnap.docs.forEach(doc => {
       novBatch.delete(doc.ref);
       novCount++;
-      if (novCount >= BATCH_LIMIT) {
-        novBatches.push(novBatch);
+      if (novCount >= BATCH_LIMIT)       novBatches.push(novBatch);
         novBatch = db.batch();
         novCount = 0;
       }
     });
     if (novCount > 0) novBatches.push(novBatch);
-    for (const batch of novBatches) await batch.commit();
+    for (const b of novBatches) await b.commit();
     deletedNovedades = novedadesSnap.size;
 
-    console.log(`[cleanupSlaDevueltas] Listo: ${deletedTurnos} turnos + ${deletedNovedades} novedades eliminados`);
-    res.json({
-      ok: true,
-      deletedTurnos,
-      deletedNovedades,
-      turnoIds: deletedTurnoIds,
-    });
+    res.json({ ok: true, deletedTurnos, deletedNovedades, deletedTurnoIds });
   });
+
+// =========================================================
+// setEmployeePortalPassword
+// Permite al admin establecer una contraseña específica para el
+// portal del empleado (crea el usuario Auth si no existe).
+// Callable: { employeeId, password, actorName? }
+// =========================================================
+export const setEmployeePortalPassword = functions.https.onCall(async (data, context) => {
+  const callerAuth = context.auth;
+  if (!callerAuth) throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+
+  const tokenRole = (callerAuth.token.role as string) || '';
+  let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
+  if (!hasAccess) {
+    try {
+      const sysDoc = await admin.firestore().collection('system_users').doc(callerAuth.uid).get();
+      if (sysDoc.exists) {
+        const fsRole = (sysDoc.data()?.role as string) || '';
+        hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === fsRole.toLowerCase());
+      }
+    } catch (_) {}
+  }
+  if (!hasAccess) throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+
+  const { employeeId, password, actorName } = data as { employeeId: string; password: string; actorName?: string };
+  if (!employeeId) throw new functions.https.HttpsError('invalid-argument', 'employeeId requerido.');
+  if (!password || password.length < 6) throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+
+  const db = admin.firestore();
+
+  const empDoc = await db.collection('empleados').doc(employeeId).get();
+  if (!empDoc.exists) throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+  const emp = empDoc.data()!;
+  const email = (emp.email || emp.correo || '').toString().trim().toLowerCase();
+  if (!email) throw new functions.https.HttpsError('failed-precondition', 'El empleado no tiene email registrado.');
+
+  const empName: string = (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim() || email);
+  const empresaId: string = (emp.empresaId || '').toString();
+
+  let uid: string;
+  let alreadyExisted = false;
+  try {
+    const existing = await admin.auth().getUserByEmail(email);
+    uid = existing.uid;
+    alreadyExisted = true;
+    await admin.auth().updateUser(uid, { password });
+  } catch (e: any) {
+    if (e.code === 'auth/user-not-found') {
+      const newUser = await admin.auth().createUser({ email, password, displayName: empName });
+      await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+      uid = newUser.uid;
+    } else {
+      throw e;
+    }
+  }
+
+  await db.collection('empleados').doc(employeeId).update({
+    'portalInvite.sent': true,
+    'portalInvite.passwordSetAt': admin.firestore.FieldValue.serverTimestamp(),
+    'portalInvite.passwordSetBy': actorName || (callerAuth.token.email as string) || callerAuth.uid,
+  });
+
+  const actor: string = actorName || (callerAuth.token.name as string) || (callerAuth.token.email as string) || 'Admin';
+  await db.collection('audit_logs').add({
+    action: 'PORTAL_PASSWORD_SET',
+    module: 'RRHH',
+    actorName: actor,
+    actorUid: callerAuth.uid,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    employeeId,
+    employeeName: empName,
+    empresaId,
+    details: 'Contraseña de portal establecida para ' + empName + ' (' + email + '). Usuario ' + (alreadyExisted ? 'existente actualizado' : 'nuevo creado') + '.',
+  });
+
+  return { success: true, email, alreadyExisted, uid };
+});

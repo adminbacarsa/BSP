@@ -2140,7 +2140,7 @@ export default function OperacionesPage() {
         REPORTE: 'Reporte', LLEGADA_TARDE: 'Llegada tarde',
         AUSENCIA_AUTO: 'Ausencia automática', NOVEDADES: 'Novedad',
         VACANTE_PROTOCOLO_COBERTURA: 'Protocolo cobertura',
-        ATENDER_NOVEDAD: 'Novedad atendida', GUARDIA_CERRADA: 'Guardia cerrada',
+        ATENDER_NOVEDAD: 'Novedad atendida', GUARDIA_CERRADA: 'Guardia cerrada', PORTAL_PASSWORD_SET: 'Contraseña portal establecida',
         DESCARTAR_NOVEDADES_TIPO: 'Novedades descartadas',
         BAJA_CUBIERTA: 'Baja (cubierta)', BAJA_PROTOCOLO: 'Baja (protocolo)',
     };

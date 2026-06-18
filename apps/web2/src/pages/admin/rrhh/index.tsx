@@ -311,6 +311,13 @@ export default function EmployeesPage() {
   const [sendingPortalIds, setSendingPortalIds] = useState<Set<string>>(new Set());
   const [sendingAllPortal, setSendingAllPortal] = useState(false);
   const [pendingPortalRequests, setPendingPortalRequests] = useState<any[]>([]);
+  // Portal password modal
+  const [showPortalPwdModal, setShowPortalPwdModal] = useState(false);
+  const [portalPwdEmp, setPortalPwdEmp] = useState<any>(null);
+  const [portalPwdMode, setPortalPwdMode] = useState<'auto' | 'manual'>('auto');
+  const [portalPwdValue, setPortalPwdValue] = useState('');
+  const [portalPwdShow, setPortalPwdShow] = useState(false);
+  const [portalPwdSending, setPortalPwdSending] = useState(false);
   const [showRRHHAlerts, setShowRRHHAlerts] = useState(false);
 
   const inputClass = "w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all";
@@ -583,6 +590,43 @@ export default function EmployeesPage() {
       addToast(`Reset aplicado a ${sent.length} empleados`, 'success');
       await loadData();
     } catch (err: any) { addToast('Error al resetear: ' + err.message, 'error'); }
+  };
+
+
+  const generateRandomPassword = (): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
+    let pwd = '';
+    for (let i = 0; i < 10; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+    return pwd;
+  };
+
+  const openPortalPwdModal = (emp: any) => {
+    if (!emp.email) { addToast('Este empleado no tiene email registrado', 'error'); return; }
+    setPortalPwdEmp(emp);
+    setPortalPwdMode('auto');
+    setPortalPwdValue(generateRandomPassword());
+    setPortalPwdShow(false);
+    setShowPortalPwdModal(true);
+  };
+
+  const handleConfirmPortalPassword = async () => {
+    if (!portalPwdEmp) return;
+    const pwd = portalPwdValue.trim();
+    if (!pwd || pwd.length < 6) { addToast('La contraseña debe tener al menos 6 caracteres', 'error'); return; }
+    setPortalPwdSending(true);
+    try {
+      const cf = getFunctions();
+      const setPortalPwd = httpsCallable(cf, 'setEmployeePortalPassword');
+      const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Admin';
+      await setPortalPwd({ employeeId: portalPwdEmp.id, password: pwd, actorName: _actor });
+      addToast('Contraseña establecida para ' + portalPwdEmp.lastName + ', ' + portalPwdEmp.firstName, 'success');
+      setShowPortalPwdModal(false);
+      await loadData();
+    } catch (err: any) {
+      addToast('Error: ' + (err?.message || String(err)), 'error');
+    } finally {
+      setPortalPwdSending(false);
+    }
   };
 
   const handleSendPortalAll = async () => {
@@ -2045,6 +2089,17 @@ export default function EmployeesPage() {
                                                     {(selectedEmp as any).portalInvite?.sent ? 'Reenviar' : 'Portal'}
                                                 </button>
                                             )}
+                                            {/* ── Establecer contraseña portal ── */}
+                                            {selectedEmp.email && (
+                                                <button
+                                                    onClick={() => openPortalPwdModal(selectedEmp)}
+                                                    title="Establecer contraseña del portal"
+                                                    className="flex items-center gap-1.5 px-3 py-2 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-violet-200 dark:border-violet-800"
+                                                >
+                                                    <ShieldCheckIcon size={13}/>
+                                                    Pass
+                                                </button>
+                                            )}
                                             {/* ── Dar de baja / Reactivar ── */}
                                             {(selectedEmp.status === 'activo' || selectedEmp.status === 'active' || !selectedEmp.status) ? (
                                                 <button
@@ -3220,6 +3275,94 @@ export default function EmployeesPage() {
                 </div>
             </div>
         )}
+
+      {/* Modal: contraseña portal */}
+      {showPortalPwdModal && portalPwdEmp && createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !portalPwdSending && setShowPortalPwdModal(false)}/>
+          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
+                  <ShieldCheckIcon size={18} className="text-violet-600 dark:text-violet-400"/>
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 dark:text-white text-base">Contraseña portal</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{portalPwdEmp.lastName}, {portalPwdEmp.firstName}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">{portalPwdEmp.email}</p>
+                </div>
+              </div>
+              <button onClick={() => setShowPortalPwdModal(false)} disabled={portalPwdSending} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">
+                <X size={16}/>
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPortalPwdMode('auto'); setPortalPwdValue(generateRandomPassword()); }}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase border-2 transition-all ${
+                  portalPwdMode === 'auto' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'
+                }`}
+              >
+                Auto-generar
+              </button>
+              <button
+                onClick={() => { setPortalPwdMode('manual'); setPortalPwdValue(''); }}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase border-2 transition-all ${
+                  portalPwdMode === 'manual' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300' : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300'
+                }`}
+              >
+                Manual
+              </button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                {portalPwdMode === 'auto' ? 'Contraseña generada' : 'Ingresar contraseña'}
+              </label>
+              <div className="relative">
+                <input
+                  type={portalPwdShow ? 'text' : 'password'}
+                  value={portalPwdValue}
+                  onChange={e => setPortalPwdValue(e.target.value)}
+                  readOnly={portalPwdMode === 'auto'}
+                  placeholder={portalPwdMode === 'manual' ? 'Mínimo 6 caracteres...' : ''}
+                  className={`w-full pr-10 p-3 rounded-xl border font-mono text-sm dark:text-white focus:ring-2 focus:ring-violet-500 outline-none transition-all ${
+                    portalPwdMode === 'auto'
+                      ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-default'
+                      : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600'
+                  }`}
+                />
+                <button type="button" onClick={() => setPortalPwdShow(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  {portalPwdShow ? <CheckCircle2 size={14}/> : <KeyRound size={14}/>}
+                </button>
+              </div>
+              {portalPwdMode === 'auto' && (
+                <button onClick={() => setPortalPwdValue(generateRandomPassword())} className="self-start text-[11px] text-violet-500 hover:text-violet-700 font-bold flex items-center gap-1 mt-0.5">
+                  <RefreshCw size={10}/> Regenerar
+                </button>
+              )}
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                La contraseña se establece inmediatamente. El empleado puede cambiarla desde el portal.
+              </p>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setShowPortalPwdModal(false)} disabled={portalPwdSending} className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-xs font-black uppercase text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all disabled:opacity-50">
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmPortalPassword}
+                disabled={portalPwdSending || !portalPwdValue || portalPwdValue.length < 6}
+                className="flex-1 py-2.5 rounded-xl text-xs font-black uppercase text-white bg-violet-600 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {portalPwdSending
+                  ? <><Loader2 size={13} className="animate-spin"/> Guardando...</>
+                  : <><ShieldCheckIcon size={13}/> Confirmar</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </DashboardLayout>
   );
 }
