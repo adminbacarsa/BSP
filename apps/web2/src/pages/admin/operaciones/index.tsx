@@ -2372,8 +2372,10 @@ export default function OperacionesPage() {
         const fmt24 = (d: any) => { try { return toDate(d).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', hour12: false, timeZone: tz }); } catch { return '--:--'; } };
         const fmtDT = (d: Date) => d.toLocaleString('es-AR', { timeZone: tz, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12: false });
         const fmtDateLong = (d: Date) => d.toLocaleDateString('es-AR', { timeZone: tz, weekday:'long', day:'2-digit', month:'long', year:'numeric' });
-        // Sanitizar texto para jsPDF: remover emojis y caracteres no-latin que corrompan el PDF
-        const sanitize = (s: string) => (s || '').replace(/[^ -ÿ]/g, '').replace(/\s+/g, ' ').trim();
+        // Fix double-encoded UTF-8 (e.g. Ã³ → ó)
+        const fixEnc = (s: string) => { try { return decodeURIComponent(escape(s || '')); } catch { return s || ''; } };
+        // Sanitize: keep printable latin-1, fix encoding first
+        const sanitize = (s: string) => fixEnc(s).replace(/[^\x20-\xFF]/g, '').replace(/\s+/g, ' ').trim();
         const operatorName = session.activeSession?.operatorName || session.mySession?.operatorName || 'Sistema Automatico';
         const guardStart   = session.activeSession?.startTime ? fmtDT(session.activeSession.startTime)
                            : session.mySession?.startTime    ? fmtDT(session.mySession.startTime) : 'No registrado';
@@ -2382,7 +2384,6 @@ export default function OperacionesPage() {
         const pageW = pdf.internal.pageSize.getWidth();
         const pageH = pdf.internal.pageSize.getHeight();
 
-        // â"€â"€ Helpers de sección â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
         const sectionHeader = (title: string, r: number, g: number, b: number) => {
             pdf.addPage();
             pdf.setFillColor(r, g, b);
@@ -2393,9 +2394,8 @@ export default function OperacionesPage() {
             pdf.setTextColor(0, 0, 0);
             return 26;
         };
-        const kv = (label: string, value: string) => [label, value];
 
-        // Datos base del día
+        // ── Datos base ──────────────────────────────────────────────────────
         const todayShifts    = logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now));
         const completedToday = todayShifts.filter((s: any) => s.isCompleted || s.status === 'COMPLETED');
         const activeNow      = todayShifts.filter((s: any) => s.isPresent && !s.isCompleted);
@@ -2405,73 +2405,142 @@ export default function OperacionesPage() {
         const distinctObjs   = new Set(todayShifts.map((s:any)=>s.objectiveId).filter(Boolean));
         const coveredObjs    = new Set(todayShifts.filter((s:any)=>s.isPresent||s.isCompleted).map((s:any)=>s.objectiveId).filter(Boolean));
         const totalPlanHrs   = todayShifts.filter((s:any)=>!s.isUnassigned).reduce((a:number,s:any)=>{ try{ return a+Math.max(0,(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); }catch{return a;} },0);
-        const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a+((toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000);} return a+((toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); },0);
+        const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a;} return a; },0);
         const totalOpShifts  = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-        // Cobertura por turnos (no por objetivos): cuántos turnos tienen guardia vs total planificado
         const coveredShifts  = completedToday.length + activeNow.length + retainedNow.length;
         const coveragePct    = totalOpShifts > 0 ? Math.round((coveredShifts / totalOpShifts) * 100) : 0;
-        // Logs operativos para PDF: siempre filtrado por acciones de operaciones, independiente del tab activo
+        const punctualCount  = completedToday.filter((s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return true; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000<=5; }).length;
+        const punctualPct    = completedToday.length > 0 ? Math.round((punctualCount/completedToday.length)*100) : 100;
+        const hasIncidents   = (absentToday.length + vacantToday.length) > 0;
+        const statusLabel    = hasIncidents ? 'CON INCIDENCIAS' : 'NORMAL';
+
+        // ── Alertas deduplicadas ─────────────────────────────────────────────
+        const noiseTypes = new Set(['RECARGO_12H','RETENCION_DETECTADA','RETENCION_LARGA','RETENCIÓN','RETENCION']);
+        const todayStartMs = new Date(now.toLocaleDateString('es-AR',{timeZone:tz})+' 00:00:00').getTime();
+        const alertsToday  = empNovedades.filter((n:any) => {
+            if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            const tsMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
+            return tsMs >= todayStartMs - 3*3600000; // incluir desde 21hs día anterior
+        });
+        const seenAlertKeys = new Set<string>();
+        const dedupedAlerts = alertsToday.filter((n: any) => {
+            const tsMin = n.createdAt?.seconds ? Math.floor(n.createdAt.seconds / 300) : 0;
+            // Para alertas de ruido (recargo, retencion): dedup por tipo+empleado+ventana 30min
+            const winKey = noiseTypes.has(n.type)
+                ? `${n.type}|${n.employeeId||n.employeeName||''}|${Math.floor(tsMin/6)}`
+                : `${n.type}|${n.objectiveId||''}|${n.positionName||''}|${n.employeeId||''}|${tsMin}`;
+            if (seenAlertKeys.has(winKey)) return false;
+            seenAlertKeys.add(winKey);
+            return true;
+        });
+        const pendingNovedades  = dedupedAlerts.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida');
+
+        // ── Logs PDF ─────────────────────────────────────────────────────────
         const pdfOpsLogs = logic.recentLogs.filter((l: any) => {
             if (l.formattedActor === 'VACANTE') return false;
             const a = (l.action || '').toUpperCase();
             return OPS_ACTIONS.has(a) || a.includes('CHECK') || a.includes('GUARD') || a.includes('TURNO') || a.includes('SHIFT') || a.includes('ABSENT') || a.includes('HANDOVER') || a.includes('COVERAGE') || a.includes('FRANCO') || a.includes('INTERRUPT');
         });
-        const punctualCount  = completedToday.filter((s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return true; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000<=5; }).length;
-        const punctualPct    = completedToday.length > 0 ? Math.round((punctualCount/completedToday.length)*100) : 100;
-        const hasIncidents   = (absentToday.length + vacantToday.length + retainedNow.length) > 0;
-        const statusLabel    = hasIncidents ? 'CON INCIDENCIAS' : 'NORMAL';
 
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // ── Por objetivo ─────────────────────────────────────────────────────
+        const objMap = new Map<string,any>();
+        todayShifts.forEach((s:any) => {
+            if (!s.objectiveId) return;
+            if (!objMap.has(s.objectiveId)) objMap.set(s.objectiveId,{name:s.objectiveName||s.objectiveId,plan:0,activo:0,compl:0,ausente:0,vacante:0,ret:0,planHrs:0,realHrs:0,tardanzas:0});
+            const o = objMap.get(s.objectiveId);
+            o.plan++;
+            if (s.isPresent && !s.isCompleted) o.activo++;
+            if (s.isCompleted) o.compl++;
+            if (s.isAbsent || s.isPotentialAbsence) o.ausente++;
+            if (s.isUnassigned) o.vacante++;
+            if (s.isRetention) o.ret++;
+            try { const ph=(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000; if(ph>0&&ph<=24)o.planHrs+=ph; } catch {}
+            if (s.isCompleted) {
+                const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null;
+                const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null;
+                if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; if(h>0&&h<=36)o.realHrs+=h;}
+                const planS=toDate(s.shiftDateObj);
+                if(rs&&(rs.getTime()-planS.getTime())/60000>5)o.tardanzas++;
+            }
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
         // PÁGINA 1 — PORTADA
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // ═══════════════════════════════════════════════════════════════════════
         pdf.setFillColor(15, 23, 42);
-        pdf.rect(0, 0, pageW, pageH * 0.45, 'F');
+        pdf.rect(0, 0, pageW, pageH * 0.42, 'F');
         pdf.setTextColor(255, 255, 255);
         pdf.setFontSize(28); pdf.setFont('helvetica', 'bold');
-        pdf.text('INFORME DE GUARDIA', pageW / 2, 50, { align: 'center' });
+        pdf.text('INFORME DE GUARDIA', pageW / 2, 46, { align: 'center' });
         pdf.setFontSize(13); pdf.setFont('helvetica', 'normal');
-        pdf.text(sanitize(empresaNombre), pageW / 2, 62, { align: 'center' });
+        pdf.text(sanitize(empresaNombre), pageW / 2, 58, { align: 'center' });
         pdf.setFontSize(10);
-        pdf.text(fmtDateLong(now).toUpperCase(), pageW / 2, 76, { align: 'center' });
-
-        // Badge estado
+        pdf.text(fmtDateLong(now).toUpperCase(), pageW / 2, 72, { align: 'center' });
         const badgeColor: [number,number,number] = hasIncidents ? [220,38,38] : [5,150,105];
         pdf.setFillColor(...badgeColor);
-        pdf.roundedRect(pageW/2 - 30, 84, 60, 10, 2, 2, 'F');
+        pdf.roundedRect(pageW/2 - 32, 80, 64, 11, 2, 2, 'F');
         pdf.setFontSize(9); pdf.setFont('helvetica', 'bold');
-        pdf.text(statusLabel, pageW / 2, 91, { align: 'center' });
+        pdf.text(statusLabel, pageW / 2, 87.5, { align: 'center' });
 
+        // KPI cards en portada
         pdf.setTextColor(0, 0, 0);
-        pdf.setFontSize(10); pdf.setFont('helvetica', 'normal');
-        const infoY = pageH * 0.45 + 16;
-        const col1 = 30, col2 = pageW / 2 + 10;
-        pdf.setFont('helvetica', 'bold'); pdf.text('OPERADOR:', col1, infoY);
-        pdf.setFont('helvetica', 'normal'); pdf.text(operatorName, col1 + 28, infoY);
-        pdf.setFont('helvetica', 'bold'); pdf.text('INICIO GUARDIA:', col1, infoY + 8);
-        pdf.setFont('helvetica', 'normal'); pdf.text(guardStart, col1 + 38, infoY + 8);
-        pdf.setFont('helvetica', 'bold'); pdf.text('CIERRE / REPORTE:', col1, infoY + 16);
-        pdf.setFont('helvetica', 'normal'); pdf.text(reportTime, col1 + 42, infoY + 16);
-        pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS CUBIERTOS:', col2, infoY);
-        pdf.setFont('helvetica', 'normal'); pdf.text(`${coveredShifts} / ${totalOpShifts} (${coveragePct}%)`, col2 + 46, infoY);
-        pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS DEL DÍA:', col2, infoY + 8);
-        pdf.setFont('helvetica', 'normal'); pdf.text(String(totalOpShifts), col2 + 38, infoY + 8);
-        pdf.setFont('helvetica', 'bold'); pdf.text('HORAS PLANIFICADAS:', col2, infoY + 16);
-        pdf.setFont('helvetica', 'normal'); pdf.text(`${totalPlanHrs.toFixed(1)} hs`, col2 + 48, infoY + 16);
+        const cardY = pageH * 0.42 + 10;
+        const cards = [
+            { label: 'COBERTURA', value: `${coveragePct}%`, color: coveragePct>=90?[5,150,105]:coveragePct>=75?[217,119,6]:[220,38,38] as [number,number,number] },
+            { label: 'ACTIVOS', value: String(logic.stats.activos), color: [30,64,175] as [number,number,number] },
+            { label: 'AUSENCIAS', value: String(absentToday.length), color: absentToday.length>0?[220,38,38]:[100,116,139] as [number,number,number] },
+            { label: 'VACANTES', value: String(logic.stats.vacantes), color: logic.stats.vacantes>0?[220,38,38]:[100,116,139] as [number,number,number] },
+            { label: 'RETENCIONES', value: String(logic.stats.retenidos + retainedNow.length), color: [124,58,237] as [number,number,number] },
+            { label: 'ALERTAS PEND.', value: String(pendingNovedades.length), color: pendingNovedades.length>0?[220,38,38]:[100,116,139] as [number,number,number] },
+        ];
+        const cardW = (pageW - 28) / 3;
+        cards.forEach((c, i) => {
+            const cx = 14 + (i % 3) * (cardW + 4);
+            const cy = cardY + Math.floor(i / 3) * 28;
+            pdf.setFillColor(248, 250, 252);
+            pdf.setDrawColor(226, 232, 240);
+            pdf.roundedRect(cx, cy, cardW, 24, 2, 2, 'FD');
+            pdf.setFillColor(...c.color as [number,number,number]);
+            pdf.roundedRect(cx, cy, 4, 24, 1, 1, 'F');
+            pdf.setFontSize(16); pdf.setFont('helvetica', 'bold');
+            pdf.setTextColor(...c.color as [number,number,number]);
+            pdf.text(c.value, cx + cardW/2, cy + 13, { align: 'center' });
+            pdf.setFontSize(7); pdf.setFont('helvetica', 'normal');
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(c.label, cx + cardW/2, cy + 20, { align: 'center' });
+        });
 
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        // PÁGINA 2 — RESUMEN EJECUTIVO (KPIs)
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        // Fila de metadata
+        const metaY = cardY + 60;
+        pdf.setFontSize(9); pdf.setTextColor(0,0,0);
+        const col1 = 14, col2 = pageW / 2 + 6;
+        pdf.setFont('helvetica', 'bold'); pdf.text('OPERADOR:', col1, metaY);
+        pdf.setFont('helvetica', 'normal'); pdf.text(sanitize(operatorName), col1 + 27, metaY);
+        pdf.setFont('helvetica', 'bold'); pdf.text('INICIO GUARDIA:', col1, metaY + 8);
+        pdf.setFont('helvetica', 'normal'); pdf.text(sanitize(guardStart), col1 + 37, metaY + 8);
+        pdf.setFont('helvetica', 'bold'); pdf.text('CIERRE / REPORTE:', col1, metaY + 16);
+        pdf.setFont('helvetica', 'normal'); pdf.text(sanitize(reportTime), col1 + 41, metaY + 16);
+        pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS CUBIERTOS:', col2, metaY);
+        pdf.setFont('helvetica', 'normal'); pdf.text(`${coveredShifts} / ${totalOpShifts} (${coveragePct}%)`, col2 + 44, metaY);
+        pdf.setFont('helvetica', 'bold'); pdf.text('HORAS PLANIFICADAS:', col2, metaY + 8);
+        pdf.setFont('helvetica', 'normal'); pdf.text(`${totalPlanHrs.toFixed(1)} hs`, col2 + 46, metaY + 8);
+        pdf.setFont('helvetica', 'bold'); pdf.text('HORAS EJECUTADAS:', col2, metaY + 16);
+        pdf.setFont('helvetica', 'normal'); pdf.text(`${totalRealHrs.toFixed(1)} hs (turnos completados)`, col2 + 43, metaY + 16);
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 2 — RESUMEN EJECUTIVO
+        // ═══════════════════════════════════════════════════════════════════════
         const y2 = sectionHeader('RESUMEN EJECUTIVO', 30, 64, 175);
         autoTable(pdf, {
             head: [['INDICADOR', 'VALOR', 'INDICADOR', 'VALOR']],
             body: [
-                ['Turnos planificados hoy',  String(totalOpShifts),        'Guardias presentes',          String(logic.stats.activos)],
-                ['Turnos completados',        String(completedToday.length),'Retenciones activas',         String(logic.stats.retenidos)],
-                ['Vacantes sin cubrir',       String(logic.stats.vacantes), 'Ausencias registradas',       String(absentToday.length)],
-                ['Objetivos con cobertura',   `${coveredObjs.size} / ${distinctObjs.size}`,'% Turnos cubiertos', `${coveragePct}%`],
-                ['Horas planificadas',        `${totalPlanHrs.toFixed(1)} hs`,'Horas reales (completados)', `${totalRealHrs.toFixed(1)} hs`],
-                ['Índice de puntualidad',     `${punctualPct}%`,            'Alertas gestionadas',         String(empNovedades.filter((n:any)=>n.status==='ATENDIDA').length)],
-                ['Alertas pendientes',        String(pendingNovedades.length),'Estado de guardia',          statusLabel],
+                ['Turnos planificados hoy', String(totalOpShifts),       'Guardias presentes',        String(logic.stats.activos)],
+                ['Turnos completados',       String(completedToday.length),'Retenciones activas',      String(logic.stats.retenidos)],
+                ['Vacantes sin cubrir',      String(logic.stats.vacantes), 'Ausencias registradas',    String(absentToday.length)],
+                ['Objetivos con cobertura',  `${coveredObjs.size} / ${distinctObjs.size}`,'% Turnos cubiertos',`${coveragePct}%`],
+                ['Horas planificadas',       `${totalPlanHrs.toFixed(1)} hs`,'Horas ejecutadas (compl.)',`${totalRealHrs.toFixed(1)} hs`],
+                ['Indice de puntualidad',    `${punctualPct}%`,            'Alertas deduplicadas',     String(dedupedAlerts.length)],
+                ['Alertas pendientes',       String(pendingNovedades.length),'Estado de guardia',       statusLabel],
             ],
             startY: y2,
             styles: { fontSize: 9, cellPadding: 4 },
@@ -2484,19 +2553,132 @@ export default function OperacionesPage() {
             },
             theme: 'grid',
             didParseCell: (data: any) => {
-                if (data.section==='body' && data.column.index===3 && data.cell.raw===statusLabel && hasIncidents) {
-                    data.cell.styles.textColor = [220,38,38]; data.cell.styles.fontStyle = 'bold';
+                if (data.section==='body' && data.column.index===3) {
+                    const v = String(data.cell.raw);
+                    if (v===statusLabel && hasIncidents) { data.cell.styles.textColor=[220,38,38]; data.cell.styles.fontStyle='bold'; }
+                    if (v.endsWith('%') && parseInt(v)<80 && v!==`${punctualPct}%`) data.cell.styles.textColor=[220,38,38];
                 }
-                if (data.section==='body' && data.column.index===3 && String(data.cell.raw).endsWith('%') && parseInt(String(data.cell.raw))<80) {
-                    data.cell.styles.textColor = [220,38,38];
+                if (data.section==='body' && data.column.index===1) {
+                    const v = String(data.cell.raw);
+                    if (['Vacantes sin cubrir','Ausencias registradas','Alertas pendientes'].some((_,i)=>data.row.index===[2,2,6][i] && parseInt(v)>0))
+                        data.cell.styles.textColor=[220,38,38];
                 }
             },
         });
 
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        // PÁGINA 3 — TURNOS COMPLETADOS
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        const y3 = sectionHeader('TURNOS COMPLETADOS', 5, 150, 105);
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 3 — COBERTURA POR OBJETIVO
+        // ═══════════════════════════════════════════════════════════════════════
+        const y3 = sectionHeader('COBERTURA POR OBJETIVO', 30, 64, 175);
+        const objRows = Array.from(objMap.values()).map((o:any) => {
+            const sla = o.plan > 0 ? Math.round(((o.activo+o.compl) / o.plan)*100) : 0;
+            return [
+                sanitize(o.name),
+                String(o.plan),
+                String(o.activo),
+                String(o.compl),
+                String(o.ausente),
+                String(o.vacante),
+                String(o.ret),
+                `${o.planHrs.toFixed(1)}h`,
+                `${sla}%`,
+            ];
+        });
+        autoTable(pdf, {
+            head: [['Objetivo','Plan','Activos','Compl.','Ausentes','Vacantes','Ret.','Hs Plan','SLA%']],
+            body: objRows.length>0 ? objRows : [['Sin datos','—','—','—','—','—','—','—','—']],
+            startY: y3,
+            styles: { fontSize: 8.5 },
+            headStyles: { fillColor: [30,64,175] },
+            columnStyles: { 0:{cellWidth:55}, 8:{fontStyle:'bold'} },
+            didParseCell: (data:any) => {
+                if (data.section==='body') {
+                    const col = data.column.index;
+                    const v = parseInt(String(data.cell.raw));
+                    if ((col===4||col===5) && v>0) { data.cell.styles.textColor=[220,38,38]; data.cell.styles.fontStyle='bold'; }
+                    if (col===8) {
+                        const pct = parseInt(String(data.cell.raw));
+                        if (pct>=90) data.cell.styles.textColor=[5,150,105];
+                        else if (pct>=75) data.cell.styles.textColor=[217,119,6];
+                        else data.cell.styles.textColor=[220,38,38];
+                    }
+                }
+            },
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 4 — INCIDENCIAS
+        // ═══════════════════════════════════════════════════════════════════════
+        const y4 = sectionHeader('INCIDENCIAS DEL TURNO', 153, 27, 27);
+        let incY = y4;
+
+        // Tardanzas
+        const tardanzasRows = completedToday
+            .filter((s:any) => { const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return false; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000>5; })
+            .map((s:any) => {
+                const rs=new Date(s.realStartTime.seconds*1000);
+                const lm=Math.round((rs.getTime()-toDate(s.shiftDateObj).getTime())/60000);
+                return [sanitize(s.employeeName||'-'),sanitize(s.objectiveName||'-'),sanitize(s.positionName||'-'),fmt24(s.shiftDateObj),`+${lm} min`];
+            });
+        pdf.setFontSize(10); pdf.setFont('helvetica','bold'); pdf.setTextColor(217,119,6);
+        pdf.text(`TARDANZAS (${tardanzasRows.length})`, 14, incY);
+        incY += 4;
+        autoTable(pdf, {
+            head: [['Guardia','Objetivo','Posicion','Horario plan','Demora']],
+            body: tardanzasRows.length>0 ? tardanzasRows : [['—','Sin tardanzas registradas','—','—','—']],
+            startY: incY,
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [217,119,6] },
+            margin: { top: 0 },
+        });
+        incY = (pdf as any).lastAutoTable.finalY + 8;
+
+        // Ausencias
+        const ausenciasRows = absentToday.map((s:any) => [
+            sanitize(s.employeeName||'(sin nombre)'),
+            sanitize(s.objectiveName||'-'),
+            sanitize(s.positionName||'-'),
+            fmt24(s.shiftDateObj),
+            s.isAbsent ? 'AUSENTE' : 'NO LLEGO',
+        ]);
+        pdf.setFontSize(10); pdf.setFont('helvetica','bold'); pdf.setTextColor(220,38,38);
+        pdf.text(`AUSENCIAS (${ausenciasRows.length})`, 14, incY);
+        incY += 4;
+        autoTable(pdf, {
+            head: [['Guardia','Objetivo','Posicion','Horario plan','Estado']],
+            body: ausenciasRows.length>0 ? ausenciasRows : [['—','Sin ausencias','—','—','—']],
+            startY: incY,
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [220,38,38] },
+            margin: { top: 0 },
+        });
+        incY = (pdf as any).lastAutoTable.finalY + 8;
+
+        // Retenciones activas
+        const retRows = [...retainedNow, ...activeNow.filter((s:any)=>s.manualRetentionType)].map((s:any) => {
+            const retType = s.manualRetentionType==='open' ? 'INDETERMINADA' : s.manualRetentionHours ? `+${s.manualRetentionHours}h` : 'RETENCION';
+            const since = s.activeStartTime?.seconds ? new Date(s.activeStartTime.seconds*1000) : null;
+            const mins = since ? Math.round((now.getTime()-since.getTime())/60000) : 0;
+            return [sanitize(s.employeeName||'-'),sanitize(s.objectiveName||'-'),sanitize(s.positionName||'-'),`${Math.floor(mins/60)}h ${mins%60}m`,retType];
+        });
+        if (retRows.length > 0 || logic.stats.retenidos > 0) {
+            pdf.setFontSize(10); pdf.setFont('helvetica','bold'); pdf.setTextColor(124,58,237);
+            pdf.text(`RETENCIONES ACTIVAS (${retRows.length})`, 14, incY);
+            incY += 4;
+            autoTable(pdf, {
+                head: [['Guardia','Objetivo','Posicion','Tiempo retenido','Tipo']],
+                body: retRows.length>0 ? retRows : [['—','Sin retenciones activas','—','—','—']],
+                startY: incY,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [124,58,237] },
+                margin: { top: 0 },
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 5 — TURNOS COMPLETADOS
+        // ═══════════════════════════════════════════════════════════════════════
+        const y5 = sectionHeader('TURNOS COMPLETADOS', 5, 150, 105);
         const completedRows = completedToday
             .sort((a:any,b:any) => toDate(a.shiftDateObj).getTime()-toDate(b.shiftDateObj).getTime())
             .map((s: any) => {
@@ -2505,16 +2687,16 @@ export default function OperacionesPage() {
                 const realS  = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : null;
                 const realE  = s.realEndTime?.seconds   ? new Date(s.realEndTime.seconds*1000)   : null;
                 const planHr = ((planE.getTime()-planS.getTime())/3600000).toFixed(1);
-                const realHr = (realS&&realE) ? ((realE.getTime()-realS.getTime())/3600000).toFixed(1) : planHr;
+                const realHr = (realS&&realE) ? ((realE.getTime()-realS.getTime())/3600000).toFixed(1) : '-';
                 const lateMin = realS ? Math.round((realS.getTime()-planS.getTime())/60000) : 0;
                 const punct   = lateMin > 5 ? `TARDE +${lateMin}m` : 'A TIEMPO';
-                return [s.employeeName||'-', s.objectiveName||'-', s.positionName||'-',
-                    `${fmt24(planS)} – ${fmt24(planE)}`, `${planHr}h`, `${realHr}h`, punct];
+                return [sanitize(s.employeeName||'-'), sanitize(s.objectiveName||'-'), sanitize(s.positionName||'-'),
+                    `${fmt24(planS)} - ${fmt24(planE)}`, `${planHr}h`, `${realHr}h`, punct];
             });
         autoTable(pdf, {
-            head: [['Guardia','Objetivo','Posición','Horario Plan.','Hs Plan','Hs Real','Puntualidad']],
-            body: completedRows.length>0 ? completedRows : [['—','—','—','Sin turnos completados hoy','—','—','—']],
-            startY: y3,
+            head: [['Guardia','Objetivo','Posicion','Horario Plan.','Hs Plan','Hs Real','Puntualidad']],
+            body: completedRows.length>0 ? completedRows : [['','Sin turnos completados','','','','','']],
+            startY: y5,
             styles: { fontSize: 8 },
             headStyles: { fillColor: [5,150,105] },
             didParseCell: (data:any) => {
@@ -2524,53 +2706,50 @@ export default function OperacionesPage() {
             },
         });
 
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        // PÁGINA 4 — BITÁCORA DE OPERACIONES
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        const y4 = sectionHeader('BITÁCORA DE OPERACIONES', 15, 23, 42);
-        const logRows = pdfOpsLogs
-            .map((log:any) => [
-                fmt24(log.time),
-                sanitize((log.action||'LOG').replace('MANUAL_','')),
-                sanitize(log.formattedActor||'Sistema'),
-                sanitize(log.targetEmployee||'-'),
-                sanitize(log.fullDetail||log.details||'-'),
-            ]);
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 6 — BITÁCORA DE OPERACIONES
+        // ═══════════════════════════════════════════════════════════════════════
+        const y6 = sectionHeader('BITACORA DE OPERACIONES', 15, 23, 42);
+        // Dedup bitácora: mismo actor+evento+objetivo en ventana 1 min
+        const seenLogKeys = new Set<string>();
+        const dedupedLogs = pdfOpsLogs.filter((log:any) => {
+            const tsMin = log.time?.seconds ? Math.floor(log.time.seconds/60) : 0;
+            const key = `${(log.action||'').toUpperCase()}|${log.formattedActor||''}|${log.targetEmployee||''}|${tsMin}`;
+            if (seenLogKeys.has(key)) return false;
+            seenLogKeys.add(key);
+            return true;
+        });
+        const logRows = dedupedLogs.map((log:any) => [
+            fmt24(log.time),
+            sanitize((log.action||'LOG').replace('MANUAL_','')),
+            sanitize(log.formattedActor||'Sistema'),
+            sanitize(log.targetEmployee||'-'),
+            sanitize(log.fullDetail||log.details||'-'),
+        ]);
         autoTable(pdf, {
             head: [['Hora','Evento','Operador','Guardia / Objetivo','Detalle']],
-            body: logRows.length>0 ? logRows : [['—','—','—','—','Sin eventos registrados']],
-            startY: y4,
+            body: logRows.length>0 ? logRows : [['','','','','Sin eventos registrados']],
+            startY: y6,
             styles: { fontSize: 7.5 },
             headStyles: { fillColor: [15,23,42] },
             columnStyles: { 4: { cellWidth: 65 } },
         });
 
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        // PÁGINA 5 — TRATAMIENTO DE ALERTAS
-        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        const y5 = sectionHeader('TRATAMIENTO DE ALERTAS', 153, 27, 27);
+        // ═══════════════════════════════════════════════════════════════════════
+        // PÁGINA 7 — TRATAMIENTO DE ALERTAS
+        // ═══════════════════════════════════════════════════════════════════════
+        const y7 = sectionHeader('TRATAMIENTO DE ALERTAS', 153, 27, 27);
+        // Resumen al inicio
+        pdf.setFontSize(9); pdf.setFont('helvetica','normal'); pdf.setTextColor(0,0,0);
+        pdf.text(`Total: ${dedupedAlerts.length} alertas  |  Pendientes: ${pendingNovedades.length}  |  Atendidas: ${dedupedAlerts.length-pendingNovedades.length}`, 14, y7-6);
         const alertTypeLabel = (t:string) => ({
             AUSENCIA_AUTO:'AUSENCIA', VACANTE_PROTOCOLO_COBERTURA:'PROT. COBERTURA',
             VACANTE_A_PLANIFICACION:'VACANTE PLAN', RELEVO_NO_PRESENTADO:'RELEVO',
             VACANTE_NO_CUBIERTA:'SIN CUBRIR', BAJA_CUBIERTA:'BAJA CUBIERTA',
-            RETENCION_LARGA:'RETENCIÓN', POSICION_SIN_RELEVO:'SIN RELEVO',
+            RETENCION_LARGA:'RETENCION', POSICION_SIN_RELEVO:'SIN RELEVO',
+            RECARGO_12H:'RECARGO 12H', LLEGADA_TARDE:'TARDANZA', RETENCION:'RETENCION',
+            RETENCION_DETECTADA:'RETENCION', RETENCIÓN:'RETENCION',
         } as any)[t] || t;
-        // Filtrar alertas al día del informe (inicio del día local)
-        const todayStartMs = new Date(now.toLocaleDateString('es-AR', { timeZone: tz }) + 'T00:00:00-03:00').getTime();
-        const alertsToday  = empNovedades.filter((n:any) => {
-            if (n.type === 'VACANTE_A_PLANIFICACION') return false;
-            const tsMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
-            return tsMs >= todayStartMs;
-        });
-        // Deduplicar: misma clave tipo+objetivo+posicion+hora-redondeada-a-5min
-        const seenAlertKeys = new Set<string>();
-        const dedupedAlerts = alertsToday.filter((n: any) => {
-            const tsMin = n.createdAt?.seconds ? Math.floor(n.createdAt.seconds / 300) : 0; // redondear a 5 min
-            const key = `${n.type}|${n.objectiveId||''}|${n.positionName||''}|${n.employeeId||''}|${tsMin}`;
-            if (seenAlertKeys.has(key)) return false;
-            seenAlertKeys.add(key);
-            return true;
-        });
         const pendientesAlerts = dedupedAlerts.filter((n:any)=>n.status!=='ATENDIDA'&&n.status!=='atendida');
         const atendidasAlerts  = dedupedAlerts.filter((n:any)=>n.status==='ATENDIDA'||n.status==='atendida');
         const alertRows = [...pendientesAlerts, ...atendidasAlerts].map((n:any) => {
@@ -2579,9 +2758,9 @@ export default function OperacionesPage() {
             return [ts, alertTypeLabel(n.type), sanitize(n.objectiveName||'-'), sanitize(n.positionName||'-'), sanitize(n.description||'-'), st];
         });
         autoTable(pdf, {
-            head: [['Hora','Tipo','Objetivo','Posición','Descripción','Estado']],
-            body: alertRows.length>0 ? alertRows : [['—','—','—','—','Sin alertas registradas','—']],
-            startY: y5,
+            head: [['Hora','Tipo','Objetivo','Posicion','Descripcion','Estado']],
+            body: alertRows.length>0 ? alertRows : [['','','','','Sin alertas registradas','']],
+            startY: y7,
             styles: { fontSize: 7.5 },
             headStyles: { fillColor: [153,27,27] },
             columnStyles: { 4:{cellWidth:60}, 5:{cellWidth:22} },
@@ -2592,15 +2771,14 @@ export default function OperacionesPage() {
             },
         });
 
-        // Pie de página en todas las páginas
+        // Pie de página
         const totalPages = (pdf as any).internal.getNumberOfPages();
         for (let i=1; i<=totalPages; i++) {
             pdf.setPage(i);
             pdf.setFontSize(7); pdf.setFont('helvetica','normal'); pdf.setTextColor(150,150,150);
-            pdf.text(`Informe confidencial — ${operatorName} — ${reportTime}`, 14, pageH-6);
-            pdf.text(`Página ${i} / ${totalPages}`, pageW-14, pageH-6, { align:'right' });
+            pdf.text(`Informe confidencial - ${sanitize(operatorName)} - ${reportTime}`, 14, pageH-6);
+            pdf.text(`Pagina ${i} / ${totalPages}`, pageW-14, pageH-6, { align:'right' });
         }
-
         pdf.save(`guardia_${now.toLocaleDateString('es-AR',{timeZone:tz}).replace(/\//g,'-')}.pdf`);
     };
     const handleOpenWA = (shift: any) => {
