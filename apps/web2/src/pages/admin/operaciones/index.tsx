@@ -1424,7 +1424,98 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
     );
 };
 
-const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isCompact, isAutoMode, onRevertAbsence }: any) => {
+const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
+    const [selected, setSelected] = React.useState<'1' | '2' | '4' | 'open' | null>(null);
+    const [loading, setLoading] = React.useState(false);
+    if (!isOpen || !shift) return null;
+    const now = new Date();
+    const endTime: Date = shift.endDateObj instanceof Date ? shift.endDateObj : now;
+    const checkInTime: Date | null = shift.activeStartTime instanceof Date ? shift.activeStartTime : null;
+    const max12h: Date | null = checkInTime ? new Date(checkInTime.getTime() + 12 * 3600000) : null;
+    const getNewEnd = (h: number) => { const base = endTime > now ? endTime : now; return new Date(base.getTime() + h * 3600000); };
+    const fmt = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const handleConfirm = async () => {
+        if (!selected) return;
+        setLoading(true);
+        try {
+            const updates: any = {};
+            if (selected !== 'open') {
+                const newEnd = getNewEnd(parseInt(selected));
+                updates.endTime = Timestamp.fromDate(newEnd);
+                updates.manualRetentionType = 'extended';
+                updates.manualRetentionHours = parseInt(selected);
+                updates.retentionType = null;
+                updates.retentionUntil = null;
+            } else {
+                updates.manualRetentionType = 'open';
+                updates.retentionType = 'open';
+                if (max12h) updates.retentionUntil = Timestamp.fromDate(max12h);
+            }
+            await updateDoc(doc(db, 'turnos', shift.id), updates);
+            onClose();
+        } catch (e: any) { toast.error('Error al aplicar retención: ' + e.message); }
+        setLoading(false);
+    };
+    const options = [
+        { key: '1', label: '+1h', sub: fmt(getNewEnd(1)) },
+        { key: '2', label: '+2h', sub: fmt(getNewEnd(2)) },
+        { key: '4', label: '+4h', sub: fmt(getNewEnd(4)) },
+        { key: 'open', label: 'Indeterminada', sub: max12h ? `máx. ${fmt(max12h)}` : 'hasta 12h' },
+    ] as const;
+    const newEnd = selected && selected !== 'open' ? getNewEnd(parseInt(selected)) : null;
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                <div className="p-4 bg-orange-600 flex justify-between items-start">
+                    <div>
+                        <p className="text-orange-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Retención manual</p>
+                        <p className="text-white font-bold text-base leading-tight">{shift.objectiveName || '—'}</p>
+                        <div className="flex gap-1.5 mt-1.5">
+                            <span className="bg-orange-700/60 text-orange-100 text-[10px] px-2 py-0.5 rounded font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
+                            {shift.positionName && <span className="bg-orange-700/60 text-orange-100 text-[10px] px-2 py-0.5 rounded">{shift.positionName}</span>}
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
+                </div>
+                <div className="p-5">
+                    <p className="text-[11px] font-bold text-slate-500 mb-1 uppercase">Empleado</p>
+                    <p className="font-black text-slate-800 text-sm mb-4">{shift.employeeName || '—'}</p>
+                    <p className="text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-wide">Tiempo extra</p>
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                        {options.map(o => (
+                            <button key={o.key} onClick={() => setSelected(o.key as any)}
+                                className={`py-3 px-2 rounded-xl border-2 text-sm font-black transition-all text-center ${selected === o.key ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 hover:border-orange-300 text-slate-700 hover:bg-orange-50/40'}`}>
+                                {o.label}
+                                <span className="block text-[10px] font-semibold text-slate-400 mt-0.5">{o.sub}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {selected && selected !== 'open' && newEnd && (
+                        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-4 text-xs text-orange-800 flex items-center gap-2">
+                            <Clock size={13} className="shrink-0 text-orange-500"/>
+                            <span>Corte automático a las <strong>{fmt(newEnd)}</strong></span>
+                        </div>
+                    )}
+                    {selected === 'open' && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 flex items-center gap-2">
+                            <AlarmClock size={13} className="shrink-0 text-amber-500"/>
+                            <span>Retención activa. Corte manual o automático a las <strong>{max12h ? fmt(max12h) : '12h desde entrada'}</strong></span>
+                        </div>
+                    )}
+                    <div className="flex gap-2">
+                        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
+                        <button onClick={handleConfirm} disabled={!selected || loading}
+                            className="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
+                            {loading ? <Loader2 size={14} className="animate-spin"/> : <AlarmClock size={14}/>} Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
     if (shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
@@ -1467,6 +1558,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
+    else if (shift.isPresent && shift.manualRetentionType === 'open')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5 animate-pulse"><AlarmClock size={8}/>RETENCIÓN</span>;
+    else if (shift.isPresent && shift.manualRetentionType === 'extended') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><AlarmClock size={8}/>RET +{shift.manualRetentionHours}h</span>;
     else if (shift.isPresent)        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
@@ -1501,7 +1594,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                     <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
                 )}
-                {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
+                {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenManualRetention(shift)} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors" title="Retención manual"><AlarmClock size={12}/></button><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
                     ? (() => {
                         const endMs = shift.endDateObj?.getTime?.() ?? 0;
@@ -1624,7 +1717,8 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
                             onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
                             onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
                             onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
-                            onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}/>
+                            onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}
+                            onOpenManualRetention={(s: any) => modals.setManualRetentionData({ isOpen: true, shift: s })}/>
                     ))}
                 </div>
             )}
@@ -1729,6 +1823,7 @@ export default function OperacionesPage() {
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [rrhhVacancyData, setRrhhVacancyData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [manualRetentionData, setManualRetentionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     const [isGrouped, setIsGrouped] = useState(true);
     const [viewMode, setViewMode] = useState<'objetivos' | 'lista'>('objetivos'); // default: vista por objetivo
@@ -2883,7 +2978,7 @@ export default function OperacionesPage() {
             .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
-    const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData };
+    const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
     const tabs = [
         { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600' },
         { id: 'ACTIVOS',   label: 'ACT',     count: logic.stats.activos,   color: 'text-emerald-600' },
@@ -3842,6 +3937,7 @@ export default function OperacionesPage() {
             <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
             <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({isOpen:true,shift:s})} onSendToPlanning={handleReportPlanning}/>
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
+            <ManualRetentionModal isOpen={manualRetentionData.isOpen} onClose={() => setManualRetentionData({isOpen:false,shift:null})} shift={manualRetentionData.shift}/>
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData({isOpen:false,ctx:{employeeName:'',phone:''}})} ctx={waData.ctx}/>
             {showDebugPanel && (<DebugPanel processedData={logic.processedData} servicesSLA={logic.servicesSLA} publishStatusMap={logic.publishStatusMap} rawShifts={logic.rawShifts as any} onClose={() => setShowDebugPanel(false)}/>)}
             {/* ── MODAL CIERRE DE GUARDIA ── */}
