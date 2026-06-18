@@ -855,6 +855,97 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
+const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
+    const [selected, setSelected] = React.useState<'1' | '2' | '4' | 'open' | null>(null);
+    const [loading, setLoading] = React.useState(false);
+    if (!isOpen || !shift) return null;
+    const now = new Date();
+    const endTime: Date = shift.endDateObj instanceof Date ? shift.endDateObj : now;
+    const checkInTime: Date | null = shift.activeStartTime instanceof Date ? shift.activeStartTime : null;
+    const max12h: Date | null = checkInTime ? new Date(checkInTime.getTime() + 12 * 3600000) : null;
+    const getNewEnd = (h: number) => { const base = endTime > now ? endTime : now; return new Date(base.getTime() + h * 3600000); };
+    const fmt = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const handleConfirm = async () => {
+        if (!selected) return;
+        setLoading(true);
+        try {
+            const updates: any = {};
+            if (selected !== 'open') {
+                const newEnd = getNewEnd(parseInt(selected));
+                updates.endTime = Timestamp.fromDate(newEnd);
+                updates.manualRetentionType = 'extended';
+                updates.manualRetentionHours = parseInt(selected);
+                updates.retentionType = null;
+                updates.retentionUntil = null;
+            } else {
+                updates.manualRetentionType = 'open';
+                updates.retentionType = 'open';
+                if (max12h) updates.retentionUntil = Timestamp.fromDate(max12h);
+            }
+            await updateDoc(doc(db, 'turnos', shift.id), updates);
+            onClose();
+        } catch (e: any) { toast.error('Error al aplicar retención: ' + (e as any).message); }
+        setLoading(false);
+    };
+    const options = [
+        { key: '1', label: '+1h', sub: fmt(getNewEnd(1)) },
+        { key: '2', label: '+2h', sub: fmt(getNewEnd(2)) },
+        { key: '4', label: '+4h', sub: fmt(getNewEnd(4)) },
+        { key: 'open', label: 'Indeterminada', sub: max12h ? `máx. ${fmt(max12h)}` : 'hasta 12h' },
+    ] as const;
+    const newEnd = selected && selected !== 'open' ? getNewEnd(parseInt(selected)) : null;
+    return (
+        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                <div className="p-4 bg-orange-600 flex justify-between items-start">
+                    <div>
+                        <p className="text-orange-200 text-[10px] font-bold uppercase tracking-widest mb-0.5">Retención manual</p>
+                        <p className="text-white font-bold text-base leading-tight">{shift.objectiveName || '—'}</p>
+                        <div className="flex gap-1.5 mt-1.5">
+                            <span className="bg-orange-700/60 text-orange-100 text-[10px] px-2 py-0.5 rounded font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
+                            {shift.positionName && <span className="bg-orange-700/60 text-orange-100 text-[10px] px-2 py-0.5 rounded">{shift.positionName}</span>}
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 shrink-0"><X size={16} className="text-white"/></button>
+                </div>
+                <div className="p-5">
+                    <p className="text-[11px] font-bold text-slate-500 mb-1 uppercase">Empleado</p>
+                    <p className="font-black text-slate-800 text-sm mb-4">{shift.employeeName || '—'}</p>
+                    <p className="text-[11px] font-bold text-slate-500 mb-2 uppercase tracking-wide">Tiempo extra</p>
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                        {options.map(o => (
+                            <button key={o.key} onClick={() => setSelected(o.key as any)}
+                                className={`py-3 px-2 rounded-xl border-2 text-sm font-black transition-all text-center ${selected === o.key ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 hover:border-orange-300 text-slate-700 hover:bg-orange-50/40'}`}>
+                                {o.label}
+                                <span className="block text-[10px] font-semibold text-slate-400 mt-0.5">{o.sub}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {selected && selected !== 'open' && newEnd && (
+                        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-4 text-xs text-orange-800 flex items-center gap-2">
+                            <Clock size={13} className="shrink-0 text-orange-500"/>
+                            <span>Corte automático a las <strong>{fmt(newEnd)}</strong></span>
+                        </div>
+                    )}
+                    {selected === 'open' && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 flex items-center gap-2">
+                            <AlarmClock size={13} className="shrink-0 text-amber-500"/>
+                            <span>Retención activa. Corte manual o automático a las <strong>{max12h ? fmt(max12h) : '12h desde entrada'}</strong></span>
+                        </div>
+                    )}
+                    <div className="flex gap-2">
+                        <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
+                        <button onClick={handleConfirm} disabled={!selected || loading}
+                            className="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-black text-sm transition-colors flex items-center justify-center gap-2">
+                            {loading ? <Loader2 size={14} className="animate-spin"/> : <Timer size={14}/>} Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export default function TacticalMapView() {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
