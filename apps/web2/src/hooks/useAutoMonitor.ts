@@ -231,8 +231,8 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
         if (s.isFranco || s.isUnassigned) return false;
-        // NUNCA auto-completar guardias en retención — su turno no termina hasta que llegue el relevo
-        if (s.isRetention) return false;
+        // No auto-completar retenciones naturales — sí las retenciones manuales con tiempo fijo (manualRetentionType='extended')
+        if (s.isRetention && s.manualRetentionType !== 'extended') return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
         return endMs > 0 && (now.getTime() - endMs) > 2 * 60 * 1000;
@@ -244,12 +244,15 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (isAutoMode) {
           try {
             const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
-            if (turnoSnap.exists() && (turnoSnap.data()?.isCompleted || turnoSnap.data()?.isRetention)) {
+            const freshData = turnoSnap.data();
+            const naturalRetention = freshData?.isRetention && freshData?.manualRetentionType !== 'extended';
+            if (turnoSnap.exists() && (freshData?.isCompleted || naturalRetention)) {
               continue;
             }
             await updateDoc(doc(db, 'turnos', s.id), {
               status: 'COMPLETED', isCompleted: true,
               realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
+              completionReason: s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END',
             });
             await createNovedad('TURNO_COMPLETADO_AUTO', 'Turno Completado (Auto)',
               `Finalización automática al vencimiento del horario: ${msg}`, s, empresaId);
