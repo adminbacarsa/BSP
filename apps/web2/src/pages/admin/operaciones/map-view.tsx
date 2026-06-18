@@ -1294,6 +1294,7 @@ export default function TacticalMapView() {
                 onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 
                 onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} 
                 onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} 
+                onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true, shift:s})}
                 onReportPlanning={handleReportPlanning} 
             />
 

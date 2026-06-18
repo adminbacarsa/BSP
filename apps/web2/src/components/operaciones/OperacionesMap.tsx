@@ -189,6 +189,7 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                                         : <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} style={{ background: canCheckIn ? '#4f46e5' : '#e2e8f0', color: canCheckIn ? 'white' : '#94a3b8', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', border: 'none', cursor: canCheckIn ? 'pointer' : 'default', width: '100%' }}>{diffMin > 5 ? 'LLEGÓ?' : 'PRES.'}</button>
                                 )}
                                 {(shift.isPresent || shift.status === 'PRESENT') && <button onClick={() => onOpenInterrupt(shift)} style={{ background: '#fef2f2', color: '#be123c', border: '1px solid #fecdd3', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', width: '100%' }}>BAJA</button>}
+                                {(shift.isPresent || shift.status === 'PRESENT') && onOpenManualRetention && <button onClick={() => onOpenManualRetention(shift)} style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', width: '100%', marginTop: '2px' }}>RET.</button>}
                             </div>
                         </div>
                     );
@@ -219,6 +220,7 @@ const OperacionesMap = ({
     onOpenAttendance,
     onOpenHandover,
     onOpenInterrupt,
+    onOpenManualRetention,
     onReportPlanning
 }: any) => {
 
