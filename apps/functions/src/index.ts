@@ -3291,7 +3291,8 @@ export const cleanupSlaDevueltas = functions
     novedadesSnap.docs.forEach(doc => {
       novBatch.delete(doc.ref);
       novCount++;
-      if (novCount >= BATCH_LIMIT)       novBatches.push(novBatch);
+      if (novCount >= BATCH_LIMIT) {
+        novBatches.push(novBatch);
         novBatch = db.batch();
         novCount = 0;
       }
