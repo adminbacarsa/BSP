@@ -1446,12 +1446,25 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
                 updates.manualRetentionHours = parseInt(selected);
                 updates.retentionType = null;
                 updates.retentionUntil = null;
+                // El turno pasa de "en retención" a "extendido oficialmente" — limpiar flag
+                updates.isRetention = false;
+                updates.retentionReason = null;
             } else {
                 updates.manualRetentionType = 'open';
                 updates.retentionType = 'open';
                 if (max12h) updates.retentionUntil = Timestamp.fromDate(max12h);
             }
             await updateDoc(doc(db, 'turnos', shift.id), updates);
+            // Auto-desestimar novedades RETENCION_DETECTADA activas del turno
+            if (selected !== 'open') {
+                const nSnap = await getDocs(query(
+                    collection(db, 'novedades'),
+                    where('shiftId', '==', shift.id),
+                    where('type', '==', 'RETENCION_DETECTADA'),
+                    where('status', '==', 'pending')
+                ));
+                await Promise.all(nSnap.docs.map(d => updateDoc(d.ref, { status: 'ATENDIDA', resolvedAt: serverTimestamp(), resolvedBy: 'RETENCIÓN_MANUAL' })));
+            }
             onClose();
         } catch (e: any) { toast.error('Error al aplicar retención: ' + e.message); }
         setLoading(false);

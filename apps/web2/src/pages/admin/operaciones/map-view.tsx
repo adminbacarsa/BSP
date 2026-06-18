@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { Toaster, toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, onSnapshot, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, onSnapshot, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -877,12 +877,23 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
                 updates.manualRetentionHours = parseInt(selected);
                 updates.retentionType = null;
                 updates.retentionUntil = null;
+                updates.isRetention = false;
+                updates.retentionReason = null;
             } else {
                 updates.manualRetentionType = 'open';
                 updates.retentionType = 'open';
                 if (max12h) updates.retentionUntil = Timestamp.fromDate(max12h);
             }
             await updateDoc(doc(db, 'turnos', shift.id), updates);
+            if (selected !== 'open') {
+                const nSnap = await getDocs(query(
+                    collection(db, 'novedades'),
+                    where('shiftId', '==', shift.id),
+                    where('type', '==', 'RETENCION_DETECTADA'),
+                    where('status', '==', 'pending')
+                ));
+                await Promise.all(nSnap.docs.map(d => updateDoc(d.ref, { status: 'ATENDIDA', resolvedAt: serverTimestamp(), resolvedBy: 'RETENCIÓN_MANUAL' })));
+            }
             onClose();
         } catch (e: any) { toast.error('Error al aplicar retención: ' + (e as any).message); }
         setLoading(false);
