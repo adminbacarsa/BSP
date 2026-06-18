@@ -665,13 +665,18 @@ export default function EmployeesPage() {
           const ausenciasSnap = await getDocs(qAusencias);
           let totalVacaciones = 0, totalLicencias = 0, totalAusencias = 0, totalEnfermedad = 0;
           
+          const parseAusDate = (val: any): Date | null => {
+              if (!val) return null;
+              if (typeof val === 'string') { const [y, m, d] = val.split('-').map(Number); return new Date(y, m - 1, d); }
+              if (typeof val.toDate === 'function') return val.toDate();
+              if (val.seconds) return new Date(val.seconds * 1000);
+              return null;
+          };
           ausenciasSnap.docs.forEach(doc => {
              const data = doc.data();
-             if (!data.startDate || !data.endDate) return;
-             const [sY, sM, sD] = data.startDate.split('-').map(Number);
-             const [eY, eM, eD] = data.endDate.split('-').map(Number);
-             const start = new Date(sY, sM - 1, sD);
-             const end = new Date(eY, eM - 1, eD);
+             const start = parseAusDate(data.startDate);
+             const end   = parseAusDate(data.endDate);
+             if (!start || !end) return;
              if (start <= lastDay && end >= firstDay) {
                  const daysCount = Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
                  const type = (data.type || '').toLowerCase();
