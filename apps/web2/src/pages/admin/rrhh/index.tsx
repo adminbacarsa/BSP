@@ -1910,6 +1910,7 @@ export default function EmployeesPage() {
                 {/* TAB BAR */}
                 <div className="flex items-center gap-2">
                     <TabBar
+                        compact
                         tabs={[
                             { id: 'dashboard',    label: 'Dashboard',    icon: BarChart2 },
                             { id: 'legajos',      label: 'Legajos',      icon: Users },
@@ -1922,17 +1923,17 @@ export default function EmployeesPage() {
                         onChange={id => { setActiveTab(id as any); setView('list'); }}
                     />
                     <Link href="/admin/rrhh/ausentismo"
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase transition-all border"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all border"
                         style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt3)' }}
                     >
-                        <TrendingDown size={12}/> Ausentismo
+                        <TrendingDown size={11}/> Ausentismo
                     </Link>
                     <Link
                         href="/admin/empleados"
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-black uppercase transition-all border"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all border"
                         style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt3)' }}
                     >
-                        <ShieldCheckIcon size={12}/> Empleados
+                        <ShieldCheckIcon size={11}/> Empleados
                     </Link>
                 </div>
             </header>
@@ -2327,204 +2328,146 @@ export default function EmployeesPage() {
                     <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 shadow-sm flex flex-col overflow-hidden relative">
                         {selectedEmp ? (
                             <div className="h-full flex flex-col animate-in fade-in">
-                                {/* EMPLOYEE DETAIL HEADER */}
-                                <div className="p-5 border-b dark:border-slate-700 bg-gradient-to-r from-slate-50 to-indigo-50/30 dark:from-slate-900 dark:to-indigo-900/10">
-                                    <div className="flex justify-between items-start">
-                                        <div className="flex gap-4 items-start">
-                                            <div className="w-16 h-16 rounded-xl bg-indigo-600 flex items-center justify-center text-2xl font-black text-white shadow-lg shadow-indigo-500/30 shrink-0">
-                                                {selectedEmp.lastName?.[0] || '?'}
-                                            </div>
-                                            <div>
-                                                <h2 className="text-xl font-black uppercase text-slate-900 dark:text-white leading-tight">
-                                                    {selectedEmp.lastName}, {selectedEmp.firstName}
-                                                </h2>
-                                                <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${(selectedEmp.status === 'activo' || selectedEmp.status === 'active') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400'}`}>
-                                                        {(selectedEmp.status === 'activo' || selectedEmp.status === 'active') ? <UserCheck size={10}/> : <UserX size={10}/>}
-                                                        {selectedEmp.status || 'activo'}
-                                                    </span>
-                                                    {selectedEmp.fileNumber && (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                                                            Leg. {selectedEmp.fileNumber}
-                                                        </span>
-                                                    )}
-                                                    {selectedEmp.category && (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">
-                                                            {selectedEmp.category}
-                                                        </span>
-                                                    )}
-                                                    {selectedEmp.laborAgreement && (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
-                                                            <Book size={9}/> {selectedEmp.laborAgreement}
-                                                        </span>
-                                                    )}
-                                                    {selectedEmp.startDate && (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-                                                            <Calendar size={9}/> Ing. {new Date(selectedEmp.startDate + 'T00:00:00').toLocaleDateString('es-AR')}
-                                                        </span>
-                                                    )}
-                                                    {selectedEmp.motivoBaja && (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
-                                                            <UserX size={9}/> {selectedEmp.motivoBaja}{selectedEmp.fechaBaja ? ` — ${new Date(selectedEmp.fechaBaja + 'T00:00:00').toLocaleDateString('es-AR')}` : ''}
-                                                        </span>
-                                                    )}
-                                                    {(selectedEmp as any).portalInvite?.sent ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
-                                                            <CheckCircle2 size={9}/> Portal enviado
-                                                        </span>
-                                                    ) : selectedEmp.email ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                                                            <Mail size={9}/> Sin acceso portal
-                                                        </span>
-                                                    ) : null}
-                                                </div>
-                                                <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                                    {selectedEmp.phone && (
-                                                        <a href={`tel:${selectedEmp.phone}`} className="flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors">
-                                                            <Phone size={10}/> {selectedEmp.phone}
-                                                        </a>
-                                                    )}
-                                                    {selectedEmp.address && (
-                                                        selectedEmp.lat && selectedEmp.lng ? (
-                                                            <a href={`https://www.google.com/maps/search/?api=1&query=${selectedEmp.lat},${selectedEmp.lng}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:underline">
-                                                                <MapPin size={10}/> {selectedEmp.address} <ExternalLink size={9}/>
-                                                            </a>
-                                                        ) : (
-                                                            <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
-                                                                <Home size={10}/> {selectedEmp.address}
-                                                            </span>
-                                                        )
-                                                    )}
-                                                </div>
-                                            </div>
+                                {/* EMPLOYEE DETAIL HEADER — compact */}
+                                <div className="px-4 py-3 border-b dark:border-slate-700 bg-white dark:bg-slate-900">
+                                    {/* fila 1: avatar + nombre + acciones */}
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center text-base font-black text-white shrink-0">
+                                            {selectedEmp.lastName?.[0] || '?'}
                                         </div>
-                                        <div className="flex gap-1.5 shrink-0 items-center flex-wrap justify-end">
-                                            {/* ── Editar — acción primaria ── */}
-                                            <button
-                                                onClick={openEditFromDetail}
-                                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-black uppercase transition-all shadow-sm"
+                                        <div className="flex-1 min-w-0">
+                                            <h2 className="text-[14px] font-black uppercase text-slate-900 dark:text-white leading-tight truncate">
+                                                {selectedEmp.lastName}, {selectedEmp.firstName}
+                                            </h2>
+                                        </div>
+                                        {/* acciones compactas */}
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button onClick={openEditFromDetail}
+                                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase shadow-sm"
                                                 style={{ backgroundColor: 'var(--company-primary, #6366f1)', color: '#fff' }}
-                                                title="Editar datos del legajo"
-                                            >
-                                                <Edit2 size={13} aria-hidden="true"/> Editar
+                                                title="Editar legajo">
+                                                <Edit2 size={12}/> Editar
                                             </button>
-                                            {/* ── Enviar / Reenviar acceso portal ── */}
                                             {selectedEmp.email && (
-                                                <button
-                                                    onClick={() => handleSendPortalOne(selectedEmp)}
+                                                <button onClick={() => handleSendPortalOne(selectedEmp)}
                                                     disabled={sendingPortalIds.has(selectedEmp.id)}
-                                                    title={(selectedEmp as any).portalInvite?.sent ? 'Reenviar acceso al portal' : 'Enviar acceso al portal de empleados'}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-indigo-200 dark:border-indigo-800 disabled:opacity-50"
-                                                >
-                                                    {sendingPortalIds.has(selectedEmp.id) ? <Loader2 size={13} className="animate-spin"/> : <KeyRound size={13}/>}
+                                                    title={(selectedEmp as any).portalInvite?.sent ? 'Reenviar portal' : 'Enviar portal'}
+                                                    className="flex items-center gap-1 px-2 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors text-[11px] font-black uppercase border border-indigo-200 disabled:opacity-50">
+                                                    {sendingPortalIds.has(selectedEmp.id) ? <Loader2 size={11} className="animate-spin"/> : <KeyRound size={11}/>}
                                                     {(selectedEmp as any).portalInvite?.sent ? 'Reenviar' : 'Portal'}
                                                 </button>
                                             )}
-                                            {/* ── Establecer contraseña portal ── */}
                                             {selectedEmp.email && (
-                                                <button
-                                                    onClick={() => openPortalPwdModal(selectedEmp)}
-                                                    title="Establecer contraseña del portal"
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-violet-200 dark:border-violet-800"
-                                                >
+                                                <button onClick={() => openPortalPwdModal(selectedEmp)}
+                                                    title="Contraseña portal"
+                                                    className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-lg border border-violet-200 transition-colors">
                                                     <ShieldCheckIcon size={13}/>
-                                                    Pass
                                                 </button>
                                             )}
-                                            {/* ── Dar de baja / Reactivar ── */}
                                             {(selectedEmp.status === 'activo' || selectedEmp.status === 'active' || !selectedEmp.status) ? (
-                                                <button
-                                                    onClick={() => { setBajaForm({ motivo: 'Desvinculación', fecha: new Date().toISOString().split('T')[0], observacion: '' }); setShowBajaModal(true); }}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-rose-200 dark:border-rose-800"
-                                                    title="Dar de baja al empleado"
-                                                >
-                                                    <UserX size={13} aria-hidden="true"/> Baja
+                                                <button onClick={() => { setBajaForm({ motivo: 'Desvinculación', fecha: new Date().toISOString().split('T')[0], observacion: '' }); setShowBajaModal(true); }}
+                                                    className="flex items-center gap-1 px-2 py-1.5 text-rose-500 hover:bg-rose-50 rounded-lg border border-rose-200 text-[11px] font-black uppercase transition-colors"
+                                                    title="Dar de baja">
+                                                    <UserX size={11}/> Baja
                                                 </button>
                                             ) : (
-                                                <button
-                                                    onClick={() => handleReactivar(selectedEmp)}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-colors text-xs font-black uppercase border border-emerald-200 dark:border-emerald-800"
-                                                    title="Reactivar empleado"
-                                                >
-                                                    <UserCheck size={13} aria-hidden="true"/> Reactivar
+                                                <button onClick={() => handleReactivar(selectedEmp)}
+                                                    className="flex items-center gap-1 px-2 py-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg border border-emerald-200 text-[11px] font-black uppercase transition-colors"
+                                                    title="Reactivar">
+                                                    <UserCheck size={11}/> Reactivar
                                                 </button>
                                             )}
-                                            {/* ── Eliminar (solo SuperAdmin) ── */}
                                             {isSuperAdmin && (
-                                                <button
-                                                    onClick={() => handleDelete(selectedEmp.id!)}
-                                                    className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors border border-slate-200 dark:border-slate-700 text-xs font-black uppercase"
-                                                    aria-label={`Eliminar permanente: ${selectedEmp.lastName}, ${selectedEmp.firstName}`}
-                                                    title="Eliminar permanente"
-                                                >
-                                                    <Trash2 size={13} aria-hidden="true"/> Eliminar
+                                                <button onClick={() => handleDelete(selectedEmp.id!)}
+                                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg border border-slate-200 transition-colors"
+                                                    title="Eliminar permanente">
+                                                    <Trash2 size={13}/>
                                                 </button>
                                             )}
-                                            {/* ── Cerrar ── */}
-                                            <button
-                                                onClick={() => setSelectedEmp(null)}
-                                                aria-label="Cerrar detalle del empleado"
-                                                className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                                            >
-                                                <X size={16} aria-hidden="true"/>
+                                            <button onClick={() => setSelectedEmp(null)}
+                                                className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
+                                                <X size={15}/>
                                             </button>
                                         </div>
+                                    </div>
+                                    {/* fila 2: badges compactos */}
+                                    <div className="flex flex-wrap items-center gap-1 mt-2">
+                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black uppercase ${(selectedEmp.status === 'activo' || selectedEmp.status === 'active') ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                                            {(selectedEmp.status === 'activo' || selectedEmp.status === 'active') ? <UserCheck size={9}/> : <UserX size={9}/>}
+                                            {selectedEmp.status || 'activo'}
+                                        </span>
+                                        {selectedEmp.fileNumber && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-600">Leg. {selectedEmp.fileNumber}</span>}
+                                        {selectedEmp.category && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-700">{selectedEmp.category}</span>}
+                                        {selectedEmp.laborAgreement && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700"><Book size={8}/> {selectedEmp.laborAgreement}</span>}
+                                        {selectedEmp.startDate && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500"><Calendar size={8}/> Ing. {new Date(selectedEmp.startDate + 'T00:00:00').toLocaleDateString('es-AR')}</span>}
+                                        {(selectedEmp as any).portalInvite?.sent
+                                            ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700"><CheckCircle2 size={8}/> Portal</span>
+                                            : selectedEmp.email ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700"><Mail size={8}/> Sin portal</span> : null}
+                                        {selectedEmp.phone && <a href={`tel:${selectedEmp.phone}`} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-slate-500 hover:text-indigo-600 bg-slate-50 border border-slate-100 transition-colors"><Phone size={8}/> {selectedEmp.phone}</a>}
+                                        {selectedEmp.address && (selectedEmp.lat && selectedEmp.lng
+                                            ? <a href={`https://www.google.com/maps/search/?api=1&query=${selectedEmp.lat},${selectedEmp.lng}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-indigo-600 hover:underline bg-slate-50 border border-slate-100"><MapPin size={8}/> {selectedEmp.address} <ExternalLink size={8}/></a>
+                                            : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-100"><Home size={8}/> {selectedEmp.address}</span>)}
+                                        {selectedEmp.motivoBaja && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-600"><UserX size={8}/> {selectedEmp.motivoBaja}</span>}
                                     </div>
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4">
                                     {empStats ? (
                                         <div className="space-y-3">
-                                            {/* ── HERO: horas del ciclo ──────────────────── */}
+                                            {/* ── HERO: planificado vs ejecutado ────────── */}
                                             <div className={`rounded-xl shadow-lg relative overflow-hidden text-white ${empStats.isOverLimit ? 'bg-gradient-to-br from-rose-700 to-rose-900' : 'bg-gradient-to-br from-slate-800 to-slate-900'}`}>
                                                 {empStats.isOverLimit && (
-                                                  <div className="absolute top-0 left-0 w-full bg-rose-600 text-white text-[9px] font-black uppercase text-center py-1 animate-pulse tracking-widest">
+                                                  <div className="absolute top-0 left-0 w-full bg-rose-600 text-white text-[9px] font-black uppercase text-center py-0.5 animate-pulse tracking-widest">
                                                     ¡Límite mensual superado!
                                                   </div>
                                                 )}
-                                                <div className="absolute inset-0 opacity-[0.04] pointer-events-none"><BarChart2 size={120} className="absolute right-4 bottom-2"/></div>
-                                                <div className={`p-5 flex gap-4 relative z-10 ${empStats.isOverLimit ? 'pt-8' : ''}`}>
-                                                  <div className="flex-1 space-y-2">
-                                                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-300">Mes · {currentDate.toLocaleString('es-ES',{month:'long',year:'numeric'})}</p>
-                                                    <div className="flex items-baseline gap-2">
-                                                      <span className="text-4xl font-black">{empStats.totalPlanificado}h</span>
-                                                      <span className="text-xs text-slate-400 font-medium">planificadas / {empStats.monthlyLimit}h límite</span>
-                                                    </div>
-                                                    {/* barra de progreso segmentada */}
-                                                    <div className="space-y-1">
-                                                      <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-                                                        <div className={`h-full rounded-full transition-all ${empStats.isOverLimit ? 'bg-rose-400' : 'bg-emerald-400'}`} style={{ width:`${Math.min((empStats.totalPlanificado/empStats.monthlyLimit)*100,100)}%` }}/>
+                                                <div className={`p-4 relative z-10 ${empStats.isOverLimit ? 'pt-7' : ''}`}>
+                                                  {/* cabecera ciclo */}
+                                                  <p className="text-[9px] font-black uppercase tracking-widest text-indigo-300 mb-3">
+                                                    Ciclo CCT · {currentDate.toLocaleString('es-ES',{month:'long',year:'numeric'})} · ciclo día {selectedEmp.cycleStartDay || 26}
+                                                  </p>
+                                                  {/* columnas planificado | ejecutado */}
+                                                  <div className="grid grid-cols-2 gap-3">
+                                                    {/* planificado */}
+                                                    <div>
+                                                      <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-1">Planificado</p>
+                                                      <div className="flex items-baseline gap-1.5">
+                                                        <span className={`text-3xl font-black ${empStats.isOverLimit ? 'text-rose-300' : 'text-white'}`}>{empStats.totalPlanificado}h</span>
+                                                        <span className="text-[10px] text-slate-400">/ {empStats.monthlyLimit}h límite</span>
                                                       </div>
-                                                      <div className="flex justify-between text-[9px] text-slate-500">
-                                                        <span>{empStats.progress}% del mes ejecutado</span>
-                                                        <span>{Math.max(0, empStats.monthlyLimit - empStats.totalPlanificado)}h disponibles</span>
+                                                      <div className="mt-2 space-y-1">
+                                                        <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                                          <div className={`h-full rounded-full transition-all ${empStats.isOverLimit ? 'bg-rose-400' : 'bg-indigo-400'}`}
+                                                            style={{ width:`${Math.min((empStats.totalPlanificado/empStats.monthlyLimit)*100,100)}%` }}/>
+                                                        </div>
+                                                        <p className="text-[9px] text-slate-500">{Math.round((empStats.totalPlanificado/empStats.monthlyLimit)*100)}% del límite · {Math.max(0,empStats.monthlyLimit-empStats.totalPlanificado)}h disponibles</p>
                                                       </div>
                                                     </div>
-                                                  </div>
-                                                  {/* donut */}
-                                                  <div className="relative w-[72px] h-[72px] shrink-0">
-                                                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                                                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="#334155" strokeWidth="3.5"/>
-                                                      <circle cx="18" cy="18" r="15.9" fill="none"
-                                                        stroke={empStats.isOverLimit ? '#f87171' : '#34d399'}
-                                                        strokeWidth="3.5"
-                                                        strokeDasharray={`${Math.min(empStats.progress,100)} 100`}
-                                                        strokeLinecap="round"/>
-                                                    </svg>
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                                      <span className="text-sm font-black leading-none">{Math.min(empStats.progress,100)}%</span>
-                                                      <span className="text-[7px] text-slate-400 uppercase">ciclo</span>
+                                                    {/* ejecutado */}
+                                                    <div className="border-l border-white/10 pl-3">
+                                                      <p className="text-[9px] font-black uppercase tracking-wide text-slate-400 mb-1">Ejecutado</p>
+                                                      <div className="flex items-baseline gap-1.5">
+                                                        <span className="text-3xl font-black text-emerald-300">{empStats.totalRealizado}h</span>
+                                                        <span className="text-[10px] text-slate-400">reales</span>
+                                                      </div>
+                                                      <div className="mt-2 space-y-1">
+                                                        <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                                          <div className="h-full rounded-full bg-emerald-400 transition-all"
+                                                            style={{ width:`${empStats.totalPlanificado > 0 ? Math.min((empStats.totalRealizado/empStats.totalPlanificado)*100,100) : 0}%` }}/>
+                                                        </div>
+                                                        <p className="text-[9px] text-slate-500">{empStats.progress}% de lo planificado</p>
+                                                      </div>
                                                     </div>
                                                   </div>
                                                 </div>
                                                 {/* sub-stats row */}
                                                 <div className="grid grid-cols-3 border-t border-white/10">
                                                   {[
-                                                    { label:'Realizadas', value:`${empStats.totalRealizado}h`, color:'text-emerald-300' },
-                                                    { label:'Turnos',     value:empStats.shiftsCount,          color:'text-indigo-300' },
-                                                    { label:'Francos',    value:empStats.francosCount,         color:'text-teal-300' },
+                                                    { label:'Turnos',  value:empStats.shiftsCount,  color:'text-indigo-300' },
+                                                    { label:'Francos', value:empStats.francosCount, color:'text-teal-300' },
+                                                    { label:'Tardanzas', value:empStats.tardanzasCount||0, color: empStats.tardanzasCount > 0 ? 'text-amber-300' : 'text-slate-400' },
                                                   ].map((s,i) => (
-                                                    <div key={i} className={`px-4 py-2.5 text-center ${i < 2 ? 'border-r border-white/10' : ''}`}>
-                                                      <p className={`text-lg font-black ${s.color}`}>{s.value}</p>
+                                                    <div key={i} className={`px-3 py-2 text-center ${i < 2 ? 'border-r border-white/10' : ''}`}>
+                                                      <p className={`text-base font-black ${s.color}`}>{s.value}</p>
                                                       <p className="text-[8px] font-black uppercase text-slate-500">{s.label}</p>
                                                     </div>
                                                   ))}
@@ -2581,19 +2524,19 @@ export default function EmployeesPage() {
                                               </div>
                                             </div>
 
-                                            {/* ── Novedades del ciclo ──────────────────── */}
-                                            <div className="grid grid-cols-4 gap-2">
+                                            {/* ── Novedades del ciclo — fila única ─────── */}
+                                            <div className="grid grid-cols-5 gap-1.5">
                                               {[
-                                                { label:'Vacaciones', value:empStats.vacationsCount||0,  color:'text-teal-600',   bg:'bg-teal-50 dark:bg-teal-900/20',     border:'border-teal-100 dark:border-teal-800',   icon:<Activity size={12}/> },
-                                                { label:'Licencias',  value:empStats.licensesCount||0,   color:'text-violet-600', bg:'bg-violet-50 dark:bg-violet-900/20', border:'border-violet-100 dark:border-violet-800',icon:<FileText size={12}/> },
-                                                { label:'Ausencias',  value:empStats.absencesCount,      color:'text-rose-600',   bg:'bg-rose-50 dark:bg-rose-900/20',     border:'border-rose-100 dark:border-rose-800',   icon:<AlertOctagon size={12}/> },
-                                                { label:'Tardanzas',  value:empStats.tardanzasCount||0,  color:'text-amber-600',  bg:'bg-amber-50 dark:bg-amber-900/20',   border:'border-amber-100 dark:border-amber-800', icon:<Clock size={12}/> },
-                                                { label:'Francos',    value:empStats.francosCount,       color:'text-emerald-600',bg:'bg-emerald-50 dark:bg-emerald-900/20',border:'border-emerald-100 dark:border-emerald-800',icon:<Coffee size={12}/> },
+                                                { label:'Vacaciones', value:empStats.vacationsCount||0,  color:'text-teal-600',   bg:'bg-teal-50',    border:'border-teal-100',   icon:<Activity size={11}/> },
+                                                { label:'Licencias',  value:empStats.licensesCount||0,   color:'text-violet-600', bg:'bg-violet-50',  border:'border-violet-100', icon:<FileText size={11}/> },
+                                                { label:'Ausencias',  value:empStats.absencesCount,      color:'text-rose-600',   bg:'bg-rose-50',    border:'border-rose-100',   icon:<AlertOctagon size={11}/> },
+                                                { label:'Tardanzas',  value:empStats.tardanzasCount||0,  color:'text-amber-600',  bg:'bg-amber-50',   border:'border-amber-100',  icon:<Clock size={11}/> },
+                                                { label:'Francos',    value:empStats.francosCount,       color:'text-emerald-600',bg:'bg-emerald-50', border:'border-emerald-100',icon:<Coffee size={11}/> },
                                               ].map((s,i) => (
-                                                <div key={i} className={`${s.bg} ${s.border} border rounded-xl p-3 flex flex-col items-center gap-1`}>
-                                                  <span className={`${s.color} opacity-70`}>{s.icon}</span>
-                                                  <span className={`text-2xl font-black ${s.color}`}>{s.value}</span>
-                                                  <span className={`text-[8px] font-black uppercase ${s.color} opacity-60`}>{s.label}</span>
+                                                <div key={i} className={`${s.bg} ${s.border} border rounded-lg p-2 flex flex-col items-center gap-0.5`}>
+                                                  <span className={`${s.color} opacity-60`}>{s.icon}</span>
+                                                  <span className={`text-lg font-black ${s.color}`}>{s.value}</span>
+                                                  <span className={`text-[8px] font-black uppercase ${s.color} opacity-60 leading-tight text-center`}>{s.label}</span>
                                                 </div>
                                               ))}
                                             </div>

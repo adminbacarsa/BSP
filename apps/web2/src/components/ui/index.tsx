@@ -112,12 +112,13 @@ interface TabBarProps {
   active: string;
   onChange: (id: string) => void;
   label?: string;
+  compact?: boolean;
 }
-export const TabBar = ({ tabs, active, onChange, label }: TabBarProps) => (
+export const TabBar = ({ tabs, active, onChange, label, compact }: TabBarProps) => (
   <div
     role="tablist"
     aria-label={label}
-    className="flex items-center gap-1 p-1 rounded-xl border flex-wrap"
+    className="flex items-center gap-0.5 p-0.5 rounded-xl border flex-wrap"
     style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)' }}
   >
     {tabs.map(tab => (
@@ -126,7 +127,7 @@ export const TabBar = ({ tabs, active, onChange, label }: TabBarProps) => (
         role="tab"
         aria-selected={active === tab.id}
         onClick={() => onChange(tab.id)}
-        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase transition-all"
+        className={`flex items-center gap-1 rounded-lg font-black uppercase transition-all ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-[11px]'}`}
         style={active === tab.id ? {
           backgroundColor: 'var(--surf)',
           color: 'var(--company-primary, #6366f1)',
@@ -135,7 +136,7 @@ export const TabBar = ({ tabs, active, onChange, label }: TabBarProps) => (
           color: 'var(--txt3)',
         }}
       >
-        {tab.icon && <tab.icon size={12} aria-hidden="true" />}
+        {tab.icon && <tab.icon size={compact ? 11 : 12} aria-hidden="true" />}
         {tab.label}
         {tab.count !== undefined && (
           <span
